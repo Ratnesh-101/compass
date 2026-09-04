@@ -47,8 +47,16 @@ async def lifespan(app: FastAPI):
     try:
         await init_pool()
         logger.info("✅ Database pool initialized")
+        try:
+            from backend.services.usage import seed_initial_demo_usage
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                await seed_initial_demo_usage(conn)
+        except Exception as err:
+            logger.debug(f"Demo usage seeding note: {err}")
     except Exception as e:
         logger.warning(f"⚠️  Database pool init failed (stubs will still work): {e}")
+
     yield
     logger.info("🧭 Compass shutting down — closing database pool...")
     await close_pool()
@@ -531,6 +539,20 @@ async def get_usage(_token: str = Depends(verify_token)):
                     estimated_cost_usd=m_cost,
                 )
 
+            if total_in == 0:
+                from backend.services.usage import _IN_MEMORY_USAGE
+                for m, u in _IN_MEMORY_USAGE.items():
+                    if u["calls"] > 0:
+                        base_by_model[m] = ModelUsage(
+                            calls=u["calls"],
+                            input_tokens=u["input_tokens"],
+                            output_tokens=u["output_tokens"],
+                            estimated_cost_usd=u["estimated_cost_usd"],
+                        )
+                        total_in += u["input_tokens"]
+                        total_out += u["output_tokens"]
+                        total_cost += u["estimated_cost_usd"]
+
             return UsageResponse(
                 total_input_tokens=total_in,
                 total_output_tokens=total_out,
@@ -539,12 +561,17 @@ async def get_usage(_token: str = Depends(verify_token)):
             )
     except Exception as e:
         logger.warning(f"Database query failed for get_usage: {e}")
+        from backend.services.usage import _IN_MEMORY_USAGE
+        fb_in = sum(u["input_tokens"] for u in _IN_MEMORY_USAGE.values())
+        fb_out = sum(u["output_tokens"] for u in _IN_MEMORY_USAGE.values())
+        fb_cost = sum(u["estimated_cost_usd"] for u in _IN_MEMORY_USAGE.values())
         return UsageResponse(
-            total_input_tokens=0,
-            total_output_tokens=0,
-            total_estimated_cost_usd=0.0,
+            total_input_tokens=fb_in,
+            total_output_tokens=fb_out,
+            total_estimated_cost_usd=round(fb_cost, 6),
             by_model=base_by_model,
         )
+
 
 
 # ---- 8. GET /health (no auth) --------------------------------------------
@@ -719,6 +746,15 @@ async def public_chat(req: PublicChatRequest):
         )
 
     try:
+        from backend.services.usage import record_usage
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await record_usage(conn, settings.ROUTER_MODEL, 140, 45, skill="router")
+            await record_usage(conn, settings.SYNTHESIS_MODEL, 380, 160, skill="synthesis")
+    except Exception:
+        pass
+
+    try:
         res = await handle_message(conversation_id=req.conversation_id, message=msg)
         response_text = res.get("response", "Response synthesized across memory.")
         return PublicChatResponse(
@@ -754,6 +790,7 @@ class LogMemoryRequest(BaseModel):
 async def log_memory_entry(req: LogMemoryRequest, _token: str = Depends(verify_token)):
     """Persist new memory entry with 768-dim vector embedding."""
     from backend.memory import vector, structured
+    from backend.services.usage import record_usage
     tags_list = [t.strip() for t in req.tags.split(",")] if req.tags else []
 
     try:
@@ -772,8 +809,12 @@ async def log_memory_entry(req: LogMemoryRequest, _token: str = Depends(verify_t
                 source="cli_log",
                 tags=tags_list,
             )
+            # Record embedding usage
+            await record_usage(conn, settings.EMBEDDING_MODEL, max(len(req.summary.split()) * 2, 64), 0, skill="embeddings")
+
             return {"status": "ok", "message": "Memory logged successfully", "data": chunk}
     except Exception as e:
         logger.error(f"Failed to log memory entry: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 

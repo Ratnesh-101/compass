@@ -104,7 +104,9 @@ async def route_message(
             tools=tools,
             tool_choice="auto",
             max_tokens=256,
+            timeout=8.0,
         )
+
 
         choice = response.choices[0]
         if choice.message.tool_calls:

@@ -86,7 +86,9 @@ async def orchestrate_chat(
                         {"role": "user", "content": f"Context:\n{context_str}\n\nQuery: {message}"}
                     ],
                     max_tokens=350,
+                    timeout=8.0,
                 )
+
                 response_text = synth_resp.choices[0].message.content or text_reply
             except Exception as e:
                 logger.warning(f"Nemotron Ultra synthesis fallback: {e}")

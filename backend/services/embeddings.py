@@ -48,7 +48,9 @@ def get_embedding(text: str) -> List[float]:
                 model=model_name,
                 input=text,
                 dimensions=DIMENSION,  # Hard-locked 768-dim
+                timeout=8.0,
             )
+
             vec = resp.data[0].embedding
             if len(vec) == DIMENSION:
                 return vec
