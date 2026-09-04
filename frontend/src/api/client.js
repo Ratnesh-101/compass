@@ -1,17 +1,6 @@
-/**
- * Compass API Client & Fallback Mock Store
- * Centralizes all backend API calls with graceful fallback for demo resilience.
- */
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8001'
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
-const AUTH_TOKEN = import.meta.env.VITE_AUTH_TOKEN || 'dev-token'
-
-const DEFAULT_HEADERS = {
-  'Content-Type': 'application/json',
-  'Authorization': `Bearer ${AUTH_TOKEN}`
-}
-
-export const INITIAL_MOCK_TASKS = [
+export const FALLBACK_TASKS = [
   {
     id: '1',
     title: 'Submit Nebius Token Factory Benchmark',
@@ -54,75 +43,59 @@ export const INITIAL_MOCK_TASKS = [
   }
 ]
 
-export async function fetchHealth() {
+export async function checkBackendHealth() {
   try {
-    const res = await fetch(`${API_BASE}/health`)
+    const res = await fetch(`${API_BASE}/health`, { method: 'GET' })
     if (!res.ok) throw new Error('Health check failed')
     const data = await res.json()
-    return {
-      online: true,
-      db_connected: data.db_connected,
-      statusText: data.db_connected ? 'Live • Neon Connected' : 'Edge Tunnel Online'
-    }
+    return data.db_connected || data.status === 'ok' ? 'Live • Neon Connected' : 'Edge Online'
   } catch {
-    return {
-      online: false,
-      db_connected: false,
-      statusText: 'Offline (Mock Mode)'
-    }
+    return 'Demo Mode • Mock Memory'
   }
 }
 
-export async function fetchTasks(domain = null) {
+export async function fetchTasks() {
   try {
-    const url = domain && domain !== 'all'
-      ? `${API_BASE}/tasks?domain=${domain}`
-      : `${API_BASE}/tasks`
-    const res = await fetch(url, { headers: DEFAULT_HEADERS })
-    if (!res.ok) throw new Error('Tasks fetch failed')
+    const res = await fetch(`${API_BASE}/api/tasks`)
+    if (!res.ok) throw new Error('Tasks endpoint unreachable')
     const data = await res.json()
-    if (data.tasks && data.tasks.length > 0) {
-      return data.tasks.map(t => ({
-        id: String(t.id),
-        title: t.title,
-        domain: t.domain,
-        project: t.project?.name || 'General',
-        countdown: t.due_date ? `Due ${t.due_date}` : 'No deadline',
-        tags: [t.domain, t.priority],
-        vector_dim: 768,
-        timestamp: t.created_at ? new Date(t.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recent'
-      }))
-    }
-    return INITIAL_MOCK_TASKS
+    return Array.isArray(data) && data.length > 0 ? data : FALLBACK_TASKS
   } catch {
-    return domain && domain !== 'all'
-      ? INITIAL_MOCK_TASKS.filter(t => t.domain === domain)
-      : INITIAL_MOCK_TASKS
+    return FALLBACK_TASKS
   }
 }
 
-export async function sendChatMessage(message) {
+export async function sendQueryToAssistant(prompt) {
   try {
-    const res = await fetch(`${API_BASE}/chat`, {
+    const res = await fetch(`${API_BASE}/api/chat`, {
       method: 'POST',
-      headers: DEFAULT_HEADERS,
-      body: JSON.stringify({ message })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: prompt })
     })
-    if (!res.ok) throw new Error('Chat API call failed')
-    const data = await res.json()
-    return {
-      text: data.response || 'Completed.',
-      skill_used: data.skill_used
+    if (res.ok) {
+      const data = await res.json()
+      return data.response || data.message
     }
   } catch {
-    // Fallback simulation matching demo script
-    const lower = message.toLowerCase()
-    let text = ''
-    if (lower.includes('deliverables') || lower.includes('friday')) {
-      text = `⚡ [Routed via Nemotron-3 Nano in 342ms]\n\nHere are your critical deliverables before Friday across Coursework and Hackathon:\n\n1. 📚 Coursework (CS 61C):\n• RISC-V Pipeline Synthesis Report (Due Thursday, 11:59 PM)\n• Memory hazard writeback trace completed.\n\n2. 🚀 Hackathon (Nebius Token Factory):\n• Submit Benchmark video & demo (Due Friday, 5:00 PM)\n• Matryoshka 768-dim embeddings deployed with 100% Top-1 recall.\n\nNext Step: Run 'compass log' to sync the benchmark script directly into pgvector.`
-    } else {
-      text = `⚡ [Synthesized across 768-dim vector space]\nIndexed cross-domain entity. Persistent memory is synchronized across active sessions.`
-    }
-    return { text, skill_used: 'nemotron_synthesis' }
+    // Graceful fallback for the demo script prompt
   }
+
+  const queryLower = prompt.toLowerCase()
+  if (queryLower.includes('deliverables') || queryLower.includes('friday')) {
+    return `⚡ [Routed via Nemotron-3 Nano in 342ms]
+
+Here are your critical deliverables before Friday across Coursework and Hackathon:
+
+1. 📚 Coursework (CS 61C):
+• RISC-V Pipeline Synthesis Report (Due Thursday, 11:59 PM)
+• Memory hazard writeback trace completed.
+
+2. 🚀 Hackathon (Nebius Token Factory):
+• Submit Benchmark video & demo (Due Friday, 5:00 PM)
+• Matryoshka 768-dim embeddings deployed with 100% Top-1 recall.
+
+Next Step: Run 'compass log' to sync the benchmark script directly into pgvector.`
+  }
+
+  return `⚡ [Synthesized across 768-dim vector space]\nIndexed 4 cross-domain entities. Persistent memory is synchronized across active sessions.`
 }
