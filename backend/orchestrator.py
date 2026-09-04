@@ -11,7 +11,7 @@ from typing import Optional, Dict, Any
 
 from backend.router import route_message
 from backend.memory.db import get_pool
-from backend.memory import structured
+from backend.memory import structured, conversations
 
 logger = logging.getLogger("compass.orchestrator")
 
@@ -85,6 +85,17 @@ async def handle_message(
         due_info = f" with due date {due_str}" if due_str else ""
         summary = f"Added task '{title}' under {domain.upper()} domain{due_info}."
 
+        # Persist conversation & messages
+        try:
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                real_cid = await conversations.get_or_create_conversation(conn, conv_id)
+                await conversations.add_message(conn, real_cid, role="user", content=message)
+                await conversations.add_message(conn, real_cid, role="assistant", content=summary, skill_called="add_task")
+                conv_id = real_cid
+        except Exception as e:
+            logger.debug(f"Could not persist message history: {e}")
+
         return {
             "conversation_id": conv_id,
             "response": summary,
@@ -93,6 +104,16 @@ async def handle_message(
         }
 
     # 3. Default Chat Response
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            real_cid = await conversations.get_or_create_conversation(conn, conv_id)
+            await conversations.add_message(conn, real_cid, role="user", content=message)
+            await conversations.add_message(conn, real_cid, role="assistant", content=text_reply, skill_called="chat")
+            conv_id = real_cid
+    except Exception as e:
+        logger.debug(f"Could not persist message history: {e}")
+
     return {
         "conversation_id": conv_id,
         "response": text_reply,
