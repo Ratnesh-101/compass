@@ -37,15 +37,14 @@ async def store_chunk(
 ) -> Dict[str, Any]:
     """Store text content along with its 768-dim vector in memory_chunks."""
     embedding = get_embedding(content)
-    vec_str = "[" + ",".join(str(x) for x in embedding) + "]"
 
     row = await conn.fetchrow(
         """
         INSERT INTO memory_chunks (domain, project_id, content, embedding, source, tags)
-        VALUES ($1, $2, $3, $4::vector, $5, $6)
+        VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING id, domain, project_id, content, source, tags, created_at
         """,
-        domain, project_id, content, vec_str, source, tags or []
+        domain, project_id, content, embedding, source, tags or []
     )
     return dict(row) if row else {}
 
@@ -58,30 +57,29 @@ async def search_chunks(
 ) -> List[Dict[str, Any]]:
     """Search memory chunks by cosine similarity using the HNSW index."""
     query_vec = get_embedding(query)
-    vec_str = "[" + ",".join(str(x) for x in query_vec) + "]"
 
     if domain:
         rows = await conn.fetch(
             """
             SELECT id, domain, project_id, content, source, tags, created_at,
-                   1 - (embedding <=> $1::vector) AS similarity
+                   1 - (embedding <=> $1) AS similarity
             FROM memory_chunks
             WHERE domain = $2
-            ORDER BY embedding <=> $1::vector ASC
+            ORDER BY embedding <=> $1 ASC
             LIMIT $3
             """,
-            vec_str, domain, limit
+            query_vec, domain, limit
         )
     else:
         rows = await conn.fetch(
             """
             SELECT id, domain, project_id, content, source, tags, created_at,
-                   1 - (embedding <=> $1::vector) AS similarity
+                   1 - (embedding <=> $1) AS similarity
             FROM memory_chunks
-            ORDER BY embedding <=> $1::vector ASC
+            ORDER BY embedding <=> $1 ASC
             LIMIT $2
             """,
-            vec_str, limit
+            query_vec, limit
         )
 
     return [dict(r) for r in rows]

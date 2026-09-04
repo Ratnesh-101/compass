@@ -78,7 +78,7 @@ def load_config() -> tuple[str, str]:
         except Exception:
             pass
 
-    return api_url or "http://localhost:8000", auth_token or ""
+    return api_url or os.getenv("COMPASS_API_URL") or "http://localhost:8001", auth_token or os.getenv("AUTH_TOKEN") or "dev-token"
 
 
 API_BASE, AUTH_TOKEN = load_config()
@@ -373,35 +373,38 @@ def log(
     tags: Optional[str] = typer.Option(None, "--tags", "-t", help="Comma-separated tags"),
 ):
     """📝 Log a memory entry (code context, coursework note, etc.)."""
-    parts = [f"Log memory: {summary}"]
-    parts.append(f"--domain {domain}")
-    if project:
-        parts.append(f"--project {project}")
-    if tags:
-        parts.append(f"--tags {tags}")
+    payload = {
+        "summary": summary,
+        "domain": domain,
+        "project": project,
+        "tags": tags,
+    }
+    result = _post("/api/log", payload)
 
-    message = " ".join(parts)
-    result = _post("/chat", {"message": message})
-
-    console.print(f"\n[compass.success]✅ Memory logged[/]")
+    console.print(f"\n[compass.success]✅ Memory logged to pgvector with 768-dim embedding[/]")
     console.print(f"   Domain:   {_domain_text(domain)}")
-    console.print(f"   Response: {result.get('response', '')}")
+    if project:
+        console.print(f"   Project:  [bold]{project}[/]")
+    if tags:
+        console.print(f"   Tags:     [cyan]{tags}[/]")
+    console.print(f"   Status:   {result.get('message', 'Logged')}")
 
 
 @app.command()
 def status():
-    """📊 Dashboard overview — deadlines, task counts, and activity."""
+    """📊 Dashboard overview — formatted terminal table across Hackathon, Coursework, Code."""
     data = _get("/dashboard")
 
     console.print(Panel(
-        "[compass.title]🧭 Compass Dashboard[/]",
+        "[compass.title]🧭 Compass Cognitive Memory Overview[/]",
         border_style="cyan",
     ))
 
-    total_tasks = data.get("total_open_tasks", 0)
-    total_projects = data.get("total_projects", 0)
-    console.print(f"\n  📊 [bold]{total_projects}[/] projects  •  "
-                  f"[bold]{total_tasks}[/] open tasks\n")
+    table = Table(title="Cross-Domain Active Metrics", border_style="dim", show_lines=True)
+    table.add_column("Domain", width=18)
+    table.add_column("Projects", justify="center", width=10)
+    table.add_column("Open Tasks", justify="center", width=12)
+    table.add_column("Nearest Deadline", min_width=32)
 
     domains = data.get("domains", {})
     for domain_name, stats in domains.items():
@@ -411,15 +414,19 @@ def status():
         task_count = stats.get("open_task_count", 0)
         deadline = stats.get("nearest_deadline")
 
-        console.print(f"  [{color}]{emoji} {domain_name.upper()}[/{color}]")
-        console.print(f"    Projects: {proj_count}  |  Open tasks: {task_count}")
+        deadline_str = f"⏰ {deadline['title']} (due {deadline['due_date']})" if deadline else "—"
+        table.add_row(
+            Text(f"{emoji} {domain_name.upper()}", style=f"bold {color}"),
+            str(proj_count),
+            str(task_count),
+            deadline_str,
+        )
 
-        if deadline:
-            console.print(
-                f"    ⏰ [bold yellow]Next deadline:[/] {deadline['title']} "
-                f"(due {deadline['due_date']})"
-            )
-        console.print()
+    console.print(table)
+    total_tasks = data.get("total_open_tasks", 0)
+    total_projects = data.get("total_projects", 0)
+    console.print(f"\n  📊 [bold]{total_projects}[/] total projects  •  [bold]{total_tasks}[/] total open tasks across persistent memory\n")
+
 
 
 @app.command()

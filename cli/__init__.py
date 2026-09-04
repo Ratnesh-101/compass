@@ -1,0 +1,1 @@
+"""Compass CLI package."""
