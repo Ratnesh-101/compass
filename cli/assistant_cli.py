@@ -333,11 +333,13 @@ def projects(
 @app.command()
 def log(
     summary: str = typer.Argument(..., help="Summary of what to log"),
+    domain: str = typer.Option("code", "--domain", "-d", help="Domain: code, coursework, hackathon, general"),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Associated project"),
     tags: Optional[str] = typer.Option(None, "--tags", "-t", help="Comma-separated tags"),
 ):
     """📝 Log a memory entry (code context, coursework note, etc.)."""
     parts = [f"Log memory: {summary}"]
+    parts.append(f"--domain {domain}")
     if project:
         parts.append(f"--project {project}")
     if tags:
@@ -347,6 +349,7 @@ def log(
     result = _post("/chat", {"message": message})
 
     console.print(f"\n[compass.success]✅ Memory logged[/]")
+    console.print(f"   Domain:   {_domain_text(domain)}")
     console.print(f"   Response: {result.get('response', '')}")
 
 

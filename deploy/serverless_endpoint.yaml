@@ -1,0 +1,114 @@
+# ============================================================================
+# Compass — Nebius Serverless Endpoint Specification
+#
+# Deploys the Compass FastAPI application on Nebius Serverless Endpoints
+# connected to Nebius Managed PostgreSQL in the shared VPC.
+# ============================================================================
+
+apiVersion: serverless.nebius.com/v1alpha1
+kind: ServerlessEndpoint
+metadata:
+  name: compass-backend
+  namespace: compass-prod
+  labels:
+    app: compass
+    component: backend
+    environment: production
+spec:
+  # Container runtime configuration
+  container:
+    image: cr.nebius.ai/cr-compass/backend:v0.1.0
+    command: ["uvicorn", "backend.main:app"]
+    args:
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8000"
+      - "--workers"
+      - "2"
+    ports:
+      - containerPort: 8000
+        protocol: TCP
+
+    resources:
+      requests:
+        cpu: "1.0"
+        memory: "2Gi"
+      limits:
+        cpu: "2.0"
+        memory: "4Gi"
+
+    # Environment variables (Production)
+    env:
+      - name: ENVIRONMENT
+        value: "production"
+      - name: LOG_LEVEL
+        value: "INFO"
+
+      # VPC Internal routing to Nebius Managed PostgreSQL cluster
+      - name: DATABASE_URL
+        valueFrom:
+          secretKeyRef:
+            name: compass-db-credentials
+            key: DATABASE_URL
+
+      # Nebius Token Factory & Auth Secrets
+      - name: NEBIUS_API_KEY
+        valueFrom:
+          secretKeyRef:
+            name: compass-nebius-credentials
+            key: NEBIUS_API_KEY
+      - name: NEBIUS_BASE_URL
+        value: "https://api.tokenfactory.nebius.com/v1/"
+      - name: AUTH_TOKEN
+        valueFrom:
+          secretKeyRef:
+            name: compass-auth-secret
+            key: AUTH_TOKEN
+
+      # Nebius Model IDs (Verified)
+      - name: ROUTER_MODEL
+        value: "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B"
+      - name: SKILL_MODEL
+        value: "nvidia/nemotron-3-super-120b-a12b"
+      - name: SYNTHESIS_MODEL
+        value: "nvidia/Nemotron-3-Ultra-550b-a55b"
+      - name: EMBEDDING_MODEL
+        value: "Qwen/Qwen3-Embedding-8B"
+      - name: EMBEDDING_DIMENSION
+        value: "768"
+
+      # CORS for Production Frontend
+      - name: CORS_ORIGINS
+        value: '["https://compass.nebius.app","https://compass-frontend.vercel.app"]'
+
+    # Health & Readiness Probes
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: 8000
+      initialDelaySeconds: 10
+      periodSeconds: 15
+      timeoutSeconds: 3
+    readinessProbe:
+      httpGet:
+        path: /health
+        port: 8000
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 3
+
+  # Autoscaling configuration
+  scaling:
+    minReplicas: 1
+    maxReplicas: 5
+    concurrency: 50
+    targetCpuUtilizationPercentage: 70
+
+  # VPC Attachment (Shared VPC with Managed PostgreSQL)
+  network:
+    vpcId: vpc-compass-prod
+    subnetIds:
+      - subnet-compass-prod-a
+    securityGroupIds:
+      - sg-compass-backend

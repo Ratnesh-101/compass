@@ -1,0 +1,95 @@
+# ============================================================================
+# Compass — Nightly Consolidation Cron Job
+#
+# Runs every night at 2:00 AM UTC (0 2 * * *).
+# Operations:
+#   1. Vector Deduplication: Merges memory chunks with cosine similarity > 0.95.
+#   2. Conversation Compaction: Condenses conversations inactive for > 7 days
+#      into summarized long-term memory entries.
+# ============================================================================
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: compass-memory-consolidation
+  namespace: compass-prod
+  labels:
+    app: compass
+    component: memory-consolidation
+    schedule: nightly
+spec:
+  # Run every night at 02:00 UTC
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 1800  # 30 minute timeout
+
+      template:
+        metadata:
+          labels:
+            app: compass
+            job: consolidation
+        spec:
+          restartPolicy: OnFailure
+
+          containers:
+            - name: consolidation-worker
+              image: cr.nebius.ai/cr-compass/backend:v0.1.0
+              command: ["python", "-m", "backend.memory.consolidate"]
+              args:
+                - "--similarity-threshold"
+                - "0.95"
+                - "--stale-thread-days"
+                - "7"
+
+              resources:
+                requests:
+                  cpu: "500m"
+                  memory: "1Gi"
+                limits:
+                  cpu: "1.0"
+                  memory: "2Gi"
+
+              env:
+                - name: ENVIRONMENT
+                  value: "production"
+                - name: LOG_LEVEL
+                  value: "INFO"
+
+                # VPC Internal routing to PostgreSQL
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: compass-db-credentials
+                      key: DATABASE_URL
+
+                # Nebius Token Factory for summarization & embeddings
+                - name: NEBIUS_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: compass-nebius-credentials
+                      key: NEBIUS_API_KEY
+                - name: NEBIUS_BASE_URL
+                  value: "https://api.tokenfactory.nebius.com/v1/"
+                - name: SYNTHESIS_MODEL
+                  value: "nvidia/Nemotron-3-Ultra-550b-a55b"
+                - name: EMBEDDING_MODEL
+                  value: "Qwen/Qwen3-Embedding-8B"
+                - name: EMBEDDING_DIMENSION
+                  value: "768"
+
+          # Shared VPC Attachment
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - key: topology.nebius.com/zone
+                        operator: In
+                        values:
+                          - eu-north1-a

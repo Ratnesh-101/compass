@@ -58,8 +58,10 @@ CREATE INDEX idx_tasks_project_id ON tasks(project_id);
 -- ============================================================
 -- Memory Chunks — vector store for semantic search
 --
--- NOTE: The VECTOR dimension (768) must match the EMBEDDING_DIMENSION
--- setting in config.py. If you change the embedding model, update both.
+-- NOTE: The VECTOR dimension (768) matches the EMBEDDING_DIMENSION
+-- setting in config.py. Qwen/Qwen3-Embedding-8B supports Matryoshka
+-- dimension truncation (dimensions=768), keeping vectors within
+-- pgvector's 2,000-dimension HNSW index ceiling.
 --
 -- Using HNSW index instead of IVFFlat because:
 --   - IVFFlat requires a training step (needs existing rows to build lists)
