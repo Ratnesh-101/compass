@@ -14,10 +14,10 @@ Run with:
 import logging
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, date, timezone
+from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import FastAPI, Depends, HTTPException, Query, Request
+from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
@@ -212,9 +212,6 @@ class HealthResponse(BaseModel):
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
-
-def _today_iso() -> str:
-    return date.today().isoformat()
 
 
 # ---------------------------------------------------------------------------

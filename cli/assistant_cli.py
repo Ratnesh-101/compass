@@ -30,7 +30,6 @@ if sys.platform == "win32":
 import httpx
 import typer
 from dotenv import load_dotenv
-from rich import print as rprint
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt
