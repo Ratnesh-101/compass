@@ -529,20 +529,22 @@ def admin_consolidate(
     from backend.jobs.consolidate import run_consolidation
 
     mode_text = "[yellow](DRY RUN)[/]" if dry_run else "[green](LIVE)[/]"
-    console.print(f"🧭 Running memory consolidation {mode_text}...")
+    console.print(f"🧭 Triggering memory consolidation {mode_text}...")
+
+    payload = {
+        "dry_run": dry_run,
+        "similarity_threshold": threshold,
+        "stale_thread_days": stale_days,
+    }
 
     try:
-        report = asyncio.run(run_consolidation(
-            similarity_threshold=threshold,
-            stale_thread_days=stale_days,
-            dry_run=dry_run,
-        ))
+        report = _post("/admin/consolidate", payload)
         console.print(f"\n[compass.success]✅ Consolidation complete[/]")
         console.print(f"  • Overdue tasks flagged: [bold]{report.get('overdue_tasks_flagged', 0)}[/]")
         console.print(f"  • Duplicate pairs merged: [bold]{report.get('duplicate_chunks_merged', 0)}[/]")
         console.print(f"  • Stale conversations rolled up: [bold]{report.get('stale_conversations_rolled_up', 0)}[/]")
     except Exception as e:
-        console.print(f"[compass.error]❌ Consolidation failed: {e}[/]")
+        console.print(f"[compass.error]❌ Remote consolidation request failed: {e}[/]")
 
 
 # ---------------------------------------------------------------------------

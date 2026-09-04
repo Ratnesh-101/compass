@@ -566,3 +566,44 @@ async def health_check():
         database=db_status,
         db_connected=(db_status == "connected"),
     )
+
+
+# ---- 9. POST /admin/consolidate ------------------------------------------
+class ConsolidateRequest(BaseModel):
+    dry_run: bool = False
+    similarity_threshold: float = 0.95
+    stale_thread_days: int = 7
+
+
+class ConsolidateResponse(BaseModel):
+    status: str
+    dry_run: bool
+    overdue_tasks_flagged: int
+    duplicate_chunks_merged: int
+    stale_conversations_rolled_up: int
+
+
+@app.post("/admin/consolidate", response_model=ConsolidateResponse)
+async def trigger_consolidation(
+    req: ConsolidateRequest = ConsolidateRequest(),
+    _token: str = Depends(verify_token),
+):
+    """Trigger memory consolidation and overdue task flagging on demand."""
+    from backend.jobs.consolidate import run_consolidation
+
+    try:
+        report = await run_consolidation(
+            similarity_threshold=req.similarity_threshold,
+            stale_thread_days=req.stale_thread_days,
+            dry_run=req.dry_run,
+        )
+        return ConsolidateResponse(
+            status="ok",
+            dry_run=req.dry_run,
+            overdue_tasks_flagged=report.get("overdue_tasks_flagged", 0),
+            duplicate_chunks_merged=report.get("duplicate_chunks_merged", 0),
+            stale_conversations_rolled_up=report.get("stale_conversations_rolled_up", 0),
+        )
+    except Exception as e:
+        logger.error(f"Consolidation job failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Consolidation job error: {e}")

@@ -54,7 +54,9 @@ ADD_TASK_TOOL: Dict[str, Any] = {
     },
 }
 
-TOOLS = [ADD_TASK_TOOL]
+from backend.skills import TOOL_DEFINITIONS
+
+TOOLS = TOOL_DEFINITIONS
 
 
 def get_openai_client() -> OpenAI:

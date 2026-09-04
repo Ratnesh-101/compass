@@ -103,7 +103,35 @@ async def handle_message(
             "data": task_record,
         }
 
-    # 3. Default Chat Response
+    # 3. Dynamic Skill Execution via SKILL_REGISTRY
+    from backend.skills import SKILL_REGISTRY
+    if skill_name and skill_name in SKILL_REGISTRY:
+        try:
+            pool = await get_pool()
+            handler = SKILL_REGISTRY[skill_name]
+            skill_result = await handler(args or {}, pool)
+            summary = skill_result.get("response", "Action completed.")
+            data = skill_result.get("data")
+
+            # Persist dialogue turn
+            try:
+                async with pool.acquire() as conn:
+                    real_cid = await conversations.get_or_create_conversation(conn, conv_id)
+                    await conversations.add_message(conn, real_cid, role="user", content=message)
+                    await conversations.add_message(conn, real_cid, role="assistant", content=summary, skill_called=skill_name)
+                    conv_id = real_cid
+            except Exception as e:
+                logger.debug(f"Could not persist message history: {e}")
+
+            return {
+                "conversation_id": conv_id,
+                "response": summary,
+                "skill_used": skill_name,
+                "data": data,
+            }
+        except Exception as e:
+            logger.error(f"Skill execution failed for {skill_name}: {e}")
+            text_reply = f"Error executing skill {skill_name}: {e}"
     try:
         pool = await get_pool()
         async with pool.acquire() as conn:

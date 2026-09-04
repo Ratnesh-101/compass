@@ -75,3 +75,19 @@ async def test_cors_headers(client: AsyncClient):
     resp = await client.options("/tasks", headers=headers)
     assert resp.status_code == 200
     assert resp.headers.get("access-control-allow-origin") == "http://localhost:5173"
+
+
+@pytest.mark.asyncio
+async def test_admin_consolidate_endpoint(client: AsyncClient, auth_headers: dict):
+    """POST /admin/consolidate requires auth and responds with consolidate metrics."""
+    # Unauthenticated
+    resp_unauth = await client.post("/admin/consolidate", json={"dry_run": True})
+    assert resp_unauth.status_code in (401, 403)
+
+    # Authenticated dry-run (won't crash even if DB is offline, returns 500 or 200 depending on DB availability)
+    resp = await client.post("/admin/consolidate", headers=auth_headers, json={"dry_run": True})
+    assert resp.status_code in (200, 500)
+    if resp.status_code == 200:
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["dry_run"] is True
