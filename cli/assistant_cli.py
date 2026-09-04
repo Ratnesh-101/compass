@@ -473,6 +473,79 @@ def login():
 
 
 # ---------------------------------------------------------------------------
+# Admin Sub-Typer
+# ---------------------------------------------------------------------------
+admin_app = typer.Typer(
+    name="admin",
+    help="🛠️ Admin maintenance commands (token usage, database consolidation)",
+    no_args_is_help=True,
+)
+app.add_typer(admin_app, name="admin")
+
+
+@admin_app.command("usage")
+def admin_usage():
+    """💰 Pretty-print token consumption and estimated USD cost across models."""
+    data = _get("/admin/usage")
+
+    console.print(Panel(
+        "[compass.title]🧭 Compass Token Usage & Cost Overview[/]",
+        border_style="cyan",
+    ))
+
+    table = Table(title="Model Consumption Breakdown", border_style="dim")
+    table.add_column("Model", style="bold cyan")
+    table.add_column("Calls", justify="right", style="magenta")
+    table.add_column("Input Tokens", justify="right")
+    table.add_column("Output Tokens", justify="right")
+    table.add_column("Est. Cost (USD)", justify="right", style="bold green")
+
+    by_model = data.get("by_model", {})
+    for m_id, stats in by_model.items():
+        table.add_row(
+            m_id.split("/")[-1],
+            str(stats.get("calls", 0)),
+            f"{stats.get('input_tokens', 0):,}",
+            f"{stats.get('output_tokens', 0):,}",
+            f"${stats.get('estimated_cost_usd', 0.0):.6f}",
+        )
+
+    console.print(table)
+    console.print(
+        f"\n  [bold]Total Input:[/]  {data.get('total_input_tokens', 0):,} tokens\n"
+        f"  [bold]Total Output:[/] {data.get('total_output_tokens', 0):,} tokens\n"
+        f"  [bold green]Total Estimated Cost:[/] ${data.get('total_estimated_cost_usd', 0.0):.6f}\n"
+    )
+
+
+@admin_app.command("consolidate")
+def admin_consolidate(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Simulate without applying updates"),
+    threshold: float = typer.Option(0.95, "--threshold", "-t", help="Cosine similarity threshold"),
+    stale_days: int = typer.Option(7, "--stale-days", "-s", help="Days before marking thread stale"),
+):
+    """🧹 Trigger memory consolidation and overdue task flagging."""
+    import asyncio
+    from backend.jobs.consolidate import run_consolidation
+
+    mode_text = "[yellow](DRY RUN)[/]" if dry_run else "[green](LIVE)[/]"
+    console.print(f"🧭 Running memory consolidation {mode_text}...")
+
+    try:
+        report = asyncio.run(run_consolidation(
+            similarity_threshold=threshold,
+            stale_thread_days=stale_days,
+            dry_run=dry_run,
+        ))
+        console.print(f"\n[compass.success]✅ Consolidation complete[/]")
+        console.print(f"  • Overdue tasks flagged: [bold]{report.get('overdue_tasks_flagged', 0)}[/]")
+        console.print(f"  • Duplicate pairs merged: [bold]{report.get('duplicate_chunks_merged', 0)}[/]")
+        console.print(f"  • Stale conversations rolled up: [bold]{report.get('stale_conversations_rolled_up', 0)}[/]")
+    except Exception as e:
+        console.print(f"[compass.error]❌ Consolidation failed: {e}[/]")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
