@@ -40,7 +40,7 @@ spec:
           containers:
             - name: consolidation-worker
               image: cr.nebius.ai/cr-compass/backend:v0.1.0
-              command: ["python", "-m", "backend.memory.consolidate"]
+              command: ["python", "-m", "backend.jobs.consolidate"]
               args:
                 - "--similarity-threshold"
                 - "0.95"
