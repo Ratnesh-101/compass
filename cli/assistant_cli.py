@@ -20,6 +20,7 @@ Install:
 
 import os
 import sys
+from pathlib import Path
 from typing import Optional
 
 # Fix Windows console encoding before importing Rich
@@ -37,16 +38,50 @@ from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
 
+# Python 3.11+ tomllib or fallback
+try:
+    import tomllib  # type: ignore[import-not-found]
+except ImportError:
+    try:
+        import tomli as tomllib  # type: ignore[no-redef]
+    except ImportError:
+        tomllib = None  # type: ignore[assignment]
+
 # ---------------------------------------------------------------------------
-# Load environment
+# Load environment & persistent config (~/.compass/config.toml)
 # ---------------------------------------------------------------------------
 load_dotenv()
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-API_BASE = os.getenv("COMPASS_API_URL", "http://localhost:8000")
-AUTH_TOKEN = os.getenv("AUTH_TOKEN", "")
+CONFIG_DIR = Path.home() / ".compass"
+CONFIG_FILE = CONFIG_DIR / "config.toml"
+
+
+def load_config() -> tuple[str, str]:
+    """Read API base URL and AUTH_TOKEN from ~/.compass/config.toml, env vars, or defaults."""
+    api_url = os.getenv("COMPASS_API_URL")
+    auth_token = os.getenv("AUTH_TOKEN")
+
+    if CONFIG_FILE.exists():
+        try:
+            content = CONFIG_FILE.read_text(encoding="utf-8")
+            if tomllib:
+                cfg = tomllib.loads(content)
+                api_url = api_url or cfg.get("api_url")
+                auth_token = auth_token or cfg.get("auth_token")
+            else:
+                for line in content.splitlines():
+                    line = line.strip()
+                    if line.startswith("api_url"):
+                        api_url = api_url or line.split("=", 1)[1].strip().strip('"').strip("'")
+                    elif line.startswith("auth_token"):
+                        auth_token = auth_token or line.split("=", 1)[1].strip().strip('"').strip("'")
+        except Exception:
+            pass
+
+    return api_url or "http://localhost:8000", auth_token or ""
+
+
+API_BASE, AUTH_TOKEN = load_config()
 
 # Domain color branding
 DOMAIN_COLORS = {
@@ -385,6 +420,56 @@ def status():
                 f"(due {deadline['due_date']})"
             )
         console.print()
+
+
+@app.command()
+def config(
+    url: Optional[str] = typer.Option(None, "--url", "-u", help="Set the Compass API base URL"),
+    token: Optional[str] = typer.Option(None, "--token", "-t", help="Set the Bearer auth token"),
+):
+    """⚙️ View or update persistent CLI settings (~/.compass/config.toml)."""
+    global API_BASE, AUTH_TOKEN
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+
+    if url is None and token is None:
+        console.print(Panel(
+            f"[bold cyan]Compass CLI Configuration[/]\n\n"
+            f"  [bold]Config file:[/] {CONFIG_FILE}\n"
+            f"  [bold]API URL:[/]     {API_BASE}\n"
+            f"  [bold]Auth Token:[/]  {'*' * len(AUTH_TOKEN) if AUTH_TOKEN else '[dim]not set[/]'}",
+            border_style="cyan",
+        ))
+        return
+
+    new_url = url or API_BASE
+    new_token = token or AUTH_TOKEN
+
+    content = f'api_url = "{new_url}"\nauth_token = "{new_token}"\n'
+    CONFIG_FILE.write_text(content, encoding="utf-8")
+    API_BASE = new_url
+    AUTH_TOKEN = new_token
+
+    console.print(f"[compass.success]✅ Configuration saved to {CONFIG_FILE}[/]")
+    console.print(f"   API URL:    {new_url}")
+    console.print(f"   Auth Token: {'*' * len(new_token) if new_token else '[dim]not set[/]'}")
+
+
+@app.command()
+def login():
+    """🔐 Interactively configure Compass API URL and Bearer token."""
+    console.print(Panel(
+        "[bold cyan]🧭 Compass Login[/]\n\n"
+        "Configure your backend endpoint and authentication token.",
+        border_style="cyan",
+    ))
+    new_url = Prompt.ask("Compass API Base URL", default=API_BASE)
+    new_token = Prompt.ask("Bearer Auth Token", password=True, default=AUTH_TOKEN)
+
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    content = f'api_url = "{new_url}"\nauth_token = "{new_token}"\n'
+    CONFIG_FILE.write_text(content, encoding="utf-8")
+
+    console.print(f"\n[compass.success]✅ Credentials saved to {CONFIG_FILE}[/]")
 
 
 # ---------------------------------------------------------------------------
