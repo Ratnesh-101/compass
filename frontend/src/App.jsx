@@ -18,8 +18,17 @@ export default function App() {
   const [isTyping, setIsTyping] = useState(false)
 
   useEffect(() => {
+    // Initial fetch
     checkBackendHealth().then(status => setBackendStatus(status))
     fetchTasks().then(data => setTasks(data))
+
+    // Real-time polling hook (every 3 seconds for live demo sync)
+    const interval = setInterval(() => {
+      checkBackendHealth().then(status => setBackendStatus(status))
+      fetchTasks().then(data => setTasks(data))
+    }, 3000)
+
+    return () => clearInterval(interval)
   }, [])
 
   const domainCounts = {
