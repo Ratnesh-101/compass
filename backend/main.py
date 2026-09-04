@@ -24,6 +24,7 @@ from pydantic import BaseModel
 
 from backend.config import get_settings
 from backend.memory.db import init_pool, close_pool, get_pool
+from backend.orchestrator import handle_message
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -223,14 +224,12 @@ def _now_iso() -> str:
 # ---- 1. POST /chat -------------------------------------------------------
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest, _token: str = Depends(verify_token)):
-    """Main conversational endpoint (stub)."""
-    conv_id = request.conversation_id or str(uuid.uuid4())
-    return ChatResponse(
-        conversation_id=conv_id,
-        response=f"Mock assistant reply to: {request.message}",
-        skill_used="chat",
-        data=None,
+    """Main conversational endpoint — wired to Nemotron router and orchestrator."""
+    result = await handle_message(
+        conversation_id=request.conversation_id,
+        message=request.message,
     )
+    return ChatResponse(**result)
 
 
 # ---- 2. GET /conversations/{conversation_id}/messages --------------------
