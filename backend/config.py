@@ -20,10 +20,10 @@ class Settings(BaseSettings):
     NEBIUS_BASE_URL: str = "https://api.tokenfactory.nebius.com/v1/"
 
     # --- Model IDs ---
-    ROUTER_MODEL: str = "nvidia/Nemotron-3-Nano-8B-v1"
-    SKILL_MODEL: str = "nvidia/nemotron-3-super-49b-v1"
-    SYNTHESIS_MODEL: str = "nvidia/Llama-3_1-Nemotron-Ultra-253B-v1"
-    EMBEDDING_MODEL: str = "BAAI/bge-en-icl"
+    ROUTER_MODEL: str = "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B"
+    SKILL_MODEL: str = "nvidia/nemotron-3-super-120b-a12b"
+    SYNTHESIS_MODEL: str = "nvidia/Nemotron-3-Ultra-550b-a55b"
+    EMBEDDING_MODEL: str = "Qwen/Qwen3-Embedding-8B"
     EMBEDDING_DIMENSION: int = 768
 
     # --- Auth ---
@@ -38,15 +38,15 @@ class Settings(BaseSettings):
 
     # --- Cost tracking (USD per 1M tokens, approximate) ---
     COST_PER_1M_INPUT: dict[str, float] = {
-        "nvidia/Nemotron-3-Nano-8B-v1": 0.12,
-        "nvidia/nemotron-3-super-49b-v1": 0.40,
-        "nvidia/Llama-3_1-Nemotron-Ultra-253B-v1": 3.00,
-        "BAAI/bge-en-icl": 0.05,
+        "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B": 0.12,
+        "nvidia/nemotron-3-super-120b-a12b": 0.40,
+        "nvidia/Nemotron-3-Ultra-550b-a55b": 3.00,
+        "Qwen/Qwen3-Embedding-8B": 0.05,
     }
     COST_PER_1M_OUTPUT: dict[str, float] = {
-        "nvidia/Nemotron-3-Nano-8B-v1": 0.12,
-        "nvidia/nemotron-3-super-49b-v1": 0.40,
-        "nvidia/Llama-3_1-Nemotron-Ultra-253B-v1": 3.00,
+        "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B": 0.12,
+        "nvidia/nemotron-3-super-120b-a12b": 0.40,
+        "nvidia/Nemotron-3-Ultra-550b-a55b": 3.00,
     }
 
     model_config = SettingsConfigDict(

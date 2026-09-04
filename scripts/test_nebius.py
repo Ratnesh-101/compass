@@ -67,9 +67,21 @@ def test_embedding_dimension(client: OpenAI) -> int | None:
         # Check against expected
         expected = int(os.getenv("EMBEDDING_DIMENSION", "768"))
         if dim != expected:
-            print(f"\n  ⚠️  WARNING: .env says EMBEDDING_DIMENSION={expected}, "
-                  f"but API returned {dim}.")
-            print(f"       → Update config.py and schema.sql VECTOR({dim}) accordingly.")
+            print(f"\n  ℹ️  Native dimension is {dim}. Testing Matryoshka dimensions={expected}...")
+            try:
+                matryoshka_res = client.embeddings.create(
+                    model=EMBEDDING_MODEL,
+                    input="Compass is a personal AI assistant with persistent memory.",
+                    dimensions=expected,
+                )
+                m_dim = len(matryoshka_res.data[0].embedding)
+                if m_dim == expected:
+                    print(f"  ✅  Matryoshka supported! Successfully returned dimensions={expected}")
+                    print(f"  💡  Schema VECTOR({expected}) and pgvector HNSW index can be preserved.")
+                    return expected
+            except Exception as me:
+                print(f"  ⚠️  Matryoshka parameter not supported: {me}")
+                print(f"       → Update config.py and schema.sql VECTOR({dim}) accordingly.")
         else:
             print(f"  ✅  Matches configured EMBEDDING_DIMENSION={expected}")
 
