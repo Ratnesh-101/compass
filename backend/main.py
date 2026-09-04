@@ -201,8 +201,9 @@ class UsageResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str
-    version: str
+    version: str = "0.1.0"
     database: str
+    db_connected: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -419,4 +420,5 @@ async def health_check():
         status="ok",
         version="0.1.0",
         database=db_status,
+        db_connected=(db_status == "connected"),
     )

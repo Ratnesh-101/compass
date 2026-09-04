@@ -16,12 +16,19 @@ import sys
 import json
 from pathlib import Path
 
+if sys.platform == "win32":
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+
 # Load .env from project root
 from dotenv import load_dotenv
 
 _project_root = Path(__file__).resolve().parent.parent
 load_dotenv(_project_root / ".env")
 
+from typing import Any
 from openai import OpenAI
 
 # ---------------------------------------------------------------------------
@@ -80,7 +87,7 @@ def test_tool_calling(client: OpenAI) -> bool | None:
     print(DIVIDER)
 
     # A minimal tool definition matching OpenAI's function-calling spec
-    tools = [
+    tools: Any = [
         {
             "type": "function",
             "function": {
@@ -105,7 +112,7 @@ def test_tool_calling(client: OpenAI) -> bool | None:
         }
     ]
 
-    messages = [
+    messages: Any = [
         {"role": "system", "content": "You are Compass, a personal AI assistant."},
         {"role": "user", "content": "Add a task called 'Fix login bug' under the code domain."},
     ]
@@ -121,15 +128,18 @@ def test_tool_calling(client: OpenAI) -> bool | None:
 
         choice = response.choices[0]
         if choice.message.tool_calls:
-            tc = choice.message.tool_calls[0]
+            tc: Any = choice.message.tool_calls[0]
+            func_name = getattr(getattr(tc, "function", None), "name", None) or getattr(tc, "name", "unknown")
+            func_args = getattr(getattr(tc, "function", None), "arguments", None) or getattr(tc, "arguments", "{}")
             print(f"  ✅  TOOL_CALLING_SUPPORTED = True")
-            print(f"  🔧  Function called: {tc.function.name}")
-            print(f"  📦  Arguments: {tc.function.arguments}")
+            print(f"  🔧  Function called: {func_name}")
+            print(f"  📦  Arguments: {func_args}")
             return True
         else:
             # Model responded with text instead of a tool call — partial support
+            content_preview = (choice.message.content or "")[:200]
             print(f"  ⚠️  Model responded with text instead of a tool call.")
-            print(f"       Response: {choice.message.content[:200]}")
+            print(f"       Response: {content_preview}")
             print(f"  📋  TOOL_CALLING_SUPPORTED = True (but model chose not to call)")
             return True
 
