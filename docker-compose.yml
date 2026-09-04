@@ -1,0 +1,56 @@
+# Compass — Local Development Environment
+#
+# Services:
+#   postgres  — pgvector-enabled PostgreSQL, auto-initializes schema
+#   backend   — FastAPI application with hot-reload
+#
+# Usage:
+#   docker compose up              # Start everything
+#   docker compose up postgres     # Start only the database
+#   docker compose down -v         # Stop and remove volumes (reset DB)
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: compass-postgres
+    environment:
+      POSTGRES_USER: compass
+      POSTGRES_PASSWORD: compass
+      POSTGRES_DB: compass
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backend/memory/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U compass -d compass"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: compass-backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://compass:compass@postgres:5432/compass
+      NEBIUS_API_KEY: ${NEBIUS_API_KEY:-}
+      AUTH_TOKEN: ${AUTH_TOKEN:-dev-token}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./backend:/app/backend:ro
+    command: >
+      uvicorn backend.main:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+      --reload-dir /app/backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
