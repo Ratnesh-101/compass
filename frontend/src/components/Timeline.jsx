@@ -8,7 +8,7 @@ export default function Timeline({ tasks, activeDomain, onSelectDomain }) {
       {/* Header & Filter Bar */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', flexWrap: 'wrap', gap: '10px' }}>
         <div>
-          <h2 style={{ fontSize: '17px', fontWeight: '600', color: '#f8fafc' }}>
+          <h2 style={{ fontSize: '17px', fontWeight: '600', color: '#f8fafc', letterSpacing: '-0.2px' }}>
             Synchronized Context Stream
           </h2>
           <p style={{ fontSize: '12px', color: '#64748b' }}>
@@ -21,7 +21,7 @@ export default function Timeline({ tasks, activeDomain, onSelectDomain }) {
               key={dom}
               onClick={() => onSelectDomain(dom)}
               style={{
-                padding: '5px 10px',
+                padding: '5px 11px',
                 borderRadius: '6px',
                 fontSize: '11.5px',
                 background: activeDomain === dom ? '#334155' : '#1e293b',
@@ -29,7 +29,8 @@ export default function Timeline({ tasks, activeDomain, onSelectDomain }) {
                 color: activeDomain === dom ? '#fff' : '#94a3b8',
                 cursor: 'pointer',
                 textTransform: 'capitalize',
-                fontWeight: '500'
+                fontWeight: '500',
+                transition: 'all 0.15s ease'
               }}>
               {dom}
             </button>
@@ -54,10 +55,10 @@ export default function Timeline({ tasks, activeDomain, onSelectDomain }) {
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'flex-start',
-                flexWrap: 'wrap',
-                gap: '12px'
+                gap: '14px'
               }}>
-              <div style={{ flex: '1 1 280px', minWidth: '240px' }}>
+              {/* Left Column: Domain Badge, Project, Timestamp, Title, Tags */}
+              <div style={{ flex: 1, minWidth: '180px' }}>
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap' }}>
                   <span className={`badge-${task.domain}`} style={{ fontSize: '10.5px', padding: '2px 7px', borderRadius: '5px', textTransform: 'uppercase', fontWeight: '700' }}>
                     {task.domain}
@@ -70,7 +71,7 @@ export default function Timeline({ tasks, activeDomain, onSelectDomain }) {
                   </span>
                 </div>
 
-                <div style={{ fontSize: '14.5px', fontWeight: '500', color: '#f8fafc', marginBottom: '10px', lineHeight: '1.4' }}>
+                <div style={{ fontSize: '14px', fontWeight: '500', color: '#f8fafc', marginBottom: '10px', lineHeight: '1.4' }}>
                   {task.title}
                 </div>
 
@@ -83,12 +84,19 @@ export default function Timeline({ tasks, activeDomain, onSelectDomain }) {
                 </div>
               </div>
 
-              <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                <div className={`countdown-badge ${isOverdue ? 'countdown-overdue' : ''}`} style={{ marginBottom: '6px' }}>
+              {/* Right Column: Countdown Badge & Dimension Tag (Guaranteed Right-Aligned, Non-Wrapping) */}
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'flex-end',
+                flexShrink: 0,
+                whiteSpace: 'nowrap'
+              }}>
+                <div className={`countdown-badge ${isOverdue ? 'countdown-overdue' : ''}`} style={{ marginBottom: '6px', whiteSpace: 'nowrap' }}>
                   {isOverdue && '⚠️ '}
                   {task.countdown}
                 </div>
-                <div className="vector-tag">
+                <div className="vector-tag" style={{ whiteSpace: 'nowrap' }}>
                   {task.vector_dim || 768}-dim embedded
                 </div>
               </div>

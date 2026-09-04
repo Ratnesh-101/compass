@@ -14,6 +14,7 @@ export default function Sidebar({
     <aside style={{
       width: '240px',
       minWidth: '220px',
+      maxWidth: '260px',
       flexShrink: 0,
       borderRight: '1px solid #1e293b',
       background: '#0d131f',
@@ -23,7 +24,7 @@ export default function Sidebar({
       height: '100vh',
       overflowY: 'auto'
     }}>
-      {/* Brand */}
+      {/* Brand Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
         <div style={{
           width: '32px',
@@ -44,7 +45,7 @@ export default function Sidebar({
         </div>
       </div>
 
-      {/* Backend Health Pill */}
+      {/* Dynamic Backend Status Badge */}
       <div style={{
         padding: '7px 10px',
         borderRadius: '8px',
@@ -67,7 +68,7 @@ export default function Sidebar({
         </span>
       </div>
 
-      {/* Navigation Tabs */}
+      {/* Navigation Views */}
       <div style={{ marginBottom: '22px' }}>
         <p style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em', color: '#64748b', fontWeight: '700', marginBottom: '8px' }}>
           Views
@@ -85,7 +86,8 @@ export default function Sidebar({
             cursor: 'pointer',
             fontWeight: '500',
             fontSize: '12.5px',
-            marginBottom: '4px'
+            marginBottom: '4px',
+            transition: 'background 0.15s ease'
           }}>
           📅 Timeline View
         </button>
@@ -101,7 +103,8 @@ export default function Sidebar({
             color: activeTab === 'chat' ? '#fff' : '#94a3b8',
             cursor: 'pointer',
             fontWeight: '500',
-            fontSize: '12.5px'
+            fontSize: '12.5px',
+            transition: 'background 0.15s ease'
           }}>
           💬 Assistant Chat
         </button>
@@ -120,6 +123,7 @@ export default function Sidebar({
           )}
         </div>
 
+        {/* Hackathon: Amber Accent (#f59e0b) */}
         <div
           onClick={() => onSelectDomain('hackathon')}
           style={{
@@ -130,8 +134,9 @@ export default function Sidebar({
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
-            background: activeDomain === 'hackathon' ? 'rgba(245, 158, 11, 0.15)' : 'transparent',
-            border: activeDomain === 'hackathon' ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid transparent'
+            background: activeDomain === 'hackathon' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(245, 158, 11, 0.04)',
+            border: activeDomain === 'hackathon' ? '1px solid rgba(245, 158, 11, 0.45)' : '1px solid rgba(245, 158, 11, 0.15)',
+            transition: 'all 0.15s ease'
           }}>
           <span style={{ fontSize: '12.5px', color: '#fbbf24', fontWeight: '500' }}>🚀 Hackathon</span>
           <span className="badge-hackathon" style={{ padding: '2px 7px', borderRadius: '10px', fontSize: '10.5px', fontWeight: '700' }}>
@@ -139,6 +144,7 @@ export default function Sidebar({
           </span>
         </div>
 
+        {/* Coursework: Blue Accent (#3b82f6) */}
         <div
           onClick={() => onSelectDomain('coursework')}
           style={{
@@ -149,8 +155,9 @@ export default function Sidebar({
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
-            background: activeDomain === 'coursework' ? 'rgba(59, 130, 246, 0.15)' : 'transparent',
-            border: activeDomain === 'coursework' ? '1px solid rgba(59, 130, 246, 0.4)' : '1px solid transparent'
+            background: activeDomain === 'coursework' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(59, 130, 246, 0.04)',
+            border: activeDomain === 'coursework' ? '1px solid rgba(59, 130, 246, 0.45)' : '1px solid rgba(59, 130, 246, 0.15)',
+            transition: 'all 0.15s ease'
           }}>
           <span style={{ fontSize: '12.5px', color: '#60a5fa', fontWeight: '500' }}>📚 Coursework</span>
           <span className="badge-coursework" style={{ padding: '2px 7px', borderRadius: '10px', fontSize: '10.5px', fontWeight: '700' }}>
@@ -158,6 +165,7 @@ export default function Sidebar({
           </span>
         </div>
 
+        {/* Code: Emerald Accent (#10b981) */}
         <div
           onClick={() => onSelectDomain('code')}
           style={{
@@ -168,8 +176,9 @@ export default function Sidebar({
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
-            background: activeDomain === 'code' ? 'rgba(16, 185, 129, 0.15)' : 'transparent',
-            border: activeDomain === 'code' ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid transparent'
+            background: activeDomain === 'code' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(16, 185, 129, 0.04)',
+            border: activeDomain === 'code' ? '1px solid rgba(16, 185, 129, 0.45)' : '1px solid rgba(16, 185, 129, 0.15)',
+            transition: 'all 0.15s ease'
           }}>
           <span style={{ fontSize: '12.5px', color: '#34d399', fontWeight: '500' }}>💻 Code</span>
           <span className="badge-code" style={{ padding: '2px 7px', borderRadius: '10px', fontSize: '10.5px', fontWeight: '700' }}>

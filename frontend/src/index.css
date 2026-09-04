@@ -17,56 +17,67 @@ code, pre, .mono {
   font-family: 'JetBrains Mono', monospace;
 }
 
-/* Domain Badges — High Contrast Visual Isolation */
+/* ==========================================================================
+   Domain Accents & Translucent Badges — High-Contrast Visual Isolation
+   ========================================================================== */
+
+/* 🚀 Hackathon: Amber Accent (#f59e0b) */
 .badge-hackathon {
-  background: rgba(245, 158, 11, 0.15);
-  color: #fbbf24;
-  border: 1px solid rgba(245, 158, 11, 0.4);
-  box-shadow: 0 0 10px rgba(245, 158, 11, 0.08);
+  background: rgba(245, 158, 11, 0.15) !important;
+  color: #fbbf24 !important;
+  border: 1px solid rgba(245, 158, 11, 0.4) !important;
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.12);
 }
 
-.badge-coursework {
-  background: rgba(59, 130, 246, 0.15);
-  color: #60a5fa;
-  border: 1px solid rgba(59, 130, 246, 0.4);
-  box-shadow: 0 0 10px rgba(59, 130, 246, 0.08);
-}
-
-.badge-code {
-  background: rgba(16, 185, 129, 0.15);
-  color: #34d399;
-  border: 1px solid rgba(16, 185, 129, 0.4);
-  box-shadow: 0 0 10px rgba(16, 185, 129, 0.08);
-}
-
-/* Timeline Cards with Glowing Domain Borders */
 .card-hackathon {
   border-left: 4px solid #f59e0b !important;
-  transition: transform 0.15s ease, border-color 0.15s ease;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .card-hackathon:hover {
-  border-color: rgba(245, 158, 11, 0.4);
+  border-color: rgba(245, 158, 11, 0.5);
+  box-shadow: 0 2px 14px rgba(245, 158, 11, 0.1);
+}
+
+/* 📚 Coursework: Blue Accent (#3b82f6) */
+.badge-coursework {
+  background: rgba(59, 130, 246, 0.15) !important;
+  color: #60a5fa !important;
+  border: 1px solid rgba(59, 130, 246, 0.4) !important;
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.12);
 }
 
 .card-coursework {
   border-left: 4px solid #3b82f6 !important;
-  transition: transform 0.15s ease, border-color 0.15s ease;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .card-coursework:hover {
-  border-color: rgba(59, 130, 246, 0.4);
+  border-color: rgba(59, 130, 246, 0.5);
+  box-shadow: 0 2px 14px rgba(59, 130, 246, 0.1);
+}
+
+/* 💻 Code: Emerald Accent (#10b981) */
+.badge-code {
+  background: rgba(16, 185, 129, 0.15) !important;
+  color: #34d399 !important;
+  border: 1px solid rgba(16, 185, 129, 0.4) !important;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.12);
 }
 
 .card-code {
   border-left: 4px solid #10b981 !important;
-  transition: transform 0.15s ease, border-color 0.15s ease;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .card-code:hover {
-  border-color: rgba(16, 185, 129, 0.4);
+  border-color: rgba(16, 185, 129, 0.5);
+  box-shadow: 0 2px 14px rgba(16, 185, 129, 0.1);
 }
 
-/* Countdown Alert Badges */
+/* ==========================================================================
+   Card Metadata & Alert Badges
+   ========================================================================== */
+
 .countdown-badge {
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 600;
   color: #fbbf24;
   background: rgba(251, 191, 36, 0.12);
@@ -75,42 +86,48 @@ code, pre, .mono {
   border: 1px solid rgba(251, 191, 36, 0.3);
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
+  white-space: nowrap;
+  letter-spacing: -0.2px;
 }
 
 .countdown-overdue {
   color: #f87171 !important;
-  background: rgba(239, 68, 68, 0.12) !important;
-  border: 1px solid rgba(239, 68, 68, 0.35) !important;
+  background: rgba(239, 68, 68, 0.14) !important;
+  border: 1px solid rgba(239, 68, 68, 0.4) !important;
 }
 
-/* Vector Dimension Tag */
 .vector-tag {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: 10.5px;
   color: #94a3b8;
   background: #131c2e;
   padding: 2px 8px;
   border-radius: 4px;
   border: 1px solid #1e293b;
+  white-space: nowrap;
+  display: inline-block;
 }
 
-/* Router Performance Chip */
+/* ==========================================================================
+   Router Latency & Token Streaming Visuals
+   ========================================================================== */
+
 .router-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: rgba(99, 102, 241, 0.12);
-  border: 1px solid rgba(99, 102, 241, 0.3);
-  color: #a5b4fc;
-  padding: 4px 10px;
+  background: rgba(99, 102, 241, 0.14);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  color: #c7d2fe;
+  padding: 5px 12px;
   border-radius: 6px;
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
   margin-bottom: 8px;
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.15);
 }
 
-/* Streaming Typing Caret */
 @keyframes blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
@@ -120,13 +137,36 @@ code, pre, .mono {
   display: inline-block;
   width: 2px;
   height: 14px;
-  background-color: #6366f1;
+  background-color: #818cf8;
   margin-left: 2px;
   vertical-align: middle;
-  animation: blink 0.8s infinite;
+  animation: blink 0.7s infinite;
 }
 
-/* Scrollbars */
+/* ==========================================================================
+   Split-Screen Responsiveness (~960px Viewport)
+   ========================================================================== */
+
+@media (max-width: 960px) {
+  aside {
+    width: 220px !important;
+    min-width: 220px !important;
+    padding: 16px 10px !important;
+  }
+  .card-hackathon, .card-coursework, .card-code {
+    padding: 12px !important;
+    gap: 10px !important;
+  }
+  .countdown-badge {
+    font-size: 10.5px !important;
+    padding: 3px 8px !important;
+  }
+  .vector-tag {
+    font-size: 10px !important;
+  }
+}
+
+/* Custom Clean Scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
 }

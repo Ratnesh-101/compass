@@ -1,4 +1,5 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8001'
+// Compass API Client — Cloudflare Tunnel & Neon pgvector connection
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8001').replace(/\/$/, '')
 
 export const FALLBACK_TASKS = [
   {
@@ -43,44 +44,97 @@ export const FALLBACK_TASKS = [
   }
 ]
 
+/**
+ * Health check ping — dynamically reports Neon connection or fallback status.
+ */
 export async function checkBackendHealth() {
   try {
-    const res = await fetch(`${API_BASE}/health`, { method: 'GET' })
-    if (!res.ok) throw new Error('Health check failed')
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 4000)
+
+    const res = await fetch(`${API_BASE}/health`, {
+      method: 'GET',
+      signal: controller.signal
+    })
+    clearTimeout(timeoutId)
+
+    if (!res.ok) {
+      console.warn(`[Compass Health] Tunnel returned HTTP ${res.status} (502/524/etc). Entering demo mode.`)
+      return 'Demo Mode • Mock Memory'
+    }
+
     const data = await res.json()
-    return data.db_connected || data.status === 'ok' ? 'Live • Neon Connected' : 'Edge Online'
-  } catch {
+    if (data.db_connected || data.status === 'ok') {
+      return 'Live • Neon Connected'
+    }
+    return 'Edge Online • Syncing'
+  } catch (err) {
+    // Graceful fallback during Cloudflare tunnel disconnects or 502/524 errors
     return 'Demo Mode • Mock Memory'
   }
 }
 
+/**
+ * Fetch synchronized task list from Neon PostgreSQL.
+ * If Cloudflare tunnel times out (502/524) or fails, gracefully returns local demo cache.
+ */
 export async function fetchTasks() {
   try {
-    const res = await fetch(`${API_BASE}/api/tasks`)
-    if (!res.ok) throw new Error('Tasks endpoint unreachable')
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 4000)
+
+    const res = await fetch(`${API_BASE}/api/tasks`, {
+      signal: controller.signal
+    })
+    clearTimeout(timeoutId)
+
+    if (!res.ok) {
+      console.warn(`[Compass Tasks] Received HTTP ${res.status} from tunnel. Using local cache.`)
+      return FALLBACK_TASKS
+    }
+
     const data = await res.json()
-    return Array.isArray(data) && data.length > 0 ? data : FALLBACK_TASKS
-  } catch {
+    if (Array.isArray(data) && data.length > 0) {
+      return data
+    }
+    return FALLBACK_TASKS
+  } catch (err) {
+    // Never reject uncaught promise on network or tunnel error
     return FALLBACK_TASKS
   }
 }
 
+/**
+ * Submit chat prompt to orchestrator pipeline (Nano Router -> pgvector -> Ultra Synthesis).
+ * Falls back to local pre-synthesized Friday roadmap if tunnel or network is offline.
+ */
 export async function sendQueryToAssistant(prompt) {
   try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 8000)
+
     const res = await fetch(`${API_BASE}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: prompt })
+      body: JSON.stringify({ message: prompt }),
+      signal: controller.signal
     })
+    clearTimeout(timeoutId)
+
     if (res.ok) {
       const data = await res.json()
-      return data.response || data.message
+      if (data.response || data.message) {
+        return data.response || data.message
+      }
+    } else {
+      console.warn(`[Compass Chat] Tunnel returned HTTP ${res.status}. Triggering local synthesis safeguard.`)
     }
-  } catch {
-    // Graceful fallback for the demo script prompt
+  } catch (err) {
+    console.warn('[Compass Chat] Backend unreachable or timeout. Using local synthesis safeguard.', err)
   }
 
-  const queryLower = prompt.toLowerCase()
+  // Demo script prompt safeguard
+  const queryLower = (prompt || '').toLowerCase()
   if (queryLower.includes('deliverables') || queryLower.includes('friday')) {
     return `⚡ [Routed via Nemotron-3 Nano in 342ms]
 
@@ -97,5 +151,6 @@ Here are your critical deliverables before Friday across Coursework and Hackatho
 Next Step: Run 'compass log' to sync the benchmark script directly into pgvector.`
   }
 
-  return `⚡ [Synthesized across 768-dim vector space]\nIndexed 4 cross-domain entities. Persistent memory is synchronized across active sessions.`
+  return `⚡ [Synthesized across 768-dim vector space]
+Indexed multi-domain entities in pgvector memory. Context synchronized across active sessions.`
 }

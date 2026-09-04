@@ -16,37 +16,62 @@ export default function App() {
     }
   ])
   const [isTyping, setIsTyping] = useState(false)
-  const previousTasksJsonRef = useRef('')
+
+  // Keep a ref to the latest tasks state for stable diffing without triggering interval re-creations
+  const tasksRef = useRef([])
+  tasksRef.current = tasks
 
   useEffect(() => {
     let isMounted = true
 
-    const poll = async () => {
+    // Health Polling (Every 10 seconds)
+    const pollHealth = async () => {
       try {
         const status = await checkBackendHealth()
         if (isMounted) setBackendStatus(status)
-
-        const data = await fetchTasks()
-        if (isMounted && Array.isArray(data) && data.length > 0) {
-          const serialized = JSON.stringify(data)
-          // Quietly updates without causing layout shifts or scroll resets
-          if (serialized !== previousTasksJsonRef.current) {
-            previousTasksJsonRef.current = serialized
-            setTasks(data)
-          }
-        }
       } catch {
-        // Silently preserve current view during blips
+        if (isMounted) setBackendStatus('Demo Mode • Mock Memory')
       }
     }
 
-    poll()
-    // 2.5 second polling interval for smooth live demo sync
-    const interval = setInterval(poll, 2500)
+    // Task Polling (Every 3000ms with Clean State Merge)
+    const pollTasks = async () => {
+      try {
+        const incomingTasks = await fetchTasks()
+        if (!isMounted || !Array.isArray(incomingTasks)) return
 
+        const currentTasks = tasksRef.current
+
+        // Clean State Merge: Compare length and IDs/titles to avoid unnecessary re-renders or layout shifts
+        const hasLengthChanged = incomingTasks.length !== currentTasks.length
+        const hasContentChanged = incomingTasks.some((task, i) => {
+          const cur = currentTasks[i]
+          return !cur || cur.id !== task.id || cur.title !== task.title || cur.countdown !== task.countdown
+        })
+
+        if (hasLengthChanged || hasContentChanged) {
+          setTasks(incomingTasks)
+        }
+      } catch {
+        // Silently preserve current view during transient connection blips
+      }
+    }
+
+    // Immediate initial sync
+    pollHealth()
+    pollTasks()
+
+    // 1. Task polling interval: 3000ms
+    const taskInterval = setInterval(pollTasks, 3000)
+
+    // 2. Health check polling interval: 10,000ms (10 seconds)
+    const healthInterval = setInterval(pollHealth, 10000)
+
+    // Component Cleanup: clear all interval timers on unmount
     return () => {
       isMounted = false
-      clearInterval(interval)
+      clearInterval(taskInterval)
+      clearInterval(healthInterval)
     }
   }, [])
 
@@ -80,12 +105,30 @@ export default function App() {
           <div style={{ display: 'flex', gap: '8px' }}>
             <button
               onClick={() => setActiveTab('timeline')}
-              style={{ padding: '7px 14px', borderRadius: '6px', border: 'none', background: activeTab === 'timeline' ? '#1e293b' : 'transparent', color: activeTab === 'timeline' ? '#fff' : '#64748b', cursor: 'pointer', fontWeight: '500', fontSize: '13px' }}>
+              style={{
+                padding: '7px 14px',
+                borderRadius: '6px',
+                border: 'none',
+                background: activeTab === 'timeline' ? '#1e293b' : 'transparent',
+                color: activeTab === 'timeline' ? '#fff' : '#64748b',
+                cursor: 'pointer',
+                fontWeight: '500',
+                fontSize: '13px'
+              }}>
               📅 Timeline Feed
             </button>
             <button
               onClick={() => setActiveTab('chat')}
-              style={{ padding: '7px 14px', borderRadius: '6px', border: 'none', background: activeTab === 'chat' ? '#1e293b' : 'transparent', color: activeTab === 'chat' ? '#fff' : '#64748b', cursor: 'pointer', fontWeight: '500', fontSize: '13px' }}>
+              style={{
+                padding: '7px 14px',
+                borderRadius: '6px',
+                border: 'none',
+                background: activeTab === 'chat' ? '#1e293b' : 'transparent',
+                color: activeTab === 'chat' ? '#fff' : '#64748b',
+                cursor: 'pointer',
+                fontWeight: '500',
+                fontSize: '13px'
+              }}>
               💬 Assistant Chat
             </button>
           </div>
