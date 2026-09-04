@@ -43,11 +43,10 @@ async def init_pool(dsn: str | None = None) -> asyncpg.Pool:
 
 
 async def get_pool() -> asyncpg.Pool:
-    """Return the existing pool or raise if not initialized."""
+    """Return the existing pool or initialize if not yet created."""
+    global _pool
     if _pool is None:
-        raise RuntimeError(
-            "Database pool has not been initialized. Call init_pool() first."
-        )
+        return await init_pool()
     return _pool
 
 

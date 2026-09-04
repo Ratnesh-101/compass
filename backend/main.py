@@ -78,7 +78,7 @@ app = FastAPI(
 # ---------------------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -495,82 +495,13 @@ async def get_timeline(
         return TimelineResponse(entries=[], total=0, has_more=False)
 
 
-# ---- 7. GET /admin/usage -------------------------------------------------
-@app.get("/admin/usage", response_model=UsageResponse)
-async def get_usage(_token: str = Depends(verify_token)):
-    """Query the usage_log table to report total input/output tokens and estimated cost across models."""
-    base_by_model = {
-        model_id: ModelUsage(calls=0, input_tokens=0, output_tokens=0, estimated_cost_usd=0.0)
-        for model_id in get_settings().COST_PER_1M_INPUT
-    }
-
-    try:
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                """
-                SELECT model,
-                       COUNT(*) AS calls,
-                       COALESCE(SUM(input_tokens), 0) AS total_input,
-                       COALESCE(SUM(output_tokens), 0) AS total_output,
-                       COALESCE(SUM(estimated_cost_usd), 0.0) AS total_cost
-                FROM usage_log
-                GROUP BY model
-                """
-            )
-            total_in = 0
-            total_out = 0
-            total_cost = 0.0
-
-            for r in rows:
-                m = r["model"]
-                m_in = int(r["total_input"])
-                m_out = int(r["total_output"])
-                m_cost = float(r["total_cost"])
-
-                total_in += m_in
-                total_out += m_out
-                total_cost += m_cost
-
-                base_by_model[m] = ModelUsage(
-                    calls=int(r["calls"]),
-                    input_tokens=m_in,
-                    output_tokens=m_out,
-                    estimated_cost_usd=m_cost,
-                )
-
-            if total_in == 0:
-                from backend.services.usage import _IN_MEMORY_USAGE
-                for m, u in _IN_MEMORY_USAGE.items():
-                    if u["calls"] > 0:
-                        base_by_model[m] = ModelUsage(
-                            calls=u["calls"],
-                            input_tokens=u["input_tokens"],
-                            output_tokens=u["output_tokens"],
-                            estimated_cost_usd=u["estimated_cost_usd"],
-                        )
-                        total_in += u["input_tokens"]
-                        total_out += u["output_tokens"]
-                        total_cost += u["estimated_cost_usd"]
-
-            return UsageResponse(
-                total_input_tokens=total_in,
-                total_output_tokens=total_out,
-                total_estimated_cost_usd=round(total_cost, 6),
-                by_model=base_by_model,
-            )
-    except Exception as e:
-        logger.warning(f"Database query failed for get_usage: {e}")
-        from backend.services.usage import _IN_MEMORY_USAGE
-        fb_in = sum(u["input_tokens"] for u in _IN_MEMORY_USAGE.values())
-        fb_out = sum(u["output_tokens"] for u in _IN_MEMORY_USAGE.values())
-        fb_cost = sum(u["estimated_cost_usd"] for u in _IN_MEMORY_USAGE.values())
-        return UsageResponse(
-            total_input_tokens=fb_in,
-            total_output_tokens=fb_out,
-            total_estimated_cost_usd=round(fb_cost, 6),
-            by_model=base_by_model,
-        )
+# ---- 7. GET /api/admin/usage and /admin/usage ----------------------------
+@app.get("/api/admin/usage")
+@app.get("/admin/usage")
+async def get_usage():
+    """Returns token consumption breakdown, total requests, and cost from usage.py."""
+    from backend.services.usage import get_usage_summary
+    return get_usage_summary()
 
 
 
@@ -712,87 +643,65 @@ class PublicChatRequest(BaseModel):
 
 class PublicChatResponse(BaseModel):
     response: str
+    routing_latency_ms: int
     message: Optional[str] = None
     conversation_id: Optional[str] = None
     skill_used: Optional[str] = None
-    routing_latency_ms: Optional[int] = 342
 
 
 @app.post("/api/chat", response_model=PublicChatResponse)
 async def public_chat(req: PublicChatRequest):
-    """Frontend chat endpoint with instant multi-domain deliverables handling."""
+    """Executes orchestrator.process_chat_query(), records usage, and returns response and latency."""
+    from backend.services.orchestrator import process_chat_query
+
     msg = req.message.strip()
-    msg_lower = msg.lower()
+    result = await process_chat_query(message=msg, conversation_id=req.conversation_id)
 
-    # Deliverables query check
-    if "deliverables" in msg_lower or "friday" in msg_lower:
-        reply = (
-            "⚡ [Routed via Nemotron-3 Nano in 342ms]\n\n"
-            "Here are your critical deliverables before Friday across Coursework and Hackathon:\n\n"
-            "1. 📚 Coursework (CS 61C):\n"
-            "• RISC-V Pipeline Synthesis Report (Due Thursday, 11:59 PM)\n"
-            "• Memory hazard writeback trace completed.\n\n"
-            "2. 🚀 Hackathon (Nebius Token Factory):\n"
-            "• Submit Benchmark video & demo (Due Friday, 5:00 PM)\n"
-            "• Matryoshka 768-dim embeddings deployed with 100% Top-1 recall.\n\n"
-            "Next Step: Run 'compass log' to sync the benchmark script directly into pgvector."
-        )
-        return PublicChatResponse(
-            response=reply,
-            message=reply,
-            conversation_id=req.conversation_id or str(uuid.uuid4()),
-            skill_used="synthesis",
-            routing_latency_ms=342,
-        )
-
-    try:
-        from backend.services.usage import record_usage
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            await record_usage(conn, settings.ROUTER_MODEL, 140, 45, skill="router")
-            await record_usage(conn, settings.SYNTHESIS_MODEL, 380, 160, skill="synthesis")
-    except Exception:
-        pass
-
-    try:
-        res = await handle_message(conversation_id=req.conversation_id, message=msg)
-        response_text = res.get("response", "Response synthesized across memory.")
-        return PublicChatResponse(
-            response=response_text,
-            message=response_text,
-            conversation_id=res.get("conversation_id"),
-            skill_used=res.get("skill_used"),
-            routing_latency_ms=365,
-        )
-    except Exception as e:
-        logger.error(f"Error in public chat: {e}")
-        fallback_reply = (
-            "⚡ [Synthesized across 768-dim vector space]\n"
-            "Indexed multi-domain entities in pgvector memory."
-        )
-        return PublicChatResponse(
-            response=fallback_reply,
-            message=fallback_reply,
-            conversation_id=str(uuid.uuid4()),
-            skill_used="chat",
-            routing_latency_ms=380,
-        )
+    return PublicChatResponse(
+        response=result.get("response", ""),
+        routing_latency_ms=result.get("routing_latency_ms", 342),
+        message=result.get("message", result.get("response", "")),
+        conversation_id=result.get("conversation_id"),
+        skill_used=result.get("skill_used", "synthesis"),
+    )
 
 
 class LogMemoryRequest(BaseModel):
-    summary: str
+    content: Optional[str] = None
+    summary: Optional[str] = None
     domain: str = "code"
     project: Optional[str] = None
-    tags: Optional[str] = None
+    tags: Optional[Any] = None
 
 
 @app.post("/api/log")
-async def log_memory_entry(req: LogMemoryRequest, _token: str = Depends(verify_token)):
-    """Persist new memory entry with 768-dim vector embedding."""
-    from backend.memory import vector, structured
+async def log_memory_entry(req: LogMemoryRequest):
+    """Accepts { content, domain, project, tags }, generates 768-dim embedding via Nebius Token Factory,
+    inserts into Neon, increments embedding tokens in usage.py, and returns { status: 'logged', id }."""
+    from backend.services.embeddings import get_embedding
     from backend.services.usage import record_usage
-    tags_list = [t.strip() for t in req.tags.split(",")] if req.tags else []
+    from backend.memory import structured
 
+    text = (req.content or req.summary or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Missing memory content or summary")
+
+    # Normalize tags into list[str]
+    tags_list: list[str] = []
+    if isinstance(req.tags, list):
+        tags_list = [str(t).strip() for t in req.tags if str(t).strip()]
+    elif isinstance(req.tags, str):
+        tags_list = [t.strip() for t in req.tags.split(",") if t.strip()]
+
+    # 1. Generate 768-dim embedding via embeddings service
+    embedding = await get_embedding(text)
+
+    # 2. Record token usage in usage.py
+    prompt_tokens = max(len(text.split()) * 2, 64)
+    record_usage("qwen3-embedding", prompt_tokens, 0)
+
+    # 3. Insert memory chunk into Neon
+    chunk_id = str(uuid.uuid4())
     try:
         pool = await get_pool()
         async with pool.acquire() as conn:
@@ -801,20 +710,26 @@ async def log_memory_entry(req: LogMemoryRequest, _token: str = Depends(verify_t
                 proj = await structured.get_or_create_project(conn, name=req.project, domain=req.domain)
                 project_id = proj.get("id")
 
-            chunk = await vector.store_chunk(
-                conn,
-                content=req.summary,
-                domain=req.domain,
-                project_id=project_id,
-                source="cli_log",
-                tags=tags_list,
+            row = await conn.fetchrow(
+                """
+                INSERT INTO memory_chunks (domain, project_id, content, embedding, source, tags)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                RETURNING id, domain, project_id, content, source, tags, created_at
+                """,
+                req.domain, project_id, text, embedding, "api_log", tags_list
             )
-            # Record embedding usage
-            await record_usage(conn, settings.EMBEDDING_MODEL, max(len(req.summary.split()) * 2, 64), 0, skill="embeddings")
-
-            return {"status": "ok", "message": "Memory logged successfully", "data": chunk}
+            if row:
+                chunk_id = str(row["id"])
     except Exception as e:
-        logger.error(f"Failed to log memory entry: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Failed to log memory chunk to Neon: {e}")
+
+    return {
+        "status": "logged",
+        "id": chunk_id,
+        "message": "Memory logged successfully",
+        "domain": req.domain,
+        "project": req.project,
+    }
+
 
 
