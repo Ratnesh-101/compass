@@ -31,9 +31,12 @@ class Settings(BaseSettings):
 
     # --- App ---
     LOG_LEVEL: str = "INFO"
+    PORT: int = 8001
+
     CORS_ORIGINS: list[str] = [
         "http://localhost:5173",
         "http://localhost:3000",
+        "https://compass-farmlytics.vercel.app",
     ]
 
     # --- Cost tracking (USD per 1M tokens, approximate) ---
