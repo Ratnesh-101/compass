@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import Sidebar from './components/Sidebar'
 import Timeline from './components/Timeline'
 import ChatPanel from './components/ChatPanel'
@@ -16,19 +16,38 @@ export default function App() {
     }
   ])
   const [isTyping, setIsTyping] = useState(false)
+  const previousTasksJsonRef = useRef('')
 
   useEffect(() => {
-    // Initial fetch
-    checkBackendHealth().then(status => setBackendStatus(status))
-    fetchTasks().then(data => setTasks(data))
+    let isMounted = true
 
-    // Real-time polling hook (every 3 seconds for live demo sync)
-    const interval = setInterval(() => {
-      checkBackendHealth().then(status => setBackendStatus(status))
-      fetchTasks().then(data => setTasks(data))
-    }, 3000)
+    const poll = async () => {
+      try {
+        const status = await checkBackendHealth()
+        if (isMounted) setBackendStatus(status)
 
-    return () => clearInterval(interval)
+        const data = await fetchTasks()
+        if (isMounted && Array.isArray(data) && data.length > 0) {
+          const serialized = JSON.stringify(data)
+          // Quietly updates without causing layout shifts or scroll resets
+          if (serialized !== previousTasksJsonRef.current) {
+            previousTasksJsonRef.current = serialized
+            setTasks(data)
+          }
+        }
+      } catch {
+        // Silently preserve current view during blips
+      }
+    }
+
+    poll()
+    // 2.5 second polling interval for smooth live demo sync
+    const interval = setInterval(poll, 2500)
+
+    return () => {
+      isMounted = false
+      clearInterval(interval)
+    }
   }, [])
 
   const domainCounts = {
@@ -41,8 +60,8 @@ export default function App() {
     setMessages(prev => [...prev, { role: 'user', text: userText }])
     setIsTyping(true)
     const reply = await sendQueryToAssistant(userText)
-    setMessages(prev => [...prev, { role: 'assistant', text: reply }])
     setIsTyping(false)
+    return reply
   }
 
   return (
@@ -56,19 +75,22 @@ export default function App() {
         onSelectTab={setActiveTab}
       />
 
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#0b0f17' }}>
-        <header style={{ height: '64px', borderBottom: '1px solid #1e293b', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 28px' }}>
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#0b0f17', minWidth: 0, overflow: 'hidden' }}>
+        <header style={{ height: '60px', borderBottom: '1px solid #1e293b', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px', flexShrink: 0 }}>
           <div style={{ display: 'flex', gap: '8px' }}>
             <button
               onClick={() => setActiveTab('timeline')}
-              style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', background: activeTab === 'timeline' ? '#1e293b' : 'transparent', color: activeTab === 'timeline' ? '#fff' : '#64748b', cursor: 'pointer', fontWeight: '500' }}>
-              Timeline Feed
+              style={{ padding: '7px 14px', borderRadius: '6px', border: 'none', background: activeTab === 'timeline' ? '#1e293b' : 'transparent', color: activeTab === 'timeline' ? '#fff' : '#64748b', cursor: 'pointer', fontWeight: '500', fontSize: '13px' }}>
+              📅 Timeline Feed
             </button>
             <button
               onClick={() => setActiveTab('chat')}
-              style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', background: activeTab === 'chat' ? '#1e293b' : 'transparent', color: activeTab === 'chat' ? '#fff' : '#64748b', cursor: 'pointer', fontWeight: '500' }}>
-              Assistant Chat
+              style={{ padding: '7px 14px', borderRadius: '6px', border: 'none', background: activeTab === 'chat' ? '#1e293b' : 'transparent', color: activeTab === 'chat' ? '#fff' : '#64748b', cursor: 'pointer', fontWeight: '500', fontSize: '13px' }}>
+              💬 Assistant Chat
             </button>
+          </div>
+          <div style={{ fontSize: '11px', color: '#64748b', fontFamily: 'JetBrains Mono, monospace' }}>
+            pgvector HNSW • 768-dim
           </div>
         </header>
 
@@ -81,6 +103,7 @@ export default function App() {
         ) : (
           <ChatPanel
             messages={messages}
+            setMessages={setMessages}
             onSendMessage={handleSendMessage}
             isTyping={isTyping}
           />
