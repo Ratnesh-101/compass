@@ -34,7 +34,9 @@ async def get_or_create_conversation(
     row = await conn.fetchrow(
         "INSERT INTO conversations DEFAULT VALUES RETURNING id"
     )
-    return str(row["id"])
+    if row is not None:
+        return str(row["id"])
+    return str(uuid.uuid4())
 
 
 async def add_message(
