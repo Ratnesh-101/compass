@@ -32,7 +32,7 @@ HEADERS = {
 }
 
 
-def test_api():
+def probe_api():
     print("=" * 65)
     print("🧭 Compass — Live API Integration Probe")
     print(f"   Target: {BASE_URL}")
@@ -108,4 +108,4 @@ def test_api():
 
 
 if __name__ == "__main__":
-    test_api()
+    probe_api()
