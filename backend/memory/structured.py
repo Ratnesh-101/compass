@@ -6,7 +6,11 @@ Used by the router skills and API endpoints.
 """
 
 from datetime import date
-from typing import Optional, Any
+from typing import Optional, Union, Any
+import asyncpg
+from asyncpg.pool import PoolConnectionProxy
+
+DbConn = Union[asyncpg.Connection, PoolConnectionProxy]
 
 PRIORITY_MAP = {
     "urgent": "urgent", "critical": "urgent", "p0": "urgent", "asap": "urgent",
@@ -30,7 +34,7 @@ VALID_DOMAINS = {"hackathon", "coursework", "code", "general"}
 # ---------------------------------------------------------------------------
 
 async def get_or_create_project(
-    conn: Any,
+    conn: DbConn,
     name: str,
     domain: str,
     description: Optional[str] = None,
@@ -89,7 +93,7 @@ async def get_or_create_project(
 
 
 async def list_projects(
-    conn: Any,
+    conn: DbConn,
     domain: Optional[str] = None,
 ) -> list[dict]:
     """Retrieve all projects, optionally filtered by domain."""
@@ -110,7 +114,7 @@ async def list_projects(
 # ---------------------------------------------------------------------------
 
 async def create_task(
-    conn: Any,
+    conn: DbConn,
     domain: str,
     title: str,
     project_id: Optional[int] = None,
@@ -141,7 +145,7 @@ async def create_task(
     return dict(row) if row else {}
 
 
-async def get_task(conn: Any, task_id: int) -> Optional[dict]:
+async def get_task(conn: DbConn, task_id: int) -> Optional[dict]:
     """Retrieve a task by ID including project details."""
     row = await conn.fetchrow(
         """
@@ -166,7 +170,7 @@ async def get_task(conn: Any, task_id: int) -> Optional[dict]:
 
 
 async def list_tasks(
-    conn: Any,
+    conn: DbConn,
     domain: Optional[str] = None,
     project_id: Optional[int] = None,
     status: Optional[str] = None,
@@ -211,7 +215,7 @@ async def list_tasks(
 
 
 async def update_task(
-    conn: Any,
+    conn: DbConn,
     task_id: int,
     **kwargs: Any
 ) -> Optional[dict]:
@@ -252,7 +256,7 @@ async def update_task(
     return await get_task(conn, task_id)
 
 
-async def delete_task(conn: Any, task_id: int) -> bool:
+async def delete_task(conn: DbConn, task_id: int) -> bool:
     """Delete a task by ID."""
     result = await conn.execute("DELETE FROM tasks WHERE id = $1", task_id)
     return result == "DELETE 1"
