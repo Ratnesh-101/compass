@@ -2,13 +2,13 @@
 
 **Personal AI assistant with persistent cross-domain memory** — tracks high-stakes hackathon deadlines, recalls code architecture across repos, and synthesizes academic coursework. Built natively on **Nebius Token Factory** with **NVIDIA Nemotron** models and **Neon Managed PostgreSQL (pgvector)**. 
 
-Live Web Dashboard: [https://compass-farmlytics.vercel.app](https://compass-farmlytics.vercel.app)
+Live Web Dashboard: [https://compass-kappa-nine.vercel.app](https://compass-kappa-nine.vercel.app)
 
 ## 🌐 Live Deployments & Cloud Infrastructure
 
 | Tier | Component | Host / Provider | Live URL / Config | Details |
 | :--- | :--- | :--- | :--- | :--- |
-| **Frontend** | Interactive Web Dashboard | **Vercel** | [compass-farmlytics.vercel.app](https://compass-farmlytics.vercel.app) | React + Vite, real-time context stream, typewriter chat |
+| **Frontend** | Interactive Web Dashboard | **Vercel** | [compass-kappa-nine.vercel.app](https://compass-kappa-nine.vercel.app) | React + Vite, real-time context stream, typewriter chat |
 | **Backend API** | FastAPI Application Shell | **Render** (Primary) | [compass-backend-qryu.onrender.com](https://compass-backend-qryu.onrender.com) | Live containerized API, 24/7 keep-alive via UptimeRobot |
 | **Compute Specs** | Serverless Endpoint & Cron | **Nebius AI Cloud** | Native manifests in [`deploy/`](./deploy) | Turnkey Nebius Serverless Endpoint & Consolidation Job specs |
 | **AI Inference** | Intent Routing & Synthesis | **Nebius Token Factory** | `api.tokenfactory.nebius.com` | NVIDIA Nemotron-3 Nano (30B) + Nemotron-3 Ultra (550B) |
