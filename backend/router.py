@@ -8,7 +8,7 @@ Probed and verified on Nebius Token Factory with nvidia/NVIDIA-Nemotron-3-Nano-3
 import json
 import logging
 from typing import Any, Optional, Dict, Tuple
-from openai import OpenAI
+from openai import OpenAI, AsyncOpenAI
 from backend.config import get_settings
 
 logger = logging.getLogger("compass.router")
@@ -59,11 +59,12 @@ from backend.skills import TOOL_DEFINITIONS
 TOOLS = TOOL_DEFINITIONS
 
 
-def get_openai_client() -> OpenAI:
-    """Return configured OpenAI client for Nebius Token Factory."""
-    return OpenAI(
+def get_openai_client() -> AsyncOpenAI:
+    """Return configured AsyncOpenAI client for Nebius Token Factory."""
+    return AsyncOpenAI(
         api_key=settings.NEBIUS_API_KEY,
         base_url=settings.NEBIUS_BASE_URL,
+        timeout=15.0,
     )
 
 
@@ -98,15 +99,19 @@ async def route_message(
     tools: Any = TOOLS
 
     try:
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model=settings.ROUTER_MODEL,
             messages=messages,
             tools=tools,
             tool_choice="auto",
             max_tokens=256,
-            timeout=8.0,
         )
 
+        from backend.services.usage import record_usage
+        usage = getattr(response, "usage", None)
+        p_tok = usage.prompt_tokens if usage else max(len(message.split()) * 2, 64)
+        c_tok = usage.completion_tokens if usage else 50
+        record_usage(settings.ROUTER_MODEL, p_tok, c_tok)
 
         choice = response.choices[0]
         if choice.message.tool_calls:
