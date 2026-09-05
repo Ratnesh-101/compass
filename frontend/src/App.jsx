@@ -141,7 +141,7 @@ export default function App() {
               💬 Assistant Chat
             </button>
           </div>
-          <div style={{ fontSize: '11px', color: '#64748b', fontFamily: 'JetBrains Mono, monospace' }}>
+          <div className="header-model-badge" style={{ fontSize: '11px', color: '#64748b', fontFamily: 'JetBrains Mono, monospace' }}>
             Nebius • Nemotron-3
           </div>
         </header>
