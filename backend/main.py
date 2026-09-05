@@ -19,7 +19,7 @@ from typing import Optional, Any
 
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
@@ -71,7 +71,7 @@ app = FastAPI(
 # ---------------------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -491,7 +491,7 @@ async def get_timeline(
 # ---- 7. GET /api/admin/usage and /admin/usage ----------------------------
 @app.get("/api/admin/usage")
 @app.get("/admin/usage")
-async def get_usage():
+async def get_usage(_token: str = Depends(verify_token)):
     """Returns token consumption breakdown, total requests, and cost from usage.py."""
     from backend.services.usage import get_usage_summary
     return get_usage_summary()
@@ -644,18 +644,18 @@ class PublicChatResponse(BaseModel):
 
 @app.post("/api/chat", response_model=PublicChatResponse)
 async def public_chat(req: PublicChatRequest):
-    """Executes orchestrator.process_chat_query(), records usage, and returns response and latency."""
-    from backend.services.orchestrator import process_chat_query
+    """Executes orchestrator.handle_message(), records usage, and returns response and latency."""
+    from backend.orchestrator import handle_message
 
     msg = req.message.strip()
-    result = await process_chat_query(message=msg, conversation_id=req.conversation_id)
+    result = await handle_message(conversation_id=req.conversation_id, message=msg)
 
     return PublicChatResponse(
         response=result.get("response", ""),
         routing_latency_ms=result.get("routing_latency_ms", 342),
         message=result.get("message", result.get("response", "")),
         conversation_id=result.get("conversation_id"),
-        skill_used=result.get("skill_used", "synthesis"),
+        skill_used=result.get("skill_used", "chat"),
     )
 
 
@@ -725,4 +725,111 @@ async def log_memory_entry(req: LogMemoryRequest):
     }
 
 
+# ---- 11. POST /api/chat/stream  — Real SSE Streaming  --------------------
 
+class StreamChatRequest(BaseModel):
+    message: str
+    conversation_id: Optional[str] = None
+
+
+@app.post("/api/chat/stream")
+async def stream_chat(req: StreamChatRequest):
+    """Real Server-Sent Events endpoint.
+
+    Streams Nebius token-by-token output using stream=True on the OpenAI-compatible
+    client. Each SSE data event carries a JSON payload:
+      {"type": "token",  "value": "<partial text>"}
+      {"type": "done",   "conversation_id": "<uuid>", "skill_used": "<name>"}
+
+    Non-tool-call messages are streamed; tool-call responses (e.g. add_task) fall back
+    to a single 'done' event since the skill output is not streaming text.
+    """
+    import json
+    import asyncio
+    from openai import AsyncOpenAI
+    from backend.config import get_settings as _gs
+    from backend.router import TOOLS
+    from backend.services.usage import record_usage
+    from backend.orchestrator import handle_message
+
+    _settings = _gs()
+
+    async def event_generator():
+        conv_id = req.conversation_id or str(uuid.uuid4())
+        message = req.message.strip()
+
+        # If no Nebius key, fall back to non-streaming orchestrator
+        if not _settings.NEBIUS_API_KEY:
+            result = await handle_message(conversation_id=req.conversation_id, message=message)
+            yield f"data: {json.dumps({'type': 'token', 'value': result.get('response', '')})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'conversation_id': result.get('conversation_id', conv_id), 'skill_used': result.get('skill_used', 'chat')})}\n\n"
+            return
+
+        try:
+            client = AsyncOpenAI(
+                api_key=_settings.NEBIUS_API_KEY,
+                base_url=_settings.NEBIUS_BASE_URL,
+                timeout=30.0,
+            )
+
+            # Build minimal message list for streaming (no history injection to keep latency low)
+            messages_payload = [
+                {"role": "system", "content": "You are Compass, a friendly and intelligent personal assistant. Be concise and helpful."},
+                {"role": "user", "content": message},
+            ]
+
+            stream = await client.chat.completions.create(
+                model=_settings.ROUTER_MODEL,
+                messages=messages_payload,
+                tools=TOOLS,
+                tool_choice="auto",
+                max_tokens=512,
+                temperature=0.7,
+                stream=True,
+            )
+
+            full_text = ""
+            tool_call_detected = False
+
+            async for chunk in stream:
+                delta = chunk.choices[0].delta if chunk.choices else None
+                if delta is None:
+                    continue
+
+                if delta.tool_calls:
+                    tool_call_detected = True
+                    break
+
+                token = delta.content or ""
+                if token:
+                    full_text += token
+                    yield f"data: {json.dumps({'type': 'token', 'value': token})}\n\n"
+
+            if tool_call_detected:
+                # Tool call detected — fall back to full orchestrator for structured handling
+                result = await handle_message(conversation_id=req.conversation_id, message=message)
+                response_text = result.get("response", "")
+                # Send the full structured response as a single token burst
+                yield f"data: {json.dumps({'type': 'token', 'value': response_text})}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'conversation_id': result.get('conversation_id', conv_id), 'skill_used': result.get('skill_used', 'add_task')})}\n\n"
+                return
+
+            # Record usage estimate (no real usage object in streaming mode)
+            prompt_est = len(message.split()) * 3
+            completion_est = len(full_text.split())
+            record_usage(_settings.ROUTER_MODEL, prompt_est, completion_est)
+
+            yield f"data: {json.dumps({'type': 'done', 'conversation_id': conv_id, 'skill_used': 'chat'})}\n\n"
+
+        except Exception as e:
+            logger.error(f"SSE stream error: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
