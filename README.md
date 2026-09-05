@@ -107,7 +107,7 @@ pip install -e ./cli
 NEBIUS_API_KEY="v1.CmMK..."
 NEBIUS_BASE_URL="https://api.tokenfactory.nebius.com/v1/"
 DATABASE_URL="postgresql://neondb_owner:***@ep-sweet-fire-b2y9w95z-pooler.c-6.eu-central-1.aws.neon.tech/neondb?sslmode=require"
-PORT=8001
+PORT=8000
 AUTH_TOKEN="dev-token"
 ```
 
@@ -122,8 +122,8 @@ python scripts/verify_hnsw_index.py
 
 ### 4. Running the Backend & Frontend
 ```powershell
-# Start FastAPI backend (port 8001)
-python -m uvicorn backend.main:app --port 8001
+# Start FastAPI backend (port 8000)
+python -m uvicorn backend.main:app --port 8000
 
 # Start Frontend (in separate terminal)
 cd frontend
