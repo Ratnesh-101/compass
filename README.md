@@ -4,7 +4,18 @@
 
 Live Web Dashboard: [https://compass-farmlytics.vercel.app](https://compass-farmlytics.vercel.app)
 
----
+## 🌐 Live Deployments & Cloud Infrastructure
+
+| Tier | Component | Host / Provider | Live URL / Config | Details |
+| :--- | :--- | :--- | :--- | :--- |
+| **Frontend** | Interactive Web Dashboard | **Vercel** | [compass-farmlytics.vercel.app](https://compass-farmlytics.vercel.app) | React + Vite, real-time context stream, typewriter chat |
+| **Backend API** | FastAPI Application Shell | **Render** (Primary) | [compass-backend-qryu.onrender.com](https://compass-backend-qryu.onrender.com) | Live containerized API, 24/7 keep-alive via UptimeRobot |
+| **Compute Specs** | Serverless Endpoint & Cron | **Nebius AI Cloud** | Native manifests in [`deploy/`](./deploy) | Turnkey Nebius Serverless Endpoint & Consolidation Job specs |
+| **AI Inference** | Intent Routing & Synthesis | **Nebius Token Factory** | `api.tokenfactory.nebius.com` | NVIDIA Nemotron-3 Nano (30B) + Nemotron-3 Ultra (550B) |
+| **Vector Memory** | Matryoshka Embeddings | **Nebius Token Factory** | `api.tokenfactory.nebius.com` | Qwen/Qwen3-Embedding-8B (768-dim truncated) |
+| **Database** | Persistent Memory & Storage | **Neon Cloud** | Managed PostgreSQL 16 | `pgvector` HNSW cosine index (<5ms retrieval) |
+| **Availability** | 24/7 Keep-Alive Monitor | **UptimeRobot** | [Monitor Status](https://dashboard.uptimerobot.com/monitors/803918931) | 5-minute health check interval, 0ms cold starts |
+
 
 ## ⚡ End-to-End System Architecture
 
@@ -153,3 +164,4 @@ python -m cli ask "What are my deliverables before Friday?"
 1. **Native OpenAI Tool Calling**: Zero-shot routing using `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` without brittle regex or fallback parsing.
 2. **Matryoshka Truncation**: Enforces `dimensions=768` on `Qwen3-Embedding-8B` to stay within `pgvector`'s 2,000-dim HNSW indexing ceiling while preserving 100% Top-1 recall.
 3. **Latency & Gateway Safeguards**: Explicit 8.0s timeouts on all external inference APIs and pre-synthesized fallback pipelines guarantee zero HTTP 524 Cloudflare gateway errors during presentations.
+4. **Dual Deployment Architecture**: The application is deployed in production on Render with a 24/7 keep-alive monitor for seamless judge access, and ships with turnkey **Nebius Serverless Endpoint** manifests ([`deploy/serverless_endpoint.yaml`](./deploy/serverless_endpoint.yaml)) and scheduled consolidation cron jobs ([`deploy/serverless_job.yaml`](./deploy/serverless_job.yaml)) engineered for Nebius AI Cloud.

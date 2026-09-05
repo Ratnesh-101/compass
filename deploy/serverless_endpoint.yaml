@@ -80,7 +80,7 @@ spec:
 
       # CORS for Production Frontend
       - name: CORS_ORIGINS
-        value: '["https://compass.nebius.app","https://compass-frontend.vercel.app"]'
+        value: '["https://compass.nebius.app","https://compass-farmlytics.vercel.app","https://compass-frontend.vercel.app"]'
 
     # Health & Readiness Probes
     livenessProbe:
