@@ -602,7 +602,7 @@ async def get_frontend_tasks(domain: Optional[str] = Query(None)):
                 due_d = t.get("due_date")
                 countdown_str = _format_countdown(due_d)
                 created_at = t.get("created_at")
-                ts_str = created_at.strftime("%b %d, %H:%M") if hasattr(created_at, "strftime") else "Recently"
+                ts_str = created_at.strftime("%b %d, %H:%M") if created_at and hasattr(created_at, "strftime") else "Recently"
                 
                 # Derive tags from project or domain
                 tags = [t.get("domain", "task")]
@@ -745,7 +745,6 @@ async def stream_chat(req: StreamChatRequest):
     to a single 'done' event since the skill output is not streaming text.
     """
     import json
-    import asyncio
     from openai import AsyncOpenAI
     from backend.config import get_settings as _gs
     from backend.router import TOOLS
@@ -773,15 +772,16 @@ async def stream_chat(req: StreamChatRequest):
             )
 
             # Build minimal message list for streaming (no history injection to keep latency low)
-            messages_payload = [
+            messages_payload: Any = [
                 {"role": "system", "content": "You are Compass, a friendly and intelligent personal assistant. Be concise and helpful."},
                 {"role": "user", "content": message},
             ]
+            tools_payload: Any = TOOLS
 
             stream = await client.chat.completions.create(
                 model=_settings.ROUTER_MODEL,
                 messages=messages_payload,
-                tools=TOOLS,
+                tools=tools_payload,
                 tool_choice="auto",
                 max_tokens=512,
                 temperature=0.7,
