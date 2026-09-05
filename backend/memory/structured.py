@@ -9,6 +9,22 @@ from datetime import date, datetime
 from typing import Optional, Any
 import asyncpg
 
+PRIORITY_MAP = {
+    "urgent": "urgent", "critical": "urgent", "p0": "urgent", "asap": "urgent",
+    "high": "high", "p1": "high", "important": "high",
+    "medium": "medium", "normal": "medium", "p2": "medium", "moderate": "medium",
+    "low": "low", "p3": "low", "minor": "low",
+}
+
+STATUS_MAP = {
+    "open": "open", "todo": "open", "to_do": "open", "pending": "open", "not_started": "open",
+    "in_progress": "in_progress", "in progress": "in_progress", "doing": "in_progress", "wip": "in_progress",
+    "done": "done", "completed": "done", "finished": "done", "closed": "done",
+    "overdue": "overdue",
+}
+
+VALID_DOMAINS = {"hackathon", "coursework", "code", "general"}
+
 
 # ---------------------------------------------------------------------------
 # Projects
@@ -24,7 +40,7 @@ async def get_or_create_project(
 
     Fuzzy resolution:
       1. Exact case-insensitive match (e.g. 'compass' == 'Compass')
-      2. Prefix/substring match (e.g. 'Compass' matches 'Compass AI Assistant')
+      2. Prefix/substring match with length >= 3 safeguard
       3. Word overlap match
     """
     clean_name = name.strip()
@@ -38,23 +54,28 @@ async def get_or_create_project(
         return dict(row)
 
     # 2. Fuzzy match: project name starts with or contains candidate, or candidate contains project name
-    row = await conn.fetchrow(
-        """
-        SELECT id, name, domain, description, created_at
-        FROM projects
-        WHERE LOWER(name) LIKE '%' || LOWER($1) || '%'
-           OR LOWER($1) LIKE '%' || LOWER(name) || '%'
-        ORDER BY LENGTH(name) ASC
-        LIMIT 1
-        """,
-        clean_name
-    )
-    if row:
-        return dict(row)
+    # Guard: Require both names to be at least 3 characters long to prevent short names
+    # (like 'AI' or 'Go') from spuriously matching arbitrary task descriptions.
+    if len(clean_name) >= 3:
+        row = await conn.fetchrow(
+            """
+            SELECT id, name, domain, description, created_at
+            FROM projects
+            WHERE LENGTH(name) >= 3
+              AND (
+                  LOWER(name) LIKE '%' || LOWER($1) || '%'
+                  OR LOWER($1) LIKE '%' || LOWER(name) || '%'
+              )
+            ORDER BY LENGTH(name) ASC
+            LIMIT 1
+            """,
+            clean_name
+        )
+        if row:
+            return dict(row)
 
     # 3. Create new project if domain is valid
-    valid_domains = {"hackathon", "coursework", "code", "general"}
-    target_domain = domain if domain in valid_domains else "general"
+    target_domain = domain if domain in VALID_DOMAINS else "general"
 
     row = await conn.fetchrow(
         """
@@ -99,14 +120,24 @@ async def create_task(
     priority: str = "medium",
     notes: Optional[str] = None,
 ) -> dict:
-    """Insert a new task into the structured tasks table."""
+    """Insert a new task into the structured tasks table with normalized inputs."""
+    # Normalize domain, status, and priority to satisfy SQL CHECK constraints
+    dom_clean = str(domain or "general").lower().strip()
+    norm_domain = dom_clean if dom_clean in VALID_DOMAINS else "general"
+
+    stat_clean = str(status or "open").lower().strip()
+    norm_status = STATUS_MAP.get(stat_clean, "open")
+
+    prio_clean = str(priority or "medium").lower().strip()
+    norm_priority = PRIORITY_MAP.get(prio_clean, "medium")
+
     row = await conn.fetchrow(
         """
         INSERT INTO tasks (domain, project_id, title, due_date, status, priority, notes)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING id, domain, project_id, title, due_date, status, priority, notes, created_at, updated_at
         """,
-        domain, project_id, title.strip(), due_date, status, priority, notes
+        norm_domain, project_id, title.strip(), due_date, norm_status, norm_priority, notes
     )
     return dict(row) if row else {}
 
@@ -185,12 +216,23 @@ async def update_task(
     task_id: int,
     **kwargs: Any
 ) -> Optional[dict]:
-    """Update task fields dynamically (e.g. status, priority, due_date, notes)."""
+    """Update task fields dynamically (e.g. status, priority, due_date, notes) with normalization."""
     allowed_fields = {"domain", "project_id", "title", "due_date", "status", "priority", "notes"}
     updates = {k: v for k, v in kwargs.items() if k in allowed_fields}
 
     if not updates:
         return await get_task(conn, task_id)
+
+    # Normalize fields if provided
+    if "domain" in updates and updates["domain"]:
+        d_val = str(updates["domain"]).lower().strip()
+        updates["domain"] = d_val if d_val in VALID_DOMAINS else "general"
+    if "status" in updates and updates["status"]:
+        s_val = str(updates["status"]).lower().strip()
+        updates["status"] = STATUS_MAP.get(s_val, "open")
+    if "priority" in updates and updates["priority"]:
+        p_val = str(updates["priority"]).lower().strip()
+        updates["priority"] = PRIORITY_MAP.get(p_val, "medium")
 
     set_clauses = []
     params: list[Any] = [task_id]
