@@ -210,7 +210,14 @@ async def handle_query_tasks(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
     count = len(tasks)
     d_str = f" in {domain.upper()}" if domain else ""
     s_str = f" with status '{status}'" if status else ""
-    summary = f"Found {count} task(s){d_str}{s_str}."
+    if tasks:
+        task_details = [
+            f"'{t['title']}' (due: {t.get('due_date') or 'no due date'}, status: {t.get('status', 'open')})"
+            for t in tasks[:5]
+        ]
+        summary = f"Found {count} task(s){d_str}{s_str}: {'; '.join(task_details)}."
+    else:
+        summary = f"Found {count} task(s){d_str}{s_str}."
     return {
         "response": summary,
         "data": {"tasks": tasks, "count": count},
