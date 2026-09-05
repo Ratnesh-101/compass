@@ -85,6 +85,9 @@ async def route_message(
             "role": "system",
             "content": (
                 "You are Compass, an intelligent personal assistant. "
+                "You maintain context across conversation history. "
+                "When the user asks follow-up questions about recently created tasks, deadlines, or status, "
+                "either call query_tasks with the relevant domain/project or answer directly from conversation history. "
                 "When the user requests adding, scheduling, or tracking a task, action item, or deadline, "
                 "call the add_task tool with properly extracted fields. "
                 "For general inquiries or conversation, respond directly with helpful text."
@@ -104,7 +107,7 @@ async def route_message(
             messages=messages,
             tools=tools,
             tool_choice="auto",
-            max_tokens=256,
+            max_tokens=1024,
         )
 
         from backend.services.usage import record_usage
