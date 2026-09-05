@@ -79,11 +79,11 @@ export default function App() {
   const domainCounts = {
     hackathon: tasks.filter(t => t.domain === 'hackathon').length,
     coursework: tasks.filter(t => t.domain === 'coursework').length,
-    code: tasks.filter(t => t.domain === 'code').length
+    code: tasks.filter(t => t.domain === 'code').length,
+    general: tasks.filter(t => t.domain === 'general').length,
   }
 
   const handleSendMessage = async (userText) => {
-    setMessages(prev => [...prev, { role: 'user', text: userText }])
     setIsTyping(true)
 
     const result = await sendQueryToAssistant(userText, conversationId)
@@ -156,6 +156,8 @@ export default function App() {
           <ChatPanel
             messages={messages}
             setMessages={setMessages}
+            conversationId={conversationId}
+            setConversationId={setConversationId}
             onSendMessage={handleSendMessage}
             isTyping={isTyping}
           />
