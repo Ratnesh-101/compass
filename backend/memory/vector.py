@@ -7,24 +7,10 @@ and querying or storing chunks in PostgreSQL with pgvector cosine similarity.
 
 from typing import List, Optional, Dict, Any
 import asyncpg
-from openai import OpenAI
 from backend.config import get_settings
+from backend.services.embeddings import get_embedding
 
 settings = get_settings()
-
-
-def get_embedding(text: str) -> List[float]:
-    """Generate a 768-dimensional embedding via Nebius Token Factory with Matryoshka truncation."""
-    client = OpenAI(
-        api_key=settings.NEBIUS_API_KEY,
-        base_url=settings.NEBIUS_BASE_URL,
-    )
-    resp = client.embeddings.create(
-        model=settings.EMBEDDING_MODEL,
-        input=text,
-        dimensions=settings.EMBEDDING_DIMENSION,
-    )
-    return resp.data[0].embedding
 
 
 async def store_chunk(
@@ -36,7 +22,7 @@ async def store_chunk(
     tags: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Store text content along with its 768-dim vector in memory_chunks."""
-    embedding = get_embedding(content)
+    embedding = await get_embedding(content)
 
     row = await conn.fetchrow(
         """
@@ -56,7 +42,7 @@ async def search_chunks(
     limit: int = 5,
 ) -> List[Dict[str, Any]]:
     """Search memory chunks by cosine similarity using the HNSW index."""
-    query_vec = get_embedding(query)
+    query_vec = await get_embedding(query)
 
     if domain:
         rows = await conn.fetch(
