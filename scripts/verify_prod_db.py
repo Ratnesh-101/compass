@@ -1,7 +1,7 @@
 """
 Compass — Production PostgreSQL Smoke-Test Script.
 
-Validates connectivity and configuration for Nebius Managed PostgreSQL:
+Validates connectivity and configuration for Neon Serverless PostgreSQL:
   1. Verifies SSL/TLS connection handshake using .env.production DATABASE_URL.
   2. Confirms 'vector' and 'uuid-ossp' extensions are installed.
   3. Verifies 'memory_chunks' table exists with an active HNSW index.
@@ -47,7 +47,7 @@ async def run_smoke_test():
 
     if not DATABASE_URL or "<" in DATABASE_URL:
         print("❌ DATABASE_URL is not configured with real credentials in .env.production.")
-        print("   Please update .env.production with your Nebius Managed PostgreSQL connection string.")
+        print("   Please update .env.production with your Neon Serverless PostgreSQL connection string.")
         return False
 
     try:

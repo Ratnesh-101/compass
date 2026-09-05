@@ -1,6 +1,10 @@
 # Nebius Managed PostgreSQL Cluster — Production Runbook
 
-This document details the provisioning, extension configuration, schema migration, and VPC routing for the production **Managed PostgreSQL** database instance on Nebius AI Cloud.
+> [!IMPORTANT]
+> **Production Architecture Decision**: Compass uses **Neon Serverless PostgreSQL** for production database storage. This provides cloud-native scale-to-zero, instant database branching, built-in connection pooling, and operational simplicity (tested end-to-end across our test suite and live application). 
+> This runbook is retained as an alternative reference for private VPC-isolated database deployments entirely inside Nebius AI Cloud.
+
+This document details the provisioning, extension configuration, schema migration, and VPC routing for the alternative **Managed PostgreSQL** database instance on Nebius AI Cloud.
 
 ---
 

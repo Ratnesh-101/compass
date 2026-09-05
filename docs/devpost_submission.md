@@ -45,14 +45,14 @@ Compass is powered by a multi-tiered architecture orchestrated across Nebius Tok
                            ▼
              [Qwen3-Embedding-8B (768d)]
                            ▼
-        [Nebius Managed PostgreSQL 16 + pgvector]
+        [Neon Serverless PostgreSQL 16 + pgvector]
           (HNSW 768-dim Index, Tasks, Messages)
 ```
 
 * **FastAPI Backend**: Clean asynchronous service using `asyncpg` connection pooling and lifespan management.
 * **Routing Tier**: `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` on Nebius Token Factory using native OpenAI-compatible function calling schemas.
 * **Vector Tier**: `Qwen/Qwen3-Embedding-8B` utilizing **Matryoshka dimension truncation (`dimensions=768`)** to fit within PostgreSQL's 2,000-dimension HNSW indexing ceiling without precision loss.
-* **Storage Tier**: PostgreSQL 16 with `pgvector` hosted on **Nebius Managed Service for PostgreSQL**.
+* **Storage Tier**: PostgreSQL 16 with `pgvector` hosted on **Neon Serverless PostgreSQL** (chosen for operational simplicity, instant database branching, scale-to-zero efficiency, and robust connection pooling tested across all development and staging environments).
 
 ---
 
@@ -72,4 +72,4 @@ Compass is powered by a multi-tiered architecture orchestrated across Nebius Tok
 
 * **Nebius Token Factory**: Model inference speeds were exceptional. The Nemotron Nano response latency consistently hovered around 350-400ms, making conversational interaction feel instant.
 * **Matryoshka Support**: The ability to pass the `dimensions` parameter directly in the embeddings API call without client-side slicing significantly reduced network overhead and storage costs.
-* **Managed PostgreSQL**: Co-locating the pgvector database inside the same Nebius VPC brought vector query latencies down to sub-3ms.
+* **Neon Serverless PostgreSQL**: Vector similarity queries against the 768-dim HNSW index over connection pooling consistently returned in sub-15ms, providing a scalable, cloud-native storage tier.

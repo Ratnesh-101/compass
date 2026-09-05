@@ -2,7 +2,7 @@
 # Compass — Nebius Serverless Endpoint Specification
 #
 # Deploys the Compass FastAPI application on Nebius Serverless Endpoints
-# connected to Nebius Managed PostgreSQL in the shared VPC.
+# connected to Neon Serverless PostgreSQL over secure SSL/TLS.
 # ============================================================================
 
 apiVersion: serverless.nebius.com/v1alpha1
@@ -45,7 +45,7 @@ spec:
       - name: LOG_LEVEL
         value: "INFO"
 
-      # VPC Internal routing to Nebius Managed PostgreSQL cluster
+      # Neon Serverless PostgreSQL connection string (Secret containing Neon URL with sslmode=require)
       - name: DATABASE_URL
         valueFrom:
           secretKeyRef:
@@ -105,10 +105,12 @@ spec:
     concurrency: 50
     targetCpuUtilizationPercentage: 70
 
-  # VPC Attachment (Shared VPC with Managed PostgreSQL)
-  network:
-    vpcId: vpc-compass-prod
-    subnetIds:
-      - subnet-compass-prod-a
-    securityGroupIds:
-      - sg-compass-backend
+  # Network configuration
+  # Neon Serverless PostgreSQL is accessed securely over public internet via SSL/TLS.
+  # VPC attachment is only needed if outbound traffic is routed through a private VPC NAT gateway.
+  # network:
+  #   vpcId: vpc-compass-prod
+  #   subnetIds:
+  #     - subnet-compass-prod-a
+  #   securityGroupIds:
+  #     - sg-compass-backend

@@ -73,7 +73,7 @@ PROJECTS = [
     {
         "name": "Nebius Integration",
         "domain": "code",
-        "description": "Production integration for Nebius Token Factory models, Serverless Endpoints, and Managed PostgreSQL.",
+        "description": "Production integration for Nebius Token Factory models, Serverless Endpoints, and Neon PostgreSQL.",
     },
 ]
 
