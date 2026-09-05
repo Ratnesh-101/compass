@@ -209,7 +209,7 @@ export default function Sidebar({
       </div>
 
       {/* Technical Specs Card */}
-      <div style={{
+      <div className="sidebar-specs-card" style={{
         padding: '12px',
         borderRadius: '8px',
         background: '#131c2e',
