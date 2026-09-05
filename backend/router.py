@@ -132,4 +132,4 @@ async def route_message(
         msg_lower = message.lower()
         if "add task" in msg_lower or "add a task" in msg_lower or "new task" in msg_lower:
             return "add_task", {"title": message.replace("add a task:", "").replace("add task:", "").strip()}, ""
-        return None, None, f"I encountered an error routing your request: {e}"
+        return None, None, "I'm having a moment — could you try that again? I'm here to help!"
