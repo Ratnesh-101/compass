@@ -1,4 +1,4 @@
-// Compass API Client — Cloudflare Tunnel & Neon pgvector connection
+// Compass API Client
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8001').replace(/\/$/, '')
 
 export const FALLBACK_TASKS = [
@@ -59,7 +59,6 @@ export async function checkBackendHealth() {
     clearTimeout(timeoutId)
 
     if (!res.ok) {
-      console.warn(`[Compass Health] Tunnel returned HTTP ${res.status} (502/524/etc). Entering demo mode.`)
       return 'Demo Mode • Mock Memory'
     }
 
@@ -68,15 +67,14 @@ export async function checkBackendHealth() {
       return 'Live • Neon Connected'
     }
     return 'Edge Online • Syncing'
-  } catch (err) {
-    // Graceful fallback during Cloudflare tunnel disconnects or 502/524 errors
+  } catch {
     return 'Demo Mode • Mock Memory'
   }
 }
 
 /**
  * Fetch synchronized task list from Neon PostgreSQL.
- * If Cloudflare tunnel times out (502/524) or fails, gracefully returns local demo cache.
+ * Falls back to local demo cache on timeout or error.
  */
 export async function fetchTasks() {
   try {
@@ -89,7 +87,6 @@ export async function fetchTasks() {
     clearTimeout(timeoutId)
 
     if (!res.ok) {
-      console.warn(`[Compass Tasks] Received HTTP ${res.status} from tunnel. Using local cache.`)
       return FALLBACK_TASKS
     }
 
@@ -98,59 +95,51 @@ export async function fetchTasks() {
       return data
     }
     return FALLBACK_TASKS
-  } catch (err) {
-    // Never reject uncaught promise on network or tunnel error
+  } catch {
     return FALLBACK_TASKS
   }
 }
 
 /**
- * Submit chat prompt to orchestrator pipeline (Nano Router -> pgvector -> Ultra Synthesis).
- * Falls back to local pre-synthesized Friday roadmap if tunnel or network is offline.
+ * Send a chat message to the Nebius-powered assistant.
+ * Passes conversation_id for multi-turn memory.
+ * Returns { response, conversation_id } on success.
  */
-export async function sendQueryToAssistant(prompt) {
+export async function sendQueryToAssistant(prompt, conversationId) {
   try {
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 8000)
+    const timeoutId = setTimeout(() => controller.abort(), 12000)
+
+    const body = { message: prompt }
+    if (conversationId) {
+      body.conversation_id = conversationId
+    }
 
     const res = await fetch(`${API_BASE}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: prompt }),
+      body: JSON.stringify(body),
       signal: controller.signal
     })
     clearTimeout(timeoutId)
 
     if (res.ok) {
       const data = await res.json()
-      if (data.response || data.message) {
-        return data.response || data.message
+      const text = data.response || data.message || ''
+      if (text) {
+        return {
+          response: text,
+          conversation_id: data.conversation_id || conversationId || null
+        }
       }
-    } else {
-      console.warn(`[Compass Chat] Tunnel returned HTTP ${res.status}. Triggering local synthesis safeguard.`)
     }
   } catch (err) {
-    console.warn('[Compass Chat] Backend unreachable or timeout. Using local synthesis safeguard.', err)
+    console.warn('[Compass Chat] Backend unreachable or timeout.', err)
   }
 
-  // Demo script prompt safeguard
-  const queryLower = (prompt || '').toLowerCase()
-  if (queryLower.includes('deliverables') || queryLower.includes('friday')) {
-    return `⚡ [Routed via Nemotron-3 Nano in 342ms]
-
-Here are your critical deliverables before Friday across Coursework and Hackathon:
-
-1. 📚 Coursework (CS 61C):
-• RISC-V Pipeline Synthesis Report (Due Thursday, 11:59 PM)
-• Memory hazard writeback trace completed.
-
-2. 🚀 Hackathon (Nebius Token Factory):
-• Submit Benchmark video & demo (Due Friday, 5:00 PM)
-• Matryoshka 768-dim embeddings deployed with 100% Top-1 recall.
-
-Next Step: Run 'compass log' to sync the benchmark script directly into pgvector.`
+  // Friendly fallback when backend is offline
+  return {
+    response: "I'm having trouble connecting right now. Please make sure the backend is running and try again!",
+    conversation_id: conversationId || null
   }
-
-  return `⚡ [Synthesized across 768-dim vector space]
-Indexed multi-domain entities in pgvector memory. Context synchronized across active sessions.`
 }
