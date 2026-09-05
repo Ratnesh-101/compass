@@ -256,7 +256,10 @@ async def handle_query_code_context(args: Dict[str, Any], pool: Any) -> Dict[str
                 c_tok = resp.usage.completion_tokens if resp.usage else 100
                 record_usage(settings.SKILL_MODEL, p_tok, c_tok)
                 raw_content = resp.choices[0].message.content
-                summary = raw_content.strip() if raw_content else f"Retrieved {count} relevant memory chunk(s) for query: '{query}'."
+                if raw_content is not None and raw_content.strip():
+                    summary = raw_content.strip()
+                else:
+                    summary = f"Retrieved {count} relevant memory chunk(s) for query: '{query}'."
                 return {
                     "response": summary,
                     "data": {"chunks": chunks, "count": count, "model": settings.SKILL_MODEL},
@@ -342,7 +345,10 @@ async def handle_summarize_day(args: Dict[str, Any], pool: Any) -> Dict[str, Any
             c_tok = resp.usage.completion_tokens if resp.usage else 80
             record_usage(settings.SYNTHESIS_MODEL, p_tok, c_tok)
             raw_content = resp.choices[0].message.content
-            summary = raw_content.strip() if raw_content else f"Daily summary: {len(tasks)} total open task(s)."
+            if raw_content is not None and raw_content.strip():
+                summary = raw_content.strip()
+            else:
+                summary = f"Daily summary: {len(tasks)} total open task(s)."
             return {
                 "response": summary,
                 "data": {"open_tasks_by_domain": by_domain, "total": len(tasks), "model": settings.SYNTHESIS_MODEL},
