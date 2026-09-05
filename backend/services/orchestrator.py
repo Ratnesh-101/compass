@@ -1,246 +1,235 @@
 """
-Compass — Multi-Model Cognitive Orchestration Engine.
+Compass — Conversational AI Orchestrator (Nebius / Nemotron).
 
-Coordinates three distinct AI model stages:
-1. Routing (NVIDIA Nemotron-3 Nano): Native function-calling router with sub-400ms SLA.
-2. Semantic Retrieval (pgvector): Generates 768-dim embedding and queries Neon HNSW index.
-3. Multi-Domain Synthesis (NVIDIA Nemotron-3 Ultra): Synthesizes cross-domain context into a clean roadmap.
+Runs a single-stage conversational pipeline:
+  1. Fetch recent task context from DB (so the AI knows what's scheduled)
+  2. Fetch recent conversation history (multi-turn memory)
+  3. Send to Nebius (Nemotron model) with a natural assistant persona
+  4. Persist the conversation turn to DB
+  5. Return the response
+
+The assistant can handle:
+  - Normal casual conversation ("hey, how's it going?")
+  - Scheduling / task questions ("what do I have due this week?")
+  - Adding tasks ("remind me to submit my report by Thursday")
+  - Any other question — it just talks normally
+
+No hardcoded demo scripts. No forced domain categorization.
 """
 
 import time
 import uuid
 import logging
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
+
 from openai import OpenAI
 
 from backend.config import get_settings
-from backend.database import get_pool
-from backend.services.embeddings import get_embedding
 from backend.services.usage import record_usage
 
 logger = logging.getLogger("compass.services.orchestrator")
 settings = get_settings()
-
-# Function-calling tools schema for Nemotron-3 Nano
-NANO_ROUTER_TOOLS: List[Dict[str, Any]] = [
-    {
-        "type": "function",
-        "function": {
-            "name": "filter_domain",
-            "description": "Filter and isolate activities by domain: hackathon, coursework, or code.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "domain": {
-                        "type": "string",
-                        "enum": ["hackathon", "coursework", "code", "general"],
-                        "description": "The target domain to filter by"
-                    }
-                },
-                "required": ["domain"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "retrieve_context",
-            "description": "Perform semantic similarity retrieval across 768-dim embedded memory chunks.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "search_query": {
-                        "type": "string",
-                        "description": "The technical or contextual query to search"
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": "Number of memory chunks to retrieve",
-                        "default": 3
-                    }
-                },
-                "required": ["search_query"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "schedule_action",
-            "description": "Schedule a deliverable, task, or deadline in structured memory.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "title": {"type": "string", "description": "Action item title"},
-                    "due_date": {"type": "string", "description": "Due date in YYYY-MM-DD format"},
-                    "domain": {"type": "string", "enum": ["hackathon", "coursework", "code"]}
-                },
-                "required": ["title"]
-            }
-        }
-    }
-]
 
 
 def _get_nebius_client() -> OpenAI:
     return OpenAI(
         api_key=settings.NEBIUS_API_KEY,
         base_url=settings.NEBIUS_BASE_URL,
-        timeout=8.0,
+        timeout=15.0,
     )
+
+
+def _build_system_prompt(task_context: str) -> str:
+    """Build the system prompt with optional task context injected."""
+    now_str = datetime.now(timezone.utc).strftime("%A, %B %d %Y, %H:%M UTC")
+
+    base = (
+        "You are Compass, a personal AI assistant. You're friendly, helpful, and conversational — "
+        "like a smart friend who also happens to keep track of your schedule and tasks. "
+        "You can talk about anything: give advice, answer questions, have a normal chat. "
+        "You also help with scheduling, deadlines, and task management. "
+        f"Current time: {now_str}.\n\n"
+    )
+
+    if task_context:
+        base += (
+            "Here are the user's currently tracked tasks and upcoming deadlines "
+            "(use this to answer scheduling questions naturally):\n"
+            f"{task_context}\n\n"
+        )
+    else:
+        base += (
+            "The user has no tasks tracked yet. If they want to add one, just ask for the details.\n\n"
+        )
+
+    base += (
+        "Guidelines:\n"
+        "- Be conversational and warm. Don't be robotic or overly formal.\n"
+        "- If the user asks about tasks/deadlines, use the task context above to answer specifically.\n"
+        "- If the user wants to add/schedule something, extract the details and confirm clearly.\n"
+        "- If the user is just chatting, just chat — don't force everything into task-management.\n"
+        "- Keep responses concise unless the user asks for detail.\n"
+        "- Use markdown sparingly — only when it genuinely helps readability."
+    )
+
+    return base
+
+
+async def _fetch_task_context() -> str:
+    """Fetch open tasks from DB and format them as a readable context string."""
+    try:
+        from backend.database import get_pool
+        from backend.memory import structured
+
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            tasks = await structured.list_tasks(conn, status="open")
+
+        if not tasks:
+            return ""
+
+        lines = []
+        for t in tasks[:10]:  # Cap at 10 to avoid flooding the prompt
+            title = t.get("title", "Untitled")
+            domain = t.get("domain", "general").upper()
+            due = t.get("due_date")
+            due_str = f", due {due}" if due else ""
+            proj = t.get("project", {})
+            proj_name = f" [{proj.get('name', '')}]" if proj and proj.get("name") else ""
+            lines.append(f"• [{domain}]{proj_name} {title}{due_str}")
+
+        return "\n".join(lines)
+    except Exception as e:
+        logger.debug(f"Could not fetch task context: {e}")
+        return ""
+
+
+async def _fetch_conversation_history(conversation_id: str) -> List[Dict[str, str]]:
+    """Fetch recent messages for this conversation from DB."""
+    try:
+        from backend.database import get_pool
+        from backend.memory import conversations
+
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            rows = await conversations.get_recent_messages(conn, conversation_id, limit=10)
+
+        history = []
+        for row in rows:
+            role = row.get("role", "user")
+            content = row.get("content", "")
+            if role in ("user", "assistant") and content:
+                history.append({"role": role, "content": content})
+
+        return history
+    except Exception as e:
+        logger.debug(f"Could not fetch conversation history: {e}")
+        return []
+
+
+async def _persist_turn(conversation_id: str, user_message: str, assistant_reply: str) -> str:
+    """Persist the conversation turn to DB. Returns the real conversation_id."""
+    try:
+        from backend.database import get_pool
+        from backend.memory import conversations
+
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            real_cid = await conversations.get_or_create_conversation(conn, conversation_id)
+            await conversations.add_message(conn, real_cid, role="user", content=user_message)
+            await conversations.add_message(conn, real_cid, role="assistant", content=assistant_reply)
+            return real_cid
+    except Exception as e:
+        logger.debug(f"Could not persist conversation turn: {e}")
+        return conversation_id
 
 
 async def process_chat_query(
     message: str,
     conversation_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Execute complete 3-step cognitive pipeline: Routing -> Retrieval -> Synthesis."""
+    """
+    Main entry point for the frontend /api/chat endpoint.
+
+    Runs:
+      1. Fetch task context from DB
+      2. Fetch conversation history
+      3. Call Nebius (Nemotron) with natural system prompt + history
+      4. Persist turn to DB
+      5. Return response
+    """
     conv_id = conversation_id or str(uuid.uuid4())
-    msg_lower = message.lower()
-    
-    # -----------------------------------------------------------------------
-    # Demo Safeguard (0:45 & 2:00 demo script moments)
-    # -----------------------------------------------------------------------
-    if "deliverables" in msg_lower or "friday" in msg_lower:
-        fallback_response = (
-            "⚡ [Routed via Nemotron-3 Nano in 342ms]\n\n"
-            "Here are your critical deliverables before Friday across Coursework and Hackathon:\n\n"
-            "1. 📚 Coursework (CS 61C):\n"
-            "• RISC-V Pipeline Synthesis Report (Due Thursday, 11:59 PM)\n"
-            "• Memory hazard writeback trace completed.\n\n"
-            "2. 🚀 Hackathon (Nebius Token Factory):\n"
-            "• Submit Benchmark video & demo (Due Friday, 5:00 PM)\n"
-            "• Matryoshka 768-dim embeddings deployed with 100% Top-1 recall.\n\n"
-            "Next Step: Run 'compass log' to sync the benchmark script directly into pgvector."
-        )
-        record_usage("nemotron-nano", 140, 45)
-        record_usage("nemotron-ultra", 380, 160)
-        return {
-            "response": fallback_response,
-            "message": fallback_response,
-            "conversation_id": conv_id,
-            "skill_used": "synthesis",
-            "routing_latency_ms": 342,
-        }
-
-    start_route = time.perf_counter()
-    routing_latency_ms = 342
-    invoked_tool = None
-    tool_args = {}
+    start_time = time.perf_counter()
 
     # -----------------------------------------------------------------------
-    # Step 1: Routing (NVIDIA Nemotron-3 Nano via native tool calling)
+    # Step 1: Gather context (tasks + conversation history) in parallel
     # -----------------------------------------------------------------------
-    if settings.NEBIUS_API_KEY:
-        try:
-            client = _get_nebius_client()
-            t0 = time.perf_counter()
-            route_res = client.chat.completions.create(
-                model=settings.ROUTER_MODEL,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are Compass Router. Classify the user intent and invoke the appropriate tool."
-                    },
-                    {"role": "user", "content": message}
-                ],
-                tools=NANO_ROUTER_TOOLS,
-                tool_choice="auto",
-                max_tokens=256,
-            )
-            routing_latency_ms = int((time.perf_counter() - t0) * 1000)
-            
-            # Record router token usage
-            usage = getattr(route_res, "usage", None)
-            p_tok = usage.prompt_tokens if usage else 120
-            c_tok = usage.completion_tokens if usage else 35
-            record_usage("nemotron-nano", p_tok, c_tok)
-
-            choice = route_res.choices[0].message
-            if choice.tool_calls:
-                tc = choice.tool_calls[0]
-                invoked_tool = getattr(tc.function, "name", "retrieve_context")
-        except Exception as e:
-            logger.warning(f"Nemotron Nano router warning: {e}. Defaulting to context retrieval.")
-            routing_latency_ms = int((time.perf_counter() - start_route) * 1000) or 365
+    task_context = await _fetch_task_context()
+    history = await _fetch_conversation_history(conv_id)
 
     # -----------------------------------------------------------------------
-    # Step 2: Semantic Context Retrieval (pgvector HNSW cosine ops)
+    # Step 2: Build messages for Nebius
     # -----------------------------------------------------------------------
-    retrieved_chunks = []
-    try:
-        # Generate 768-dim query embedding via embeddings.py
-        query_vec = await get_embedding(message)
-        record_usage("qwen3-embedding", len(message.split()) * 2, 0)
+    system_prompt = _build_system_prompt(task_context)
+    messages: List[Dict[str, str]] = [{"role": "system", "content": system_prompt}]
 
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            # Cosine similarity <=> on HNSW index
-            rows = await conn.fetch(
-                """
-                SELECT id, domain, content, source, tags,
-                       1 - (embedding <=> $1) AS similarity
-                FROM memory_chunks
-                ORDER BY embedding <=> $1 ASC
-                LIMIT 3
-                """,
-                query_vec
-            )
-            retrieved_chunks = [dict(r) for r in rows]
-    except Exception as e:
-        logger.warning(f"pgvector HNSW retrieval skipped: {e}")
+    # Inject recent history (last N turns before this message)
+    if history:
+        messages.extend(history)
+
+    messages.append({"role": "user", "content": message})
 
     # -----------------------------------------------------------------------
-    # Step 3: Multi-Domain Synthesis (NVIDIA Nemotron-3 Ultra)
+    # Step 3: Call Nebius
     # -----------------------------------------------------------------------
-    context_text = "\n".join([
-        f"[{c.get('domain', 'general').upper()}] {c.get('content', '')}"
-        for c in retrieved_chunks
-    ]) if retrieved_chunks else "Persistent memory loaded."
-
-    synthesis_prompt = (
-        "You are Compass, a personal AI assistant with cross-domain memory.\n"
-        "Synthesize the user query against the retrieved context into a prioritized, actionable roadmap.\n"
-        "Categorize items clearly under Hackathon, Coursework, or Code."
-    )
-
     response_text = ""
     if settings.NEBIUS_API_KEY:
         try:
             client = _get_nebius_client()
-            synth_res = client.chat.completions.create(
-                model=settings.SYNTHESIS_MODEL,
-                messages=[
-                    {"role": "system", "content": synthesis_prompt},
-                    {
-                        "role": "user",
-                        "content": f"Context memories:\n{context_text}\n\nUser Question: {message}"
-                    }
-                ],
-                max_tokens=350,
+            result = client.chat.completions.create(
+                model=settings.ROUTER_MODEL,  # Nemotron-3 Nano — fast, good for chat
+                messages=messages,
+                max_tokens=512,
+                temperature=0.7,
             )
-            usage = getattr(synth_res, "usage", None)
-            p_tok = usage.prompt_tokens if usage else 380
-            c_tok = usage.completion_tokens if usage else 160
-            record_usage("nemotron-ultra", p_tok, c_tok)
-            response_text = synth_res.choices[0].message.content or ""
-        except Exception as e:
-            logger.warning(f"Nemotron Ultra synthesis fallback ({e}).")
+            usage = getattr(result, "usage", None)
+            p_tok = usage.prompt_tokens if usage else len(message.split()) * 3
+            c_tok = usage.completion_tokens if usage else 80
+            record_usage(settings.ROUTER_MODEL, p_tok, c_tok)
 
+            response_text = result.choices[0].message.content or ""
+        except Exception as e:
+            logger.warning(f"Nebius chat call failed: {e}")
+
+    # -----------------------------------------------------------------------
+    # Step 4: Fallback if Nebius is unavailable
+    # -----------------------------------------------------------------------
     if not response_text:
-        response_text = (
-            f"⚡ [Routed via Nemotron-3 Nano in {routing_latency_ms}ms]\n\n"
-            f"Synthesized across 768-dim vector space ({len(retrieved_chunks)} memories retrieved):\n"
-            f"{context_text}"
-        )
+        msg_lower = message.lower()
+        if any(w in msg_lower for w in ["task", "deadline", "due", "schedule", "remind"]):
+            if task_context:
+                response_text = f"Here's what I have tracked for you:\n\n{task_context}"
+            else:
+                response_text = "You don't have any tasks tracked yet. Want to add one? Just tell me what it is and when it's due."
+        else:
+            response_text = (
+                "I'm having a bit of trouble connecting right now. "
+                "Try again in a moment — I'll be back shortly!"
+            )
+
+    # -----------------------------------------------------------------------
+    # Step 5: Persist conversation turn
+    # -----------------------------------------------------------------------
+    latency_ms = int((time.perf_counter() - start_time) * 1000)
+    conv_id = await _persist_turn(conv_id, message, response_text)
 
     return {
         "response": response_text,
         "message": response_text,
         "conversation_id": conv_id,
-        "skill_used": invoked_tool or "synthesis",
-        "routing_latency_ms": routing_latency_ms,
-        "retrieved_count": len(retrieved_chunks),
+        "skill_used": "chat",
+        "routing_latency_ms": latency_ms,
     }
 
 
