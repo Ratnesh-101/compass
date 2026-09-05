@@ -5,16 +5,19 @@ Handles generating 768-dim embeddings via Nebius Token Factory (Qwen/Qwen3-Embed
 and querying or storing chunks in PostgreSQL with pgvector cosine similarity.
 """
 
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 import asyncpg
+from asyncpg.pool import PoolConnectionProxy
 from backend.config import get_settings
 from backend.services.embeddings import get_embedding
 
 settings = get_settings()
 
+DbConn = Union[asyncpg.Connection, PoolConnectionProxy]
+
 
 async def store_chunk(
-    conn: asyncpg.Connection,
+    conn: DbConn,
     content: str,
     domain: str = "general",
     project_id: Optional[int] = None,
@@ -36,7 +39,7 @@ async def store_chunk(
 
 
 async def search_chunks(
-    conn: asyncpg.Connection,
+    conn: DbConn,
     query: str,
     domain: Optional[str] = None,
     limit: int = 5,
