@@ -4,13 +4,12 @@ Compass — Conversation & Message Storage Operations.
 Provides database access for chat conversations and message history in PostgreSQL.
 """
 
-from typing import Optional
+from typing import Optional, Any
 import uuid
-import asyncpg
 
 
 async def get_or_create_conversation(
-    conn: asyncpg.Connection,
+    conn: Any,
     conversation_id: Optional[str] = None,
 ) -> str:
     """Validate or create a conversation record, returning its UUID as string."""
@@ -40,7 +39,7 @@ async def get_or_create_conversation(
 
 
 async def add_message(
-    conn: asyncpg.Connection,
+    conn: Any,
     conversation_id: str,
     role: str,
     content: str,
@@ -64,7 +63,7 @@ async def add_message(
 
 
 async def get_recent_messages(
-    conn: asyncpg.Connection,
+    conn: Any,
     conversation_id: str,
     limit: int = 50,
 ) -> list[dict]:
