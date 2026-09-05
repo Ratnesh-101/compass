@@ -41,6 +41,53 @@ def _normalize_model_name(name: str) -> str:
     return name
 
 
+# Background task set to prevent premature garbage collection of in-flight writes
+_BACKGROUND_TASKS: set = set()
+
+
+def _on_persist_done(task: Any) -> None:
+    """Callback to clean up background task reference and log any unhandled exceptions."""
+    _BACKGROUND_TASKS.discard(task)
+    if not task.cancelled():
+        exc = task.exception()
+        if exc:
+            logger.error(f"Background usage_log persistence failed: {exc}", exc_info=exc)
+
+
+async def _persist_to_db(
+    model_name: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    cost: float,
+    skill: Optional[str] = None,
+    conn: Optional[asyncpg.Connection] = None,
+) -> None:
+    """Insert a usage record into the usage_log table."""
+    try:
+        if conn is not None:
+            await conn.execute(
+                """
+                INSERT INTO usage_log (model, input_tokens, output_tokens, estimated_cost_usd, skill)
+                VALUES ($1, $2, $3, $4, $5)
+                """,
+                model_name, prompt_tokens, completion_tokens, cost, skill,
+            )
+        else:
+            from backend.memory.db import get_pool
+            pool = await get_pool()
+            async with pool.acquire() as db_conn:
+                await db_conn.execute(
+                    """
+                    INSERT INTO usage_log (model, input_tokens, output_tokens, estimated_cost_usd, skill)
+                    VALUES ($1, $2, $3, $4, $5)
+                    """,
+                    model_name, prompt_tokens, completion_tokens, cost, skill,
+                )
+        logger.debug(f"usage_log row persisted: {model_name} ({prompt_tokens} in / {completion_tokens} out)")
+    except Exception as db_err:
+        logger.warning(f"Failed to persist usage_log: {db_err}")
+
+
 def record_usage(
     model_name: str,
     prompt_tokens: int,
@@ -51,7 +98,7 @@ def record_usage(
     """Record token consumption and compute cost.
 
     Updates in-memory accumulators synchronously.
-    When `conn` is provided, also fires an async INSERT into usage_log.
+    Schedules an async INSERT into usage_log table using a managed background task.
 
     Args:
         model_name: Name or alias of the model used
@@ -79,33 +126,30 @@ def record_usage(
         _USAGE_STATE[key]["completion_tokens"] += completion_tokens
         _USAGE_STATE[key]["cost"] = round(_USAGE_STATE[key]["cost"] + cost, 6)
 
-    # Persist to DB if connection supplied
-    if conn is not None:
-        async def _persist() -> None:
-            try:
-                await conn.execute(
-                    """
-                    INSERT INTO usage_log (model, input_tokens, output_tokens, estimated_cost_usd, skill)
-                    VALUES ($1, $2, $3, $4, $5)
-                    """,
-                    model_name, prompt_tokens, completion_tokens, cost, skill,
-                )
-            except Exception as db_err:
-                logger.warning(f"Failed to persist usage_log: {db_err}")
-
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(_persist())
-            else:
-                loop.run_until_complete(_persist())
-        except RuntimeError:
-            pass  # No event loop — in a sync context, skip DB write
+    # Schedule DB persistence with a strong reference and completion callback
+    try:
+        loop = asyncio.get_running_loop()
+        task = loop.create_task(
+            _persist_to_db(model_name, prompt_tokens, completion_tokens, cost, skill, conn=conn)
+        )
+        _BACKGROUND_TASKS.add(task)
+        task.add_done_callback(_on_persist_done)
+    except RuntimeError:
+        # No running event loop (e.g. running in synchronous CLI or worker)
+        pass
 
     logger.info(
         f"Usage recorded: {model_name} | {prompt_tokens} in / {completion_tokens} out | ${cost:.6f}"
     )
     return cost
+
+
+async def flush_usage_tasks() -> None:
+    """Wait for all pending usage persistence background tasks to complete."""
+    import asyncio
+    if _BACKGROUND_TASKS:
+        tasks = list(_BACKGROUND_TASKS)
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 def get_usage_summary() -> Dict[str, Any]:
