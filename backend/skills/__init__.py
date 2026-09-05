@@ -219,8 +219,13 @@ async def handle_query_tasks(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
 
 @register_skill("query_code_context")
 async def handle_query_code_context(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
-    """Query memory_chunks using vector.search_chunks."""
+    """Query memory_chunks using vector.search_chunks and synthesize response via SKILL_MODEL."""
     from backend.memory import vector
+    from backend.config import get_settings
+    from backend.services.usage import record_usage
+    from openai import AsyncOpenAI
+
+    settings = get_settings()
     query = args.get("query", "")
     domain = args.get("domain", "code")
 
@@ -228,6 +233,36 @@ async def handle_query_code_context(args: Dict[str, Any], pool: Any) -> Dict[str
         async with pool.acquire() as conn:
             chunks = await vector.search_chunks(conn, query=query, domain=domain, limit=3)
         count = len(chunks)
+
+        # Synthesize technical response using SKILL_MODEL (nvidia/nemotron-3-super-120b-a12b)
+        if chunks and settings.NEBIUS_API_KEY:
+            try:
+                context_text = "\n\n".join(f"[Snippet #{c['id']}]:\n{c['content']}" for c in chunks)
+                client = AsyncOpenAI(api_key=settings.NEBIUS_API_KEY, base_url=settings.NEBIUS_BASE_URL, timeout=15.0)
+                prompt = (
+                    f"Answer the user's question using the retrieved code context below.\n\n"
+                    f"Context:\n{context_text}\n\n"
+                    f"Question: {query}"
+                )
+                resp = await client.chat.completions.create(
+                    model=settings.SKILL_MODEL,
+                    messages=[
+                        {"role": "system", "content": "You are a senior technical coding assistant."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=384,
+                )
+                p_tok = resp.usage.prompt_tokens if resp.usage else len(prompt.split()) * 2
+                c_tok = resp.usage.completion_tokens if resp.usage else 100
+                record_usage(settings.SKILL_MODEL, p_tok, c_tok)
+                summary = resp.choices[0].message.content.strip()
+                return {
+                    "response": summary,
+                    "data": {"chunks": chunks, "count": count, "model": settings.SKILL_MODEL},
+                }
+            except Exception as llm_err:
+                logger.warning(f"SKILL_MODEL synthesis failed: {llm_err}")
+
         summary = f"Retrieved {count} relevant memory chunk(s) for query: '{query}'."
         return {
             "response": summary,
@@ -266,8 +301,13 @@ async def handle_log_code_context(args: Dict[str, Any], pool: Any) -> Dict[str, 
 
 @register_skill("summarize_day")
 async def handle_summarize_day(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
-    """Return open task counts across domains."""
+    """Return executive daily standup summary using SYNTHESIS_MODEL across domains."""
     from backend.memory import structured
+    from backend.config import get_settings
+    from backend.services.usage import record_usage
+    from openai import AsyncOpenAI
+
+    settings = get_settings()
     async with pool.acquire() as conn:
         tasks = await structured.list_tasks(conn, status="open")
 
@@ -275,6 +315,38 @@ async def handle_summarize_day(args: Dict[str, Any], pool: Any) -> Dict[str, Any
     for t in tasks:
         d = t.get("domain", "general")
         by_domain[d] = by_domain.get(d, 0) + 1
+
+    # Synthesize daily briefing using SYNTHESIS_MODEL (nvidia/Nemotron-3-Ultra-550b-a55b)
+    if tasks and settings.NEBIUS_API_KEY:
+        try:
+            task_list_str = "\n".join(
+                f"- [{t['domain'].upper()}] {t['title']} (Due: {t.get('due_date') or 'No date'}, Priority: {t.get('priority', 'medium')})"
+                for t in tasks[:15]
+            )
+            client = AsyncOpenAI(api_key=settings.NEBIUS_API_KEY, base_url=settings.NEBIUS_BASE_URL, timeout=15.0)
+            prompt = (
+                "Synthesize the following active tasks into a concise, high-impact 2-3 sentence daily briefing. "
+                "Highlight the nearest deadlines across hackathon, coursework, and code:\n\n"
+                f"{task_list_str}"
+            )
+            resp = await client.chat.completions.create(
+                model=settings.SYNTHESIS_MODEL,
+                messages=[
+                    {"role": "system", "content": "You provide prioritized, executive daily standup summaries."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=256,
+            )
+            p_tok = resp.usage.prompt_tokens if resp.usage else len(prompt.split()) * 2
+            c_tok = resp.usage.completion_tokens if resp.usage else 80
+            record_usage(settings.SYNTHESIS_MODEL, p_tok, c_tok)
+            summary = resp.choices[0].message.content.strip()
+            return {
+                "response": summary,
+                "data": {"open_tasks_by_domain": by_domain, "total": len(tasks), "model": settings.SYNTHESIS_MODEL},
+            }
+        except Exception as llm_err:
+            logger.warning(f"SYNTHESIS_MODEL daily summary failed: {llm_err}")
 
     parts = [f"{d.upper()}: {c}" for d, c in by_domain.items()]
     summary = f"Daily summary: {len(tasks)} total open task(s) ({', '.join(parts) if parts else 'None'})."
