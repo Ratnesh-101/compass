@@ -15,7 +15,8 @@ import logging
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, date, timezone
-from typing import Optional, Any
+from typing import Optional, Any, cast
+from openai.types.chat import ChatCompletionMessageParam, ChatCompletionToolParam
 
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -602,7 +603,10 @@ async def get_frontend_tasks(domain: Optional[str] = Query(None)):
                 due_d = t.get("due_date")
                 countdown_str = _format_countdown(due_d)
                 created_at = t.get("created_at")
-                ts_str = created_at.strftime("%b %d, %H:%M") if created_at and hasattr(created_at, "strftime") else "Recently"
+                if isinstance(created_at, (datetime, date)):
+                    ts_str = created_at.strftime("%b %d, %H:%M")
+                else:
+                    ts_str = "Recently"
                 
                 # Derive tags from project or domain
                 tags = [t.get("domain", "task")]
@@ -772,16 +776,16 @@ async def stream_chat(req: StreamChatRequest):
             )
 
             # Build minimal message list for streaming (no history injection to keep latency low)
-            messages_payload: Any = [
+            messages: list[ChatCompletionMessageParam] = [
                 {"role": "system", "content": "You are Compass, a friendly and intelligent personal assistant. Be concise and helpful."},
                 {"role": "user", "content": message},
             ]
-            tools_payload: Any = TOOLS
+            tools: list[ChatCompletionToolParam] = cast(list[ChatCompletionToolParam], TOOLS)
 
             stream = await client.chat.completions.create(
                 model=_settings.ROUTER_MODEL,
-                messages=messages_payload,
-                tools=tools_payload,
+                messages=messages,
+                tools=tools,
                 tool_choice="auto",
                 max_tokens=512,
                 temperature=0.7,
