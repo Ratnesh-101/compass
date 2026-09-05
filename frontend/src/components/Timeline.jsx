@@ -40,7 +40,27 @@ export default function Timeline({ tasks, activeDomain, onSelectDomain }) {
 
       {/* Task Stream Feed */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-        {filtered.map(task => {
+        {filtered.length === 0 ? (
+          <div style={{
+            padding: '40px 20px',
+            textAlign: 'center',
+            background: '#111827',
+            borderRadius: '10px',
+            border: '1px dashed #334155',
+            color: '#94a3b8',
+            marginTop: '10px'
+          }}>
+            <div style={{ fontSize: '28px', marginBottom: '10px' }}>📭</div>
+            <div style={{ fontSize: '15px', fontWeight: '600', color: '#f8fafc', marginBottom: '6px' }}>
+              No tasks found
+            </div>
+            <div style={{ fontSize: '12px', color: '#64748b' }}>
+              {activeDomain === 'all'
+                ? "Your memory stream is clear. Add tasks via CLI ('compass add ...') or in the Chat tab."
+                : `No active tasks found under ${activeDomain.toUpperCase()} domain.`}
+            </div>
+          </div>
+        ) : filtered.map(task => {
           const isOverdue = (task.countdown || '').toLowerCase().includes('overdue')
 
           return (
