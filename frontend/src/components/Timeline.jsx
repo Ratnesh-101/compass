@@ -16,7 +16,7 @@ export default function Timeline({ tasks, activeDomain, onSelectDomain }) {
           </p>
         </div>
         <div style={{ display: 'flex', gap: '6px' }}>
-          {['all', 'hackathon', 'coursework', 'code'].map(dom => (
+          {['all', 'hackathon', 'coursework', 'code', 'general'].map(dom => (
             <button
               key={dom}
               onClick={() => onSelectDomain(dom)}
