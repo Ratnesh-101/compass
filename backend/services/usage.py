@@ -25,16 +25,8 @@ PRICING_PER_1M = {
     "Qwen/Qwen3-Embedding-8B": {"prompt": 0.02, "completion": 0.00},
 }
 
-# In-Memory State Store
-_USAGE_STATE: Dict[str, Dict[str, Any]] = {
-    "nemotron-nano": {"calls": 1, "prompt_tokens": 2450, "completion_tokens": 480, "cost": 0.000234},
-    "nemotron-ultra": {"calls": 1, "prompt_tokens": 3100, "completion_tokens": 950, "cost": 0.003240},
-    "qwen3-embedding": {"calls": 2, "prompt_tokens": 4264, "completion_tokens": 0, "cost": 0.000085},
-    "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B": {"calls": 1, "prompt_tokens": 2450, "completion_tokens": 480, "cost": 0.000234},
-    "nvidia/nemotron-3-super-120b-a12b": {"calls": 1, "prompt_tokens": 1820, "completion_tokens": 620, "cost": 0.000976},
-    "nvidia/Nemotron-3-Ultra-550b-a55b": {"calls": 1, "prompt_tokens": 3100, "completion_tokens": 950, "cost": 0.003240},
-    "Qwen/Qwen3-Embedding-8B": {"calls": 2, "prompt_tokens": 4264, "completion_tokens": 0, "cost": 0.000085},
-}
+# In-Memory State Store — starts empty; populated exclusively by real API calls
+_USAGE_STATE: Dict[str, Dict[str, Any]] = {}
 
 
 def _normalize_model_name(name: str) -> str:
@@ -58,6 +50,9 @@ def record_usage(
 ) -> float:
     """Record token consumption and compute cost.
 
+    Updates in-memory accumulators synchronously.
+    When `conn` is provided, also fires an async INSERT into usage_log.
+
     Args:
         model_name: Name or alias of the model used
         prompt_tokens: Number of prompt/input tokens
@@ -65,9 +60,11 @@ def record_usage(
         conn: Optional active asyncpg connection to persist into database
         skill: Optional skill or pipeline stage identifier
     """
+    import asyncio
+
     norm_key = _normalize_model_name(model_name)
     pricing = PRICING_PER_1M.get(norm_key, {"prompt": 0.08, "completion": 0.08})
-    
+
     cost = (prompt_tokens * pricing["prompt"] / 1_000_000.0) + (
         completion_tokens * pricing["completion"] / 1_000_000.0
     )
@@ -81,6 +78,29 @@ def record_usage(
         _USAGE_STATE[key]["prompt_tokens"] += prompt_tokens
         _USAGE_STATE[key]["completion_tokens"] += completion_tokens
         _USAGE_STATE[key]["cost"] = round(_USAGE_STATE[key]["cost"] + cost, 6)
+
+    # Persist to DB if connection supplied
+    if conn is not None:
+        async def _persist() -> None:
+            try:
+                await conn.execute(
+                    """
+                    INSERT INTO usage_log (model, input_tokens, output_tokens, estimated_cost_usd, skill)
+                    VALUES ($1, $2, $3, $4, $5)
+                    """,
+                    model_name, prompt_tokens, completion_tokens, cost, skill,
+                )
+            except Exception as db_err:
+                logger.warning(f"Failed to persist usage_log: {db_err}")
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.ensure_future(_persist())
+            else:
+                loop.run_until_complete(_persist())
+        except RuntimeError:
+            pass  # No event loop — in a sync context, skip DB write
 
     logger.info(
         f"Usage recorded: {model_name} | {prompt_tokens} in / {completion_tokens} out | ${cost:.6f}"
