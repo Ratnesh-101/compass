@@ -5,7 +5,7 @@ Central registry for all skills supported by Compass. Provides a standardized
 pattern for registering tools for the router and dispatching execution in orchestrator.
 """
 
-from typing import Any, Callable, Coroutine, Dict, List, Optional
+from typing import Any, Callable, Coroutine, Dict, List
 import logging
 
 logger = logging.getLogger("compass.skills")
@@ -255,7 +255,8 @@ async def handle_query_code_context(args: Dict[str, Any], pool: Any) -> Dict[str
                 p_tok = resp.usage.prompt_tokens if resp.usage else len(prompt.split()) * 2
                 c_tok = resp.usage.completion_tokens if resp.usage else 100
                 record_usage(settings.SKILL_MODEL, p_tok, c_tok)
-                summary = resp.choices[0].message.content.strip()
+                raw_content = resp.choices[0].message.content
+                summary = raw_content.strip() if raw_content else f"Retrieved {count} relevant memory chunk(s) for query: '{query}'."
                 return {
                     "response": summary,
                     "data": {"chunks": chunks, "count": count, "model": settings.SKILL_MODEL},
@@ -340,7 +341,8 @@ async def handle_summarize_day(args: Dict[str, Any], pool: Any) -> Dict[str, Any
             p_tok = resp.usage.prompt_tokens if resp.usage else len(prompt.split()) * 2
             c_tok = resp.usage.completion_tokens if resp.usage else 80
             record_usage(settings.SYNTHESIS_MODEL, p_tok, c_tok)
-            summary = resp.choices[0].message.content.strip()
+            raw_content = resp.choices[0].message.content
+            summary = raw_content.strip() if raw_content else f"Daily summary: {len(tasks)} total open task(s)."
             return {
                 "response": summary,
                 "data": {"open_tasks_by_domain": by_domain, "total": len(tasks), "model": settings.SYNTHESIS_MODEL},
@@ -382,14 +384,18 @@ async def handle_get_hackathon_deadlines(args: Dict[str, Any], pool: Any) -> Dic
 @register_skill("log_code_snippet")
 async def handle_log_code_snippet(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
     """Log code snippets and technical context into pgvector with 768-dim embeddings."""
-    from backend.memory import vector
+    from backend.memory import vector, structured
     content = args.get("content", "")
-    project = args.get("project")
+    project_name = args.get("project")
     tags = args.get("tags", "")
     tag_list = [t.strip() for t in tags.split(",")] if isinstance(tags, str) and tags else []
     
     async with pool.acquire() as conn:
-        chunk = await vector.store_chunk(conn, content=content, domain="code", tags=tag_list)
+        project_id = None
+        if project_name:
+            proj = await structured.get_or_create_project(conn, project_name, "code")
+            project_id = proj.get("id")
+        chunk = await vector.store_chunk(conn, content=content, domain="code", project_id=project_id, tags=tag_list)
     return {"response": "💻 Logged code context with 768-dim embedding in Neon HNSW index.", "data": chunk}
 
 
