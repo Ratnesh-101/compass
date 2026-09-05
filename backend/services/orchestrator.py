@@ -20,7 +20,7 @@ No hardcoded demo scripts. No forced domain categorization.
 import time
 import uuid
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, date, timezone
 from typing import Optional, Dict, Any, List
 
 from openai import OpenAI
@@ -74,6 +74,16 @@ def _build_system_prompt(task_context: str) -> str:
     )
 
     return base
+
+
+def _parse_iso_date(val: Optional[str]) -> Optional[date]:
+    """Parse an ISO date string (YYYY-MM-DD) into a date object."""
+    if not val:
+        return None
+    try:
+        return datetime.strptime(val.strip(), "%Y-%m-%d").date()
+    except Exception:
+        return None
 
 
 async def _fetch_task_context() -> str:
@@ -186,10 +196,15 @@ async def process_chat_query(
     response_text = ""
     if settings.NEBIUS_API_KEY:
         try:
-            client = _get_nebius_client()
-            result = client.chat.completions.create(
+            from backend.skills import TOOL_DEFINITIONS, SKILL_REGISTRY
+            import json
+
+            client: Any = _get_nebius_client()
+            result: Any = client.chat.completions.create(
                 model=settings.ROUTER_MODEL,  # Nemotron-3 Nano — fast, good for chat
                 messages=messages,
+                tools=TOOL_DEFINITIONS,
+                tool_choice="auto",
                 max_tokens=512,
                 temperature=0.7,
             )
@@ -198,7 +213,48 @@ async def process_chat_query(
             c_tok = usage.completion_tokens if usage else 80
             record_usage(settings.ROUTER_MODEL, p_tok, c_tok)
 
-            response_text = result.choices[0].message.content or ""
+            choice = result.choices[0]
+            if choice.message.tool_calls:
+                tc = choice.message.tool_calls[0]
+                func_name = getattr(getattr(tc, "function", None), "name", None) or getattr(tc, "name", "add_task")
+                raw_args = getattr(getattr(tc, "function", None), "arguments", "{}") or "{}"
+
+                try:
+                    args = json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args)
+                except Exception:
+                    args = {"title": message}
+
+                if func_name == "add_task":
+                    from backend.database import get_pool
+                    from backend.memory import structured
+
+                    title = args.get("title") or message
+                    domain = args.get("domain") or "general"
+                    due_date = _parse_iso_date(args.get("due_date"))
+                    priority = args.get("priority") or "medium"
+                    
+                    # Normalize domain
+                    valid_domains = {"hackathon", "coursework", "code", "general"}
+                    if domain not in valid_domains:
+                        domain = "general"
+
+                    pool = await get_pool()
+                    async with pool.acquire() as conn:
+                        await structured.create_task(
+                            conn, domain=domain, title=title, 
+                            due_date=due_date, priority=priority
+                        )
+                    due_info = f" for {args.get('due_date')}" if args.get("due_date") else ""
+                    response_text = f"Got it! I've added '{title}' to your {domain} tasks{due_info}."
+                elif func_name in SKILL_REGISTRY:
+                    from backend.database import get_pool
+                    pool = await get_pool()
+                    skill_result = await SKILL_REGISTRY[func_name](args, pool)
+                    response_text = skill_result.get("response", "Action completed.")
+                else:
+                    response_text = "I attempted that action but ran into an issue."
+            else:
+                response_text = choice.message.content or ""
         except Exception as e:
             logger.warning(f"Nebius chat call failed: {e}")
 
