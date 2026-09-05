@@ -60,10 +60,10 @@ flowchart TD
         CF["Cloudflare Tunnel<br/>(QUIC / trycloudflare.com)"]
     end
 
-    subgraph Backend Core (FastAPI :8001)
+    subgraph Backend Core (FastAPI :8000)
         API["FastAPI App Shell<br/>(backend/main.py)"]
         Router["Nemotron-3 Nano Router<br/>(Tools & Function Calling)"]
-        Orchestrator["Cognitive Orchestrator<br/>(backend/services/orchestrator.py)"]
+        Orchestrator["Cognitive Orchestrator<br/>(backend/orchestrator.py)"]
         Usage["Token & Cost Accounting<br/>(backend/services/usage.py)"]
         Embed["Nebius Vector Factory<br/>(backend/services/embeddings.py)"]
     end
@@ -185,7 +185,7 @@ compass/
 * **Accumulator**: Maintains both in-memory counters (`_USAGE_STATE`) and optional PostgreSQL `usage_log` rows.
 * **Summary Schema**: Returns total requests, total tokens, total dollar cost (e.g., `$0.0045`), and a model breakdown table formatted for `compass admin usage`.
 
-### 3. Multi-Model Cognitive Orchestrator ([backend/services/orchestrator.py](file:///c:/Users/Ratnesh%20Singh/OneDrive/Desktop/compass/backend/services/orchestrator.py))
+### 3. Multi-Model Cognitive Orchestrator ([backend/orchestrator.py](file:///c:/Users/Ratnesh%20Singh/OneDrive/Desktop/compass/backend/orchestrator.py))
 * **Step 1 — Fast Intent Routing (NVIDIA Nemotron-3 Nano)**:
   * Uses tool-calling schemas: `filter_domain`, `retrieve_context`, `schedule_action`.
   * Records execution latency via `time.perf_counter()` to verify the sub-400ms SLA.
