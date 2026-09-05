@@ -1,0 +1,17 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    {
+      "source": "/health",
+      "destination": "https://compass-backend-qryu.onrender.com/health"
+    },
+    {
+      "source": "/chat",
+      "destination": "https://compass-backend-qryu.onrender.com/chat"
+    },
+    {
+      "source": "/api/:path*",
+      "destination": "https://compass-backend-qryu.onrender.com/api/:path*"
+    }
+  ]
+}

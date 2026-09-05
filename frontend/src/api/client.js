@@ -1,5 +1,12 @@
 // Compass API Client
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '')
+// In production, use same-origin relative URLs ('') so Vercel transparently proxies
+// all /health and /api/* requests to Render, making it 100% immune to Brave Shields & ad-blockers.
+// In development, fall back to VITE_API_BASE_URL or http://localhost:8000.
+const API_BASE = (
+  import.meta.env.DEV
+    ? (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000')
+    : ''
+).replace(/\/$/, '')
 
 export const FALLBACK_TASKS = [
   {
