@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
+import { streamQueryFromAssistant } from '../api/client'
 
-export default function ChatPanel({ messages, setMessages, onSendMessage, isTyping }) {
+export default function ChatPanel({ messages, setMessages, conversationId, setConversationId, onSendMessage, isTyping }) {
   const [input, setInput] = useState('')
   const [streamingText, setStreamingText] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
@@ -26,8 +27,8 @@ export default function ChatPanel({ messages, setMessages, onSendMessage, isTypi
   }, [])
 
   /**
-   * Token Streaming & Typewriter Mechanism
-   * Chunks 3–5 characters or 1 token every 18ms for realistic sub-400ms progressive delivery.
+   * Token Streaming & Typewriter Mechanism (Fallback)
+   * Chunks 3–5 characters or 1 token every 18ms for progressive delivery when SSE is unavailable.
    */
   const streamAssistantResponse = (fullText) => {
     setIsStreaming(true)
@@ -58,7 +59,6 @@ export default function ChatPanel({ messages, setMessages, onSendMessage, isTypi
         accumulated += chunks[chunkIndex]
         setStreamingText(accumulated)
         chunkIndex++
-        // Continuous auto-scroll keeping the generation centered
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
       } else {
         clearInterval(streamTimerRef.current)
@@ -76,9 +76,54 @@ export default function ChatPanel({ messages, setMessages, onSendMessage, isTypi
     if (!text || isStreaming || isTyping) return
     setInput('')
 
-    const reply = await onSendMessage(text)
-    if (reply) {
-      streamAssistantResponse(reply)
+    // 1. Add user message to conversation
+    setMessages(prev => [...prev, { role: 'user', text }])
+    setIsStreaming(true)
+    setStreamingText('')
+
+    let receivedTokens = ''
+
+    try {
+      // 2. Attempt real Server-Sent Events streaming from Nebius endpoint
+      await streamQueryFromAssistant(text, conversationId, {
+        onToken: (token, full) => {
+          receivedTokens = full
+          setStreamingText(full)
+          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+        },
+        onComplete: (doneData) => {
+          setIsStreaming(false)
+          setStreamingText('')
+          if (receivedTokens) {
+            setMessages(prev => [...prev, { role: 'assistant', text: receivedTokens }])
+          }
+          if (doneData?.conversation_id && setConversationId) {
+            setConversationId(doneData.conversation_id)
+          }
+          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+        },
+        onError: async (err) => {
+          console.warn('[SSE Stream Error — falling back to non-streaming chat]', err)
+          setIsStreaming(false)
+          setStreamingText('')
+          if (onSendMessage) {
+            const reply = await onSendMessage(text)
+            if (reply) {
+              streamAssistantResponse(reply)
+            }
+          }
+        }
+      })
+    } catch (err) {
+      console.warn('[SSE Stream Failed — falling back to non-streaming chat]', err)
+      setIsStreaming(false)
+      setStreamingText('')
+      if (onSendMessage) {
+        const reply = await onSendMessage(text)
+        if (reply) {
+          streamAssistantResponse(reply)
+        }
+      }
     }
   }
 
