@@ -47,31 +47,11 @@ settings = get_settings()
 
 # ---------------------------------------------------------------------------
 # Helper: Embeddings & LLM Summarization
-# ---------------------------------------------------------------------------
-
-def _deterministic_embedding(text: str, dim: int = 768) -> list[float]:
-    seed = sum(ord(c) * (i + 1) for i, c in enumerate(text))
-    raw = [math.sin(seed + i * 0.17) for i in range(dim)]
-    norm = math.sqrt(sum(x * x for x in raw)) or 1.0
-    return [x / norm for x in raw]
+from backend.services.embeddings import get_embedding
 
 
-def get_embedding(client, text: str) -> list[float]:
-    if client and settings.NEBIUS_API_KEY:
-        try:
-            res = client.embeddings.create(
-                model=settings.EMBEDDING_MODEL,
-                input=text,
-                dimensions=settings.EMBEDDING_DIMENSION,
-            )
-            return res.data[0].embedding
-        except Exception as e:
-            logger.warning(f"Live embedding failed ({e}); using deterministic fallback")
-    return _deterministic_embedding(text, settings.EMBEDDING_DIMENSION)
-
-
-def summarize_messages(client, messages: list[dict]) -> str:
-    """Condense conversation messages using Nemotron Nano or fallback."""
+async def summarize_messages(client, messages: list[dict]) -> str:
+    """Condense conversation messages using Nemotron Ultra (synthesis model) or fallback."""
     formatted = "\n".join(f"{m['role'].upper()}: {m['content']}" for m in messages)
     if client and settings.NEBIUS_API_KEY:
         try:
@@ -81,8 +61,8 @@ def summarize_messages(client, messages: list[dict]) -> str:
                 "tasks created or completed, and relevant technical context.\n\n"
                 f"{formatted}"
             )
-            resp = client.chat.completions.create(
-                model=settings.ROUTER_MODEL,
+            resp = await client.chat.completions.create(
+                model=settings.SYNTHESIS_MODEL,
                 messages=[
                     {"role": "system", "content": "You produce concise, factual conversation summaries."},
                     {"role": "user", "content": prompt}
@@ -163,6 +143,9 @@ async def deduplicate_vectors(
     # Similarity > threshold <=> distance < (1 - threshold).
     max_distance = 1.0 - threshold
 
+    # Optimized LATERAL join using pgvector HNSW index rather than quadratic Cartesian product.
+    # Note: Nightly job bounds candidate chunks to the last 30 days to keep runtimes predictable;
+    # older chunks should be handled via a separate, less frequent reconciliation pass.
     duplicates = await conn.fetch(
         """
         SELECT
@@ -172,8 +155,15 @@ async def deduplicate_vectors(
             b.source AS remove_source,
             1.0 - (a.embedding <=> b.embedding) AS similarity
         FROM memory_chunks a
-        JOIN memory_chunks b ON a.id < b.id
-        WHERE (a.embedding <=> b.embedding) < $1
+        CROSS JOIN LATERAL (
+            SELECT id, source, embedding
+            FROM memory_chunks b
+            WHERE b.id > a.id
+              AND (a.embedding <=> b.embedding) < $1
+            ORDER BY b.embedding <=> a.embedding ASC
+            LIMIT 1
+        ) b
+        WHERE a.created_at > now() - interval '30 days'
         ORDER BY similarity DESC
         """,
         max_distance
@@ -253,8 +243,8 @@ async def archive_stale_threads(
             logger.info(f"    - Conversation {cid} already archived as chunk #{existing}.")
             continue
 
-        summary = summarize_messages(client, messages)
-        emb = get_embedding(client, summary)
+        summary = await summarize_messages(client, messages)
+        emb = await get_embedding(summary)
 
         logger.info(f"    📦 Archiving conv {cid} ({len(messages)} msgs, last active {c['last_active_at'].date()}):")
         logger.info(f"       Summary: {summary[:120]}...")
@@ -301,8 +291,8 @@ async def run_consolidation(
     client = None
     if settings.NEBIUS_API_KEY:
         try:
-            from openai import OpenAI
-            client = OpenAI(api_key=settings.NEBIUS_API_KEY, base_url=settings.NEBIUS_BASE_URL)
+            from openai import AsyncOpenAI
+            client = AsyncOpenAI(api_key=settings.NEBIUS_API_KEY, base_url=settings.NEBIUS_BASE_URL, timeout=30.0)
         except Exception as e:
             logger.warning(f"Could not load OpenAI client: {e}")
 
@@ -322,6 +312,10 @@ async def run_consolidation(
         logger.info("=" * 60)
 
         return {
+            "overdue_tasks_flagged": overdue_count,
+            "duplicate_chunks_merged": pruned_count,
+            "stale_conversations_rolled_up": archived_count,
+            # Backwards compatibility aliases
             "overdue_tasks": overdue_count,
             "pruned_chunks": pruned_count,
             "archived_threads": archived_count,
