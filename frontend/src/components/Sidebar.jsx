@@ -185,6 +185,27 @@ export default function Sidebar({
             {domainCounts.code}
           </span>
         </div>
+
+        {/* General: Slate Accent (#64748b) */}
+        <div
+          onClick={() => onSelectDomain('general')}
+          style={{
+            padding: '8px 12px',
+            borderRadius: '8px',
+            marginBottom: '6px',
+            cursor: 'pointer',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            background: activeDomain === 'general' ? 'rgba(100, 116, 139, 0.15)' : 'rgba(100, 116, 139, 0.04)',
+            border: activeDomain === 'general' ? '1px solid rgba(100, 116, 139, 0.45)' : '1px solid rgba(100, 116, 139, 0.15)',
+            transition: 'all 0.15s ease'
+          }}>
+          <span style={{ fontSize: '12.5px', color: '#94a3b8', fontWeight: '500' }}>🌐 General</span>
+          <span className="badge-general" style={{ padding: '2px 7px', borderRadius: '10px', fontSize: '10.5px', fontWeight: '700' }}>
+            {domainCounts.general}
+          </span>
+        </div>
       </div>
 
       {/* Technical Specs Card */}
