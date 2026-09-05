@@ -72,6 +72,23 @@ code, pre, .mono {
   box-shadow: 0 2px 14px rgba(16, 185, 129, 0.1);
 }
 
+/* 🌐 General: Slate Accent (#64748b) */
+.badge-general {
+  background: rgba(100, 116, 139, 0.15) !important;
+  color: #94a3b8 !important;
+  border: 1px solid rgba(100, 116, 139, 0.4) !important;
+  box-shadow: 0 0 10px rgba(100, 116, 139, 0.08);
+}
+
+.card-general {
+  border-left: 4px solid #64748b !important;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.card-general:hover {
+  border-color: rgba(100, 116, 139, 0.5);
+  box-shadow: 0 2px 14px rgba(100, 116, 139, 0.08);
+}
+
 /* ==========================================================================
    Card Metadata & Alert Badges
    ========================================================================== */
