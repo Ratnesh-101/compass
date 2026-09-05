@@ -50,18 +50,9 @@ def _generate_deterministic_embedding(text: str, dim: int = 768) -> list[float]:
 
 
 def get_embedding(text: str, client = None) -> list[float]:
-    """Get a 768-dim embedding either from Nebius Token Factory or fallback."""
-    if client and settings.NEBIUS_API_KEY:
-        try:
-            res = client.embeddings.create(
-                model=settings.EMBEDDING_MODEL,
-                input=text,
-                dimensions=settings.EMBEDDING_DIMENSION,
-            )
-            return res.data[0].embedding
-        except Exception as e:
-            print(f"    [!] Nebius live embedding failed ({e}), using deterministic vector")
-    return _generate_deterministic_embedding(text, settings.EMBEDDING_DIMENSION)
+    """Get a 768-dim embedding from the single canonical embedding service."""
+    from backend.services.embeddings import get_embedding_sync
+    return get_embedding_sync(text)
 
 
 # ---------------------------------------------------------------------------
