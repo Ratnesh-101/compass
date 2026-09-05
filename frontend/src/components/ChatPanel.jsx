@@ -89,7 +89,7 @@ export default function ChatPanel({ messages, setMessages, onSendMessage, isTypi
 
   const handleQuickPrompt = () => {
     if (isStreaming || isTyping) return
-    const prompt = 'What are my top deliverables across coursework and hackathon before Friday?'
+    const prompt = 'What tasks do I have coming up?'
     setInput(prompt)
     handleSend(prompt)
   }
@@ -224,7 +224,7 @@ export default function ChatPanel({ messages, setMessages, onSendMessage, isTypi
         {isTyping && !isStreaming && (
           <div style={{ color: '#94a3b8', fontSize: '12px', fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 12px' }}>
             <span style={{ display: 'inline-block', width: '7px', height: '7px', borderRadius: '50%', background: '#6366f1', boxShadow: '0 0 8px #6366f1' }} />
-            ⚡ Nemotron-3 Nano dispatching function calls & synthesizing cross-domain memory...
+            Thinking...
           </div>
         )}
 
@@ -252,8 +252,8 @@ export default function ChatPanel({ messages, setMessages, onSendMessage, isTypi
             gap: '8px',
             transition: 'all 0.15s ease'
           }}>
-          <span style={{ fontSize: '14px' }}>💡</span>
-          <span>Click to test: <strong>"What are my top deliverables across coursework and hackathon before Friday?"</strong></span>
+          <span style={{ fontSize: '14px' }}>📋</span>
+          <span>Quick prompt: <strong>"What tasks do I have coming up?"</strong></span>
         </button>
       </div>
 
@@ -263,7 +263,7 @@ export default function ChatPanel({ messages, setMessages, onSendMessage, isTypi
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={isStreaming ? "Streaming assistant response..." : "Ask Compass across your hackathons, coursework, or repos..."}
+          placeholder={isStreaming ? 'Streaming response...' : 'Ask me anything, or say "add a task"...'}
           disabled={isInputDisabled}
           style={{
             flex: 1,
