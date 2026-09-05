@@ -1,5 +1,5 @@
 // Compass API Client
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8001').replace(/\/$/, '')
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '')
 
 export const FALLBACK_TASKS = [
   {
@@ -137,9 +137,89 @@ export async function sendQueryToAssistant(prompt, conversationId) {
     console.warn('[Compass Chat] Backend unreachable or timeout.', err)
   }
 
-  // Friendly fallback when backend is offline
-  return {
-    response: "I'm having trouble connecting right now. Please make sure the backend is running and try again!",
-    conversation_id: conversationId || null
+    // Friendly fallback when backend is offline
+    return {
+      response: "I'm having trouble connecting right now. Please make sure the backend is running and try again!",
+      conversation_id: conversationId || null
+    }
+  }
+
+/**
+ * Stream chat tokens via Server-Sent Events (SSE) from /api/chat/stream.
+ * Dispatches incremental tokens via onToken, completion metadata via onComplete,
+ * and errors via onError.
+ */
+export async function streamQueryFromAssistant(prompt, conversationId, { onToken, onComplete, onError } = {}) {
+  try {
+    const body = { message: prompt }
+    if (conversationId) {
+      body.conversation_id = conversationId
+    }
+
+    const res = await fetch(`${API_BASE}/api/chat/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+
+    if (!res.ok) {
+      throw new Error(`SSE endpoint returned HTTP ${res.status}`)
+    }
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let fullResponse = ''
+    let lastConvId = conversationId || null
+    let lastSkill = null
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed || !trimmed.startsWith('data:')) continue
+        const jsonStr = trimmed.slice(5).trim()
+        if (!jsonStr) continue
+        try {
+          const evt = JSON.parse(jsonStr)
+          if (evt.type === 'token') {
+            fullResponse += evt.value
+            if (onToken) onToken(evt.value, fullResponse)
+          } else if (evt.type === 'done') {
+            if (evt.conversation_id) lastConvId = evt.conversation_id
+            if (evt.skill_used) lastSkill = evt.skill_used
+          } else if (evt.type === 'error') {
+            throw new Error(evt.message || 'Stream error')
+          }
+        } catch (e) {
+          console.warn('[Compass SSE Parse Error]', e, jsonStr)
+        }
+      }
+    }
+
+    if (onComplete) {
+      onComplete({
+        response: fullResponse,
+        conversation_id: lastConvId,
+        skill_used: lastSkill,
+      })
+    }
+    return {
+      response: fullResponse,
+      conversation_id: lastConvId,
+      skill_used: lastSkill,
+    }
+  } catch (err) {
+    if (onError) {
+      onError(err)
+    } else {
+      throw err
+    }
   }
 }
