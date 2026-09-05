@@ -119,7 +119,7 @@ EMBEDDING_DIMENSION=768
 DATABASE_URL="postgresql://username:password@ep-your-neon-pooler.region.neon.tech/neondb?sslmode=require"
 
 # === Security & App ===
-AUTH_TOKEN="dev-token"
+AUTH_TOKEN="your-secret-token-here"
 LOG_LEVEL="INFO"
 PORT=8000
 ```
@@ -222,11 +222,24 @@ Compass includes an automated regression test suite (**31 tests**, 100% passing)
 ============================== 31 passed in 57.36s ==============================
 ```
 
-- **API & Authentication (`test_api.py`)**: Tests Bearer token authentication, invalid credentials rejection, and CORS headers.
-- **Structured Memory (`test_structured.py`)**: Validates database schema migrations, project creation, task lifecycle (add/edit/query/complete/delete), and task isolation across domains.
-- **Multi-Turn Context (`test_multi_turn.py`)**: End-to-end verification that conversational context persists across turns (e.g. Turn 1: *"Add a task: submit final demo video, domain hackathon"* ➔ Turn 2: *"When is it due?"* correctly resolves the newly created task).
-- **SSE Streaming (`test_streaming.py`)**: Verifies `text/event-stream` headers, `X-Accel-Buffering: no`, and incremental token packet delivery.
-- **CLI Functionality (`test_cli.py`)**: Validates terminal commands, CLI argument parsing, and output formatting.
+- **API & Authentication (`tests/test_api_endpoints.py`)**: Tests Bearer token authentication, invalid credentials rejection, and CORS headers.
+- **Structured Memory (`tests/test_structured_memory.py`)**: Validates database schema migrations, project creation, task lifecycle (add/edit/query/complete/delete), and task isolation across domains.
+- **Multi-Turn Context (`tests/test_multi_turn.py`)**: End-to-end verification that conversational context persists across turns (e.g. Turn 1: *"Add a task: submit final demo video, domain hackathon"* ➔ Turn 2: *"When is it due?"* correctly resolves the newly created task).
+- **SSE Streaming (`tests/test_streaming.py`)**: Verifies `text/event-stream` headers, `X-Accel-Buffering: no`, and incremental token packet delivery.
+- **CLI Operations (`tests/test_cli.py`)**: Validates terminal commands, CLI argument parsing, and output formatting.
+- **End-to-End Demo Flow (`tests/test_demo_flow.py`)**: Validates end-to-end flow across memory ingestion, tool calls, and roadmap generation.
+
+---
+
+## Repository Structure & Tooling
+
+- `backend/`: FastAPI application, database pool lifecycle, routers, orchestrator, and skill definitions.
+- `cli/`: Terminal interface built with Typer and Rich (`compass` / `python -m cli`).
+- `frontend/`: React + Vite single-page application with responsive dark dashboard and typewriter chat.
+- `deploy/`: Production manifests for Nebius Serverless Endpoints and nightly consolidation jobs.
+- `scripts/`: Data seeding and pgvector HNSW index verification utilities.
+- `.agents/skills/` & `skills-lock.json`: Official Neon Database Agent Skills registry for AI pair-programming and automated database operations.
+- `pyrefly.toml`: IDE language server / static type checker configuration for local Python runtime.
 
 ---
 
