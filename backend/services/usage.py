@@ -15,6 +15,7 @@ logger = logging.getLogger("compass.services.usage")
 PRICING_PER_1M = {
     # Normalized model keys
     "nemotron-nano": {"prompt": 0.08, "completion": 0.08},
+    "nemotron-super": {"prompt": 0.40, "completion": 0.40},
     "nemotron-ultra": {"prompt": 0.80, "completion": 0.80},
     "qwen3-embedding": {"prompt": 0.02, "completion": 0.00},
     
@@ -34,6 +35,8 @@ def _normalize_model_name(name: str) -> str:
     n = name.lower()
     if "nano" in n:
         return "nemotron-nano"
+    if "super" in n:
+        return "nemotron-super"
     if "ultra" in n:
         return "nemotron-ultra"
     if "embedding" in n or "qwen" in n:
@@ -118,7 +121,7 @@ def record_usage(
     cost = round(cost, 6)
 
     # Update canonical model entry in memory
-    for key in (norm_key, model_name):
+    for key in {norm_key, model_name}:
         if key not in _USAGE_STATE:
             _USAGE_STATE[key] = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "cost": 0.0}
         _USAGE_STATE[key]["calls"] += 1
