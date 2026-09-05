@@ -9,10 +9,11 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('timeline')
   const [selectedDomain, setSelectedDomain] = useState('all')
   const [backendStatus, setBackendStatus] = useState('Connecting...')
+  const [conversationId, setConversationId] = useState(null)
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
-      text: 'Compass Cognitive Core initialized. Vector context and multi-domain memory are active.'
+      text: "Hey! I'm Compass, your personal assistant. I can help you track tasks, manage deadlines, or just have a chat. What's on your mind?"
     }
   ])
   const [isTyping, setIsTyping] = useState(false)
@@ -42,7 +43,7 @@ export default function App() {
 
         const currentTasks = tasksRef.current
 
-        // Clean State Merge: Compare length and IDs/titles to avoid unnecessary re-renders or layout shifts
+        // Clean State Merge: Compare length and IDs/titles to avoid unnecessary re-renders
         const hasLengthChanged = incomingTasks.length !== currentTasks.length
         const hasContentChanged = incomingTasks.some((task, i) => {
           const cur = currentTasks[i]
@@ -84,9 +85,17 @@ export default function App() {
   const handleSendMessage = async (userText) => {
     setMessages(prev => [...prev, { role: 'user', text: userText }])
     setIsTyping(true)
-    const reply = await sendQueryToAssistant(userText)
+
+    const result = await sendQueryToAssistant(userText, conversationId)
+
     setIsTyping(false)
-    return reply
+
+    // Update conversation_id for multi-turn threading
+    if (result.conversation_id && result.conversation_id !== conversationId) {
+      setConversationId(result.conversation_id)
+    }
+
+    return result.response
   }
 
   return (
@@ -133,7 +142,7 @@ export default function App() {
             </button>
           </div>
           <div style={{ fontSize: '11px', color: '#64748b', fontFamily: 'JetBrains Mono, monospace' }}>
-            pgvector HNSW • 768-dim
+            Nebius • Nemotron-3
           </div>
         </header>
 
