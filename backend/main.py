@@ -47,13 +47,6 @@ async def lifespan(app: FastAPI):
     try:
         await init_pool()
         logger.info("✅ Database pool initialized")
-        try:
-            from backend.services.usage import seed_initial_demo_usage
-            pool = await get_pool()
-            async with pool.acquire() as conn:
-                await seed_initial_demo_usage(conn)
-        except Exception as err:
-            logger.debug(f"Demo usage seeding note: {err}")
     except Exception as e:
         logger.warning(f"⚠️  Database pool init failed (stubs will still work): {e}")
 
