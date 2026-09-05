@@ -47,7 +47,7 @@ def _abort(msg: str) -> None:
     sys.exit(1)
 
 
-def test_embedding_dimension(client: OpenAI) -> int | None:
+def verify_embedding_dimension(client: OpenAI) -> int | None:
     """Call the embedding endpoint and return the vector dimension."""
     print(f"\n{DIVIDER}")
     print(f"TEST 1 — Embedding Dimension ({EMBEDDING_MODEL})")
@@ -92,7 +92,7 @@ def test_embedding_dimension(client: OpenAI) -> int | None:
         return None
 
 
-def test_tool_calling(client: OpenAI) -> bool | None:
+def verify_tool_calling(client: OpenAI) -> bool | None:
     """Test whether the router model supports OpenAI-compatible function calling."""
     print(f"\n{DIVIDER}")
     print(f"TEST 2 — Tool Calling Support ({ROUTER_MODEL})")
@@ -186,10 +186,10 @@ def main() -> None:
     )
 
     # --- Test 1: Embedding Dimension ---
-    dim = test_embedding_dimension(client)
+    dim = verify_embedding_dimension(client)
 
     # --- Test 2: Tool Calling ---
-    tool_support = test_tool_calling(client)
+    tool_support = verify_tool_calling(client)
 
     # --- Summary ---
     print(f"\n{DIVIDER}")
