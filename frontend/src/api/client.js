@@ -59,7 +59,7 @@ export async function checkBackendHealth() {
     clearTimeout(timeoutId)
 
     if (!res.ok) {
-      return 'Demo Mode • Mock Memory'
+      return 'Backend Error • HTTP ' + res.status
     }
 
     const data = await res.json()
@@ -68,13 +68,13 @@ export async function checkBackendHealth() {
     }
     return 'Edge Online • Syncing'
   } catch {
-    return 'Demo Mode • Mock Memory'
+    return 'Backend Offline • Connection Refused'
   }
 }
 
 /**
  * Fetch synchronized task list from Neon PostgreSQL.
- * Falls back to local demo cache on timeout or error.
+ * Returns empty array if database is empty; falls back to demo tasks only if server is unreachable.
  */
 export async function fetchTasks() {
   try {
@@ -91,7 +91,7 @@ export async function fetchTasks() {
     }
 
     const data = await res.json()
-    if (Array.isArray(data) && data.length > 0) {
+    if (Array.isArray(data)) {
       return data
     }
     return FALLBACK_TASKS
