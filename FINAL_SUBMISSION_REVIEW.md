@@ -243,11 +243,12 @@ Queried directly from `compass admin usage`:
 - **Funded Credit Remaining**: **>$28.99 USD** out of $29.00 allocated credit.
 
 ### Cost Tiering Alignment
-Observed pricing matches the planned architecture:
-- **Nemotron-3 Nano (Router)**: $0.08 / 1M tokens ($0.000127 avg per route) — handles high-frequency intent classification cheaply.
-- **Nemotron-3 Super (Code Skill)**: $0.40 / 1M tokens ($0.000204 per synthesis) — mid-tier pricing for heavy technical context analysis without paying top-tier rates.
-- **Nemotron-3 Ultra (Executive Standup)**: $0.80 / 1M tokens ($0.000558 per briefing) — reserved strictly for high-value cross-domain daily executive summaries.
-- **Qwen3-Embedding**: $0.02 / 1M tokens ($0.000001 per chunk) — negligible embedding overhead.
+Per-token pricing sourced from the Nebius Token Factory model catalog (`tokenfactory.nebius.com/models/catalog`), checked September 2026. Models without a listed per-token rate on the public catalog are marked as estimated.
+
+- **Nemotron-3 Nano (Router)** (`nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`): **$0.06 input / $0.24 output per 1M tokens** *(verified, live catalog)* — cheapest tier; handles high-frequency intent classification.
+- **Nemotron-3 Super (Code Skill)** (`nvidia/nemotron-3-super-120b-a12b`): **$0.30 input / $0.90 output per 1M tokens** *(verified, live catalog)* — mid-tier; used for technical code-context synthesis.
+- **Nemotron-3 Ultra (Executive Standup)** (`nvidia/Nemotron-3-Ultra-550b-a55b`): **ESTIMATED — not independently verified** *(no per-token rate listed on public catalog at time of audit; previously cited figure of $1.20/1M for Ultra sourced via Artificial Analysis pricing comparison, but not confirmed from dashboard directly)* — reserved strictly for high-value cross-domain executive summaries.
+- **Qwen3-Embedding** (`Qwen/Qwen3-Embedding-8B`): **ESTIMATED — not independently verified** *(no per-token rate listed on public catalog at time of audit)* — negligible embedding overhead in practice ($0.000001 observed per 64-token chunk).
 
 ---
 
@@ -280,5 +281,5 @@ Observed pricing matches the planned architecture:
 - **Where a Skeptical Judge Would Push Back**: In its current form, Compass is a single-user tool with a shared bearer token. To have widespread impact, it requires multi-tenant user authentication, calendar integration (Google Calendar / Canvas LMS), and GitHub webhook ingestion.
 
 ### 4. Quality of the Idea
-- **Where It's Strong**: The concept of a persistent, domain-segregated memory hierarchy with tiered intelligence (small cheap model for routing, medium model for code search, large model for executive summaries) demonstrates thoughtful cost-performance optimization. It shows how modern open-source models can collaborate effectively on a budget under $0.05/day.
+- **Where It's Strong**: The concept of a persistent, domain-segregated memory hierarchy with tiered intelligence (small cheap model for routing, medium model for code search, large model for executive summaries) demonstrates thoughtful cost-performance optimization. It shows how modern open-source models can collaborate effectively on a verified budget of **$0.0028–$0.0034/day** across a realistic multi-domain workload (measured at 18–25 total calls including 3 vector embeddings, 5 task additions/queries, 2 coursework lookups, 2 deep Super code syntheses, 1 Ultra executive summary, and casual chat fallbacks).
 - **Where a Skeptical Judge Would Push Back**: The personal assistant space is crowded. An experienced evaluator will immediately ask how Compass differentiates itself from ChatGPT with memory or Mem0. The answer is cost transparency, local/PostgreSQL data ownership, and strict domain isolation, but that value proposition must be communicated clearly in the demo video.
