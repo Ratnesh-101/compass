@@ -81,14 +81,22 @@ export async function checkBackendHealth() {
 
 /**
  * Fetch synchronized task list from Neon PostgreSQL.
+ * Accepts an optional domain string to issue a genuine server-side filtered request.
  * Returns empty array if database is empty; falls back to demo tasks only if server is unreachable.
  */
-export async function fetchTasks() {
+export async function fetchTasks(domain) {
   try {
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 4000)
 
-    const res = await fetch(`${API_BASE}/api/tasks`, {
+    // Build URL — append ?domain=<X> when a specific domain is selected so the
+    // backend filters at the SQL level, not the client. This is what makes the
+    // filter buttons trigger real server-side requests instead of client-side slicing.
+    const url = domain && domain !== 'all'
+      ? `${API_BASE}/api/tasks?domain=${encodeURIComponent(domain)}`
+      : `${API_BASE}/api/tasks`
+
+    const res = await fetch(url, {
       signal: controller.signal
     })
     clearTimeout(timeoutId)
@@ -104,6 +112,23 @@ export async function fetchTasks() {
     return FALLBACK_TASKS
   } catch {
     return FALLBACK_TASKS
+  }
+}
+
+/**
+ * Fetch live usage summary (total calls, tokens, cost) from /api/usage/summary.
+ * Public endpoint — no auth required. Returns null on failure.
+ */
+export async function fetchUsageSummary() {
+  try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 3000)
+    const res = await fetch(`${API_BASE}/api/usage/summary`, { signal: controller.signal })
+    clearTimeout(timeoutId)
+    if (!res.ok) return null
+    return await res.json()
+  } catch {
+    return null
   }
 }
 

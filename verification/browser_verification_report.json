@@ -1,0 +1,130 @@
+{
+  "target_url": "http://127.0.0.1:5173",
+  "browser": "Chromium 152 (Brave Headless)",
+  "network_requests": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:5173/src/api/client.js",
+      "type": "request"
+    },
+    {
+      "method": "GET",
+      "url": "http://localhost:8000/api/tasks",
+      "type": "request"
+    },
+    {
+      "method": "GET",
+      "url": "http://localhost:8000/api/usage/summary",
+      "type": "request"
+    },
+    {
+      "method": "GET",
+      "url": "http://localhost:8000/api/tasks",
+      "type": "request"
+    },
+    {
+      "method": "GET",
+      "url": "http://localhost:8000/api/usage/summary",
+      "type": "request"
+    },
+    {
+      "method": "GET",
+      "url": "http://localhost:8000/api/tasks",
+      "type": "request"
+    },
+    {
+      "method": "GET",
+      "url": "http://localhost:8000/api/tasks?domain=hackathon",
+      "type": "request"
+    },
+    {
+      "method": "GET",
+      "url": "http://localhost:8000/api/tasks",
+      "type": "request"
+    },
+    {
+      "method": "GET",
+      "url": "http://localhost:8000/api/tasks?domain=coursework",
+      "type": "request"
+    },
+    {
+      "method": "GET",
+      "url": "http://localhost:8000/api/tasks?domain=code",
+      "type": "request"
+    },
+    {
+      "method": "GET",
+      "url": "http://localhost:8000/api/tasks",
+      "type": "request"
+    },
+    {
+      "method": "GET",
+      "url": "http://localhost:8000/api/tasks",
+      "type": "request"
+    },
+    {
+      "method": "GET",
+      "url": "http://localhost:8000/api/tasks",
+      "type": "request"
+    },
+    {
+      "method": "POST",
+      "url": "http://localhost:8000/api/chat/stream",
+      "type": "request"
+    },
+    {
+      "method": "GET",
+      "url": "http://localhost:8000/api/tasks",
+      "type": "request"
+    },
+    {
+      "method": "GET",
+      "url": "http://localhost:8000/api/tasks",
+      "type": "request"
+    },
+    {
+      "method": "GET",
+      "url": "http://localhost:8000/api/usage/summary",
+      "type": "request"
+    },
+    {
+      "method": "GET",
+      "url": "http://localhost:8000/api/tasks",
+      "type": "request"
+    }
+  ],
+  "filter_results": {
+    "hackathon": {
+      "clicked": true,
+      "requests_seen": [
+        "http://localhost:8000/api/tasks?domain=hackathon"
+      ]
+    },
+    "coursework": {
+      "clicked": true,
+      "requests_seen": [
+        "http://localhost:8000/api/tasks?domain=coursework"
+      ]
+    },
+    "code": {
+      "clicked": true,
+      "requests_seen": [
+        "http://localhost:8000/api/tasks?domain=code"
+      ]
+    },
+    "all": {
+      "clicked": true,
+      "requests_seen": [
+        "http://localhost:8000/api/tasks",
+        "http://localhost:8000/api/tasks"
+      ]
+    }
+  },
+  "badge_before": "\u26a1 95 calls \u00b7 $0.01987",
+  "badge_after": "\u26a1 96 calls \u00b7 $0.01988",
+  "screenshots": [
+    "/Users/nandani/Downloads/compass/verification/browser_01_initial_timeline.png",
+    "/Users/nandani/Downloads/compass/verification/browser_02_timeline_filtered.png",
+    "/Users/nandani/Downloads/compass/verification/browser_03_chat_and_counter.png"
+  ]
+}

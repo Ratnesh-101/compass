@@ -5,6 +5,7 @@ Uses asyncpg with pgvector codec registration.
 The pool registers the vector type on every new connection via the `init` callback,
 so all connections in the pool can read/write VECTOR columns.
 """
+from __future__ import annotations
 
 import asyncpg
 from pgvector.asyncpg import register_vector

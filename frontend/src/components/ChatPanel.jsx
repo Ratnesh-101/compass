@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { streamQueryFromAssistant } from '../api/client'
 
-export default function ChatPanel({ messages, setMessages, conversationId, setConversationId, onSendMessage, isTyping }) {
+export default function ChatPanel({ messages, setMessages, conversationId, setConversationId, onSendMessage, isTyping, onChatComplete }) {
   const [input, setInput] = useState('')
   const [streamingText, setStreamingText] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
@@ -99,6 +99,9 @@ export default function ChatPanel({ messages, setMessages, conversationId, setCo
           }
           if (doneData?.conversation_id && setConversationId) {
             setConversationId(doneData.conversation_id)
+          }
+          if (onChatComplete) {
+            onChatComplete()
           }
           messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
         },
