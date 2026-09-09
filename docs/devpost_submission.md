@@ -3,7 +3,7 @@
 ## 1. Project Overview
 * **Tagline**: Personal AI assistant with persistent memory across hackathons, coursework, and code repositories.
 * **Track / Category**: Best Use of Nebius Token Factory & NVIDIA Open-Source Models.
-* **Team**: Ratnesh Singh (Infra / Deployment / Backend), Nandani (Frontend / UI), Rhythm (Memory / Skills).
+* **Team**: Ratnesh Singh (VIT+IIT, Infra / Deployment / Backend), Nandani (Frontend / UI), Rhythm (Memory / Skills).
 
 ---
 

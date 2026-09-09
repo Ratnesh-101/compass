@@ -3,7 +3,7 @@
 
 ## What It Does
 
-Compass is a personal AI assistant engineered for intense dual-track academic and competitive engineering workloads (specifically VIT + IIT Madras dual-degree coursework and hackathons). It maintains persistent, long-term memory across three partitioned domains: hackathon deadlines, repository code context, and academic coursework. Accessible via both a real-time web dashboard and a terminal CLI, Compass accurately tracks deliverables, recalls technical architecture decisions via dense vector search, and synthesizes unified schedules across domains.
+Compass is a personal AI assistant engineered for intense dual-track academic and competitive engineering workloads (specifically VIT dual-degree coursework and hackathons). It maintains persistent, long-term memory across three partitioned domains: hackathon deadlines, repository code context, and academic coursework. Accessible via both a real-time web dashboard and a terminal CLI, Compass accurately tracks deliverables, recalls technical architecture decisions via dense vector search, and synthesizes unified schedules across domains.
 
 ---
 
@@ -247,7 +247,7 @@ Compass includes an automated regression test suite (**31 tests**, 100% passing)
 
 - **Rhythm**: Backend Architecture, Database Schema, and Nebius Token Factory Tool Registration
 - **Nandani**: Frontend Web Dashboard, Real-Time Context Stream UI, and Chat Interface
-- **Ratnesh**: System Integration, Deployment Engineering (Render, Vercel, Nebius Manifests), and Terminal CLI
+- **Ratnesh Singh** (VIT+IIT): System Integration, Deployment Engineering (Render, Vercel, Nebius Manifests), and Terminal CLI
 
 ---
 
