@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import Sidebar from './components/Sidebar'
 import Timeline from './components/Timeline'
 import ChatPanel from './components/ChatPanel'
-import { checkBackendHealth, fetchTasks, sendQueryToAssistant } from './api/client'
+import { checkBackendHealth, fetchTasks, sendQueryToAssistant, fetchUsageSummary } from './api/client'
 
 export default function App() {
   const [tasks, setTasks] = useState([])
@@ -10,10 +10,11 @@ export default function App() {
   const [selectedDomain, setSelectedDomain] = useState('all')
   const [backendStatus, setBackendStatus] = useState('Connecting...')
   const [conversationId, setConversationId] = useState(null)
+  const [usageStats, setUsageStats] = useState(null)
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
-      text: "Hey! I'm Compass, your personal assistant. I can help you track tasks, manage deadlines, or just have a chat. What's on your mind?"
+      text: "Hey! I'm Compass, your productivity copilot. I can track tasks, recall code context, synthesize cross-domain roadmaps, and search the web. What's on your mind?"
     }
   ])
   const [isTyping, setIsTyping] = useState(false)
@@ -21,6 +22,39 @@ export default function App() {
   // Keep a ref to the latest tasks state for stable diffing without triggering interval re-creations
   const tasksRef = useRef([])
   tasksRef.current = tasks
+
+  // Refresh usage stats from the backend (public endpoint, no auth required)
+  const refreshUsage = useCallback(async () => {
+    const stats = await fetchUsageSummary()
+    if (stats) setUsageStats(stats)
+  }, [])
+
+  // P0.1 FIX: Domain-aware task fetcher — fires a NEW server-side request with
+  // ?domain=<X> query param every time selectedDomain changes, instead of
+  // client-side array filtering on stale data.
+  const loadTasks = useCallback(async (domain) => {
+    try {
+      const incomingTasks = await fetchTasks(domain)
+      if (!Array.isArray(incomingTasks)) return
+
+      const currentTasks = tasksRef.current
+      const hasLengthChanged = incomingTasks.length !== currentTasks.length
+      const hasContentChanged = incomingTasks.some((task, i) => {
+        const cur = currentTasks[i]
+        return !cur || cur.id !== task.id || cur.title !== task.title || cur.countdown !== task.countdown
+      })
+      if (hasLengthChanged || hasContentChanged) {
+        setTasks(incomingTasks)
+      }
+    } catch {
+      // Silently preserve current view during transient connection blips
+    }
+  }, [])
+
+  // Re-fetch tasks from server whenever the domain filter changes
+  useEffect(() => {
+    loadTasks(selectedDomain)
+  }, [selectedDomain, loadTasks])
 
   useEffect(() => {
     let isMounted = true
@@ -35,32 +69,14 @@ export default function App() {
       }
     }
 
-    // Task Polling (Every 3000ms with Clean State Merge)
-    const pollTasks = async () => {
-      try {
-        const incomingTasks = await fetchTasks()
-        if (!isMounted || !Array.isArray(incomingTasks)) return
-
-        const currentTasks = tasksRef.current
-
-        // Clean State Merge: Compare length and IDs/titles to avoid unnecessary re-renders
-        const hasLengthChanged = incomingTasks.length !== currentTasks.length
-        const hasContentChanged = incomingTasks.some((task, i) => {
-          const cur = currentTasks[i]
-          return !cur || cur.id !== task.id || cur.title !== task.title || cur.countdown !== task.countdown
-        })
-
-        if (hasLengthChanged || hasContentChanged) {
-          setTasks(incomingTasks)
-        }
-      } catch {
-        // Silently preserve current view during transient connection blips
-      }
+    // Task Polling (Every 3000ms with Clean State Merge) — uses current domain filter
+    const pollTasks = () => {
+      if (isMounted) loadTasks(selectedDomain)
     }
 
     // Immediate initial sync
     pollHealth()
-    pollTasks()
+    refreshUsage()
 
     // 1. Task polling interval: 3000ms
     const taskInterval = setInterval(pollTasks, 3000)
@@ -74,6 +90,7 @@ export default function App() {
       clearInterval(taskInterval)
       clearInterval(healthInterval)
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const domainCounts = {
@@ -95,8 +112,17 @@ export default function App() {
       setConversationId(result.conversation_id)
     }
 
+    // P0.2 FIX: Refresh usage counter after every chat turn so the header
+    // reflects real token consumption instead of showing a static string.
+    refreshUsage()
+
     return result.response
   }
+
+  // P0.2: Build the live header badge text with micro-dollar precision
+  const usageBadge = usageStats
+    ? `⚡ ${usageStats.total_requests ?? 0} calls · $${(usageStats.total_estimated_cost_usd ?? 0).toFixed(5)}`
+    : 'Nebius • Nemotron-3'
 
   return (
     <div style={{ display: 'flex', height: '100vh', width: '100vw', background: '#0b0f17', overflow: 'hidden' }}>
@@ -113,6 +139,7 @@ export default function App() {
         <header style={{ height: '60px', borderBottom: '1px solid #1e293b', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px', flexShrink: 0 }}>
           <div style={{ display: 'flex', gap: '8px' }}>
             <button
+              id="tab-timeline"
               onClick={() => setActiveTab('timeline')}
               style={{
                 padding: '7px 14px',
@@ -127,6 +154,7 @@ export default function App() {
               📅 Timeline Feed
             </button>
             <button
+              id="tab-chat"
               onClick={() => setActiveTab('chat')}
               style={{
                 padding: '7px 14px',
@@ -141,8 +169,9 @@ export default function App() {
               💬 Assistant Chat
             </button>
           </div>
-          <div className="header-model-badge" style={{ fontSize: '11px', color: '#64748b', fontFamily: 'JetBrains Mono, monospace' }}>
-            Nebius • Nemotron-3
+          {/* P0.2: Live usage counter — updates after every chat message */}
+          <div id="usage-badge" className="header-model-badge" style={{ fontSize: '11px', color: '#64748b', fontFamily: 'JetBrains Mono, monospace' }}>
+            {usageBadge}
           </div>
         </header>
 
@@ -160,9 +189,11 @@ export default function App() {
             setConversationId={setConversationId}
             onSendMessage={handleSendMessage}
             isTyping={isTyping}
+            onChatComplete={refreshUsage}
           />
         )}
       </main>
     </div>
   )
 }
+

@@ -1,8 +1,8 @@
 # Compass — Devpost Submission Draft
 
 ## 1. Project Overview
-* **Tagline**: Personal AI assistant with persistent memory across hackathons, coursework, and code repositories.
-* **Track / Category**: Best Use of Nebius Token Factory & NVIDIA Open-Source Models.
+* **Tagline**: Productivity copilot and agent with persistent memory across hackathons, coursework, and code repositories.
+* **Track / Category**: Best Apps and Agents Track (powered by Nebius Token Factory & NVIDIA Nemotron Models).
 * **Team**: Ratnesh Singh (VIT+IIT, Infra / Deployment / Backend), Nandani (Frontend / UI), Rhythm (Memory / Skills).
 
 ---

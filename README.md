@@ -3,7 +3,16 @@
 
 ## What It Does
 
-Compass is a personal AI assistant engineered for intense dual-track academic and competitive engineering workloads (specifically VIT dual-degree coursework and hackathons). It maintains persistent, long-term memory across three partitioned domains: hackathon deadlines, repository code context, and academic coursework. Accessible via both a real-time web dashboard and a terminal CLI, Compass accurately tracks deliverables, recalls technical architecture decisions via dense vector search, and synthesizes unified schedules across domains.
+Compass is a productivity copilot and personal AI assistant engineered for intense dual-track academic and competitive engineering workloads (specifically VIT dual-degree coursework and hackathons). It maintains persistent, long-term memory across three partitioned domains: hackathon deadlines, repository code context, and academic coursework. Accessible via both a real-time web dashboard and a terminal CLI, Compass accurately tracks deliverables, recalls technical architecture decisions via dense vector search, and synthesizes unified schedules across domains.
+
+---
+
+## Hackathon Submission & Track Information
+
+- **Track**: **Best Apps and Agents Track**
+- **Project Origin**: Compass does **not** pre-date the hackathon submission window. Repository creation, architecture design, and code commenced on **September 4, 2026**, following the August 26, 2026 hackathon launch.
+- **AI Infrastructure**: Powered natively by Nebius Token Factory with a 3-tier NVIDIA Nemotron routing and synthesis architecture (`Nano 30B`, `Super 120B`, `Ultra 550B`) + `Qwen3-Embedding-8B` dense memory.
+- **Compute Hosting**: Hosted on Render (FastAPI) and Vercel (React + Vite) with turnkey deployment manifests for Nebius AI Cloud in `deploy/`.
 
 ---
 
@@ -75,15 +84,15 @@ Nebius Token Factory is the core AI engine of Compass. Every routing decision, e
 
 3. **`nvidia/Nemotron-3-Ultra-550b-a55b` — Cross-Domain Roadmap Synthesis (Context-Escalated Only)**:
    Compass reserves Nemotron-3 Ultra strictly for the `summarize_across_domains` skill. Ultra is **never** invoked per-message or directly on raw user text due to token economics:
-   - **Economic Reality**: On our $29 Token Factory funding, Nemotron Nano costs ~$0.08 / 1M tokens blended, while Nemotron Ultra costs ~$1.20 / 1M tokens blended (a ~15x cost gap).
+   - **Economic Reality**: On our $29 Token Factory funding, Nemotron Nano costs ~$0.08 / 1M tokens blended, while Nemotron Ultra is estimated at ~$1.20 / 1M tokens blended *(estimated, not independently verified from the dashboard directly; a ~15x cost gap)*.
    - **Architectural Safeguard**: Compass uses a two-step escalation. Nemotron Nano first fetches, filters, and aggregates structured tasks and notes from Neon PostgreSQL. Only that pre-filtered context payload is handed to Nemotron Ultra to synthesize cross-domain conflict analysis, deliverable timelines, and unified weekly roadmaps.
 
 4. **`Qwen/Qwen3-Embedding-8B` — 768-Dim Dense Semantic Memory**:
    Code context snippets and academic coursework notes are vectorized via `Qwen/Qwen3-Embedding-8B`, hosted natively on Nebius Token Factory *(note: Qwen3 is a Token Factory-hosted foundation model, not an NVIDIA model)*. Vectors are **Matryoshka-truncated from native 4,096 dimensions to 768 dimensions**, perfectly fitting within `pgvector`'s 2,000-dimension HNSW indexing ceiling while preserving 100% Top-1 recall in retrieval benchmarks.
 
 5. **Nebius Serverless Endpoint & Job Manifests (`deploy/`)**:
-   Production-ready manifests for Nebius AI Cloud are maintained in [`deploy/serverless_endpoint.yaml`](./deploy/serverless_endpoint.yaml) (container endpoint) and [`deploy/serverless_job.yaml`](./deploy/serverless_job.yaml) (nightly memory consolidation cron). 
-   - *Honest Status Note*: During deployment verification via the Nebius CLI (`nebius iam tenant get --id tenant-e00bqrxevpggympk55`), our team tenant was confirmed to be in `suspension_state: SUSPENDED` pending billing verification. As a result, Compass's compute layer is actively hosted in production on Render + Vercel + Neon, with **Nebius Token Factory handling 100% of all live AI inference, routing, and embeddings**. The manifests remain turnkey for instant deployment upon tenant reactivation.
+   Deployment manifests for Nebius AI Cloud are prepared in [`deploy/serverless_endpoint.yaml`](./deploy/serverless_endpoint.yaml) (container endpoint) and [`deploy/serverless_job.yaml`](./deploy/serverless_job.yaml) (nightly memory consolidation cron).
+   - *Current Real Deployment State*: Manifests exist in the repository, but compute is currently hosted on Render and Vercel with local/cron execution for the consolidation job, while the team's Nebius Cloud tenant (`tenant-e00bqrxevpggympk55`) is pending billing verification. Live AI model inference, routing, and embeddings run 100% on Nebius Token Factory. The manifests provide turnkey deployment whenever tenant compute is enabled.
 
 6. **Nightly Memory Consolidation Job**:
    An automated worker that performs:
@@ -172,6 +181,7 @@ compass admin usage
 ### 6. Running the Test Suite
 ```powershell
 python -m pytest tests -v
+# 37 passed, 0 skipped, 0 failed in ~78s (Python 3.12+)
 ```
 
 ---
@@ -216,18 +226,19 @@ Compass provides 8 core memory skills, a conversational fallback, and a cross-do
 
 ## Testing
 
-Compass includes an automated regression test suite (**31 tests**, 100% passing) covering all critical application surfaces:
+Compass includes an automated regression test suite (**37 tests**, 100% passing, 0 skipped) covering all critical application surfaces, run under Python 3.12.4 against a live Postgres instance:
 
 ```text
-============================== 31 passed in 57.36s ==============================
+======================== 37 passed in 77.85s (0:01:17) =========================
 ```
 
 - **API & Authentication (`tests/test_api_endpoints.py`)**: Tests Bearer token authentication, invalid credentials rejection, and CORS headers.
-- **Structured Memory (`tests/test_structured_memory.py`)**: Validates database schema migrations, project creation, task lifecycle (add/edit/query/complete/delete), and task isolation across domains.
-- **Multi-Turn Context (`tests/test_multi_turn.py`)**: End-to-end verification that conversational context persists across turns (e.g. Turn 1: *"Add a task: submit final demo video, domain hackathon"* ➔ Turn 2: *"When is it due?"* correctly resolves the newly created task).
-- **SSE Streaming (`tests/test_streaming.py`)**: Verifies `text/event-stream` headers, `X-Accel-Buffering: no`, and incremental token packet delivery.
-- **CLI Operations (`tests/test_cli.py`)**: Validates terminal commands, CLI argument parsing, and output formatting.
-- **End-to-End Demo Flow (`tests/test_demo_flow.py`)**: Validates end-to-end flow across memory ingestion, tool calls, and roadmap generation.
+- **Structured Memory (`tests/test_structured_memory.py`)**: Validates database schema migrations, project creation, task lifecycle (add/edit/query/complete/delete), and task isolation across domains — runs against a live Postgres instance.
+- **Multi-Turn Context (`tests/test_multi_turn.py`)**: End-to-end verification that conversational context persists across turns.
+- **SSE Streaming (`tests/test_streaming.py`)**: Verifies `text/event-stream` headers, `X-Accel-Buffering: no`, and incremental token delivery.
+- **CLI Operations (`tests/test_cli.py`)**: Validates terminal commands, argument parsing, output formatting, and CLI SSE streaming.
+- **End-to-End Demo Flow (`tests/test_demo_flow.py`)**: Validates the full flow across memory ingestion, tool calls, and roadmap generation.
+- **Gap Closure Verification (`tests/test_gap_closures.py`)**: Server-side task domain filtering, the public `/api/usage/summary` endpoint, per-IP rate limiting, the gated `search_web` skill, CLI streaming fallback, and usage-summary cost deltas across turns.
 
 ---
 

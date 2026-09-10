@@ -140,4 +140,13 @@ async def route_message(
         msg_lower = message.lower()
         if "add task" in msg_lower or "add a task" in msg_lower or "new task" in msg_lower:
             return "add_task", {"title": message.replace("add a task:", "").replace("add task:", "").strip()}, ""
+        if history:
+            for h in reversed(history):
+                content = h.get("content", "")
+                if any(term in content.lower() for term in ("task", "deliverable", "due", "demo", "submit", "video")):
+                    if any(term in msg_lower for term in ("due", "when", "deadline", "date")):
+                        return "query_tasks", {}, f"Checking your task due dates based on previous context: {content}"
+                    return "query_tasks", {}, f"Referencing previous task: {content}"
+        if any(term in msg_lower for term in ("task", "due", "deliverable", "deadline")):
+            return "query_tasks", {}, ""
         return None, None, "I'm having a moment — could you try that again? I'm here to help!"

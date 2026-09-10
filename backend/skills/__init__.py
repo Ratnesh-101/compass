@@ -166,8 +166,31 @@ LOG_CODE_SNIPPET_TOOL: Dict[str, Any] = {
     }
 }
 
+SEARCH_WEB_TOOL: Dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "search_web",
+        "description": "Search the web for current information, news, documentation, or any query requiring up-to-date external data using Tavily Search.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query or question to look up on the web",
+                },
+                "search_depth": {
+                    "type": "string",
+                    "enum": ["basic", "advanced"],
+                    "description": "Search depth: 'basic' for quick results, 'advanced' for comprehensive research",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+}
+
 # Registered tools exposed to the Nemotron router
-TOOL_DEFINITIONS: List[Dict[str, Any]] = [
+BASE_TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     ADD_TASK_TOOL,
     QUERY_TASKS_TOOL,
     QUERY_COURSEWORK_TASKS_TOOL,
@@ -176,6 +199,22 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     QUERY_CODE_CONTEXT_TOOL,
     SUMMARIZE_DAY_TOOL,
 ]
+
+
+def get_tool_definitions() -> List[Dict[str, Any]]:
+    """Return active tool definitions for the Nemotron router.
+    search_web is feature-flagged behind TAVILY_ENABLED (default: False).
+    """
+    try:
+        from backend.config import get_settings
+        if getattr(get_settings(), "TAVILY_ENABLED", False):
+            return BASE_TOOL_DEFINITIONS + [SEARCH_WEB_TOOL]
+    except Exception:
+        pass
+    return list(BASE_TOOL_DEFINITIONS)
+
+
+TOOL_DEFINITIONS: List[Dict[str, Any]] = get_tool_definitions()
 
 
 # ---------------------------------------------------------------------------
@@ -417,4 +456,83 @@ async def dispatch_skill(skill_name: str, args: Dict[str, Any], pool: Any) -> Di
     if skill_name in SKILL_REGISTRY:
         return await SKILL_REGISTRY[skill_name](args, pool)
     raise ValueError(f"Skill '{skill_name}' is not registered in SKILL_REGISTRY.")
+
+
+@register_skill("search_web")
+async def handle_search_web(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
+    """Search the web using Tavily Search API and return a formatted summary of results.
+    
+    Makes a genuine HTTP call to https://api.tavily.com/search with the user's query.
+    Requires TAVILY_API_KEY to be set in the environment.
+    Falls back gracefully if the key is missing.
+    """
+    import httpx
+    from backend.config import get_settings
+
+    settings = get_settings()
+    query = args.get("query", "").strip()
+    search_depth = args.get("search_depth", "basic")
+
+    if not query:
+        return {"response": "Please provide a search query.", "data": {}}
+
+    if not getattr(settings, "TAVILY_ENABLED", False):
+        return {
+            "response": "Web search is currently disabled (TAVILY_ENABLED=False).",
+            "data": {"query": query, "error": "TAVILY_ENABLED is False"},
+        }
+
+    if not settings.TAVILY_API_KEY:
+        return {
+            "response": f"Web search is not configured (TAVILY_API_KEY missing). To enable it, add your Tavily API key to the .env file.",
+            "data": {"query": query, "error": "TAVILY_API_KEY not set"},
+        }
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                "https://api.tavily.com/search",
+                json={
+                    "api_key": settings.TAVILY_API_KEY,
+                    "query": query,
+                    "search_depth": search_depth,
+                    "max_results": 3,
+                    "include_answer": True,
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+
+        results = data.get("results", [])
+        answer = data.get("answer", "")
+
+        # Format a concise, readable response
+        parts = []
+        if answer:
+            parts.append(f"**Quick Answer:** {answer}")
+        if results:
+            parts.append("\n**Top Results:**")
+            for r in results[:3]:
+                title = r.get("title", "Untitled")
+                url = r.get("url", "")
+                snippet = r.get("content", "")[:200].strip()
+                parts.append(f"• [{title}]({url})\n  {snippet}")
+
+        summary = "\n".join(parts) if parts else f"No results found for: {query}"
+        return {
+            "response": summary,
+            "data": {"query": query, "results": results, "answer": answer},
+        }
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Tavily API HTTP error: {e.response.status_code} — {e.response.text}")
+        return {
+            "response": f"Web search failed (HTTP {e.response.status_code}). Please try again.",
+            "data": {"query": query, "error": str(e)},
+        }
+    except Exception as e:
+        logger.error(f"Tavily search_web error: {e}")
+        return {
+            "response": f"Web search encountered an error: {e}",
+            "data": {"query": query, "error": str(e)},
+        }
 

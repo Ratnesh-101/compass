@@ -17,6 +17,7 @@ Usage:
 Install:
     pip install -e ./cli
 """
+from __future__ import annotations
 
 import os
 import sys
@@ -184,6 +185,56 @@ def _post(path: str, data: dict) -> dict:
         raise typer.Exit(1)
 
 
+def _stream_chat(payload: dict) -> tuple[str, str | None, str | None]:
+    """Consume the SSE streaming endpoint /api/chat/stream, printing tokens live.
+
+    Returns (full_response, conversation_id, skill_used).
+    Falls back cleanly to synchronous _post('/chat', payload) if streaming fails.
+    """
+    import json
+    url = f"{API_BASE}/api/chat/stream"
+    full_text = []
+    conv_id = payload.get("conversation_id")
+    skill_used = None
+
+    try:
+        with httpx.stream("POST", url, headers=_headers(), json=payload, timeout=60.0) as resp:
+            if resp.status_code != 200:
+                res = _post("/chat", payload)
+                resp_text = res.get("response", "")
+                console.print(resp_text)
+                return resp_text, res.get("conversation_id"), res.get("skill_used")
+
+            for line in resp.iter_lines():
+                if not line or not line.startswith("data: "):
+                    continue
+                try:
+                    ev = json.loads(line[6:])
+                except Exception:
+                    continue
+
+                ev_type = ev.get("type")
+                if ev_type == "token":
+                    val = ev.get("value", "")
+                    console.print(val, end="", markup=False)
+                    full_text.append(val)
+                elif ev_type == "done":
+                    conv_id = ev.get("conversation_id", conv_id)
+                    skill_used = ev.get("skill_used")
+                elif ev_type == "error":
+                    err_msg = ev.get("message", "Unknown error")
+                    console.print(f"\n[dim red]Error: {err_msg}[/]")
+
+            console.print()
+            return "".join(full_text), conv_id, skill_used
+
+    except (httpx.ConnectError, httpx.HTTPError):
+        res = _post("/chat", payload)
+        resp_text = res.get("response", "")
+        console.print(resp_text)
+        return resp_text, res.get("conversation_id"), res.get("skill_used")
+
+
 def _domain_text(domain: str) -> Text:
     """Return a Rich Text styled with the domain's color."""
     emoji = DOMAIN_EMOJI.get(domain, "")
@@ -198,7 +249,7 @@ def _domain_text(domain: str) -> Text:
 
 @app.command()
 def chat():
-    """💬 Interactive conversation with Compass."""
+    """💬 Interactive conversation with Compass (streaming tokens live)."""
     console.print(Panel(
         "[compass.title]🧭 Compass Chat[/]\n"
         "Type your message and press Enter. Type [bold]quit[/] or [bold]exit[/] to leave.",
@@ -225,26 +276,23 @@ def chat():
         if conversation_id:
             payload["conversation_id"] = conversation_id
 
-        result = _post("/chat", payload)
-        conversation_id = result.get("conversation_id")
-        response_text = result.get("response", "")
-        skill = result.get("skill_used")
-
-        skill_tag = f" [dim]({skill})[/]" if skill else ""
-        console.print(f"\n[bold green]Compass[/]{skill_tag}: {response_text}")
+        console.print("\n[bold green]Compass[/]: ", end="")
+        _, new_conv_id, skill = _stream_chat(payload)
+        if new_conv_id:
+            conversation_id = new_conv_id
+        if skill:
+            console.print(f"[dim]({skill})[/]")
 
 
 @app.command()
 def ask(
     query: str = typer.Argument(..., help="Your question for Compass"),
 ):
-    """❓ Ask a one-shot question."""
-    result = _post("/chat", {"message": query})
-    response_text = result.get("response", "")
-    skill = result.get("skill_used")
-
-    skill_tag = f" [dim]({skill})[/]" if skill else ""
-    console.print(f"\n[bold green]Compass[/]{skill_tag}: {response_text}")
+    """❓ Ask a one-shot question (streamed live from Nebius Token Factory)."""
+    console.print("\n[bold green]Compass[/]: ", end="")
+    _, _, skill = _stream_chat({"message": query})
+    if skill:
+        console.print(f"[dim]({skill})[/]")
 
 
 @app.command()
@@ -290,10 +338,6 @@ def tasks(
     data = _get("/tasks", params)
     task_list = data.get("tasks", [])
 
-    if not task_list:
-        console.print("[dim]No tasks found.[/]")
-        return
-
     table = Table(
         title="🧭 Compass Tasks",
         title_style="bold cyan",
@@ -307,6 +351,11 @@ def tasks(
     table.add_column("Priority", width=10, justify="center")
     table.add_column("Due", width=12, justify="center")
     table.add_column("Project", width=15)
+
+    if not task_list:
+        console.print(table)
+        console.print("[dim]No tasks found.[/]")
+        return
 
     for task in task_list:
         domain_name = task["domain"]
@@ -344,11 +393,10 @@ def projects(
     data = _get("/projects", params)
     project_list = data.get("projects", [])
 
+    console.print(Panel("[compass.title]🧭 Compass Projects[/]", border_style="cyan"))
     if not project_list:
         console.print("[dim]No projects found.[/]")
         return
-
-    console.print(Panel("[compass.title]🧭 Compass Projects[/]", border_style="cyan"))
 
     # Group by domain
     grouped: dict[str, list] = {}
