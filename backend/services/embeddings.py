@@ -22,11 +22,11 @@ DIMENSION = 768
 
 def _get_base_url() -> str:
     # Prefer explicit NEBIUS_BASE_URL or default to Nebius API endpoint
-    return os.getenv("NEBIUS_BASE_URL") or getattr(settings, "NEBIUS_BASE_URL", "https://api.studio.nebius.ai/v1/")
+    return str(os.getenv("NEBIUS_BASE_URL") or getattr(settings, "NEBIUS_BASE_URL", "https://api.studio.nebius.ai/v1/"))
 
 
 def _get_api_key() -> str:
-    return os.getenv("NEBIUS_API_KEY") or getattr(settings, "NEBIUS_API_KEY", "")
+    return str(os.getenv("NEBIUS_API_KEY") or getattr(settings, "NEBIUS_API_KEY", ""))
 
 
 def _generate_fallback_embedding(text: str, dim: int = 768) -> List[float]:

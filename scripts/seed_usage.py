@@ -23,6 +23,14 @@ from backend.services.usage import record_usage, get_usage_summary
 
 settings = get_settings()
 
+# Opt-in Safety Gate: Refuse to run unless ALLOW_SEED=true is explicitly set in the environment
+_allow_seed = os.getenv("ALLOW_SEED", "").strip().lower()
+if _allow_seed != "true":
+    raise RuntimeError(
+        "CRITICAL ERROR: Refusing to run scripts/seed_usage.py! "
+        "Seeding requires explicit opt-in: set ALLOW_SEED=true in your environment to execute."
+    )
+
 # Safety Guard: Hard-fail if DATABASE_URL or COMPASS_API_URL points at Frankfurt production instance or Render
 _db_url = (settings.DATABASE_URL or "").lower()
 _api_base_env = os.getenv("COMPASS_API_URL", "").lower()

@@ -49,6 +49,9 @@ async def route_message(
                 "either call query_tasks with the relevant domain/project or answer directly from conversation history. "
                 "When the user requests adding, scheduling, or tracking a task, action item, or deadline, "
                 "call the add_task tool with properly extracted fields. "
+                "When the user asks whether their open workload is achievable or feasible, what to prioritise, "
+                "what to drop, whether they can finish in time, feels overloaded, or asks for a feasibility review / workload triage, "
+                "call the assess_feasibility tool with extracted days and hours_per_day. "
                 "For general inquiries or conversation, respond directly with helpful text."
             ),
         }
@@ -97,6 +100,13 @@ async def route_message(
         logger.error(f"Nebius router invocation failed: {e}")
         # Fallback keyword routing for robustness
         msg_lower = message.lower()
+        if any(term in msg_lower for term in ("feasibility", "can i finish", "what to drop", "what should i drop", "what i drop", "triage", "overloaded", "overcommit", "adversarial")):
+            import re
+            days_match = re.search(r"(\d+)\s*days?", msg_lower)
+            hours_match = re.search(r"(\d+(?:\.\d+)?)\s*hours?", msg_lower)
+            f_days = int(days_match.group(1)) if days_match else 5
+            f_hours = float(hours_match.group(1)) if hours_match else 4.0
+            return "assess_feasibility", {"days": f_days, "hours_per_day": f_hours}, ""
         if "add task" in msg_lower or "add a task" in msg_lower or "new task" in msg_lower:
             return "add_task", {"title": message.replace("add a task:", "").replace("add task:", "").strip()}, ""
         if history:

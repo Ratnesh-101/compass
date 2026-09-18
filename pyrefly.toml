@@ -1,2 +1,2 @@
-python-interpreter-path = ".venv312/bin/python"
-search-path = ["."]
+python-interpreter-path = ".venv/Scripts/python.exe"
+search-path = [".", ".venv/Lib/site-packages"]

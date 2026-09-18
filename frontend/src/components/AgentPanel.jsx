@@ -64,9 +64,31 @@ const STEP_STYLES = {
     label: 'COMPLETE',
     labelColor: '#4ade80',
   },
+  propose: {
+    bg: 'rgba(6, 78, 59, 0.3)',
+    border: '#06b6d4',
+    icon: '📋',
+    label: 'PLANNER PROPOSAL',
+    labelColor: '#22d3ee',
+  },
+  verdict: {
+    bg: 'rgba(95, 30, 30, 0.4)',
+    border: '#ef4444',
+    icon: '⚖️',
+    label: 'REALIST VERDICT',
+    labelColor: '#f87171',
+  },
+  replan: {
+    bg: 'rgba(74, 55, 40, 0.4)',
+    border: '#f59e0b',
+    icon: '🔄',
+    label: 'PLANNER RE-PLAN',
+    labelColor: '#fbbf24',
+  },
 }
 
 const SUGGESTED_GOALS = [
+  "I have 5 days left and I'm working 4 hours a day. Go through everything I have open across the hackathon, my coursework, and my code debt, and tell me honestly whether I can finish it — and if I can't, decide what I drop.",
   "Plan my week considering all hackathon deadlines and coursework",
   "Flag any deadline conflicts this week and suggest resolutions",
   "Write a retrospective for the Compass project",
@@ -214,6 +236,24 @@ function StepCard({ step, index }) {
           {style.label}
         </span>
 
+        {/* Agent Badge (Planner / Realist) */}
+        {(step.metadata?.agent || step.agent) && (
+          <span style={{
+            fontSize: '10px',
+            fontWeight: '700',
+            letterSpacing: '0.05em',
+            color: (step.metadata?.agent || step.agent) === 'planner' ? '#22d3ee' : '#f87171',
+            background: (step.metadata?.agent || step.agent) === 'planner' ? 'rgba(6, 182, 212, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+            border: `1px solid ${(step.metadata?.agent || step.agent) === 'planner' ? '#06b6d4' : '#ef4444'}`,
+            padding: '2px 8px',
+            borderRadius: '10px',
+            textTransform: 'uppercase',
+            fontFamily: 'JetBrains Mono, monospace',
+          }}>
+            {(step.metadata?.agent || step.agent) === 'planner' ? '🧠 PLANNER' : '⚖️ REALIST'}
+          </span>
+        )}
+
         {/* Model Tier Attribution */}
         {step.model_tier && (
           <span style={{
@@ -266,6 +306,51 @@ function StepCard({ step, index }) {
         </div>
       )}
 
+      {/* Realist Arithmetic Box */}
+      {step.metadata?.verdict && (
+        <div style={{
+          margin: '8px 0',
+          background: 'rgba(15, 23, 42, 0.85)',
+          border: `1px solid ${step.metadata.verdict.verdict === 'FEASIBLE' ? '#22c55e55' : '#ef444455'}`,
+          borderRadius: '6px',
+          padding: '10px 12px',
+          fontFamily: 'JetBrains Mono, monospace',
+          fontSize: '11px',
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+            <span style={{
+              fontWeight: '700',
+              color: step.metadata.verdict.verdict === 'FEASIBLE' ? '#4ade80' : '#f87171',
+            }}>
+              REALIST VERDICT: {step.metadata.verdict.verdict}
+            </span>
+            <span style={{ color: '#94a3b8' }}>
+              Utilisation: <strong style={{ color: step.metadata.verdict.utilisation_pct > 100 ? '#f87171' : '#4ade80' }}>{step.metadata.verdict.utilisation_pct}%</strong>
+            </span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', color: '#cbd5e1' }}>
+            <div>Demand: <strong>{step.metadata.verdict.demand_hours}h</strong></div>
+            <div>Capacity: <strong>{step.metadata.verdict.capacity_hours}h</strong></div>
+            <div>Overcommit: <strong style={{ color: step.metadata.verdict.overcommit_hours > 0 ? '#f87171' : '#4ade80' }}>{step.metadata.verdict.overcommit_hours}h</strong></div>
+          </div>
+          {step.metadata.verdict.must_cut_hours > 0 && (
+            <div style={{ marginTop: '6px', color: '#fbbf24' }}>
+              ✂️ Must cut: <strong>{step.metadata.verdict.must_cut_hours}h</strong>
+            </div>
+          )}
+          {step.metadata.verdict.challenged_estimates?.length > 0 && (
+            <div style={{ marginTop: '6px', borderTop: '1px solid #334155', paddingTop: '6px' }}>
+              <span style={{ color: '#f87171', fontWeight: '600' }}>Challenged Estimates:</span>
+              <ul style={{ margin: '4px 0 0 16px', padding: 0, color: '#94a3b8' }}>
+                {step.metadata.verdict.challenged_estimates.map((c, i) => (
+                  <li key={i}>{c}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Epistemic Abstention Warning Card */}
       {isAbstained && (
         <div style={{
@@ -297,6 +382,47 @@ function StepCard({ step, index }) {
       }}>
         {step.type === 'done' ? formatDoneSummary(step.content) : step.content}
       </div>
+
+      {/* Feasibility Triage Artifact */}
+      {step.type === 'done' && step.metadata?.artifact_markdown && (
+        <div style={{
+          marginTop: '12px',
+          background: 'rgba(15, 23, 42, 0.95)',
+          border: '1px solid #38bdf8',
+          borderRadius: '8px',
+          padding: '14px 16px',
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+            <span style={{ fontSize: '12px', fontWeight: '700', color: '#38bdf8', letterSpacing: '0.05em' }}>
+              📋 FEASIBILITY TRIAGE ARTIFACT
+            </span>
+            <button
+              onClick={() => navigator.clipboard.writeText(step.metadata.artifact_markdown)}
+              style={{
+                background: '#1e293b',
+                border: '1px solid #475569',
+                borderRadius: '4px',
+                color: '#cbd5e1',
+                padding: '3px 8px',
+                fontSize: '10px',
+                cursor: 'pointer',
+                fontFamily: 'JetBrains Mono, monospace',
+              }}
+            >
+              📋 Copy Markdown
+            </button>
+          </div>
+          <div style={{
+            fontSize: '12px',
+            lineHeight: '1.6',
+            color: '#e2e8f0',
+            whiteSpace: 'pre-wrap',
+            fontFamily: 'system-ui, -apple-system, sans-serif',
+          }}>
+            {step.metadata.artifact_markdown}
+          </div>
+        </div>
+      )}
 
       {/* Compact Run Report Card */}
       {step.type === 'done' && reportCard && <ReportCard reportCard={reportCard} />}
@@ -483,10 +609,24 @@ export default function AgentPanel({ onTaskMutated, conversationId }) {
         reqPayload.conversation_id = conversationId
       }
 
-      const response = await fetch(`${apiBase}/api/agent/run`, {
+      const isFeasibility = !payload.action && (/feasibility|can i finish|what i drop|what to drop|what should i drop|triage|days left|working \d+ hours/i.test(payload.goal || ''))
+      const endpoint = isFeasibility ? `${apiBase}/api/agent/feasibility` : `${apiBase}/api/agent/run`
+      let reqBody = reqPayload
+      if (isFeasibility) {
+        const goalStr = payload.goal || ''
+        const daysMatch = goalStr.match(/(\d+)\s*days?/i)
+        const hoursMatch = goalStr.match(/(\d+(?:\.\d+)?)\s*hours?/i)
+        reqBody = {
+          days: daysMatch ? parseInt(daysMatch[1]) : 5,
+          hours_per_day: hoursMatch ? parseFloat(hoursMatch[1]) : 4.0,
+          domain: null,
+        }
+      }
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(reqPayload),
+        body: JSON.stringify(reqBody),
         signal: controller.signal,
       })
 
@@ -519,6 +659,18 @@ export default function AgentPanel({ onTaskMutated, conversationId }) {
               // Collect pending confirmations
               if (event.type === 'confirm_request') {
                 setPendingActions(prev => [...prev, { tool: event.tool, args: event.args }])
+              } else if (event.type === 'done' && event.metadata?.triage_plan) {
+                const tp = event.metadata.triage_plan
+                if ((tp.drop && tp.drop.length > 0) || (tp.defer && tp.defer.length > 0)) {
+                  setPendingActions([{
+                    tool: 'apply_triage_plan',
+                    args: {
+                      drop_ids: (tp.drop || []).map(t => t.task_id),
+                      defer_ids: (tp.defer || []).map(t => t.task_id),
+                    },
+                    summary: `Apply Triage Plan: drop ${tp.drop?.length || 0} task(s), defer ${tp.defer?.length || 0} task(s)`,
+                  }])
+                }
               }
             } catch {
               // Skip malformed events
@@ -573,6 +725,36 @@ export default function AgentPanel({ onTaskMutated, conversationId }) {
     setPendingActions([])
     setShowRejectInput(false)
 
+    if (actionsToApprove.some(a => a.tool === 'apply_triage_plan')) {
+      try {
+        const apiBase = getApiBase()
+        await fetch(`${apiBase}/api/agent/confirm`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer dev-token',
+          },
+          body: JSON.stringify({ actions: actionsToApprove, run_id: currentRunId }),
+        })
+        setSteps(prev => [...prev, {
+          type: 'observe',
+          step: prev.length + 1,
+          elapsed_ms: 0,
+          content: 'Triage mutations applied to database: deferred and dropped tasks updated in Neon PostgreSQL.',
+          model_tier: 'Neon Postgres Engine',
+        }])
+        onTaskMutated?.()
+      } catch (err) {
+        setSteps(prev => [...prev, {
+          type: 'error',
+          step: prev.length + 1,
+          elapsed_ms: 0,
+          content: `Failed to apply triage plan: ${err.message}`,
+        }])
+      }
+      return
+    }
+
     // Resume agent with action='approve' so it executes mutation and finishes
     await streamFromEndpoint({
       run_id: currentRunId,
@@ -585,9 +767,27 @@ export default function AgentPanel({ onTaskMutated, conversationId }) {
 
   const rejectActions = async () => {
     const feedback = rejectFeedback.trim() || 'User declined proposed change. Do not modify this task and propose an alternative plan.'
+    const wasTriage = pendingActions.some(a => a.tool === 'apply_triage_plan')
+    const triageAction = pendingActions.find(a => a.tool === 'apply_triage_plan')
     setPendingActions([])
     setShowRejectInput(false)
     setRejectFeedback('')
+
+    if (wasTriage) {
+      const diff = {
+        declined_action: triageAction,
+        feedback: feedback || 'User declined proposed triage mutations. Zero database records modified. Plan retained as advisory only.',
+      }
+      setSteps(prev => [...prev, {
+        type: 'observe',
+        step: prev.length + 1,
+        elapsed_ms: 0,
+        content: 'Human veto applied: Triage mutations declined. All original task statuses, priorities, and deadlines remain unchanged in PostgreSQL.',
+        model_tier: 'Human Authorization Gate',
+        metadata: { replan_diff: diff },
+      }])
+      return
+    }
 
     // Resume agent with action='reject' so it re-plans!
     await streamFromEndpoint({

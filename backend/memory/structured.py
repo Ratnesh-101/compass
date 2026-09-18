@@ -150,6 +150,7 @@ async def get_task(conn: DbConn, task_id: int) -> Optional[dict]:
     row = await conn.fetchrow(
         """
         SELECT t.id, t.domain, t.title, t.due_date, t.status, t.priority, t.notes,
+               t.duration_minutes, t.scheduled_start, t.scheduled_end, t.is_fixed, t.recurrence_rule,
                t.created_at, t.updated_at,
                p.id AS project_id, p.name AS project_name
         FROM tasks t
@@ -175,10 +176,13 @@ async def list_tasks(
     project_id: Optional[int] = None,
     status: Optional[str] = None,
     due_before: Optional[date] = None,
+    scheduled_only: bool = False,
+    unscheduled_only: bool = False,
 ) -> list[dict]:
     """Query tasks with optional filters."""
     query = """
         SELECT t.id, t.domain, t.title, t.due_date, t.status, t.priority, t.notes,
+               t.duration_minutes, t.scheduled_start, t.scheduled_end, t.is_fixed, t.recurrence_rule,
                t.created_at, t.updated_at,
                p.id AS project_id, p.name AS project_name
         FROM tasks t
@@ -199,8 +203,12 @@ async def list_tasks(
     if due_before:
         params.append(due_before)
         query += f" AND t.due_date <= ${len(params)}"
+    if scheduled_only:
+        query += " AND t.scheduled_start IS NOT NULL"
+    if unscheduled_only:
+        query += " AND t.scheduled_start IS NULL"
 
-    query += " ORDER BY t.due_date ASC NULLS LAST, t.id ASC"
+    query += " ORDER BY t.scheduled_start ASC NULLS LAST, t.due_date ASC NULLS LAST, t.id ASC"
 
     rows = await conn.fetch(query, *params)
     results = []
@@ -219,8 +227,9 @@ async def update_task(
     task_id: int,
     **kwargs: Any
 ) -> Optional[dict]:
-    """Update task fields dynamically (e.g. status, priority, due_date, notes) with normalization."""
-    allowed_fields = {"domain", "project_id", "title", "due_date", "status", "priority", "notes"}
+    """Update task fields dynamically (e.g. status, priority, due_date, notes, scheduling) with normalization."""
+    allowed_fields = {"domain", "project_id", "title", "due_date", "status", "priority", "notes",
+                      "duration_minutes", "scheduled_start", "scheduled_end", "is_fixed", "recurrence_rule"}
     updates = {k: v for k, v in kwargs.items() if k in allowed_fields}
 
     if not updates:
@@ -236,6 +245,11 @@ async def update_task(
     if "priority" in updates and updates["priority"]:
         p_val = str(updates["priority"]).lower().strip()
         updates["priority"] = PRIORITY_MAP.get(p_val, "medium")
+    if "duration_minutes" in updates and updates["duration_minutes"] is not None:
+        try:
+            updates["duration_minutes"] = int(updates["duration_minutes"])
+        except (ValueError, TypeError):
+            updates["duration_minutes"] = 60
 
     set_clauses = []
     params: list[Any] = [task_id]
@@ -256,7 +270,192 @@ async def update_task(
     return await get_task(conn, task_id)
 
 
+async def update_task_status(conn: DbConn, task_id: int, status: str) -> Optional[dict]:
+    """Convenience helper to update task status."""
+    return await update_task(conn, task_id, status=status)
+
+
 async def delete_task(conn: DbConn, task_id: int) -> bool:
     """Delete a task by ID."""
     result = await conn.execute("DELETE FROM tasks WHERE id = $1", task_id)
     return result == "DELETE 1"
+
+
+# ---------------------------------------------------------------------------
+# Scheduling Preferences & Calendar Connections
+# ---------------------------------------------------------------------------
+
+async def get_scheduling_preferences(conn: DbConn, user_id: str = "default_user") -> dict:
+    """Get scheduling preferences for a user, or defaults if not configured."""
+    row = await conn.fetchrow(
+        """
+        SELECT user_id, work_start_time, work_end_time, work_days, buffer_minutes, preferred_focus
+        FROM scheduling_preferences
+        WHERE user_id = $1
+        """,
+        user_id
+    )
+    if row:
+        res = dict(row)
+        if hasattr(res["work_start_time"], "strftime"):
+            res["work_start_time"] = res["work_start_time"].strftime("%H:%M:%S")
+        if hasattr(res["work_end_time"], "strftime"):
+            res["work_end_time"] = res["work_end_time"].strftime("%H:%M:%S")
+        return res
+
+    return {
+        "user_id": user_id,
+        "work_start_time": "09:00:00",
+        "work_end_time": "18:00:00",
+        "work_days": [1, 2, 3, 4, 5],
+        "buffer_minutes": 15,
+        "preferred_focus": "morning"
+    }
+
+
+async def update_scheduling_preferences(
+    conn: DbConn,
+    user_id: str = "default_user",
+    **kwargs: Any
+) -> dict:
+    """Update or insert scheduling preferences for a user."""
+    allowed = {"work_start_time", "work_end_time", "work_days", "buffer_minutes", "preferred_focus"}
+    updates = {k: v for k, v in kwargs.items() if k in allowed}
+
+    # Ensure row exists
+    await conn.execute(
+        """
+        INSERT INTO scheduling_preferences (user_id, work_start_time, work_end_time, work_days, buffer_minutes, preferred_focus)
+        VALUES ($1, '09:00:00', '18:00:00', '{1,2,3,4,5}', 15, 'morning')
+        ON CONFLICT (user_id) DO NOTHING
+        """,
+        user_id
+    )
+
+    if not updates:
+        return await get_scheduling_preferences(conn, user_id)
+
+    set_clauses = []
+    params: list[Any] = [user_id]
+    for k, v in updates.items():
+        params.append(v)
+        set_clauses.append(f"{k} = ${len(params)}")
+
+    query = f"UPDATE scheduling_preferences SET {', '.join(set_clauses)} WHERE user_id = $1"
+    await conn.execute(query, *params)
+    return await get_scheduling_preferences(conn, user_id)
+
+
+# ---------------------------------------------------------------------------
+# Task Dependencies Graph
+# ---------------------------------------------------------------------------
+
+async def add_task_dependency(conn: DbConn, task_id: int, depends_on_task_id: int) -> dict:
+    """Add a dependency relationship: task_id depends on depends_on_task_id.
+    Validates:
+      1. Both tasks exist.
+      2. task_id != depends_on_task_id (no self-loops).
+      3. No cycle is created (reachability check from depends_on_task_id to task_id).
+    """
+    if task_id == depends_on_task_id:
+        raise ValueError("A task cannot depend on itself")
+
+    t1 = await conn.fetchrow("SELECT id FROM tasks WHERE id = $1", task_id)
+    if not t1:
+        raise ValueError(f"Task {task_id} does not exist")
+    t2 = await conn.fetchrow("SELECT id FROM tasks WHERE id = $1", depends_on_task_id)
+    if not t2:
+        raise ValueError(f"Prerequisite task {depends_on_task_id} does not exist")
+
+    # Check for cycle: if depends_on_task_id already depends (directly or transitively) on task_id
+    cycle_check = await conn.fetchrow(
+        """
+        WITH RECURSIVE dep_chain AS (
+            SELECT depends_on_task_id FROM task_dependencies WHERE task_id = $1
+            UNION
+            SELECT td.depends_on_task_id
+            FROM task_dependencies td
+            JOIN dep_chain dc ON td.task_id = dc.depends_on_task_id
+        )
+        SELECT 1 FROM dep_chain WHERE depends_on_task_id = $2
+        """,
+        depends_on_task_id, task_id
+    )
+    if cycle_check:
+        raise ValueError(f"Adding dependency ({task_id} depends on {depends_on_task_id}) would create a circular dependency cycle")
+
+    row = await conn.fetchrow(
+        """
+        INSERT INTO task_dependencies (task_id, depends_on_task_id)
+        VALUES ($1, $2)
+        ON CONFLICT (task_id, depends_on_task_id) DO UPDATE SET task_id = EXCLUDED.task_id
+        RETURNING id, task_id, depends_on_task_id, created_at
+        """,
+        task_id, depends_on_task_id
+    )
+    return dict(row) if row else {}
+
+
+async def remove_task_dependency(conn: DbConn, task_id: int, depends_on_task_id: int) -> bool:
+    """Remove a dependency edge between task_id and depends_on_task_id."""
+    res = await conn.execute(
+        "DELETE FROM task_dependencies WHERE task_id = $1 AND depends_on_task_id = $2",
+        task_id, depends_on_task_id
+    )
+    return res == "DELETE 1"
+
+
+async def get_task_dependencies(conn: DbConn, task_id: int) -> list[dict]:
+    """Get all tasks that task_id depends on (prerequisites), with task details."""
+    rows = await conn.fetch(
+        """
+        SELECT t.id, t.domain, t.title, t.due_date, t.status, t.priority,
+               t.duration_minutes, t.scheduled_start, t.scheduled_end, t.is_fixed,
+               td.created_at AS dependency_created_at
+        FROM task_dependencies td
+        JOIN tasks t ON td.depends_on_task_id = t.id
+        WHERE td.task_id = $1
+        ORDER BY t.scheduled_start ASC NULLS LAST, t.id ASC
+        """,
+        task_id
+    )
+    return [dict(r) for r in rows]
+
+
+async def get_downstream_tasks(conn: DbConn, task_id: int) -> list[dict]:
+    """Get all downstream tasks that directly or transitively depend on task_id.
+    Returns in topological order (earliest dependents first).
+    """
+    rows = await conn.fetch(
+        """
+        WITH RECURSIVE downstream AS (
+            SELECT td.task_id, 1 as depth
+            FROM task_dependencies td
+            WHERE td.depends_on_task_id = $1
+            UNION
+            SELECT td.task_id, d.depth + 1
+            FROM task_dependencies td
+            JOIN downstream d ON td.depends_on_task_id = d.task_id
+        )
+        SELECT DISTINCT ON (t.id) t.id, t.domain, t.title, t.due_date, t.status, t.priority,
+               t.duration_minutes, t.scheduled_start, t.scheduled_end, t.is_fixed,
+               d.depth
+        FROM downstream d
+        JOIN tasks t ON d.task_id = t.id
+        ORDER BY t.id, d.depth ASC
+        """,
+        task_id
+    )
+    res = [dict(r) for r in rows]
+    # Sort by depth asc, then scheduled_start asc
+    res.sort(key=lambda x: (x.get("depth", 1), str(x.get("scheduled_start") or "")))
+    return res
+
+
+async def get_all_dependencies_map(conn: DbConn) -> dict[int, list[int]]:
+    """Return a mapping of task_id -> list of prerequisite task_ids."""
+    rows = await conn.fetch("SELECT task_id, depends_on_task_id FROM task_dependencies")
+    dep_map: dict[int, list[int]] = {}
+    for r in rows:
+        dep_map.setdefault(r["task_id"], []).append(r["depends_on_task_id"])
+    return dep_map

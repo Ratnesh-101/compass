@@ -811,6 +811,7 @@ async def test_agent_epistemic_abstention():
     mock_client.chat.completions = MagicMock()
     mock_client.chat.completions.create = AsyncMock(side_effect=[
         _create_mock_completion(content="[ABSTAIN] Insufficient coursework information available. I cannot formulate a schedule without missing deadlines."),
+        _create_mock_completion(content="[ABSTAIN] Even after checking live sources, no verified syllabus curve exists."),
     ])
 
     steps = []

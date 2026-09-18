@@ -9,7 +9,6 @@ Automated verification tests for all gap closures:
 5. P2.8: Tavily search_web skill tool definition and execution fallback.
 """
 
-import json
 import pytest
 from httpx import AsyncClient
 
@@ -83,16 +82,18 @@ async def test_per_ip_rate_limiting_exceeded(client: AsyncClient, monkeypatch):
 @pytest.mark.asyncio
 async def test_search_web_skill_registered_and_dispatchable(monkeypatch):
     """P2.8: Verify search_web feature-flag gating and handler execution."""
-    from backend.skills import TOOL_DEFINITIONS, SKILL_REGISTRY, dispatch_skill, get_tool_definitions, SEARCH_WEB_TOOL
+    from backend.skills import SKILL_REGISTRY, dispatch_skill, get_tool_definitions
     from backend.config import get_settings
 
-    # By default, search_web is gated OFF and not in TOOL_DEFINITIONS
-    tool_names = [t["function"]["name"] for t in TOOL_DEFINITIONS if "function" in t]
-    assert "search_web" not in tool_names
+    settings = get_settings()
+    # When TAVILY_ENABLED is False, get_tool_definitions excludes search_web
+    monkeypatch.setattr(settings, "TAVILY_ENABLED", False)
+    disabled_tools = get_tool_definitions()
+    assert not any(t["function"]["name"] == "search_web" for t in disabled_tools if "function" in t)
 
     # When TAVILY_ENABLED is True, get_tool_definitions includes search_web
-    settings = get_settings()
     monkeypatch.setattr(settings, "TAVILY_ENABLED", True)
+    monkeypatch.setattr(settings, "TAVILY_API_KEY", "tvly-test-key")
     active_tools = get_tool_definitions()
     assert any(t["function"]["name"] == "search_web" for t in active_tools if "function" in t)
 
@@ -114,9 +115,12 @@ async def test_search_web_skill_registered_and_dispatchable(monkeypatch):
     assert "currently disabled" in res_disabled["response"]
 
 
-def test_cli_streaming_helper_fallback():
+def test_cli_streaming_helper_fallback(monkeypatch):
     """P2.7: Verify CLI _stream_chat gracefully handles synchronous fallback."""
     from cli.assistant_cli import _stream_chat
+    import cli.assistant_cli as cli_mod
+
+    monkeypatch.setattr(cli_mod, "_post", lambda path, payload: {"response": "Fallback response", "conversation_id": "c1", "skill_used": "chat"})
 
     # Call with a simple query against running server
     text, conv_id, skill = _stream_chat({"message": "Hello Compass!"})
@@ -131,7 +135,7 @@ async def test_usage_summary_cost_delta_changes_across_turns(client: AsyncClient
     Proves the cost counter is live and not frozen by asserting a measurable cost delta
     between a small turn and a heavy multi-domain synthesis turn.
     """
-    from backend.services.usage import get_usage_summary, record_usage
+    from backend.services.usage import record_usage
     from backend.config import get_settings
 
     settings = get_settings()
@@ -163,7 +167,6 @@ async def test_query_coursework_notes_sets_coursework_domain(monkeypatch):
     """Gap 3 Fix: Verify query_coursework_notes specifically queries domain='coursework'."""
     from backend.skills import dispatch_skill
     from backend.memory.db import get_pool
-    from unittest.mock import AsyncMock
 
     pool = await get_pool()
     captured_args = {}
@@ -405,10 +408,39 @@ async def test_agent_runs_conversation_id_filtering(client: AsyncClient):
             await conn.execute("DELETE FROM agent_runs WHERE id = $1", test_run_id)
 
 
-def test_cli_agent_runs_and_briefing_commands():
+def test_cli_agent_runs_and_briefing_commands(monkeypatch):
     """Verify CLI commands `agent-runs` and `agent-briefing` execute cleanly."""
     from typer.testing import CliRunner
     from cli.assistant_cli import app
+    from unittest.mock import MagicMock
+    import httpx
+
+    def mock_get(url, *args, **kwargs):
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        if "runs" in url:
+            resp.json.return_value = {
+                "runs": [
+                    {
+                        "id": "run_test12345678",
+                        "goal": "Test goal for CLI history display",
+                        "status": "completed",
+                        "steps_count": 3,
+                        "created_at": "2026-09-17T12:00:00",
+                        "conversation_id": "conv_123",
+                    }
+                ]
+            }
+        else:
+            resp.json.return_value = {
+                "run_id": "run_briefing123",
+                "briefing": "Morning executive briefing summary.",
+                "steps_count": 2,
+                "created_at": "2026-09-17T08:00:00",
+            }
+        return resp
+
+    monkeypatch.setattr(httpx, "get", mock_get)
 
     runner = CliRunner()
 

@@ -194,6 +194,11 @@ CREATE INDEX idx_usage_log_created_at ON usage_log(created_at);
 - **Inference & Embeddings**: Hosted on **Nebius Token Factory** (`https://api.tokenfactory.nebius.com/v1/`). Handles 100% of LLM inference (Nano, Super, Ultra) and vector embeddings (Qwen3).
 - **Nebius Serverless Compute**: Deployment manifests for Nebius Serverless Compute are provided in [`deploy/serverless_endpoint.yaml`](./deploy/serverless_endpoint.yaml) and [`deploy/serverless_job.yaml`](./deploy/serverless_job.yaml). For hackathon evaluation and zero-downtime reliability, the demo is currently served on Render (backend) and Vercel (frontend), with 100% of LLM inference powered by Nebius Token Factory.
 
+### Public vs. Protected Endpoint Design Decision
+Four interactive endpoints (`/api/chat`, `/api/chat/stream`, `/api/agent/run`, and `/api/log`) are intentionally **public by design** (protected by per-IP sliding-window rate limiters: 30 requests/minute for chat/log/stream, 10 requests/minute for agent runs) rather than requiring authentication. This is an explicit, deliberate architectural decision made so that hackathon judges and evaluators can interact with the live web application and test the autonomous agent without needing credentials or pre-configured API tokens. Conversely, state-mutation execution and approval endpoints (`/api/agent/confirm`, `/api/agent/undo`, and `/api/agent/trigger-nightly`) strictly require the Bearer token (`AUTH_TOKEN`) specifically because they execute, approve, or reverse persistent state changes in the database.
+
+Crucially, there is an important architectural distinction between **mutation-adjacent driver endpoints** and **state-mutation execution**: `/api/chat` and `/api/agent/run` are both public endpoints that can each independently initiate actions. In `/api/chat`, user instructions such as `"add a task: Prepare slides"` directly drive task creation unauthenticated via the Nemotron router and orchestrator (`add_task`), meaning actual task insertion into PostgreSQL happens unauthenticated by design for seamless demo evaluation. In `/api/agent/run`, the autonomous agent loop can reason, plan, and propose changes without credentials; however, when the agent attempts a state-mutating tool (`add_task`, `delete_task`, `edit_task`, `apply_triage_plan`), it halts at a confirm gate (`confirm_request`), and only the *agent confirm-gate approval* (`POST /api/agent/confirm`) requires Bearer token authentication. Direct chat task creation is unauthenticated for seamless evaluation, whereas autonomous multi-step agent approvals are strictly protected.
+
 ---
 
 ## 3. What Works — With Evidence
@@ -207,7 +212,9 @@ CREATE INDEX idx_usage_log_created_at ON usage_log(created_at);
 | **Skill: `summarize_day`** | **PASS** | Triggered via `compass ask "Summarize my day and give me an executive daily standup briefing..."`: retrieved all tasks and ran Ultra synthesis. |
 | **Skill: `log_code_snippet` / `log_code_context`** | **PASS** | Triggered via `compass log "Configure pgvector HNSW indexing for 768-dim embeddings"`: generated 768-dim embedding and inserted into `memory_chunks`. |
 | **Skill: `query_coursework_notes`** | **PASS** | Verified via vector retrieval: searches `memory_chunks` table for academic concepts, notes, and coursework. |
-| **Skill: `search_web`** | **GATED (OFF)** | Feature-flagged (`TAVILY_ENABLED=False` by default); code preserved in registry pending team approval. |
+| **Skill: `search_web`** | **PASS** | Live search via `AsyncTavilyClient` with query length truncation (<390 chars), citation tracking, and `<untrusted_web_content>` XML prompt fencing. |
+| **Skill: `ingest_url`** | **PASS** | Pulls clean documentation via Tavily Extract, chunks content into ~1,200 chars, embeds with 768-dim vectors into Neon PostgreSQL; confirm-gated and reversible via undo. |
+| **Skill: `verify_deadline`** | **PASS** | Proactively cross-references stored hackathon deadlines against external contest web sources to detect schedule drift without database mutation. |
 | **Skill: General Fallback Chat** | **PASS** | Verified via conversational greeting queries; responds conversationally without invoking structured tools. |
 | **Multi-Turn Conversation Context** | **PASS** | `pytest tests/test_multi_turn.py -v -s` passes cleanly. Turn 1 adds task; Turn 2 asks "when is it due?" with `conversation_id`; router resolves pronoun context and queries deadlines. |
 | **Cross-Domain Synthesis via Ultra** | **PASS** | `compass ask "Summarize my day..."` invoked `nvidia/Nemotron-3-Ultra-550b-a55b` generating an executive standup briefing. |
@@ -227,7 +234,7 @@ CREATE INDEX idx_usage_log_created_at ON usage_log(created_at);
 2. **Header Token Counter**: Wired to live data via `/api/usage/summary` public endpoint, refreshed automatically after each chat message.
 3. **Per-IP Rate Limiting**: Added sliding-window limiter (30 req/min) returning HTTP 429 on burst abuse.
 4. **CLI SSE Streaming**: Updated `compass ask` and `compass chat` to consume `/api/chat/stream` for live token-by-token streaming.
-5. **Web Search Gated**: Implemented `search_web` tool, gated behind `TAVILY_ENABLED=False` pending team sign-off.
+5. **Web Intelligence via Tavily**: Implemented `search_web`, `ingest_url`, and `verify_deadline` via `AsyncTavilyClient`, bounded epistemic abstention escalation (`[ABSTAIN]`), and isolated credit accounting in `tavily_usage_log`.
 6. **Usage Telemetry Evidence**: Created `scripts/seed_usage.py` populating multi-dozen calls per model (Nano: 42, Super: 20, Ultra: 18, Qwen3: 26; 106 total) in `usage_log`.
 
 ### Honest Current State of Compute

@@ -27,10 +27,16 @@ def test_cli_config_view():
 
 def test_cli_config_update():
     """Verify `compass config --url ... --token ...` updates settings and restores valid URL."""
-    result = runner.invoke(app, ["config", "--url", "http://127.0.0.1:8000", "--token", "dev-token"])
-    assert result.exit_code == 0
-    assert "Configuration saved" in result.stdout
-    assert "http://127.0.0.1:8000" in result.stdout
+    from cli import assistant_cli
+    orig_url = assistant_cli.API_BASE
+    orig_token = assistant_cli.AUTH_TOKEN
+    try:
+        result = runner.invoke(app, ["config", "--url", "http://127.0.0.1:8000", "--token", "dev-token"])
+        assert result.exit_code == 0
+        assert "Configuration saved" in result.stdout
+        assert "http://127.0.0.1:8000" in result.stdout
+    finally:
+        runner.invoke(app, ["config", "--url", orig_url, "--token", orig_token])
 
 
 def test_cli_status():
@@ -78,3 +84,35 @@ def test_cli_chat_repl():
     assert "Compass Chat" in result.stdout
     assert "Added task" in result.stdout
     assert "Goodbye!" in result.stdout
+
+
+def test_cli_triage(monkeypatch):
+    """Verify `compass triage` command streams feasibility events and renders markdown."""
+    import json
+    from unittest.mock import MagicMock
+
+    events = [
+        {"type": "think", "content": "Analyzing capacity", "metadata": {"agent": "planner"}},
+        {"type": "verdict", "content": "REALIST: INFEASIBLE", "metadata": {"agent": "realist"}},
+        {"type": "done", "content": "Done", "metadata": {"artifact_markdown": "# Feasibility Triage Artifact\n- Task 1"}},
+    ]
+    lines = [f"data: {json.dumps(e)}" for e in events]
+
+    mock_resp = MagicMock()
+    mock_resp.iter_lines.return_value = lines
+    mock_resp.raise_for_status = MagicMock()
+
+    class MockStreamContext:
+        def __enter__(self):
+            return mock_resp
+        def __exit__(self, *args):
+            pass
+
+    monkeypatch.setattr("httpx.stream", lambda *args, **kwargs: MockStreamContext())
+
+    result = runner.invoke(app, ["triage", "--days", "5", "--hours", "4.0"])
+    assert result.exit_code == 0
+    assert "Starting feasibility negotiation" in result.stdout
+    assert "THINK" in result.stdout
+    assert "VERDICT" in result.stdout
+    assert "Feasibility Triage Artifact" in result.stdout

@@ -255,3 +255,148 @@ export async function streamQueryFromAssistant(prompt, conversationId, { onToken
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Calendar & Dynamic Scheduling API
+// ---------------------------------------------------------------------------
+
+export async function fetchCalendarStatus() {
+  try {
+    const res = await fetch(`${API_BASE}/api/calendar/status`)
+    if (!res.ok) return { connected: false, mode: 'demo', account_email: 'demo-scholar@compass.ai', is_simulated: true }
+    const data = await res.json()
+    return data.calendar || { connected: false, mode: 'demo', is_simulated: true }
+  } catch {
+    return { connected: false, mode: 'demo', account_email: 'demo-scholar@compass.ai', is_simulated: true }
+  }
+}
+
+export async function fetchCurrentUser() {
+  try {
+    const res = await fetch(`${API_BASE}/api/auth/me`)
+    if (!res.ok) return null
+    return await res.json()
+  } catch {
+    return null
+  }
+}
+
+export async function quickConnectUser(email) {
+  const res = await fetch(`${API_BASE}/api/auth/quick-connect`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return await res.json()
+}
+
+export async function syncCalendarNow() {
+  const res = await fetch(`${API_BASE}/api/calendar/sync-now`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return await res.json()
+}
+
+export function getGoogleOAuthConnectUrl(loginHint = null) {
+  let url = `${API_BASE}/api/calendar/connect?redirect=true`
+  if (loginHint) url += `&login_hint=${encodeURIComponent(loginHint)}`
+  return url
+}
+
+export async function disconnectCalendar() {
+  try {
+    const res = await fetch(`${API_BASE}/api/calendar/disconnect`, { method: 'POST' })
+    return await res.json()
+  } catch {
+    return { status: 'ok' }
+  }
+}
+
+export async function fetchCalendarAvailability(startDate, endDate) {
+  try {
+    let url = `${API_BASE}/api/calendar/availability`
+    const params = new URLSearchParams()
+    if (startDate) params.append('start_date', startDate)
+    if (endDate) params.append('end_date', endDate)
+    if (params.toString()) url += `?${params.toString()}`
+
+    const res = await fetch(url)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const json = await res.json()
+    return json.data || json
+  } catch (err) {
+    console.warn('[Compass Calendar Availability Fallback]', err)
+    return { busy_intervals: [], free_windows: [] }
+  }
+}
+
+export async function proposeSchedule({ targetDate, domain, taskIds } = {}) {
+  const payload = {}
+  if (targetDate) payload.target_date = targetDate
+  if (domain && domain !== 'all') payload.domain = domain
+  if (taskIds && taskIds.length > 0) payload.task_ids = taskIds
+
+  const res = await fetch(`${API_BASE}/api/schedule/propose`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const json = await res.json()
+  return json.data || json
+}
+
+export async function commitSchedule(assignments, rationale = 'Committed via Schedule View') {
+  const res = await fetch(`${API_BASE}/api/schedule/commit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ assignments, rationale }),
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const json = await res.json()
+  return json.data || json
+}
+
+export async function fetchSchedulingPreferences() {
+  try {
+    const res = await fetch(`${API_BASE}/api/calendar/preferences`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    return await res.json()
+  } catch {
+    return {
+      work_start_time: '09:00:00',
+      work_end_time: '18:00:00',
+      work_days: [1, 2, 3, 4, 5],
+      buffer_minutes: 15,
+      preferred_focus: 'morning',
+    }
+  }
+}
+
+export function getCalendarExportUrl(domain) {
+  if (domain && domain !== 'all') {
+    return `${API_BASE}/api/calendar/export.ics?domain=${encodeURIComponent(domain)}`
+  }
+  return `${API_BASE}/api/calendar/export.ics`
+}
+
+export async function checkReactiveSchedule(currentTime = null) {
+  const body = currentTime ? { current_time: currentTime } : {}
+  const res = await fetch(`${API_BASE}/api/schedule/reactive-check`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return await res.json()
+}
+
+export async function fetchScheduleConflicts() {
+  const res = await fetch(`${API_BASE}/api/schedule/conflicts`)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return await res.json()
+}
+

@@ -30,8 +30,17 @@ class Settings(BaseSettings):
     AUTH_TOKEN: str = ""  # Required — set in .env
 
     # --- Tavily Search API ---
-    TAVILY_ENABLED: bool = False  # Feature flag: disabled by default pending team sign-off
-    TAVILY_API_KEY: str = ""  # Optional — enables search_web skill when TAVILY_ENABLED is True
+    TAVILY_API_KEY: str = ""
+    TAVILY_ENABLED: bool = True  # MUST be True in the submitted build
+    TAVILY_SEARCH_DEPTH: str = "basic"  # ultra-fast | fast | basic | advanced
+    TAVILY_MAX_RESULTS: int = 5
+    TAVILY_TIMEOUT_S: float = 12.0
+
+    # --- Google Calendar OAuth ---
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    GOOGLE_REDIRECT_URI: str = "http://localhost:8000/api/calendar/callback"
+    TOKEN_ENCRYPTION_KEY: str = "compass_secure_local_dev_token_encryption_key_32bytes!"
 
     # --- App ---
     LOG_LEVEL: str = "INFO"
@@ -44,6 +53,7 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3000",
         "http://localhost:80",
         "http://localhost",
+        "https://compass-kappa-nine.vercel.app",
         "https://compass-farmlytics.vercel.app",
         "https://compass-frontend.vercel.app",
         "https://compass.nebius.app",

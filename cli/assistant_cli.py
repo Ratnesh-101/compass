@@ -317,7 +317,7 @@ def add(
     message = " ".join(parts)
     result = _post("/chat", {"message": message})
 
-    console.print(f"\n[compass.success]✅ Task sent to Compass[/]")
+    console.print("\n[compass.success]✅ Task sent to Compass[/]")
     console.print(f"   Response: {result.get('response', '')}")
 
 
@@ -430,7 +430,7 @@ def log(
     }
     result = _post("/api/log", payload)
 
-    console.print(f"\n[compass.success]✅ Memory logged to pgvector with 768-dim embedding[/]")
+    console.print("\n[compass.success]✅ Memory logged to pgvector with 768-dim embedding[/]")
     console.print(f"   Domain:   {_domain_text(domain)}")
     if project:
         console.print(f"   Project:  [bold]{project}[/]")
@@ -573,6 +573,18 @@ def admin_usage():
         f"  [bold green]Total Estimated Cost:[/] ${data.get('total_estimated_cost_usd', 0.0):.6f}\n"
     )
 
+    tavily_data = data.get("tavily")
+    if tavily_data:
+        t_table = Table(title="Tavily Web Search & Extraction Credits", border_style="dim")
+        t_table.add_column("Operation", style="bold yellow")
+        t_table.add_column("Calls", justify="right", style="magenta")
+        t_table.add_column("Credits Consumed", justify="right", style="bold green")
+        by_op = tavily_data.get("by_operation", {})
+        for op, stats in by_op.items():
+            t_table.add_row(op.title(), str(stats.get("calls", 0)), str(stats.get("credits", 0)))
+        console.print(t_table)
+        console.print(f"  [bold yellow]Total Tavily Credits:[/] {tavily_data.get('total_credits', 0)} credits\n")
+
 
 @admin_app.command("consolidate")
 def admin_consolidate(
@@ -581,9 +593,6 @@ def admin_consolidate(
     stale_days: int = typer.Option(7, "--stale-days", "-s", help="Days before marking thread stale"),
 ):
     """🧹 Trigger memory consolidation and overdue task flagging."""
-    import asyncio
-    from backend.jobs.consolidate import run_consolidation
-
     mode_text = "[yellow](DRY RUN)[/]" if dry_run else "[green](LIVE)[/]"
     console.print(f"🧭 Triggering memory consolidation {mode_text}...")
 
@@ -595,7 +604,7 @@ def admin_consolidate(
 
     try:
         report = _post("/admin/consolidate", payload)
-        console.print(f"\n[compass.success]✅ Consolidation complete[/]")
+        console.print("\n[compass.success]✅ Consolidation complete[/]")
         console.print(f"  • Overdue tasks flagged: [bold]{report.get('overdue_tasks_flagged', 0)}[/]")
         console.print(f"  • Duplicate pairs merged: [bold]{report.get('duplicate_chunks_merged', 0)}[/]")
         console.print(f"  • Stale conversations rolled up: [bold]{report.get('stale_conversations_rolled_up', 0)}[/]")
@@ -790,12 +799,12 @@ def agent(
                         for ch in resp.iter_text():
                             buf += ch
                             while "\n" in buf:
-                                l, buf = buf.split("\n", 1)
-                                l = l.strip()
-                                if not l.startswith("data: "):
+                                line_str, buf = buf.split("\n", 1)
+                                line_str = line_str.strip()
+                                if not line_str.startswith("data: "):
                                     continue
                                 try:
-                                    ev = _json.loads(l[6:])
+                                    ev = _json.loads(line_str[6:])
                                 except Exception:
                                     continue
                                 stype = ev.get("type", "think")
@@ -991,6 +1000,41 @@ def agent_briefing():
         ))
     except Exception as e:
         console.print(f"[compass.error]❌ Failed to fetch proactive briefing: {e}[/]")
+
+
+@app.command("triage")
+def triage(
+    days: int = typer.Option(5, "--days", "-d", help="Days available"),
+    hours: float = typer.Option(4.0, "--hours", "-h", help="Focused hours per day"),
+    domain: Optional[str] = typer.Option(None, "--domain", help="Restrict to domain"),
+):
+    """Run the Planner ↔ Realist feasibility negotiation."""
+    import json as _json
+    from rich.markdown import Markdown
+
+    console.print(f"[bold cyan]⚖️  Starting feasibility negotiation[/] ({days}d × {hours}h/d)")
+    try:
+        with httpx.stream(
+            "POST",
+            f"{API_BASE}/api/agent/feasibility",
+            json={"days": days, "hours_per_day": hours, "domain": domain},
+            headers=_headers(),
+            timeout=120.0,
+        ) as r:
+            r.raise_for_status()
+            for line in r.iter_lines():
+                if not line or not line.startswith("data: "):
+                    continue
+                ev = _json.loads(line[6:])
+                agent = ev.get("metadata", {}).get("agent", "")
+                colour = {"planner": "cyan", "realist": "red"}.get(agent, "white")
+                console.print(f"[{colour}]{ev.get('type', '').upper()}[/] {ev.get('content', '')}")
+                if ev.get("type") == "done":
+                    md = ev.get("metadata", {}).get("artifact_markdown", "")
+                    if md:
+                        console.print(Markdown(md))
+    except Exception as e:
+        console.print(f"[compass.error]❌ Triage failed: {e}[/]")
 
 
 # ---------------------------------------------------------------------------

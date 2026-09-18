@@ -107,16 +107,21 @@ async def handle_message(
                     notes=notes,
                 )
         except Exception as e:
-            logger.warning(f"Database unavailable for add_task, returning structured response: {e}")
-            task_record = {
-                "id": 999,
-                "domain": domain,
-                "title": title,
-                "due_date": due_str,
-                "status": status,
-                "priority": priority,
-                "notes": notes,
-                "db_persisted": False,
+            logger.error(f"add_task failed — database unavailable: {e}", exc_info=True)
+            latency_ms = int((time.perf_counter() - start_time) * 1000)
+            failure_msg = (
+                f"I could not save the task '{title}' — the database is unreachable "
+                f"right now. Nothing was stored. Please try again in a moment."
+            )
+            return {
+                "conversation_id": conv_id,
+                "response": failure_msg,
+                "message": failure_msg,
+                "skill_used": "add_task",
+                "success": False,
+                "error": "database_unavailable",
+                "data": None,
+                "routing_latency_ms": latency_ms,
             }
 
         # Build skill summary
@@ -151,15 +156,35 @@ async def handle_message(
             pool = await get_pool()
             handler = SKILL_REGISTRY[skill_name]
             skill_result = await handler(args or {}, pool)
-            summary = skill_result.get("response", "Action completed.")
+
+            # SkillResult contract: {success, data, summary, error}
+            # Accept "response" only as a legacy alias so older handlers keep working.
+            if not isinstance(skill_result, dict):
+                raise TypeError(
+                    f"Skill '{skill_name}' returned {type(skill_result).__name__}, expected dict"
+                )
+
+            succeeded = bool(skill_result.get("success", True))
+            summary = (
+                skill_result.get("summary")
+                or skill_result.get("response")
+                or ("Action completed." if succeeded else "")
+            )
             data = skill_result.get("data")
 
-            # Persist dialogue turn
+            if not succeeded:
+                err = skill_result.get("error") or "unknown error"
+                logger.warning("Skill '%s' reported failure: %s", skill_name, err)
+                summary = summary or f"I couldn't complete that: {err}"
+
             try:
                 async with pool.acquire() as conn:
                     real_cid = await conversations.get_or_create_conversation(conn, conv_id)
                     await conversations.add_message(conn, real_cid, role="user", content=message)
-                    await conversations.add_message(conn, real_cid, role="assistant", content=summary, skill_called=skill_name)
+                    await conversations.add_message(
+                        conn, real_cid, role="assistant",
+                        content=summary, skill_called=skill_name,
+                    )
                     conv_id = real_cid
             except Exception as e:
                 logger.debug(f"Could not persist message history: {e}")
@@ -170,12 +195,18 @@ async def handle_message(
                 "response": summary,
                 "message": summary,
                 "skill_used": skill_name,
+                "success": succeeded,
+                "error": skill_result.get("error"),
                 "data": data,
                 "routing_latency_ms": latency_ms,
             }
         except Exception as e:
-            logger.error(f"Skill execution failed for {skill_name}: {e}")
-            text_reply = f"Error executing skill {skill_name}: {e}"
+            logger.error(f"Skill execution failed for {skill_name}: {e}", exc_info=True)
+            # Do not leak raw exception text to the user.
+            text_reply = (
+                "I hit an internal error running that action. It has been logged — "
+                "nothing was changed."
+            )
 
     try:
         pool = await get_pool()

@@ -187,21 +187,66 @@ SEARCH_WEB_TOOL: Dict[str, Any] = {
     "type": "function",
     "function": {
         "name": "search_web",
-        "description": "Search the web for current information, news, documentation, or any query requiring up-to-date external data using Tavily Search.",
+        "description": (
+            "Search the live web for current information that is NOT in Compass's "
+            "stored memory. Use only after checking memory first. Good for: current "
+            "deadlines, library/API changes since a note was written, facts that "
+            "post-date stored context."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "The search query or question to look up on the web",
-                },
-                "search_depth": {
+                "query": {"type": "string", "description": "Search query, under 390 chars"},
+                "depth": {
                     "type": "string",
                     "enum": ["basic", "advanced"],
-                    "description": "Search depth: 'basic' for quick results, 'advanced' for comprehensive research",
+                    "description": "Use 'advanced' (2 credits) only when basic is insufficient",
                 },
             },
             "required": ["query"],
+        },
+    },
+}
+
+INGEST_URL_TOOL: Dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "ingest_url",
+        "description": (
+            "Permanently add the contents of a web page to Compass's long-term "
+            "memory so it becomes semantically searchable later. Use when the user "
+            "says to remember, save, or read a link."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "The URL to extract and ingest"},
+                "domain": {
+                    "type": "string",
+                    "enum": ["hackathon", "coursework", "code", "general"],
+                    "description": "Domain to store memory under",
+                },
+                "project": {"type": "string", "description": "Optional project name to associate with"},
+            },
+            "required": ["url", "domain"],
+        },
+    },
+}
+
+VERIFY_DEADLINE_TOOL: Dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "verify_deadline",
+        "description": (
+            "Compare a stored task's due_date against what the live web currently says. "
+            "Searches for deadline announcements or updates and flags drift."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "integer", "description": "The ID of the task to verify"},
+            },
+            "required": ["task_id"],
         },
     },
 }
@@ -372,6 +417,100 @@ DETECT_DEADLINE_CONFLICTS_TOOL: Dict[str, Any] = {
     },
 }
 
+GET_CALENDAR_AVAILABILITY_TOOL: Dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "get_calendar_availability",
+        "description": "Query free/busy windows and existing schedule blocks from Google Calendar and Compass tasks across a date range.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "start_date": {
+                    "type": "string",
+                    "description": "Start date in YYYY-MM-DD format (defaults to today)",
+                },
+                "end_date": {
+                    "type": "string",
+                    "description": "End date in YYYY-MM-DD format (defaults to 7 days from start_date)",
+                },
+            },
+        },
+    },
+}
+
+PROPOSE_SCHEDULE_TOOL: Dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "propose_schedule",
+        "description": "Analyze unscheduled or pending tasks and use deterministic slot allocation to propose optimal, non-overlapping calendar time slots respecting working hours, buffers, and deadlines.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "target_date": {
+                    "type": "string",
+                    "description": "Target date or start date for scheduling in YYYY-MM-DD format",
+                },
+                "domain": {
+                    "type": "string",
+                    "enum": ["hackathon", "coursework", "code", "general"],
+                    "description": "Optional domain filter for tasks to schedule",
+                },
+                "task_ids": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "Specific task IDs to schedule (if omitted, schedules all open unscheduled tasks)",
+                },
+            },
+        },
+    },
+}
+
+COMMIT_SCHEDULE_TOOL: Dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "commit_schedule",
+        "description": "Commit approved time slots to tasks in PostgreSQL, synchronize with Google Calendar, and record to audit log. MUTATING ACTION requiring user confirmation.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "assignments": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "task_id": {"type": "integer"},
+                            "scheduled_start": {"type": "string", "description": "ISO 8601 UTC start datetime"},
+                            "scheduled_end": {"type": "string", "description": "ISO 8601 UTC end datetime"},
+                        },
+                        "required": ["task_id", "scheduled_start", "scheduled_end"],
+                    },
+                    "description": "List of task slot assignments to commit",
+                },
+                "rationale": {
+                    "type": "string",
+                    "description": "Summary rationale of the schedule plan",
+                },
+            },
+            "required": ["assignments"],
+        },
+    },
+}
+
+DETECT_SCHEDULE_CONFLICTS_TOOL: Dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "detect_schedule_conflicts",
+        "description": "Analyze scheduled tasks, calendar events, and task dependency prerequisites to detect time overlaps, dependency timing violations, overdue/slipped tasks, and deadline breaches.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "start_date": {"type": "string", "description": "Optional start date filter (YYYY-MM-DD)"},
+                "end_date": {"type": "string", "description": "Optional end date filter (YYYY-MM-DD)"},
+            },
+        },
+    },
+}
+
 # Registered tools exposed to the Nemotron router
 BASE_TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     ADD_TASK_TOOL,
@@ -390,17 +529,21 @@ BASE_TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     LIST_PROJECTS_TOOL,
     CHAT_TOOL,
     DETECT_DEADLINE_CONFLICTS_TOOL,
+    GET_CALENDAR_AVAILABILITY_TOOL,
+    PROPOSE_SCHEDULE_TOOL,
+    COMMIT_SCHEDULE_TOOL,
+    DETECT_SCHEDULE_CONFLICTS_TOOL,
 ]
 
 
 def get_tool_definitions() -> List[Dict[str, Any]]:
     """Return active tool definitions for the Nemotron router.
-    search_web is feature-flagged behind TAVILY_ENABLED (default: False).
+    search_web, ingest_url, and verify_deadline are available when Tavily is enabled.
     """
     try:
-        from backend.config import get_settings
-        if getattr(get_settings(), "TAVILY_ENABLED", False):
-            return BASE_TOOL_DEFINITIONS + [SEARCH_WEB_TOOL]
+        from backend.services.tavily import tavily_available
+        if tavily_available():
+            return BASE_TOOL_DEFINITIONS + [SEARCH_WEB_TOOL, INGEST_URL_TOOL, VERIFY_DEADLINE_TOOL]
     except Exception:
         pass
     return list(BASE_TOOL_DEFINITIONS)
@@ -988,7 +1131,7 @@ async def handle_detect_deadline_conflicts(args: Dict[str, Any], pool: Any) -> D
             except Exception:
                 pass
 
-    conflicts = []
+    conflicts: List[Dict[str, Any]] = []
     for d_str, day_tasks in sorted(by_date.items()):
         domains = {t.get("domain", "general") for t in day_tasks}
         priorities = {t.get("priority", "medium") for t in day_tasks}
@@ -1011,9 +1154,10 @@ async def handle_detect_deadline_conflicts(args: Dict[str, Any], pool: Any) -> D
             })
 
     if conflicts:
+        top_domains = [str(d) for d in (conflicts[0].get("domains") or [])]
         summary = (
             f"⚠️ Detected {len(conflicts)} deadline conflict cluster(s) within the next {days} days. "
-            f"Most critical: {conflicts[0]['date']} with {conflicts[0]['task_count']} tasks across {', '.join(conflicts[0]['domains'])}."
+            f"Most critical: {conflicts[0]['date']} with {conflicts[0]['task_count']} tasks across {', '.join(top_domains)}."
         )
     else:
         summary = f"✅ No critical deadline conflicts detected across domains in the next {days} days."
@@ -1038,79 +1182,658 @@ async def dispatch_skill(skill_name: str, args: Dict[str, Any], pool: Any) -> Di
 
 @register_skill("search_web")
 async def handle_search_web(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
-    """Search the web using Tavily Search API and return a formatted summary of results.
-    
-    Makes a genuine HTTP call to https://api.tavily.com/search with the user's query.
-    Requires TAVILY_API_KEY to be set in the environment.
-    Falls back gracefully if the key is missing.
+    """Search the live web using the centralized Tavily service.
+
+    Returns citations, fenced context, and human-readable summary.
     """
-    import httpx
-    from backend.config import get_settings
+    from backend.services import tavily as tavily_service
 
-    settings = get_settings()
-    query = args.get("query", "").strip()
-    search_depth = args.get("search_depth", "basic")
-
+    query = (args.get("query") or "").strip()
     if not query:
-        return {"response": "Please provide a search query.", "data": {}}
-
-    if not getattr(settings, "TAVILY_ENABLED", False):
         return {
-            "response": "Web search is currently disabled (TAVILY_ENABLED=False).",
-            "data": {"query": query, "error": "TAVILY_ENABLED is False"},
+            "success": False,
+            "data": {},
+            "summary": "Query cannot be empty",
+            "response": "Please provide a search query.",
+            "error": "Query cannot be empty",
         }
 
-    if not settings.TAVILY_API_KEY:
+    if not tavily_service.tavily_available():
         return {
-            "response": f"Web search is not configured (TAVILY_API_KEY missing). To enable it, add your Tavily API key to the .env file.",
-            "data": {"query": query, "error": "TAVILY_API_KEY not set"},
+            "success": False,
+            "data": {},
+            "summary": "Web search is not configured on this instance",
+            "response": "Web search is currently disabled or missing an API key.",
+            "error": "Web search is not configured on this instance",
+        }
+
+    depth = args.get("depth") or args.get("search_depth") or "basic"
+    try:
+        resp = await tavily_service.search(query, search_depth=depth)
+    except Exception as e:
+        logger.warning(f"Tavily search failed: {e}")
+        return {
+            "success": False,
+            "data": {},
+            "summary": f"Web search failed: {e}",
+            "response": f"Web search failed: {e}",
+            "error": f"Web search failed: {e}",
+        }
+
+    results = resp.get("results", [])
+    citations = [
+        {"title": r.get("title"), "url": r.get("url"), "score": r.get("score")}
+        for r in results
+    ]
+    fenced = tavily_service.fence_web_content(results)
+    top_url = citations[0]["url"] if citations else "none"
+    summary = f"Found {len(results)} web result(s) for '{query}'. Top source: {top_url}"
+
+    # Build markdown response for chat interface
+    parts = [f"**Web Search Results for:** *{query}*"]
+    for r in results[:3]:
+        parts.append(f"• [{r.get('title', 'Untitled')}]({r.get('url', '')})\n  {r.get('content', '')[:180].strip()}...")
+    formatted_response = "\n".join(parts) if results else summary
+
+    return {
+        "success": True,
+        "data": {"results": results, "citations": citations, "source": "web"},
+        "fenced_context": fenced,
+        "summary": summary,
+        "response": formatted_response,
+        "error": None,
+    }
+
+
+@register_skill("ingest_url")
+async def handle_ingest_url(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
+    """Extract and ingest a web page's contents into Compass long-term memory.
+
+    Chunked, embedded via Qwen3 768-dim, and stored into memory_chunks table.
+    Mutating action — must be confirm-gated by the agent loop.
+    """
+    from backend.services import tavily as tavily_service
+    from backend.memory import vector, structured
+
+    VALID_DOMAINS = {"hackathon", "coursework", "code", "general"}
+    url = (args.get("url") or "").strip()
+    domain = (args.get("domain") or "general").lower()
+
+    if domain not in VALID_DOMAINS:
+        return {
+            "success": False,
+            "data": {},
+            "summary": f"Invalid domain '{domain}'. Must be one of: {', '.join(sorted(VALID_DOMAINS))}",
+            "response": f"Invalid domain '{domain}'.",
+            "error": f"Invalid domain '{domain}'",
+        }
+
+    if not url.startswith(("http://", "https://")):
+        return {
+            "success": False,
+            "data": {},
+            "summary": "URL must start with http:// or https://",
+            "response": "URL must start with http:// or https://",
+            "error": "URL must start with http:// or https://",
+        }
+
+    if not tavily_service.tavily_available():
+        return {
+            "success": False,
+            "data": {},
+            "summary": "Tavily service is not available on this instance",
+            "response": "Tavily service is not configured.",
+            "error": "Tavily service is not available",
         }
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(
-                "https://api.tavily.com/search",
-                json={
-                    "api_key": settings.TAVILY_API_KEY,
-                    "query": query,
-                    "search_depth": search_depth,
-                    "max_results": 3,
-                    "include_answer": True,
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
-
-        results = data.get("results", [])
-        answer = data.get("answer", "")
-
-        # Format a concise, readable response
-        parts = []
-        if answer:
-            parts.append(f"**Quick Answer:** {answer}")
-        if results:
-            parts.append("\n**Top Results:**")
-            for r in results[:3]:
-                title = r.get("title", "Untitled")
-                url = r.get("url", "")
-                snippet = r.get("content", "")[:200].strip()
-                parts.append(f"• [{title}]({url})\n  {snippet}")
-
-        summary = "\n".join(parts) if parts else f"No results found for: {query}"
-        return {
-            "response": summary,
-            "data": {"query": query, "results": results, "answer": answer},
-        }
-    except httpx.HTTPStatusError as e:
-        logger.error(f"Tavily API HTTP error: {e.response.status_code} — {e.response.text}")
-        return {
-            "response": f"Web search failed (HTTP {e.response.status_code}). Please try again.",
-            "data": {"query": query, "error": str(e)},
-        }
+        resp = await tavily_service.extract([url], extract_depth="advanced")
     except Exception as e:
-        logger.error(f"Tavily search_web error: {e}")
+        logger.error(f"Tavily extract failed for {url}: {e}")
         return {
-            "response": f"Web search encountered an error: {e}",
-            "data": {"query": query, "error": str(e)},
+            "success": False,
+            "data": {},
+            "summary": f"Extraction failed: {e}",
+            "response": f"Extraction failed: {e}",
+            "error": f"Extraction failed: {e}",
         }
 
+    ok = resp.get("results", [])
+    if not ok:
+        failed = resp.get("failed_results", [])
+        return {
+            "success": False,
+            "data": {"failed": failed},
+            "summary": f"Could not extract content from {url}",
+            "response": f"Could not extract content from {url}",
+            "error": f"Could not extract content from {url}",
+        }
+
+    raw = ok[0].get("raw_content") or ok[0].get("content") or ""
+    flagged = tavily_service.scan_for_injection(raw)
+
+    # Chunk text (~1200 chars with 200 char overlap, max 12 chunks)
+    chunks = [raw[i : i + 1200] for i in range(0, len(raw), 1000)][:12]
+    stored = 0
+
+    async with pool.acquire() as conn:
+        project_id = None
+        if args.get("project"):
+            proj = await structured.get_or_create_project(conn, args["project"], domain)
+            project_id = proj["id"]
+
+        tags = ["web", "tavily-extract"]
+        if flagged:
+            tags.append("injection-flagged")
+
+        for ch in chunks:
+            if not ch.strip():
+                continue
+            await vector.store_chunk(
+                conn,
+                domain=domain,
+                content=ch,
+                project_id=project_id,
+                source=url,
+                tags=tags,
+            )
+            stored += 1
+
+    injection_note = " ⚠️ Page contained instruction-like text; stored as data only." if flagged else ""
+    summary = f"Ingested {url} into {domain.upper()} memory as {stored} searchable chunk(s).{injection_note}"
+
+    return {
+        "success": True,
+        "data": {
+            "url": url,
+            "chunks_stored": stored,
+            "domain": domain,
+            "injection_flagged": bool(flagged),
+        },
+        "summary": summary,
+        "response": summary,
+        "error": None,
+    }
+
+
+@register_skill("verify_deadline")
+async def handle_verify_deadline(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
+    """Compare a stored task's due date against live web sources to detect drift."""
+    from backend.services import tavily as tavily_service
+    from backend.memory import structured
+
+    task_id = args.get("task_id")
+    if not task_id:
+        return {
+            "success": False,
+            "data": {},
+            "summary": "task_id is required",
+            "response": "task_id is required",
+            "error": "task_id is required",
+        }
+
+    async with pool.acquire() as conn:
+        task = await structured.get_task(conn, int(task_id))
+    if not task:
+        return {
+            "success": False,
+            "data": {},
+            "summary": f"No task with id {task_id}",
+            "response": f"No task with id {task_id}",
+            "error": f"No task with id {task_id}",
+        }
+
+    task_title = task.get("title", "")
+    stored_due = str(task.get("due_date") or "none")
+
+    if not tavily_service.tavily_available():
+        return {
+            "success": False,
+            "data": {"task": dict(task)},
+            "summary": "Web search is not configured to verify deadline",
+            "response": "Web search is not configured.",
+            "error": "Web search is not configured",
+        }
+
+    query = f"{task_title} deadline submission date"
+    try:
+        resp = await tavily_service.search(query, search_depth="basic")
+    except Exception as e:
+        return {
+            "success": False,
+            "data": {"task": dict(task)},
+            "summary": f"Web search failed during verification: {e}",
+            "response": f"Web search failed during verification: {e}",
+            "error": str(e),
+        }
+
+    results = resp.get("results", [])
+    fenced = tavily_service.fence_web_content(results)
+    summary = f"Checked '{task_title}' (stored due: {stored_due}) against {len(results)} live source(s)."
+
+    return {
+        "success": True,
+        "data": {
+            "task": dict(task),
+            "results": results,
+            "citations": [r.get("url") for r in results if r.get("url")],
+            "source": "web",
+        },
+        "fenced_context": fenced,
+        "summary": summary,
+        "response": summary,
+        "error": None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Feasibility & Realist Tool Definitions and Handlers
+# ---------------------------------------------------------------------------
+
+ASSESS_FEASIBILITY_TOOL: Dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "assess_feasibility",
+        "description": (
+            "Determine whether the user's open workload is actually achievable in the "
+            "time they have, and produce a keep/defer/drop triage plan. Use when the "
+            "user asks what to prioritise, what to drop, whether they can finish in "
+            "time, or says they feel overloaded."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "days": {"type": "integer", "description": "Days available, default 5"},
+                "hours_per_day": {"type": "number", "description": "Focused hours per day, default 4"},
+                "domain": {
+                    "type": "string",
+                    "enum": ["hackathon", "coursework", "code", "general"],
+                    "description": "Optional: restrict to one domain",
+                },
+            },
+            "required": [],
+        },
+    },
+}
+
+
+APPLY_TRIAGE_PLAN_TOOL: Dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "apply_triage_plan",
+        "description": "Apply a feasibility triage plan: mark dropped tasks done and keep deferred tasks open. MUTATING — requires user confirmation.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "defer_ids": {"type": "array", "items": {"type": "integer"}, "description": "Task IDs to defer (set status=open)"},
+                "drop_ids": {"type": "array", "items": {"type": "integer"}, "description": "Task IDs to drop (set status=done)"},
+            },
+            "required": [],
+        },
+    },
+}
+
+
+@register_skill("assess_feasibility")
+async def handle_assess_feasibility(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
+    from backend.agents.feasibility import assess_feasibility, DEFAULT_HOURS_PER_DAY
+    try:
+        days = int(args.get("days") or 5)
+        hours = float(args.get("hours_per_day") or DEFAULT_HOURS_PER_DAY)
+    except (TypeError, ValueError):
+        days, hours = 5, DEFAULT_HOURS_PER_DAY
+    days = min(max(days, 1), 90)
+    hours = min(max(hours, 0.5), 16.0)
+
+    domain = args.get("domain")
+    if domain not in ("hackathon", "coursework", "code", "general"):
+        domain = None
+
+    try:
+        plan = await assess_feasibility(pool, days=days, hours_per_day=hours, domain=domain)
+    except Exception as e:
+        logger.error("Feasibility review failed: %s", e, exc_info=True)
+        return {"success": False, "data": {}, "summary": "",
+                "error": "Could not complete the feasibility review."}
+
+    v = plan.verdict
+    return {
+        "success": True,
+        "data": {
+            "triage_plan": plan.model_dump(),
+            "artifact_markdown": plan.as_markdown(),
+            "rounds_used": plan.rounds_used,
+            "degraded": plan.degraded,
+        },
+        "summary": (
+            f"{v.verdict}: {v.demand_hours}h of work against {v.capacity_hours}h "
+            f"available ({v.utilisation_pct}% utilisation). "
+            f"Keeping {len(plan.keep)}, deferring {len(plan.defer)}, "
+            f"dropping {len(plan.drop)}. {plan.narrative}"
+        ),
+        "error": None,
+    }
+
+
+@register_skill("apply_triage_plan")
+async def handle_apply_triage_plan(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
+    """Set deferred tasks to 'open' with pushed dates and drop others.
+    MUTATING — must be confirm-gated."""
+    from backend.memory import structured
+    defer_ids = [int(i) for i in (args.get("defer_ids") or [])]
+    drop_ids = [int(i) for i in (args.get("drop_ids") or [])]
+    changed = []
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            for tid in drop_ids:
+                await structured.update_task_status(conn, tid, "done")
+                changed.append({"id": tid, "action": "dropped"})
+            for tid in defer_ids:
+                await structured.update_task_status(conn, tid, "open")
+                changed.append({"id": tid, "action": "deferred"})
+    return {
+        "success": True,
+        "data": {"changed": changed},
+        "summary": f"Applied triage: {len(drop_ids)} dropped, {len(defer_ids)} deferred.",
+        "error": None,
+    }
+
+
+BASE_TOOL_DEFINITIONS.append(ASSESS_FEASIBILITY_TOOL)
+BASE_TOOL_DEFINITIONS.append(APPLY_TRIAGE_PLAN_TOOL)
+
+
+# ---------------------------------------------------------------------------
+# Scheduling & Calendar Skill Handlers
+# ---------------------------------------------------------------------------
+
+@register_skill("get_calendar_availability")
+async def handle_get_calendar_availability(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
+    """Query free/busy windows and existing schedule blocks from Google Calendar & tasks."""
+    from datetime import datetime, date, timedelta, timezone
+    from backend.services.calendar import get_calendar_freebusy
+    from backend.services.scheduler import get_available_windows
+    from backend.memory.structured import get_scheduling_preferences
+
+    start_str = args.get("start_date")
+    end_str = args.get("end_date")
+
+    now = datetime.now(timezone.utc)
+    if start_str:
+        try:
+            start_dt = datetime.combine(date.fromisoformat(start_str[:10]), datetime.min.time(), tzinfo=timezone.utc)
+        except Exception:
+            start_dt = now
+    else:
+        start_dt = now
+
+    if end_str:
+        try:
+            end_dt = datetime.combine(date.fromisoformat(end_str[:10]), datetime.max.time(), tzinfo=timezone.utc)
+        except Exception:
+            end_dt = start_dt + timedelta(days=7)
+    else:
+        end_dt = start_dt + timedelta(days=7)
+
+    busy = await get_calendar_freebusy(start_dt, end_dt, pool=pool)
+
+    prefs = {"work_start_time": "09:00:00", "work_end_time": "18:00:00", "work_days": [1, 2, 3, 4, 5], "buffer_minutes": 15}
+    if pool is not None:
+        try:
+            async with pool.acquire() as conn:
+                prefs = await get_scheduling_preferences(conn)
+        except Exception:
+            pass
+
+    free_windows = get_available_windows(
+        busy,
+        start_dt,
+        end_dt,
+        work_start_time=prefs.get("work_start_time", "09:00:00"),
+        work_end_time=prefs.get("work_end_time", "18:00:00"),
+        work_days=prefs.get("work_days", [1, 2, 3, 4, 5]),
+        buffer_minutes=prefs.get("buffer_minutes", 15),
+    )
+
+    summary = (
+        f"📅 Calendar Availability ({start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')}):\n"
+        f"• {len(busy)} busy event(s)/commitments\n"
+        f"• {len(free_windows)} available focus window(s) within working hours"
+    )
+
+    return {
+        "response": summary,
+        "data": {
+            "start": start_dt.isoformat(),
+            "end": end_dt.isoformat(),
+            "busy_count": len(busy),
+            "busy_intervals": busy,
+            "free_windows_count": len(free_windows),
+            "free_windows": [
+                {"start": w.start.isoformat(), "end": w.end.isoformat(), "duration_minutes": w.duration_minutes}
+                for w in free_windows
+            ],
+        },
+    }
+
+
+@register_skill("propose_schedule")
+async def handle_propose_schedule(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
+    """Run deterministic interval slot allocation for pending tasks."""
+    from datetime import datetime, date, timedelta, timezone
+    from backend.memory.structured import list_tasks, get_scheduling_preferences, get_all_dependencies_map
+    from backend.services.calendar import get_calendar_freebusy
+    from backend.services.scheduler import get_available_windows, allocate_task_slots
+
+    target_date_str = args.get("target_date")
+    domain = args.get("domain")
+    task_ids = args.get("task_ids")
+
+    now = datetime.now(timezone.utc)
+    if target_date_str:
+        try:
+            start_dt = datetime.combine(date.fromisoformat(target_date_str[:10]), datetime.min.time(), tzinfo=timezone.utc)
+        except Exception:
+            start_dt = now
+    else:
+        start_dt = now
+    end_dt = start_dt + timedelta(days=7)
+
+    tasks: List[Dict[str, Any]] = []
+    dep_map: Dict[int, List[int]] = {}
+    prefs = {"work_start_time": "09:00:00", "work_end_time": "18:00:00", "work_days": [1, 2, 3, 4, 5], "buffer_minutes": 15}
+
+    if pool is not None:
+        async with pool.acquire() as conn:
+            prefs = await get_scheduling_preferences(conn)
+            dep_map = await get_all_dependencies_map(conn)
+            if task_ids:
+                all_tasks = await list_tasks(conn, domain=domain)
+                id_set = set(task_ids)
+                tasks = [t for t in all_tasks if t["id"] in id_set]
+            else:
+                tasks = await list_tasks(conn, domain=domain, status="open")
+
+    busy = await get_calendar_freebusy(start_dt, end_dt, pool=pool)
+    free_windows = get_available_windows(
+        busy,
+        start_dt,
+        end_dt,
+        work_start_time=prefs.get("work_start_time", "09:00:00"),
+        work_end_time=prefs.get("work_end_time", "18:00:00"),
+        work_days=prefs.get("work_days", [1, 2, 3, 4, 5]),
+        buffer_minutes=prefs.get("buffer_minutes", 15),
+    )
+
+    allocation = allocate_task_slots(
+        tasks,
+        free_windows,
+        buffer_minutes=prefs.get("buffer_minutes", 15),
+        dependencies=dep_map,
+    )
+
+    scheduled_list = allocation["scheduled"]
+    lines = [f"⚡ Proposed Schedule Plan: {allocation['summary']}"]
+    for s in scheduled_list:
+        lines.append(f"  • Task #{s['task_id']} '{s['title']}' ({s['domain']}): {s['scheduled_start'][:16]} → {s['scheduled_end'][:16]}")
+    if allocation["unassigned"]:
+        lines.append(f"\n⚠️ Unplaced tasks ({len(allocation['unassigned'])}):")
+        for u in allocation["unassigned"]:
+            lines.append(f"  • Task #{u['task_id']} '{u['title']}': {u['reason']}")
+
+    return {
+        "response": "\n".join(lines),
+        "data": {
+            "status": "proposed",
+            "horizon": {"start": start_dt.isoformat(), "end": end_dt.isoformat()},
+            "scheduled": allocation["scheduled"],
+            "unassigned": allocation["unassigned"],
+            "conflicts": allocation["conflicts"],
+            "summary": allocation["summary"],
+        },
+    }
+
+
+@register_skill("commit_schedule")
+async def handle_commit_schedule(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
+    """Commit approved time slots to tasks and synchronize to Google Calendar."""
+    from backend.memory.structured import get_task, update_task
+    from backend.services.calendar import link_calendar_event
+    from backend.services.scheduler import _ensure_utc
+
+    assignments = args.get("assignments") or []
+    rationale = args.get("rationale") or "Schedule committed by Compass Agent."
+
+    if not assignments:
+        return {"response": "No task assignments provided to commit.", "data": {"status": "error"}}
+
+    committed_results: List[Dict[str, Any]] = []
+    previous_states: List[Dict[str, Any]] = []
+
+    if pool is not None:
+        async with pool.acquire() as conn:
+            for item in assignments:
+                t_id = item.get("task_id")
+                s_start = item.get("scheduled_start")
+                s_end = item.get("scheduled_end")
+                if not t_id or not s_start or not s_end:
+                    continue
+
+                prev = await get_task(conn, t_id)
+                if prev:
+                    previous_states.append({
+                        "task_id": t_id,
+                        "scheduled_start": prev.get("scheduled_start").isoformat() if prev.get("scheduled_start") else None,
+                        "scheduled_end": prev.get("scheduled_end").isoformat() if prev.get("scheduled_end") else None,
+                    })
+
+                s_start_dt = _ensure_utc(s_start)
+                s_end_dt = _ensure_utc(s_end)
+
+                updated = await update_task(
+                    conn,
+                    t_id,
+                    scheduled_start=s_start_dt,
+                    scheduled_end=s_end_dt,
+                )
+                if updated:
+                    cal_link = await link_calendar_event(
+                        task_id=t_id,
+                        start_dt=s_start_dt,
+                        end_dt=s_end_dt,
+                        title=updated["title"],
+                        pool=pool,
+                    )
+                    committed_results.append({
+                        "task_id": t_id,
+                        "title": updated["title"],
+                        "scheduled_start": s_start_dt.isoformat(),
+                        "scheduled_end": s_end_dt.isoformat(),
+                        "calendar_event_id": cal_link.get("google_event_id"),
+                    })
+
+    response_text = (
+        f"✅ Successfully committed schedule for {len(committed_results)} task(s) and synced to Google Calendar.\n"
+        f"Rationale: {rationale}"
+    )
+
+    return {
+        "response": response_text,
+        "data": {
+            "status": "committed",
+            "committed_count": len(committed_results),
+            "committed_tasks": committed_results,
+            "previous_states": previous_states,
+            "rationale": rationale,
+        },
+    }
+
+
+@register_skill("detect_schedule_conflicts")
+async def handle_detect_schedule_conflicts(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
+    """Analyze scheduled tasks, calendar events, and dependencies for timing conflicts and violations."""
+    from datetime import datetime, date, timedelta, timezone
+    from backend.memory.structured import list_tasks, get_all_dependencies_map
+    from backend.services.calendar import get_calendar_freebusy
+    from backend.services.scheduler import detect_schedule_conflicts
+
+    start_date = args.get("start_date")
+    end_date = args.get("end_date")
+    now = datetime.now(timezone.utc)
+
+    if start_date:
+        try:
+            s_dt = datetime.combine(date.fromisoformat(start_date[:10]), datetime.min.time(), tzinfo=timezone.utc)
+        except Exception:
+            s_dt = now
+    else:
+        s_dt = now
+
+    if end_date:
+        try:
+            e_dt = datetime.combine(date.fromisoformat(end_date[:10]), datetime.max.time(), tzinfo=timezone.utc)
+        except Exception:
+            e_dt = s_dt + timedelta(days=14)
+    else:
+        e_dt = s_dt + timedelta(days=14)
+
+    tasks: List[Dict[str, Any]] = []
+    dep_map: Dict[int, List[int]] = {}
+    if pool is not None:
+        async with pool.acquire() as conn:
+            tasks = await list_tasks(conn)
+            dep_map = await get_all_dependencies_map(conn)
+
+    # External busy intervals
+    ext_events: List[Dict[str, Any]] = []
+    if pool is not None:
+        all_busy = await get_calendar_freebusy(s_dt, e_dt, pool=pool)
+        ext_events = [b for b in all_busy if b.get("source") != "compass_task"]
+
+    conflicts = detect_schedule_conflicts(
+        scheduled_tasks=tasks,
+        external_events=ext_events,
+        dependencies=dep_map,
+        current_time=now,
+    )
+
+    if conflicts:
+        lines = [f"⚠️ Detected {len(conflicts)} schedule conflict(s) or constraint violation(s):"]
+        for c in conflicts:
+            lines.append(f"  • [{c['conflict_type'].upper()}] {c.get('issue', c)}")
+        resp_text = "\n".join(lines)
+    else:
+        resp_text = "✅ No schedule conflicts, dependency timing violations, or slipped deadlines detected."
+
+    return {
+        "response": resp_text,
+        "data": {
+            "conflicts": conflicts,
+            "conflict_count": len(conflicts),
+            "scanned_tasks_count": len(tasks),
+            "scanned_external_events_count": len(ext_events),
+        },
+    }
+
+
+TOOL_DEFINITIONS = get_tool_definitions()

@@ -164,3 +164,15 @@ CREATE TABLE IF NOT EXISTS agent_audit_log (
 CREATE INDEX IF NOT EXISTS idx_agent_audit_log_run_id     ON agent_audit_log(run_id);
 CREATE INDEX IF NOT EXISTS idx_agent_audit_log_created_at ON agent_audit_log(created_at);
 
+-- ============================================================
+-- Tavily Usage Log — credit consumption tracking
+-- ============================================================
+CREATE TABLE IF NOT EXISTS tavily_usage_log (
+    id         SERIAL       PRIMARY KEY,
+    operation  TEXT         NOT NULL,   -- 'search' | 'extract'
+    credits    INTEGER      NOT NULL DEFAULT 1,
+    created_at TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_tavily_usage_created_at ON tavily_usage_log(created_at);
+

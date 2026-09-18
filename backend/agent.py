@@ -23,7 +23,7 @@ import json
 import time
 import uuid
 import logging
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple, cast
 
 from openai import AsyncOpenAI
@@ -36,8 +36,8 @@ logger = logging.getLogger("compass.agent")
 # ---------------------------------------------------------------------------
 # Tools that mutate state require human confirmation before execution
 # ---------------------------------------------------------------------------
-MUTATING_TOOLS = frozenset({"add_task", "edit_task", "update_task_status", "delete_task", "log_code_snippet", "log_code_context"})
-READ_ONLY_TOOLS = frozenset({"query_tasks", "query_code_context", "query_coursework_tasks", "get_hackathon_deadlines", "summarize_day", "search_web", "list_projects", "query_coursework_notes", "chat", "summarize_across_domains"})
+MUTATING_TOOLS = frozenset({"add_task", "edit_task", "update_task_status", "delete_task", "log_code_snippet", "log_code_context", "ingest_url", "apply_triage_plan", "commit_schedule"})
+READ_ONLY_TOOLS = frozenset({"query_tasks", "query_code_context", "query_coursework_tasks", "get_hackathon_deadlines", "summarize_day", "search_web", "list_projects", "query_coursework_notes", "chat", "summarize_across_domains", "verify_deadline", "assess_feasibility", "detect_deadline_conflicts", "get_calendar_availability", "propose_schedule", "detect_schedule_conflicts"})
 
 # In-memory registry for live SSE confirmation events: run_id -> (asyncio.Event, outcome_dict)
 _PENDING_CONFIRMATION_EVENTS: Dict[str, Tuple[asyncio.Event, Dict[str, Any]]] = {}
@@ -46,7 +46,7 @@ _PENDING_CONFIRMATION_EVENTS: Dict[str, Tuple[asyncio.Event, Dict[str, Any]]] = 
 @dataclass
 class AgentStep:
     """One step in the agent's reasoning trace."""
-    type: str           # "think" | "tool_call" | "observe" | "confirm_request" | "confirm_ack" | "critic" | "synthesize" | "error" | "done" | "timeout"
+    type: str           # "think" | "tool_call" | "observe" | "confirm_request" | "confirm_ack" | "critic" | "synthesize" | "error" | "done" | "timeout" | "escalate"
     content: str = ""
     tool_name: Optional[str] = None
     tool_args: Optional[Dict[str, Any]] = None
@@ -241,7 +241,7 @@ async def get_critique_stats(pool: Any) -> Dict[str, Any]:
     total_runs = len(rows)
     runs_with_critique = 0
     issues_flagged = 0
-    recent_evals = []
+    recent_evals: List[Dict[str, Any]] = []
 
     for r in rows:
         steps_raw = (
@@ -391,6 +391,26 @@ async def undo_last_agent_action(
             await conn.execute("DELETE FROM memory_chunks WHERE id = $1", affected_id)
             reverted_action["action"] = f"Deleted logged memory chunk #{affected_id}"
 
+        elif tool == "ingest_url":
+            args_obj = json.loads(row["args"]) if isinstance(row["args"], str) else (row["args"] or {})
+            target_url = args_obj.get("url")
+            audit_ts = row.get("created_at")
+            if target_url and audit_ts:
+                await conn.execute(
+                    "DELETE FROM memory_chunks WHERE source = $1 AND created_at >= ($2::timestamptz - interval '2 minutes')",
+                    target_url,
+                    audit_ts,
+                )
+                reverted_action["action"] = f"Deleted ingested memory chunks for {target_url}"
+            elif target_url:
+                await conn.execute("DELETE FROM memory_chunks WHERE source = $1", target_url)
+                reverted_action["action"] = f"Deleted ingested memory chunks for {target_url}"
+            elif affected_id:
+                await conn.execute("DELETE FROM memory_chunks WHERE id = $1", affected_id)
+                reverted_action["action"] = f"Deleted ingested memory chunk #{affected_id}"
+            else:
+                reverted_action["action"] = "Reverted ingested URL memory"
+
         # Mark the audit log entry as reverted
         await conn.execute("UPDATE agent_audit_log SET is_reverted = TRUE WHERE id = $1", audit_id)
 
@@ -466,6 +486,8 @@ async def run_agent(
 
     total_run_cost_usd: float = 0.0
     is_abstained: bool = False
+    web_escalation_used: bool = False
+    forced_tool_choice: Optional[Any] = None
     active_replan_diff: Optional[Dict[str, Any]] = None
 
     # Check for existing run state in database
@@ -665,12 +687,15 @@ async def run_agent(
                 c_tok = 100
                 record_usage(settings.SKILL_MODEL, 200, 100)
             else:
+                current_tool_choice = forced_tool_choice if forced_tool_choice is not None else "auto"
+                forced_tool_choice = None
+
                 completions: Any = client.chat.completions
                 response = await completions.create(
                     model=str(settings.SKILL_MODEL),
                     messages=cast(Any, messages),
                     tools=cast(Any, agent_tools),
-                    tool_choice="auto",
+                    tool_choice=current_tool_choice,
                     max_tokens=512,
                     temperature=0.4,
                 )
@@ -690,7 +715,7 @@ async def run_agent(
             # --- Tool call branch ---
             if choice.message.tool_calls:
                 tc = choice.message.tool_calls[0]
-                tc_id: str = str(tc["id"]) if isinstance(tc, dict) and "id" in tc else str(getattr(tc, "id", f"call_{uuid.uuid4().hex[:8]}"))
+                tc_id = str(tc["id"]) if isinstance(tc, dict) and "id" in tc else str(getattr(tc, "id", f"call_{uuid.uuid4().hex[:8]}"))
                 if isinstance(tc, dict):
                     func_info = tc.get("function", {})
                     func_name = str(func_info.get("name", "")) if isinstance(func_info, dict) else ""
@@ -888,7 +913,7 @@ async def run_agent(
                                 tool=func_name,
                                 args=tool_args,
                                 run_id=run_id,
-                                affected_table="tasks",
+                                affected_table="memory_chunks" if func_name in ("ingest_url", "log_code_snippet", "log_code_context") else "tasks",
                                 affected_id=affected_id,
                                 previous_state=prev_state,
                                 new_state=new_st,
@@ -903,6 +928,7 @@ async def run_agent(
 
                 # Emit OBSERVE step
                 step_num += 1
+                obs_tier = "Tavily Web Intelligence" if func_name in ("search_web", "ingest_url", "verify_deadline") else "Neon Postgres Engine"
                 obs_step = AgentStep(
                     type="observe",
                     content=tool_result,
@@ -910,14 +936,14 @@ async def run_agent(
                     step_number=step_num,
                     elapsed_ms=int((time.perf_counter() - step_start) * 1000),
                     run_id=run_id,
-                    model_tier="Neon Postgres Engine",
+                    model_tier=obs_tier,
                     step_cost_usd=0.0,
                 )
                 yield obs_step
                 accumulated_steps.append(obs_step)
 
                 # Add to agent context for next iteration
-                asst_payload: Dict[str, Any] = {
+                asst_payload = {
                     "role": "assistant",
                     "content": None,
                     "tool_calls": [
@@ -958,9 +984,49 @@ async def run_agent(
                         else:
                             logger.info("Critique-revise cycle cap (2 rounds) reached; proceeding to synthesis.")
 
-                # Epistemic Humility: Detect abstention
+                # Epistemic Humility: Detect abstention and escalate to Tavily search if enabled
                 if any(k in reply.upper() for k in ("[ABSTAIN]", "[ABSTENTION]", "ABSTAIN:")) or reply.strip().startswith("[ABSTAIN]"):
-                    is_abstained = True
+                    try:
+                        from backend.services.tavily import tavily_available
+                        tavily_ok = tavily_available()
+                    except Exception:
+                        tavily_ok = False
+                    if tavily_ok and not web_escalation_used:
+                        web_escalation_used = True
+                        forced_tool_choice = {"type": "function", "function": {"name": "search_web"}}
+                        step_num += 1
+                        escalate_step = AgentStep(
+                            type="escalate",
+                            content="Memory doesn't cover this. Escalating to live web search rather than guessing.",
+                            step_number=step_num,
+                            elapsed_ms=int((time.perf_counter() - step_start) * 1000),
+                            run_id=run_id,
+                            model_tier="Tavily Web Intelligence",
+                            step_cost_usd=0.0,
+                            metadata={"reason": "abstention", "provider": "tavily"},
+                        )
+                        yield escalate_step
+                        accumulated_steps.append(escalate_step)
+
+                        messages.append({"role": "assistant", "content": reply})
+                        messages.append({
+                            "role": "user",
+                            "content": (
+                                "Stored memory does not cover this question. Please call the 'search_web' tool "
+                                "now to retrieve current information from the live web to answer the goal."
+                            ),
+                        })
+                        continue
+                    else:
+                        is_abstained = True
+
+                # Determine provenance
+                if is_abstained:
+                    provenance = "abstained"
+                elif any(t in tools_used for t in ("search_web", "ingest_url", "verify_deadline")) or web_escalation_used:
+                    provenance = "web"
+                else:
+                    provenance = "memory"
 
                 # Emit SYNTHESIZE step
                 step_num += 1
@@ -975,6 +1041,9 @@ async def run_agent(
                     metadata={
                         "abstained": is_abstained,
                         "replan_diff": active_replan_diff,
+                        "source": provenance,
+                        "sources": [provenance],
+                        "web_escalation_used": web_escalation_used,
                     },
                 )
                 yield synth_step
@@ -1005,7 +1074,7 @@ async def run_agent(
                 "role": "user",
                 "content": "You've gathered enough information. Please produce your final comprehensive answer now.",
             })
-            completions: Any = client.chat.completions
+            completions = client.chat.completions
             response = await completions.create(
                 model=str(settings.SYNTHESIS_MODEL),
                 messages=cast(Any, messages),
@@ -1058,6 +1127,13 @@ async def run_agent(
         "Nemotron-3 Ultra (550B)": sum(s.step_cost_usd or 0.0 for s in accumulated_steps if s.model_tier and "Ultra" in s.model_tier),
         "Neon Postgres Engine": 0.0,
     }
+    if is_abstained:
+        run_source = "abstained"
+    elif any(t in tools_used for t in ("search_web", "ingest_url", "verify_deadline")) or web_escalation_used:
+        run_source = "web"
+    else:
+        run_source = "memory"
+
     report_card = {
         "run_id": run_id,
         "status": "completed",
@@ -1067,6 +1143,9 @@ async def run_agent(
         "critique_rounds": critique_rounds,
         "total_cost_usd": round(total_run_cost_usd, 6),
         "abstained": is_abstained,
+        "source": run_source,
+        "sources": [run_source],
+        "web_escalation_used": web_escalation_used,
         "replan_diff": active_replan_diff,
         "tier_breakdown": {k: round(v, 6) for k, v in tier_breakdown.items()},
     }
@@ -1201,7 +1280,7 @@ async def execute_confirmed_actions(
 
         previous_state = None
         affected_id = None
-        affected_table = "tasks"
+        affected_table = "memory_chunks" if tool_name in ("ingest_url", "log_code_snippet", "log_code_context") else "tasks"
 
         # Capture pre-mutation state for audit log & undo
         try:
@@ -1216,6 +1295,23 @@ async def execute_confirmed_actions(
                                 if hasattr(v, "isoformat"):
                                     previous_state[k] = v.isoformat()
                             affected_id = int(task_id)
+            elif pool and tool_name == "commit_schedule":
+                assignments = tool_args.get("assignments") or []
+                affected_ids = [a.get("task_id") for a in assignments if a.get("task_id")]
+                if affected_ids:
+                    async with pool.acquire() as conn:
+                        rows = await conn.fetch("SELECT id, scheduled_start, scheduled_end FROM tasks WHERE id = ANY($1::int[])", affected_ids)
+                        previous_state = {
+                            "tasks": [
+                                {
+                                    "task_id": r["id"],
+                                    "scheduled_start": r["scheduled_start"].isoformat() if r["scheduled_start"] else None,
+                                    "scheduled_end": r["scheduled_end"].isoformat() if r["scheduled_end"] else None,
+                                }
+                                for r in rows
+                            ]
+                        }
+                    affected_id = affected_ids[0] if affected_ids else None
         except Exception as e:
             logger.warning(f"Failed to capture pre-mutation state: {e}")
 

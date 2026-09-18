@@ -103,10 +103,86 @@ async def hydrate_usage_from_db(pool=None) -> Dict[str, Any]:
 
             _USAGE_STATE = new_state
             logger.info(f"Hydrated usage state from usage_log: {len(rows)} model groups loaded.")
+
+            # Hydrate Tavily credit telemetry
+            try:
+                tavily_rows = await conn.fetch(
+                    "SELECT operation, COUNT(*) as calls, COALESCE(SUM(credits), 0) as credits FROM tavily_usage_log GROUP BY operation"
+                )
+                for tr in tavily_rows:
+                    op = tr["operation"]
+                    _TAVILY_STATE[op] = {"calls": int(tr["calls"]), "credits": int(tr["credits"])}
+                logger.info(f"Hydrated Tavily credits: {get_tavily_summary()['total_credits']} total credits.")
+            except Exception as te:
+                logger.debug(f"Could not hydrate tavily_usage_log (table might be initializing): {te}")
     except Exception as e:
         logger.warning(f"Failed to hydrate usage from DB: {e}")
 
     return _USAGE_STATE
+
+
+# Tavily credit state store — starts at 0, tracked separately from token costs
+_TAVILY_STATE: Dict[str, Dict[str, int]] = {
+    "search": {"calls": 0, "credits": 0},
+    "extract": {"calls": 0, "credits": 0},
+}
+
+
+def get_tavily_summary() -> Dict[str, Any]:
+    """Return consolidated Tavily credit accounting summary."""
+    total_credits = sum(v.get("credits", 0) for v in _TAVILY_STATE.values())
+    total_calls = sum(v.get("calls", 0) for v in _TAVILY_STATE.values())
+    return {
+        "by_operation": {k: dict(v) for k, v in _TAVILY_STATE.items()},
+        "total_credits": total_credits,
+        "total_calls": total_calls,
+    }
+
+
+async def _persist_tavily_to_db(
+    operation: str,
+    credits: int,
+    conn: Optional[asyncpg.Connection] = None,
+) -> None:
+    """Insert a record into tavily_usage_log table."""
+    try:
+        if conn is not None:
+            await conn.execute(
+                "INSERT INTO tavily_usage_log (operation, credits) VALUES ($1, $2)",
+                operation, credits,
+            )
+        else:
+            from backend.memory.db import get_pool
+            pool = await get_pool()
+            async with pool.acquire() as db_conn:
+                await db_conn.execute(
+                    "INSERT INTO tavily_usage_log (operation, credits) VALUES ($1, $2)",
+                    operation, credits,
+                )
+    except Exception as err:
+        logger.warning(f"Failed to persist tavily_usage_log: {err}")
+
+
+async def record_tavily_credits(
+    operation: str,
+    credits: int,
+    conn: Optional[asyncpg.Connection] = None,
+) -> None:
+    """Record Tavily credit usage and persist asynchronously with strong reference."""
+    import asyncio
+    st = _TAVILY_STATE.setdefault(operation, {"calls": 0, "credits": 0})
+    st["calls"] += 1
+    st["credits"] += credits
+
+    try:
+        loop = asyncio.get_running_loop()
+        task = loop.create_task(_persist_tavily_to_db(operation, credits, conn=conn))
+        _BACKGROUND_TASKS.add(task)
+        task.add_done_callback(_on_persist_done)
+    except RuntimeError:
+        pass
+
+    logger.info(f"Tavily credit recorded: operation={operation}, credits={credits}")
 
 
 
@@ -282,5 +358,6 @@ def get_usage_summary() -> Dict[str, Any]:
                 "cost": f"${v['estimated_cost_usd']:.6f}"
             }
             for k, v in by_model.items()
-        ]
+        ],
+        "tavily": get_tavily_summary(),
     }
