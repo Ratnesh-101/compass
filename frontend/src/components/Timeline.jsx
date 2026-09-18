@@ -2,13 +2,18 @@ import React, { useState } from 'react'
 
 const KNOWN_FIELDS = new Set([
   'id', 'domain', 'project', 'timestamp', 'title', 'tags',
-  'countdown', 'vector_dim', 'description'
+  'countdown', 'vector_dim', 'description', 'notes'
 ])
 
+const DOMAIN_META = {
+  hackathon: { icon: '🚀', label: 'Hackathon' },
+  coursework: { icon: '📚', label: 'Coursework' },
+  code: { icon: '💻', label: 'Code' },
+  general: { icon: '🌐', label: 'General' },
+}
+
 function formatFieldLabel(key) {
-  return key
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, c => c.toUpperCase())
+  return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
 function formatFieldValue(value) {
@@ -20,8 +25,8 @@ function formatFieldValue(value) {
 
 function TaskDetailModal({ task, onClose }) {
   if (!task) return null
-
   const isOverdue = (task.countdown || '').toLowerCase().includes('overdue')
+  const notesOrDescription = task.notes || task.description
   const extraEntries = Object.entries(task).filter(([key, value]) => {
     if (KNOWN_FIELDS.has(key)) return false
     if (value === null || value === undefined || value === '') return false
@@ -32,136 +37,98 @@ function TaskDetailModal({ task, onClose }) {
     <div
       onClick={onClose}
       style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(2, 6, 15, 0.72)',
-        backdropFilter: 'blur(2px)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 1000,
-        padding: '20px'
+        position: 'fixed', inset: 0, background: 'rgba(31, 27, 46, 0.35)',
+        backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center',
+        justifyContent: 'center', zIndex: 1000, padding: '20px'
       }}
     >
       <div
         onClick={e => e.stopPropagation()}
         className={`card-${task.domain}`}
         style={{
-          background: '#111827',
-          borderRadius: '12px',
-          border: '1px solid #1f2937',
-          width: '100%',
-          maxWidth: '560px',
-          maxHeight: '85vh',
-          overflowY: 'auto',
-          padding: '24px',
-          boxShadow: '0 20px 60px rgba(0,0,0,0.5)'
+          background: 'var(--bg-card)', borderRadius: '16px', border: '1px solid var(--border)',
+          width: '100%', maxWidth: '560px', maxHeight: '85vh', overflowY: 'auto',
+          padding: '26px', boxShadow: 'var(--shadow-lg)'
         }}
       >
-        {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', gap: '12px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '18px', gap: '12px' }}>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-            <span className={`badge-${task.domain}`} style={{ fontSize: '10.5px', padding: '2px 7px', borderRadius: '5px', textTransform: 'uppercase', fontWeight: '700' }}>
+            <span className={`badge-${task.domain}`} style={{ fontSize: '10.5px', padding: '3px 10px', borderRadius: '20px', textTransform: 'uppercase', fontWeight: '700' }}>
               {task.domain}
             </span>
-            <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: '500' }}>
+            <span style={{ fontSize: '12.5px', color: 'var(--text-secondary)', fontWeight: '500' }}>
               • {task.project}
             </span>
           </div>
           <button
             onClick={onClose}
             style={{
-              background: '#1e293b',
-              border: '1px solid #334155',
-              color: '#94a3b8',
-              width: '26px',
-              height: '26px',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '14px',
-              lineHeight: 1,
-              flexShrink: 0
+              background: 'var(--bg-card-soft)', border: '1px solid var(--border)', color: 'var(--text-secondary)',
+              width: '28px', height: '28px', borderRadius: '50%', cursor: 'pointer',
+              fontSize: '14px', lineHeight: 1, flexShrink: 0
             }}
           >
             ✕
           </button>
         </div>
 
-        {/* Title */}
-        <div style={{ marginBottom: task.description ? '14px' : '18px' }}>
-          <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em', color: '#64748b', fontWeight: '700', marginBottom: '4px' }}>
+        <div style={{ marginBottom: notesOrDescription ? '14px' : '18px' }}>
+          <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', fontWeight: '700', marginBottom: '5px' }}>
             Title
           </div>
-          <div style={{ fontSize: '18px', fontWeight: '600', color: '#f8fafc', lineHeight: '1.4' }}>
+          <div style={{ fontSize: '19px', fontWeight: '700', color: 'var(--text-primary)', lineHeight: '1.4' }}>
             {task.title}
           </div>
         </div>
 
-        {/* Description — only renders when the backend actually provides one */}
-        {task.description && (
+        {notesOrDescription && (
           <div style={{ marginBottom: '18px' }}>
-            <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em', color: '#64748b', fontWeight: '700', marginBottom: '4px' }}>
-              Description
+            <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', fontWeight: '700', marginBottom: '5px' }}>
+              Notes
             </div>
-            <div style={{ fontSize: '13.5px', color: '#cbd5e1', lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>
-              {task.description}
+            <div style={{ fontSize: '14px', color: 'var(--text-secondary)', lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>
+              {notesOrDescription}
             </div>
           </div>
         )}
 
-        {/* Status Row */}
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '18px' }}>
           <div className={`countdown-badge ${isOverdue ? 'countdown-overdue' : ''}`}>
-            {isOverdue && '⚠️ '}
-            {task.countdown}
+            {isOverdue && '⚠️ '}{task.countdown}
           </div>
-          <div className="vector-tag">
-            {task.vector_dim || 768}-dim embedded
-          </div>
+          <div className="vector-tag">{task.vector_dim || 768}-dim embedded</div>
         </div>
 
-        {/* Core details grid */}
         <div style={{
-          display: 'grid',
-          gridTemplateColumns: '110px 1fr',
-          rowGap: '10px',
-          columnGap: '12px',
-          fontSize: '13px',
-          marginBottom: extraEntries.length ? '18px' : 0,
-          borderTop: '1px solid #1f2937',
-          paddingTop: '16px'
+          display: 'grid', gridTemplateColumns: '110px 1fr', rowGap: '10px', columnGap: '12px',
+          fontSize: '13px', marginBottom: extraEntries.length ? '18px' : 0,
+          borderTop: '1px solid var(--border-soft)', paddingTop: '16px'
         }}>
-          <div style={{ color: '#64748b' }}>ID</div>
-          <div style={{ color: '#e2e8f0', fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>{task.id}</div>
+          <div style={{ color: 'var(--text-muted)' }}>ID</div>
+          <div style={{ color: 'var(--text-primary)', fontFamily: "'JetBrains Mono', monospace", fontSize: '12px' }}>{task.id}</div>
 
-          <div style={{ color: '#64748b' }}>Logged</div>
-          <div style={{ color: '#e2e8f0' }}>{task.timestamp}</div>
+          <div style={{ color: 'var(--text-muted)' }}>Logged</div>
+          <div style={{ color: 'var(--text-primary)' }}>{task.timestamp}</div>
 
-          <div style={{ color: '#64748b' }}>Tags</div>
+          <div style={{ color: 'var(--text-muted)' }}>Tags</div>
           <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
             {(task.tags || []).length > 0 ? task.tags.map(tag => (
-              <span key={tag} style={{ fontSize: '10.5px', background: '#1e293b', color: '#94a3b8', padding: '2px 7px', borderRadius: '4px' }}>
+              <span key={tag} style={{ fontSize: '10.5px', background: 'var(--bg-card-soft)', color: 'var(--text-secondary)', padding: '2px 9px', borderRadius: '20px', border: '1px solid var(--border)' }}>
                 #{tag}
               </span>
-            )) : <span style={{ color: '#64748b' }}>—</span>}
+            )) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
           </div>
         </div>
 
-        {/* Any additional fields present on the task object */}
         {extraEntries.length > 0 && (
           <div style={{
-            display: 'grid',
-            gridTemplateColumns: '110px 1fr',
-            rowGap: '10px',
-            columnGap: '12px',
-            fontSize: '13px',
-            borderTop: '1px solid #1f2937',
-            paddingTop: '16px'
+            display: 'grid', gridTemplateColumns: '110px 1fr', rowGap: '10px', columnGap: '12px',
+            fontSize: '13px', borderTop: '1px solid var(--border-soft)', paddingTop: '16px'
           }}>
             {extraEntries.map(([key, value]) => (
               <React.Fragment key={key}>
-                <div style={{ color: '#64748b' }}>{formatFieldLabel(key)}</div>
-                <div style={{ color: '#e2e8f0', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                <div style={{ color: 'var(--text-muted)' }}>{formatFieldLabel(key)}</div>
+                <div style={{ color: 'var(--text-primary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                   {formatFieldValue(value)}
                 </div>
               </React.Fragment>
@@ -176,66 +143,53 @@ function TaskDetailModal({ task, onClose }) {
 export default function Timeline({ tasks, activeDomain, onSelectDomain }) {
   const [selectedTask, setSelectedTask] = useState(null)
   const filtered = activeDomain === 'all' ? tasks : tasks.filter(t => t.domain === activeDomain)
+  const today = new Date().toLocaleDateString('en-US', { weekday: 'long' })
 
   return (
-    <div style={{ padding: '20px', overflowY: 'auto', flex: 1, minWidth: 0 }}>
-      {/* Header & Filter Bar */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', flexWrap: 'wrap', gap: '10px' }}>
-        <div>
-          <h2 style={{ fontSize: '17px', fontWeight: '600', color: '#f8fafc', letterSpacing: '-0.2px' }}>
-            Synchronized Context Stream
-          </h2>
-          <p style={{ fontSize: '12px', color: '#64748b' }}>
-            Multi-domain vector memory logs synced from CLI and backend
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: '6px' }}>
-          {['all', 'hackathon', 'coursework', 'code', 'general'].map(dom => (
-            <button
-              key={dom}
-              onClick={() => onSelectDomain(dom)}
-              style={{
-                padding: '5px 11px',
-                borderRadius: '6px',
-                fontSize: '11.5px',
-                background: activeDomain === dom ? '#334155' : '#1e293b',
-                border: activeDomain === dom ? '1px solid #475569' : '1px solid #1e293b',
-                color: activeDomain === dom ? '#fff' : '#94a3b8',
-                cursor: 'pointer',
-                textTransform: 'capitalize',
-                fontWeight: '500',
-                transition: 'all 0.15s ease'
-              }}>
-              {dom}
-            </button>
-          ))}
-        </div>
+    <div style={{ padding: '32px 36px', overflowY: 'auto', flex: 1, minWidth: 0, background: 'var(--bg-app)' }}>
+      {/* Header */}
+      <div style={{ marginBottom: '26px' }}>
+        <h2 style={{ fontSize: '30px', fontWeight: '800', color: 'var(--text-primary)', letterSpacing: '-0.5px' }}>
+          Timeline Feed <span className="serif-accent" style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>— {today}</span>
+        </h2>
+        <p style={{ fontSize: '14px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+          What's happening across your workspace today
+        </p>
+      </div>
+
+      {/* Filter pills */}
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '24px', flexWrap: 'wrap' }}>
+        {['all', 'hackathon', 'coursework', 'code', 'general'].map(dom => (
+          <button
+            key={dom}
+            onClick={() => onSelectDomain(dom)}
+            className={`filter-pill ${activeDomain === dom ? 'active' : ''}`}
+          >
+            {dom}
+          </button>
+        ))}
       </div>
 
       {/* Task Stream Feed */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', maxWidth: '760px' }}>
         {filtered.length === 0 ? (
           <div style={{
-            padding: '40px 20px',
-            textAlign: 'center',
-            background: '#111827',
-            borderRadius: '10px',
-            border: '1px dashed #334155',
-            color: '#94a3b8',
-            marginTop: '10px'
+            padding: '48px 20px', textAlign: 'center', background: 'var(--bg-card)',
+            borderRadius: '16px', border: '1px dashed var(--border)', color: 'var(--text-secondary)'
           }}>
-            <div style={{ fontSize: '28px', marginBottom: '10px' }}>📭</div>
-            <div style={{ fontSize: '15px', fontWeight: '600', color: '#f8fafc', marginBottom: '6px' }}>
+            <div style={{ fontSize: '30px', marginBottom: '10px' }}>📭</div>
+            <div style={{ fontSize: '16px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '6px' }}>
               No tasks found
             </div>
-            <div style={{ fontSize: '12px', color: '#64748b' }}>
+            <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
               {activeDomain === 'all'
-                ? "Your memory stream is clear. Add tasks via CLI ('compass add ...') or in the Chat tab."
+                ? "Your workspace is clear. Add tasks via CLI ('compass add ...') or in the Chat tab."
                 : `No active tasks found under ${activeDomain.toUpperCase()} domain.`}
             </div>
           </div>
         ) : filtered.map(task => {
           const isOverdue = (task.countdown || '').toLowerCase().includes('overdue')
+          const meta = DOMAIN_META[task.domain] || DOMAIN_META.general
 
           return (
             <div
@@ -244,64 +198,48 @@ export default function Timeline({ tasks, activeDomain, onSelectDomain }) {
               onClick={() => setSelectedTask(task)}
               role="button"
               tabIndex={0}
-              onKeyDown={e => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault()
-                  setSelectedTask(task)
-                }
-              }}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedTask(task) } }}
               style={{
-                background: '#111827',
-                padding: '16px',
-                borderRadius: '10px',
-                border: '1px solid #1f2937',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'flex-start',
-                gap: '14px',
+                background: 'var(--bg-card)', padding: '20px', borderRadius: '16px',
+                border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)',
                 cursor: 'pointer'
               }}>
-              {/* Left Column: Domain Badge, Project, Timestamp, Title, Tags */}
-              <div style={{ flex: 1, minWidth: '180px' }}>
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap' }}>
-                  <span className={`badge-${task.domain}`} style={{ fontSize: '10.5px', padding: '2px 7px', borderRadius: '5px', textTransform: 'uppercase', fontWeight: '700' }}>
-                    {task.domain}
-                  </span>
-                  <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: '500' }}>
-                    • {task.project}
-                  </span>
-                  <span style={{ fontSize: '11px', color: '#64748b' }}>
-                    • {task.timestamp}
-                  </span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '14px', marginBottom: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{
+                    width: '38px', height: '38px', borderRadius: '10px',
+                    background: 'var(--bg-card-soft)', border: '1px solid var(--border)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '17px', flexShrink: 0
+                  }}>
+                    {meta.icon}
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '13.5px', fontWeight: '700', color: 'var(--text-primary)' }}>{task.project}</div>
+                    <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>{task.timestamp}</div>
+                  </div>
                 </div>
+                <span className={`badge-${task.domain}`} style={{ fontSize: '10.5px', padding: '3px 10px', borderRadius: '20px', textTransform: 'uppercase', fontWeight: '700', flexShrink: 0 }}>
+                  {meta.label}
+                </span>
+              </div>
 
-                <div style={{ fontSize: '14px', fontWeight: '500', color: '#f8fafc', marginBottom: '10px', lineHeight: '1.4' }}>
-                  {task.title}
-                </div>
+              <div style={{ fontSize: '15px', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '14px', lineHeight: '1.5' }}>
+                {task.title}
+              </div>
 
-                <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                   {(task.tags || []).map(tag => (
-                    <span key={tag} style={{ fontSize: '10.5px', background: '#1e293b', color: '#94a3b8', padding: '2px 7px', borderRadius: '4px' }}>
+                    <span key={tag} style={{ fontSize: '10.5px', background: 'var(--bg-card-soft)', color: 'var(--text-secondary)', padding: '3px 9px', borderRadius: '20px', border: '1px solid var(--border)' }}>
                       #{tag}
                     </span>
                   ))}
                 </div>
-              </div>
-
-              {/* Right Column: Countdown Badge & Dimension Tag (Guaranteed Right-Aligned, Non-Wrapping) */}
-              <div style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'flex-end',
-                flexShrink: 0,
-                whiteSpace: 'nowrap'
-              }}>
-                <div className={`countdown-badge ${isOverdue ? 'countdown-overdue' : ''}`} style={{ marginBottom: '6px', whiteSpace: 'nowrap' }}>
-                  {isOverdue && '⚠️ '}
-                  {task.countdown}
-                </div>
-                <div className="vector-tag" style={{ whiteSpace: 'nowrap' }}>
-                  {task.vector_dim || 768}-dim embedded
+                <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexShrink: 0 }}>
+                  <div className={`countdown-badge ${isOverdue ? 'countdown-overdue' : ''}`}>
+                    {isOverdue && '⚠️ '}{task.countdown}
+                  </div>
+                  <div className="vector-tag">{task.vector_dim || 768}-dim</div>
                 </div>
               </div>
             </div>
