@@ -21,10 +21,16 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U compass -d compass"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://compass:compass@localhost:5432/compass
+      AUTH_TOKEN: dev-token
+      NEBIUS_API_KEY: ${{ secrets.NEBIUS_API_KEY || '' }}
+      COMPASS_API_URL: http://127.0.0.1:8000
 
     steps:
       - name: Checkout repository
@@ -51,10 +57,41 @@ jobs:
         run: |
           PGPASSWORD=compass psql -h localhost -U compass -d compass -f backend/memory/schema.sql
 
+      - name: Start FastAPI backend
+        run: |
+          nohup uvicorn backend.main:app --host 127.0.0.1 --port 8000 > backend.log 2>&1 &
+          echo $! > backend.pid
+
+      - name: Wait for backend to become healthy
+        run: |
+          for i in $(seq 1 30); do
+            if curl --silent --fail http://127.0.0.1:8000/health > /dev/null; then
+              echo "Backend is healthy after ${i} attempt(s)."
+              exit 0
+            fi
+            echo "Waiting for backend to become healthy... (attempt ${i}/30)"
+            sleep 2
+          done
+          echo "::error::Backend failed to become healthy within the timeout."
+          echo "----- backend.log -----"
+          cat backend.log || echo "(no backend.log produced)"
+          exit 1
+
       - name: Run Test Suite
         env:
-          DATABASE_URL: postgresql://compass:compass@localhost:5432/compass
-          AUTH_TOKEN: dev-token
-          NEBIUS_API_KEY: ${{ secrets.NEBIUS_API_KEY || 'mock-key' }}
+          COMPASS_API_URL: http://127.0.0.1:8000
         run: |
           pytest tests/ -v
+
+      - name: Dump backend logs on failure
+        if: failure()
+        run: |
+          echo "----- backend.log -----"
+          cat backend.log || echo "(no backend.log produced)"
+
+      - name: Stop backend
+        if: always()
+        run: |
+          if [ -f backend.pid ]; then
+            kill "$(cat backend.pid)" 2>/dev/null || true
+          fi
