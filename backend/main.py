@@ -692,6 +692,7 @@ class FrontendTaskOut(BaseModel):
     scheduled_end: Optional[str] = None
     is_fixed: bool = False
     description: Optional[str] = None
+    due_date: Optional[str] = None  # ISO date string (YYYY-MM-DD), for edit pre-fill
 
 
 def _format_countdown(due_date: Optional[date]) -> str:
@@ -755,6 +756,7 @@ async def get_frontend_tasks(domain: Optional[str] = Query(None)):
                         scheduled_end=s_end.isoformat() if hasattr(s_end, "isoformat") else (str(s_end) if s_end else None),
                         is_fixed=bool(t.get("is_fixed", False)),
                         description=t.get("notes") or t.get("description"),
+                        due_date=due_d.isoformat() if hasattr(due_d, "isoformat") else (str(due_d) if due_d else None),
                     )
                 )
             return result
@@ -887,6 +889,110 @@ async def create_frontend_task(req: CreateTaskRequest):
             duration_minutes=int(req.duration_minutes or 60),
             description=req.notes,
         )
+
+
+class UpdateTaskRequest(BaseModel):
+    title: Optional[str] = None
+    domain: Optional[str] = None
+    project: Optional[str] = None
+    due_date: Optional[str] = None
+    priority: Optional[str] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+    duration_minutes: Optional[int] = None
+
+
+@app.patch("/api/tasks/{task_id}", response_model=FrontendTaskOut)
+@app.put("/api/tasks/{task_id}", response_model=FrontendTaskOut)
+async def update_frontend_task(task_id: str, req: UpdateTaskRequest, request: Request):
+    """Direct user endpoint to edit any field of a task/deadline without relying on AI chat."""
+    try:
+        numeric_id = int(task_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid task ID")
+
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            existing = await structured.get_task(conn, numeric_id)
+            if not existing:
+                raise HTTPException(status_code=404, detail="Task not found")
+
+            # Build update kwargs — only include provided fields
+            update_kwargs: dict = {}
+
+            if req.title is not None:
+                update_kwargs["title"] = req.title.strip()
+            if req.domain is not None:
+                update_kwargs["domain"] = req.domain.lower().strip()
+            if req.priority is not None:
+                update_kwargs["priority"] = req.priority
+            if req.status is not None:
+                update_kwargs["status"] = req.status
+            if req.notes is not None:
+                update_kwargs["notes"] = req.notes.strip() or None
+            if req.duration_minutes is not None:
+                update_kwargs["duration_minutes"] = req.duration_minutes
+
+            # Handle due_date string → date conversion
+            if req.due_date is not None:
+                if req.due_date == "" or req.due_date.lower() == "null":
+                    update_kwargs["due_date"] = None
+                else:
+                    try:
+                        from datetime import date as _date
+                        update_kwargs["due_date"] = _date.fromisoformat(req.due_date)
+                    except ValueError:
+                        raise HTTPException(status_code=400, detail=f"Invalid due_date format: {req.due_date}")
+
+            # Handle project rename: resolve or create project
+            if req.project is not None:
+                proj_name = req.project.strip() or "General"
+                dom_for_proj = update_kwargs.get("domain") or existing.get("domain", "general")
+                proj_row = await structured.get_or_create_project(conn, proj_name, dom_for_proj)
+                update_kwargs["project_id"] = proj_row.get("id")
+
+            updated = await structured.update_task(conn, numeric_id, **update_kwargs)
+            if not updated:
+                raise HTTPException(status_code=500, detail="Failed to update task")
+
+            # Reformat into FrontendTaskOut
+            proj_data = updated.get("project") or {}
+            proj_name_out = proj_data.get("name", "General") if proj_data else "General"
+            due_d = updated.get("due_date")
+            countdown_str = _format_countdown(due_d)
+            created_at = updated.get("created_at")
+            if isinstance(created_at, (datetime, date)):
+                ts_str = created_at.strftime("%b %d, %H:%M")
+            else:
+                ts_str = "Recently"
+
+            tags = [updated.get("domain", "task")]
+            if proj_name_out and proj_name_out != "General":
+                tags.append(proj_name_out.lower().replace(" ", "-"))
+            if updated.get("priority") == "urgent":
+                tags.append("urgent")
+
+            return FrontendTaskOut(
+                id=str(updated["id"]),
+                title=updated["title"],
+                domain=updated.get("domain", "general"),
+                project=proj_name_out,
+                countdown=countdown_str,
+                tags=tags,
+                vector_dim=768,
+                timestamp=ts_str,
+                priority=updated.get("priority", "medium"),
+                status=updated.get("status", "open"),
+                duration_minutes=int(updated.get("duration_minutes") or 60),
+                description=updated.get("notes") or updated.get("description"),
+                due_date=due_d.isoformat() if hasattr(due_d, "isoformat") else (str(due_d) if due_d else None),
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"DB unavailable for task update: {e}")
+        raise HTTPException(status_code=503, detail="Database unavailable")
 
 
 @app.delete("/api/tasks/{task_id}")

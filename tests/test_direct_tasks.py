@@ -95,3 +95,44 @@ async def test_direct_delete_mock_or_demo_id(client: AsyncClient):
     assert resp.status_code == 200
     data = resp.json()
     assert data["deleted"] is True
+
+
+@pytest.mark.asyncio
+async def test_direct_update_task_patch(client: AsyncClient):
+    """Updating task fields via PATCH /api/tasks/{task_id} reflects new values."""
+    create_payload = {
+        "title": "Initial Title",
+        "domain": "code",
+        "project": "Refactor",
+        "due_date": "2026-10-10",
+        "priority": "low",
+        "notes": "Original notes"
+    }
+    create_resp = await client.post("/api/tasks", json=create_payload)
+    assert create_resp.status_code == 200
+    task_id = create_resp.json()["id"]
+
+    if str(task_id).isdigit():
+        patch_payload = {
+            "title": "Updated Title via PATCH",
+            "priority": "urgent",
+            "notes": "Updated description",
+            "due_date": "2026-11-20"
+        }
+        patch_resp = await client.patch(f"/api/tasks/{task_id}", json=patch_payload)
+        assert patch_resp.status_code == 200
+        patched_data = patch_resp.json()
+        assert patched_data["title"] == "Updated Title via PATCH"
+        assert patched_data["priority"] == "urgent"
+        assert patched_data["description"] == "Updated description"
+        assert patched_data["due_date"] == "2026-11-20"
+
+        await client.delete(f"/api/tasks/{task_id}")
+
+
+@pytest.mark.asyncio
+async def test_direct_update_task_invalid_id(client: AsyncClient):
+    """Updating a non-numeric task ID returns 400."""
+    resp = await client.patch("/api/tasks/invalid-id", json={"title": "New Title"})
+    assert resp.status_code == 400
+

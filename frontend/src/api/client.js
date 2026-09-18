@@ -430,3 +430,20 @@ export async function deleteTask(taskId) {
   return await res.json()
 }
 
+/**
+ * Update/edit any property of a task or deadline directly.
+ */
+export async function updateTask(taskId, updateData) {
+  const res = await fetch(`${API_BASE}/api/tasks/${taskId}`, {
+    method: 'PATCH',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(updateData),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || `Failed to update deadline (HTTP ${res.status})`)
+  }
+  return await res.json()
+}
+
+
