@@ -16,6 +16,8 @@ export default function NorthstarPanel({
   tasks = [],
   backendStatus = 'Live • Neon Connected',
   onSelectTab,
+  pendingPrompt,
+  onClearPendingPrompt,
 }) {
   const [activeSubTab, setActiveSubTab] = useState(initialSubTab)
 
@@ -24,6 +26,12 @@ export default function NorthstarPanel({
       setActiveSubTab(initialSubTab)
     }
   }, [initialSubTab])
+
+  useEffect(() => {
+    if (pendingPrompt) {
+      setActiveSubTab('assistant')
+    }
+  }, [pendingPrompt])
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100vh', minWidth: 0, overflow: 'hidden', background: 'var(--bg-app)' }}>
@@ -126,6 +134,8 @@ export default function NorthstarPanel({
             onChatComplete={onChatComplete}
             tasks={tasks}
             backendStatus={backendStatus}
+            initialPrompt={pendingPrompt}
+            onClearInitialPrompt={onClearPendingPrompt}
           />
         ) : activeSubTab === 'planner' ? (
           <AgentPanel

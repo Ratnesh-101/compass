@@ -50,6 +50,7 @@ export default function App() {
     }
   ])
   const [isTyping, setIsTyping] = useState(false)
+  const [pendingPrompt, setPendingPrompt] = useState(null)
 
   // Keep a ref to the latest tasks state for stable diffing without triggering interval re-creations
   const tasksRef = useRef([])
@@ -224,6 +225,10 @@ export default function App() {
               loadTasks(selectedDomain)
               refreshUsage()
             }}
+            onOpenNorthstar={(prompt) => {
+              setActiveTab('northstar')
+              setPendingPrompt(prompt)
+            }}
           />
         ) : activeTab === 'calendar' ? (
           <CalendarView
@@ -258,6 +263,8 @@ export default function App() {
               refreshUsage()
             }}
             onSelectTab={setActiveTab}
+            pendingPrompt={pendingPrompt}
+            onClearPendingPrompt={() => setPendingPrompt(null)}
           />
         )}
       </main>

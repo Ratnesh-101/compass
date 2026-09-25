@@ -39,7 +39,7 @@ function formatFieldValue(value) {
   return String(value)
 }
 
-function AddDeadlineModal({ isOpen, onClose, onCreated, defaultDomain }) {
+function AddDeadlineModal({ isOpen, onClose, onCreated, defaultDomain, tasks = [], onOpenNorthstar }) {
   const [title, setTitle] = useState('')
   const [domain, setDomain] = useState('general')
   const [customDomain, setCustomDomain] = useState('')
@@ -68,11 +68,103 @@ function AddDeadlineModal({ isOpen, onClose, onCreated, defaultDomain }) {
 
   if (!isOpen) return null
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-    const cleanTitle = title.trim()
-    if (!cleanTitle) {
+  const cleanTitle = title.trim().toLowerCase()
+  const cleanDate = dueDate || null
+
+  // Exact duplicate: same title (case-insensitive) AND exact same date (or both unscheduled), not done
+  const exactMatch = cleanTitle ? (tasks || []).find(t =>
+    (t.title || '').trim().toLowerCase() === cleanTitle &&
+    (t.status || 'open') !== 'done' &&
+    ((t.due_date || null) === cleanDate)
+  ) : null
+
+  // Same name match: same title, but different date or unscheduled, not done
+  const sameNameMatch = (!exactMatch && cleanTitle) ? (tasks || []).find(t =>
+    (t.title || '').trim().toLowerCase() === cleanTitle &&
+    (t.status || 'open') !== 'done'
+  ) : null
+
+  const handleAskNorthstar = (customPrompt) => {
+    const trimmedTitle = title.trim()
+    const defaultPrompt = trimmedTitle
+      ? `Look into my schedules and check if adding deadline "${trimmedTitle}"${dueDate ? ` due ${dueDate}` : ''} conflicts with existing commitments or if schedules need adjusting.`
+      : `Look into my schedules and upcoming deadlines, check for any conflicts or overloaded days, and suggest optimizations.`
+    const promptToSend = customPrompt || defaultPrompt
+    onClose()
+    if (onOpenNorthstar) {
+      onOpenNorthstar(promptToSend)
+    }
+  }
+
+  const handleShiftDeadline = async () => {
+    if (!sameNameMatch) return
+    if (!dueDate) {
+      setError('Please select a deadline date above to shift this deadline to.')
+      return
+    }
+    setLoading(true)
+    setError(null)
+    try {
+      await updateTask(sameNameMatch.id, {
+        due_date: dueDate,
+        priority: priority || sameNameMatch.priority,
+        notes: notes.trim() ? `${sameNameMatch.description || ''}\n${notes.trim()}`.trim() : sameNameMatch.description
+      })
+      if (onCreated) onCreated()
+      onClose()
+    } catch (err) {
+      setError(err.message || 'Failed to shift existing deadline.')
+      setLoading(false)
+    }
+  }
+
+  const handleCreateDifferentThing = async () => {
+    const trimmedTitle = title.trim()
+    if (!trimmedTitle) {
       setError('Please enter a deadline title.')
+      return
+    }
+    let finalDomain = domain
+    if (domain === 'other') {
+      const cleanCustom = customDomain.trim().toLowerCase().replace(/\s+/g, '-')
+      finalDomain = cleanCustom || 'other'
+    }
+    setLoading(true)
+    setError(null)
+    try {
+      await createTask({
+        title: trimmedTitle,
+        domain: finalDomain,
+        project: project.trim() || 'General',
+        due_date: dueDate || null,
+        priority,
+        duration_minutes: Number(duration) || 60,
+        notes: notes.trim() ? `${notes.trim()} (Distinct item)` : '(Distinct item)',
+        allow_different_thing: true,
+      })
+      if (onCreated) onCreated()
+      onClose()
+    } catch (err) {
+      setError(err.message || 'Failed to create separate deadline.')
+      setLoading(false)
+    }
+  }
+
+  const handleSubmit = async (e) => {
+    if (e) e.preventDefault()
+    const trimmedTitle = title.trim()
+    if (!trimmedTitle) {
+      setError('Please enter a deadline title.')
+      return
+    }
+
+    if (exactMatch) {
+      setError(`Cannot add duplicate deadline: An identical deadline titled "${exactMatch.title}" scheduled for ${exactMatch.due_date || 'unscheduled'} already exists.`)
+      return
+    }
+
+    if (sameNameMatch) {
+      setError(`A deadline titled "${sameNameMatch.title}" already exists. Please choose whether to shift the deadline or if it is for a completely different thing below.`)
       return
     }
 
@@ -86,7 +178,7 @@ function AddDeadlineModal({ isOpen, onClose, onCreated, defaultDomain }) {
     setError(null)
     try {
       await createTask({
-        title: cleanTitle,
+        title: trimmedTitle,
         domain: finalDomain,
         project: project.trim() || 'General',
         due_date: dueDate || null,
@@ -139,7 +231,7 @@ function AddDeadlineModal({ isOpen, onClose, onCreated, defaultDomain }) {
               ➕ Add New Deadline
             </h3>
             <p style={{ fontSize: '12.5px', color: 'var(--text-secondary)', margin: '4px 0 0' }}>
-              Create a standalone deadline without relying on AI chat
+              Create a standalone deadline, or ask Northstar to look into schedules & resolve conflicts
             </p>
           </div>
           <button
@@ -397,46 +489,206 @@ function AddDeadlineModal({ isOpen, onClose, onCreated, defaultDomain }) {
             />
           </div>
 
+          {/* Exact Duplicate Warning */}
+          {exactMatch && (
+            <div style={{
+              padding: '12px 14px',
+              borderRadius: '10px',
+              background: 'rgba(239, 68, 68, 0.12)',
+              border: '1px solid rgba(239, 68, 68, 0.35)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px',
+              marginTop: '4px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#f87171', fontWeight: '700', fontSize: '13px' }}>
+                <span>🚫</span>
+                <span>Exact Duplicate Deadline</span>
+              </div>
+              <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                A deadline titled <strong>"{exactMatch.title}"</strong> is already scheduled for <strong>{exactMatch.due_date || 'unscheduled'}</strong> ({exactMatch.domain}). You cannot add the exact same deadline multiple times.
+              </p>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '2px' }}>
+                <button
+                  type="button"
+                  id="btn-northstar-fix-exact"
+                  onClick={() => handleAskNorthstar(`I have an existing deadline titled "${exactMatch.title}" scheduled for ${exactMatch.due_date || 'unscheduled'}. Can you look into my schedules, check for duplicate commitments or conflicts, and tell me how to resolve this?`)}
+                  style={{
+                    padding: '7px 13px',
+                    borderRadius: '8px',
+                    background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.25) 0%, rgba(99, 102, 241, 0.25) 100%)',
+                    border: '1px solid rgba(139, 92, 246, 0.5)',
+                    color: '#c084fc',
+                    fontSize: '12px',
+                    fontWeight: '700',
+                    cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: '6px'
+                  }}
+                >
+                  <span>🧭</span>
+                  <span>Ask Northstar to Look into Schedules & Fix It</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Same Name Warning */}
+          {sameNameMatch && (
+            <div style={{
+              padding: '12px 14px',
+              borderRadius: '10px',
+              background: 'rgba(245, 166, 35, 0.1)',
+              border: '1px solid rgba(245, 166, 35, 0.35)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px',
+              marginTop: '4px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#fbbf24', fontWeight: '700', fontSize: '13px' }}>
+                <span>⚠️</span>
+                <span>Existing Deadline with Same Name Found</span>
+              </div>
+              <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                You already have a deadline titled <strong>"{sameNameMatch.title}"</strong> scheduled for <strong>{sameNameMatch.due_date || 'unscheduled'}</strong> ({sameNameMatch.domain}).
+                <br />
+                Would you like to <strong>shift your existing deadline</strong> to <strong>{dueDate || '(choose date)'}</strong>, or is this for a <strong>completely different thing</strong>?
+              </p>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '4px' }}>
+                <button
+                  type="button"
+                  id="btn-shift-deadline"
+                  onClick={handleShiftDeadline}
+                  disabled={loading || !dueDate}
+                  style={{
+                    padding: '7px 13px',
+                    borderRadius: '8px',
+                    background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                    color: '#fff',
+                    border: 'none',
+                    fontSize: '12px',
+                    fontWeight: '700',
+                    cursor: (!dueDate || loading) ? 'not-allowed' : 'pointer',
+                    opacity: !dueDate ? 0.6 : 1,
+                    display: 'flex', alignItems: 'center', gap: '6px'
+                  }}
+                  title={!dueDate ? "Please pick a new deadline date above first" : `Shift existing deadline to ${dueDate}`}
+                >
+                  <span>📅</span>
+                  <span>Shift Existing Deadline {dueDate ? `to ${dueDate}` : '(Pick Date First)'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  id="btn-different-thing"
+                  onClick={handleCreateDifferentThing}
+                  disabled={loading}
+                  style={{
+                    padding: '7px 13px',
+                    borderRadius: '8px',
+                    background: 'var(--bg-card-soft)',
+                    border: '1px solid var(--border)',
+                    color: 'var(--text-primary)',
+                    fontSize: '12px',
+                    fontWeight: '600',
+                    cursor: loading ? 'not-allowed' : 'pointer',
+                    display: 'flex', alignItems: 'center', gap: '6px'
+                  }}
+                  title="Add as a separate deadline for a completely different item"
+                >
+                  <span>🔀</span>
+                  <span>Completely Different Thing</span>
+                </button>
+
+                <button
+                  type="button"
+                  id="btn-northstar-fix-samename"
+                  onClick={() => handleAskNorthstar(`I have an existing deadline titled "${sameNameMatch.title}" scheduled for ${sameNameMatch.due_date || 'unscheduled'}, and I want to add another deadline with the same name for ${dueDate || 'upcoming'}. Can you look into my schedules, check for conflicts, and help me decide whether to shift it or schedule it as a separate deliverable?`)}
+                  style={{
+                    padding: '7px 13px',
+                    borderRadius: '8px',
+                    background: 'rgba(139, 92, 246, 0.15)',
+                    border: '1px solid rgba(139, 92, 246, 0.4)',
+                    color: '#c084fc',
+                    fontSize: '12px',
+                    fontWeight: '700',
+                    cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: '6px'
+                  }}
+                >
+                  <span>🧭</span>
+                  <span>Ask Northstar to Fix It</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Form Actions */}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', marginTop: '12px', flexWrap: 'wrap' }}>
             <button
               type="button"
-              onClick={onClose}
+              id="btn-ask-northstar-schedule"
+              onClick={() => handleAskNorthstar()}
               style={{
-                padding: '9px 16px',
+                padding: '9px 14px',
                 borderRadius: '8px',
-                border: '1px solid var(--border)',
-                background: 'var(--bg-card-soft)',
-                color: 'var(--text-secondary)',
-                fontSize: '13px',
-                fontWeight: '500',
-                cursor: 'pointer'
-              }}
-            >
-              Cancel
-            </button>
-            <button
-              id="btn-submit-create-deadline"
-              type="submit"
-              disabled={loading}
-              style={{
-                padding: '9px 20px',
-                borderRadius: '8px',
-                border: 'none',
-                background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
-                color: '#ffffff',
-                fontSize: '13px',
+                background: 'rgba(139, 92, 246, 0.12)',
+                border: '1px solid rgba(139, 92, 246, 0.35)',
+                color: '#c084fc',
+                fontSize: '12.5px',
                 fontWeight: '700',
-                cursor: loading ? 'not-allowed' : 'pointer',
-                opacity: loading ? 0.7 : 1,
-                boxShadow: '0 4px 12px rgba(37, 99, 235, 0.4)',
+                cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '8px'
+                gap: '6px'
               }}
+              title="Ask Northstar AI to analyze schedules and resolve conflicts before adding"
             >
-              {loading ? 'Creating...' : '+ Create Deadline'}
+              <span>🧭</span>
+              <span>Ask Northstar to Look into Schedules</span>
             </button>
+
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                type="button"
+                onClick={onClose}
+                style={{
+                  padding: '9px 16px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border)',
+                  background: 'var(--bg-card-soft)',
+                  color: 'var(--text-secondary)',
+                  fontSize: '13px',
+                  fontWeight: '500',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                id="btn-submit-create-deadline"
+                type="submit"
+                disabled={loading || Boolean(exactMatch)}
+                style={{
+                  padding: '9px 20px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  background: exactMatch
+                    ? 'var(--bg-card-soft)'
+                    : 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+                  color: exactMatch ? 'var(--text-muted)' : '#ffffff',
+                  fontSize: '13px',
+                  fontWeight: '700',
+                  cursor: (loading || exactMatch) ? 'not-allowed' : 'pointer',
+                  opacity: loading || exactMatch ? 0.6 : 1,
+                  boxShadow: exactMatch ? 'none' : '0 4px 12px rgba(37, 99, 235, 0.4)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}
+              >
+                {loading ? 'Creating...' : exactMatch ? 'Duplicate Blocked' : '+ Create Deadline'}
+              </button>
+            </div>
           </div>
         </form>
       </div>
@@ -899,7 +1151,7 @@ function TaskDetailModal({ task, onClose, onDelete, onUpdated }) {
   )
 }
 
-export default function Timeline({ tasks, activeDomain, onSelectDomain, onTasksUpdated }) {
+export default function Timeline({ tasks, activeDomain, onSelectDomain, onTasksUpdated, onOpenNorthstar }) {
   const [selectedTask, setSelectedTask] = useState(null)
   const [showAddModal, setShowAddModal] = useState(false)
   const filtered = activeDomain === 'all' ? tasks : tasks.filter(t => t.domain === activeDomain)
@@ -1250,6 +1502,8 @@ export default function Timeline({ tasks, activeDomain, onSelectDomain, onTasksU
         onClose={() => setShowAddModal(false)}
         onCreated={onTasksUpdated}
         defaultDomain={activeDomain}
+        tasks={tasks}
+        onOpenNorthstar={onOpenNorthstar}
       />
     </div>
   )

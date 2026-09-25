@@ -18,7 +18,7 @@ function getTimeGreeting() {
 
 export default function ChatPanel({
   messages, setMessages, conversationId, setConversationId, onSendMessage, isTyping, onChatComplete,
-  tasks = [], backendStatus = ''
+  tasks = [], backendStatus = '', initialPrompt = null, onClearInitialPrompt = null
 }) {
   const [input, setInput] = useState('')
   const [streamingText, setStreamingText] = useState('')
@@ -230,6 +230,14 @@ export default function ChatPanel({
       }
     }
   }
+
+  useEffect(() => {
+    if (initialPrompt && initialPrompt.trim()) {
+      const promptToRun = initialPrompt.trim()
+      if (onClearInitialPrompt) onClearInitialPrompt()
+      handleSend(promptToRun)
+    }
+  }, [initialPrompt])
 
   const handleSubmit = (e) => {
     e.preventDefault()
