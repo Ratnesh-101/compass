@@ -18,7 +18,7 @@ TEST_DATABASE_URL="postgresql://..." python -m pytest tests -v
 **Verified result** (pytest --collect-only, Python 3.12, against Neon test branch):
 
 ```
-193 tests collected
+195 tests collected
 ```
 
 The CI pipeline (`ci.yml`) also runs `--collect-only` before the full run to surface this count in every CI log.
@@ -37,7 +37,7 @@ The CI pipeline (`ci.yml`) also runs `--collect-only` before the full run to sur
 | `test_feasibility.py` | 10 | Capacity arithmetic, triage, negotiation caps |
 | `test_cli.py` | 9 | CLI commands, REPL, config, triage |
 | `test_specialist_agent.py` | 8 | Domain specialists, delegation, read-only enforcement |
-| `test_direct_tasks.py` | 7 | Task CRUD, status transitions, demo ID protection |
+| `test_direct_tasks.py` | 9 | Task CRUD, status transitions, duplicate prevention, same-name shift/confirm |
 | `test_google_calendar_auth.py` | 6 | OAuth flow, token encryption, account isolation |
 | `test_chat_gate.py` | 5 | Chat confirmation gate behavior and state checks |
 | `test_specialist_confirm_gate.py` | 4 | Mutation gate via specialist path |
@@ -47,7 +47,7 @@ The CI pipeline (`ci.yml`) also runs `--collect-only` before the full run to sur
 | `test_structured_memory.py` | 3 | pgvector migration, HNSW indexing |
 | `test_multi_turn.py` | 1 | Multi-turn conversational memory |
 | `test_streaming.py` | 1 | SSE token streaming |
-| **Total** | **193** | **20 test suites** |
+| **Total** | **195** | **20 test suites** |
 
 ## Test Infrastructure
 

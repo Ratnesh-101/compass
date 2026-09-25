@@ -264,7 +264,7 @@ Open [http://localhost:5173](http://localhost:5173). All visitors receive an iso
 
 ## Testing
 
-Compass has **193 automated tests** (verified by pytest collection across 20 test suites including security hardening) against a live PostgreSQL + pgvector instance.
+Compass has **195 automated tests** (verified by pytest collection across 20 test suites including security hardening) against a live PostgreSQL + pgvector instance.
 
 ```bash
 # Set a test database first

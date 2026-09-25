@@ -73,7 +73,7 @@ Compass is an autonomous productivity agent and conversational copilot with pers
 3. **Safe Autonomous Agent Mutations**: Multi-step agents can easily corrupt user data if allowed to run mutations unchecked. We engineered a strict Human-in-the-Loop confirmation gate with state recovery and audit logging (`agent_audit_log`) supporting full 1-click undo.
 
 #### Accomplishments That We're Proud Of
-- **193 Automated Tests**: 193 automated tests across 20 test suites verifying memory, agent loops, security hardening, endpoints, and CLI commands.
+- **195 Automated Tests**: 195 automated tests across 20 test suites verifying memory, agent loops, security hardening, endpoints, and CLI commands.
 - **Blended Model Economics**: Squeezed 106 full-turn evaluations into just **$0.019** on Nebius Token Factory by dispatching 85% of queries to Nano and PostgreSQL directly.
 - **Zero-Friction Evaluation**: Judges can immediately use the live web app and API without setting up accounts or providing API keys.
 - **ChatGPT-Quality UX**: Complete chat management with sidebar context menus and instant shareable public links.
@@ -226,6 +226,6 @@ Rather than forcing users to treat Chat and Agent Planner as two competing AI de
 2. **Specialist Multi-Agent Layer**: Dedicated experts with scoped toolkits and system prompts.
 3. **ChatGPT-Style Session Management**: Pin, rename, archive, and delete chats with interactive confirmation dialogs.
 4. **1-Click Public Sharing**: Instant unauthenticated share URLs (`/?share=<id>`) for public viewing with zero login barriers.
-5. **Full Test Suite & Zero Regressions**: All 193 automated tests passing against live PostgreSQL.
+5. **Full Test Suite & Zero Regressions**: All 195 automated tests passing against live PostgreSQL.
 ```
 
