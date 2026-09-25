@@ -5,9 +5,12 @@ Provides database access for chat conversations and message history in PostgreSQ
 """
 
 from typing import Optional, Union, List, Dict, Any
+import logging
 import uuid
 import asyncpg
 from asyncpg.pool import PoolConnectionProxy
+
+logger = logging.getLogger("compass.conversations")
 
 DbConn = Union[asyncpg.Connection, PoolConnectionProxy]
 
@@ -32,6 +35,28 @@ async def get_or_create_conversation(
                     cid
                 )
                 return str(row["id"])
+            else:
+                try:
+                    ins_row = await conn.fetchrow(
+                        """
+                        INSERT INTO conversations (id, title, user_id)
+                        VALUES ($1, $2, $3)
+                        RETURNING id
+                        """,
+                        cid, title, user_id
+                    )
+                    if ins_row:
+                        return str(ins_row["id"])
+                except Exception:
+                    try:
+                        ins_row = await conn.fetchrow(
+                            "INSERT INTO conversations (id) VALUES ($1) RETURNING id",
+                            cid
+                        )
+                        if ins_row:
+                            return str(ins_row["id"])
+                    except Exception:
+                        pass
         except (ValueError, TypeError):
             pass
 
@@ -281,7 +306,8 @@ async def update_conversation(
         query = f"UPDATE conversations SET {', '.join(updates)} WHERE id = $1"
         await conn.execute(query, *params)
         return True
-    except Exception:
+    except Exception as e:
+        logger.error(f"update_conversation failed: {e}", exc_info=True)
         return False
 
 
