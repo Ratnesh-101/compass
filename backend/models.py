@@ -280,7 +280,14 @@ class QuickConnectBody(BaseModel):
 
 
 class AddDependencyBody(BaseModel):
-    prerequisite_task_id: int
+    depends_on_task_id: Optional[int] = None
+    prerequisite_task_id: Optional[int] = None
+
+    def get_prerequisite_id(self) -> int:
+        val = self.depends_on_task_id if self.depends_on_task_id is not None else self.prerequisite_task_id
+        if val is None:
+            raise ValueError("Field depends_on_task_id or prerequisite_task_id is required")
+        return val
 
 
 class ReactiveCheckBody(BaseModel):

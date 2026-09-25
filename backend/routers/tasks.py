@@ -700,9 +700,13 @@ async def add_task_dependency_endpoint(task_id: int, body: AddDependencyBody):
     pool = await get_pool()
     if not pool:
         raise HTTPException(status_code=500, detail="Database unavailable")
+    try:
+        prereq_id = body.get_prerequisite_id()
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     async with pool.acquire() as conn:
         try:
-            dep = await structured.add_task_dependency(conn, task_id, body.depends_on_task_id)
+            dep = await structured.add_task_dependency(conn, task_id, prereq_id)
             return {"status": "ok", "dependency": dep}
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
