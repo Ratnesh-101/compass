@@ -40,6 +40,7 @@ def test_token_encryption_and_decryption():
     """Verify HMAC-authenticated encryption and decryption roundtrip."""
     secret_token = "ya29.a0AfH6SMD_real_live_google_access_token_12345"
     enc = encrypt_token(secret_token)
+    assert enc is not None
     assert enc.startswith("enc:")
     assert enc != secret_token
 
