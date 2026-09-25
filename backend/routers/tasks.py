@@ -632,7 +632,7 @@ async def update_frontend_task(task_id: str, req: UpdateTaskRequest, request: Re
 # ---- DELETE /api/tasks/{task_id} and DELETE /tasks/{task_id} ----------
 @router.delete("/api/tasks/{task_id}")
 @router.delete("/tasks/{task_id}")
-async def delete_frontend_task(task_id: str, request: Request = None):
+async def delete_frontend_task(task_id: str, request: Optional[Request] = None):
     """Direct user endpoint to delete a task or deadline without relying on AI chat."""
     try:
         numeric_id = int(task_id)
