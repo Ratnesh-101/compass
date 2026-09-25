@@ -384,6 +384,11 @@ async def create_frontend_task(request: Request, req: CreateTaskRequest):
                         priority=req.priority or target_task.get("priority", "medium"),
                         notes=req.notes or req.description or target_task.get("notes"),
                     )
+                    if not updated_row:
+                        raise HTTPException(
+                            status_code=404,
+                            detail="Task to shift was not found.",
+                        )
                     due_d = updated_row.get("due_date")
                     countdown_str = _format_countdown(due_d)
                     created_at = updated_row.get("created_at") or datetime.now()
