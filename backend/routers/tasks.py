@@ -513,7 +513,7 @@ async def create_frontend_task(request: Request, req: CreateTaskRequest):
             tags=[dom_clean],
             vector_dim=768,
             timestamp="Just now",
-            priority=req.priority,
+            priority=req.priority or "medium",
             status="open",
             duration_minutes=int(req.duration_minutes or 60),
             description=req.notes or req.description,
