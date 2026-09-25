@@ -443,7 +443,7 @@ async def create_frontend_task(request: Request, req: CreateTaskRequest):
             task_id = task_row["id"]
             if req.duration_minutes:
                 try:
-                    await structured.update_task(conn, task_id, duration_minutes=int(req.duration_minutes))
+                    await structured.update_task(conn, task_id, duration_minutes=req.duration_minutes)
                 except Exception as ex:
                     logger.debug(f"Could not update duration_minutes: {ex}")
 
@@ -492,7 +492,7 @@ async def create_frontend_task(request: Request, req: CreateTaskRequest):
                 timestamp=ts_str,
                 priority=task_row.get("priority", "medium"),
                 status=task_row.get("status", "open"),
-                duration_minutes=int(req.duration_minutes or 60),
+                duration_minutes=req.duration_minutes or 60,
                 scheduled_start=None,
                 scheduled_end=None,
                 is_fixed=False,
@@ -515,7 +515,7 @@ async def create_frontend_task(request: Request, req: CreateTaskRequest):
             timestamp="Just now",
             priority=req.priority or "medium",
             status="open",
-            duration_minutes=int(req.duration_minutes or 60),
+            duration_minutes=req.duration_minutes or 60,
             description=req.notes or req.description,
             due_date=parsed_date.isoformat() if parsed_date else None,
         )
