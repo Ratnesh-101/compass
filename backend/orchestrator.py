@@ -164,7 +164,7 @@ async def handle_message(
         if domain not in valid_domains:
             domain = "general"
 
-        task_record: Dict[str, Any] = {}
+        task_record: Optional[Dict[str, Any]] = None
         shift_existing = bool(args.get("shift_existing", False))
         allow_different_thing = bool(args.get("allow_different_thing", False))
         allow_duplicate = bool(args.get("allow_duplicate", False))
