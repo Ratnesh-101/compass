@@ -136,12 +136,13 @@ async def route_message(
     tools: Any = TOOLS
 
     try:
-        response = await client.chat.completions.create(
+        response: Any = await client.chat.completions.create(
             model=settings.ROUTER_MODEL,
             messages=messages,
             tools=tools,
             tool_choice="auto",
             max_tokens=1024,
+            stream=False,
         )
 
         from backend.services.usage import record_usage
