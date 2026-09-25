@@ -175,6 +175,9 @@ class CreateTaskRequest(BaseModel):
     scheduled_start: Optional[str] = None
     scheduled_end: Optional[str] = None
     is_fixed: Optional[bool] = False
+    shift_existing: Optional[bool] = False
+    allow_different_thing: Optional[bool] = False
+    allow_duplicate: Optional[bool] = False
 
 
 class UpdateTaskRequest(BaseModel):

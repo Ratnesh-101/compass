@@ -28,6 +28,67 @@ def get_openai_client() -> AsyncOpenAI:
     )
 
 
+def _extract_task_creation_args(message: str) -> dict:
+    """Extract title, domain, and due_date from an explicit task creation prompt."""
+    msg_lower = message.lower()
+    title = message
+    domain = "general"
+    due_date = None
+    for prefix in ("add a task:", "add task:", "add a task", "add task", "create task:"):
+        if prefix in msg_lower:
+            idx = msg_lower.find(prefix) + len(prefix)
+            title = message[idx:].strip()
+            break
+
+    # Extract due date if present (e.g. "due 2026-10-31" or "due: 2026-10-31")
+    if "due" in title.lower():
+        parts = title.split()
+        new_parts = []
+        skip_next = False
+        for idx, part in enumerate(parts):
+            if skip_next:
+                skip_next = False
+                continue
+            part_clean = part.lower().strip(",;:")
+            if part_clean.startswith("due=") or part_clean.startswith("due:"):
+                val = part.split("=", 1)[-1].split(":", 1)[-1].strip(",; ")
+                if val:
+                    due_date = val
+            elif part_clean == "due" and idx + 1 < len(parts):
+                due_date = parts[idx + 1].strip(",;:= ")
+                skip_next = True
+            else:
+                new_parts.append(part)
+        title = " ".join(new_parts).strip(" ,;")
+
+    if "domain" in title.lower():
+        parts = title.split()
+        new_parts = []
+        skip_next = False
+        for idx, part in enumerate(parts):
+            if skip_next:
+                skip_next = False
+                continue
+            part_clean = part.lower().strip(",;:")
+            if part_clean.startswith("domain=") or part_clean.startswith("domain:"):
+                val = part.split("=", 1)[-1].split(":", 1)[-1].strip(",; ")
+                if val:
+                    domain = val.lower()
+            elif part_clean == "domain" and idx + 1 < len(parts):
+                val = parts[idx + 1].strip(",;:= ")
+                if val:
+                    domain = val.lower()
+                    skip_next = True
+            else:
+                new_parts.append(part)
+        title = " ".join(new_parts).strip(" ,;")
+
+    res: dict[str, Any] = {"title": title, "domain": domain}
+    if due_date:
+        res["due_date"] = due_date
+    return res
+
+
 async def route_message(
     message: str,
     history: Optional[list[dict[str, str]]] = None,
@@ -90,6 +151,9 @@ async def route_message(
         record_usage(settings.ROUTER_MODEL, p_tok, c_tok)
 
         choice = response.choices[0]
+        msg_lower = message.lower()
+        is_explicit_add_task = any(term in msg_lower for term in ("add a task", "add task", "new task", "create task"))
+
         if choice.message.tool_calls:
             tc: Any = choice.message.tool_calls[0]
             func_name = getattr(getattr(tc, "function", None), "name", None) or getattr(tc, "name", "add_task")
@@ -101,42 +165,18 @@ async def route_message(
                 logger.warning(f"Failed to parse function arguments JSON ({e}): {raw_args}")
                 args = {"title": message}
 
+            # Guard against model misrouting an explicit task creation command to query_tasks
+            if func_name == "query_tasks" and is_explicit_add_task:
+                fallback_args = _extract_task_creation_args(message)
+                func_name = "add_task"
+                args = {**fallback_args, **{k: v for k, v in args.items() if k in ("domain", "due_date", "priority")}}
+
             logger.info(f"Router invoked tool: {func_name} with args: {args}")
             return func_name, args, ""
         else:
             # Fallback if model responded with conversational text to an explicit task creation command
-            msg_lower = message.lower()
-            if any(term in msg_lower for term in ("add a task", "add task", "new task", "create task")):
-                title = message
-                domain = "general"
-                for prefix in ("add a task:", "add task:", "add a task", "add task", "create task:"):
-                    if prefix in msg_lower:
-                        idx = msg_lower.find(prefix) + len(prefix)
-                        title = message[idx:].strip()
-                        break
-                if "domain" in title.lower():
-                    # Parse domain via token inspection to eliminate regular expression backtracking
-                    parts = title.split()
-                    new_parts = []
-                    skip_next = False
-                    for idx, part in enumerate(parts):
-                        if skip_next:
-                            skip_next = False
-                            continue
-                        part_clean = part.lower().strip(",;:")
-                        if part_clean.startswith("domain=") or part_clean.startswith("domain:"):
-                            val = part.split("=", 1)[-1].split(":", 1)[-1].strip(",; ")
-                            if val:
-                                domain = val.lower()
-                        elif part_clean == "domain" and idx + 1 < len(parts):
-                            val = parts[idx + 1].strip(",;:= ")
-                            if val:
-                                domain = val.lower()
-                                skip_next = True
-                        else:
-                            new_parts.append(part)
-                    title = " ".join(new_parts).strip(" ,;")
-                return "add_task", {"title": title, "domain": domain}, ""
+            if is_explicit_add_task:
+                return "add_task", _extract_task_creation_args(message), ""
 
             reply = choice.message.content or "How can I help you today?"
             return None, None, reply

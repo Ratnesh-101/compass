@@ -349,6 +349,77 @@ async def create_frontend_task(request: Request, req: CreateTaskRequest):
     try:
         pool = await get_pool()
         async with pool.acquire() as conn:
+            # 1. Check for exact duplicate deadline (same title case-insensitive and same due date, not done)
+            existing_tasks = await structured.list_tasks(conn, user_id=user_id)
+            exact_matches = [
+                t for t in existing_tasks
+                if t["title"].strip().lower() == title.lower()
+                and (
+                    (t.get("due_date") is None and parsed_date is None)
+                    or (t.get("due_date") == parsed_date)
+                )
+                and t.get("status") != "done"
+            ]
+            if exact_matches and not req.allow_duplicate:
+                ex = exact_matches[0]
+                d_str = ex.get("due_date") or "unscheduled"
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Duplicate deadline: '{title}' is already scheduled for {d_str}. Exact duplicate deadlines cannot be added. Ask Northstar to look into schedules or choose a different date."
+                )
+
+            # 2. Check for existing deadline with same name (different date or asking to shift vs separate thing)
+            same_name_matches = [
+                t for t in existing_tasks
+                if t["title"].strip().lower() == title.lower()
+                and t.get("status") != "done"
+            ]
+            if same_name_matches and not req.allow_different_thing and not req.allow_duplicate:
+                if req.shift_existing:
+                    target_task = same_name_matches[0]
+                    updated_row = await structured.update_task(
+                        conn,
+                        target_task["id"],
+                        due_date=parsed_date,
+                        priority=req.priority or target_task.get("priority", "medium"),
+                        notes=req.notes or req.description or target_task.get("notes"),
+                    )
+                    due_d = updated_row.get("due_date")
+                    countdown_str = _format_countdown(due_d)
+                    created_at = updated_row.get("created_at") or datetime.now()
+                    ts_str = created_at.strftime("%b %d, %H:%M") if isinstance(created_at, (datetime, date)) else "Just now"
+                    p_name = updated_row.get("project_name") or proj_name
+                    tags = [updated_row.get("domain", dom_clean)]
+                    if p_name and p_name != "General":
+                        tags.append(p_name.lower().replace(" ", "-"))
+                    if updated_row.get("priority") == "urgent":
+                        tags.append("urgent")
+                    return FrontendTaskOut(
+                        id=str(updated_row["id"]),
+                        title=updated_row["title"],
+                        domain=updated_row["domain"],
+                        project=p_name,
+                        countdown=countdown_str,
+                        tags=tags,
+                        vector_dim=768,
+                        timestamp=ts_str,
+                        priority=updated_row.get("priority", "medium"),
+                        status=updated_row.get("status", "open"),
+                        duration_minutes=int(updated_row.get("duration_minutes") or 60),
+                        scheduled_start=None,
+                        scheduled_end=None,
+                        is_fixed=bool(updated_row.get("is_fixed", False)),
+                        description=updated_row.get("notes") or updated_row.get("description"),
+                        due_date=due_d.isoformat() if hasattr(due_d, "isoformat") else (str(due_d) if due_d else None),
+                    )
+                else:
+                    ex = same_name_matches[0]
+                    d_str = ex.get("due_date") or "unscheduled"
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"A deadline with the name '{title}' already exists on {d_str}. Please specify whether to shift the deadline (shift_existing=true) or if it is for a completely different thing (allow_different_thing=true)."
+                    )
+
             project_id = None
             if proj_name and proj_name != "General":
                 proj = await structured.get_or_create_project(conn, name=proj_name, domain=dom_clean)
@@ -421,6 +492,7 @@ async def create_frontend_task(request: Request, req: CreateTaskRequest):
                 scheduled_end=None,
                 is_fixed=False,
                 description=req.notes or req.description,
+                due_date=due_d.isoformat() if hasattr(due_d, "isoformat") else (str(due_d) if due_d else None),
             )
     except HTTPException:
         raise
@@ -440,6 +512,7 @@ async def create_frontend_task(request: Request, req: CreateTaskRequest):
             status="open",
             duration_minutes=int(req.duration_minutes or 60),
             description=req.notes or req.description,
+            due_date=parsed_date.isoformat() if parsed_date else None,
         )
 
 

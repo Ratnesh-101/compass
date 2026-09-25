@@ -40,6 +40,18 @@ ADD_TASK_TOOL: Dict[str, Any] = {
                     "type": "string",
                     "description": "Additional context or details for the task",
                 },
+                "shift_existing": {
+                    "type": "boolean",
+                    "description": "If a task with the same name already exists, shift its deadline to due_date instead of asking",
+                },
+                "allow_different_thing": {
+                    "type": "boolean",
+                    "description": "If a task with the same name already exists, confirm this is for a completely different item and allow creating",
+                },
+                "allow_duplicate": {
+                    "type": "boolean",
+                    "description": "Bypass exact duplicate check",
+                },
             },
             "required": ["title"],
         },

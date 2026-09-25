@@ -73,6 +73,7 @@ async def handle_message(
                     content = r.get("content", "")
                     if role in ("user", "assistant") and content:
                         history.append({"role": role, "content": content})
+            logger.debug("Loaded history for %s: %s", conversation_id, history)
         except Exception as e:
             logger.debug(f"Could not load conversation history: {e}")
 
@@ -164,9 +165,109 @@ async def handle_message(
             domain = "general"
 
         task_record: Dict[str, Any] = {}
+        shift_existing = bool(args.get("shift_existing", False))
+        allow_different_thing = bool(args.get("allow_different_thing", False))
+        allow_duplicate = bool(args.get("allow_duplicate", False))
         try:
             pool = await get_pool()
             async with pool.acquire() as conn:
+                existing_tasks = await structured.list_tasks(conn, user_id=user_id)
+                exact_matches = [
+                    t for t in existing_tasks
+                    if t["title"].strip().lower() == title.lower()
+                    and (
+                        (t.get("due_date") is None and due_date is None)
+                        or (t.get("due_date") == due_date)
+                    )
+                    and t.get("status") != "done"
+                ]
+                if exact_matches and not allow_duplicate:
+                    ex = exact_matches[0]
+                    d_str = ex.get("due_date") or "unscheduled"
+                    resp = (
+                        f"⚠️ A deadline with the exact same name '{ex['title']}' and due date ({d_str}) "
+                        f"already exists in your schedule. You cannot add the exact same deadline multiple times. "
+                        f"I can inspect your schedules to see when you have free slots or help you rebalance your tasks."
+                    )
+                    try:
+                        real_cid = await conversations.get_or_create_conversation(conn, conv_id, user_id=user_id)
+                        await conversations.add_message(conn, real_cid, role="user", content=message)
+                        await conversations.add_message(conn, real_cid, role="assistant", content=resp, skill_called="add_task")
+                        conv_id = real_cid
+                    except Exception as e:
+                        logger.debug(f"Could not persist message history: {e}")
+                    return {
+                        "conversation_id": conv_id,
+                        "response": resp,
+                        "message": resp,
+                        "skill_used": "add_task",
+                        "success": False,
+                        "data": {"error": "duplicate_exact_deadline", "existing_task_id": ex["id"]},
+                        "routing_latency_ms": int((time.perf_counter() - start_time) * 1000),
+                    }
+
+                same_name_matches = [
+                    t for t in existing_tasks
+                    if t["title"].strip().lower() == title.lower()
+                    and t.get("status") != "done"
+                ]
+                if same_name_matches and not allow_different_thing and not allow_duplicate:
+                    ex = same_name_matches[0]
+                    old_d = ex.get("due_date") or "unscheduled"
+                    new_d = due_date or "unscheduled"
+                    if shift_existing:
+                        task_record = await structured.update_task(
+                            conn,
+                            ex["id"],
+                            due_date=due_date,
+                            priority=priority,
+                            notes=notes or ex.get("notes"),
+                        )
+                        resp = f"Shifted existing deadline '{ex['title']}' from {old_d} to {new_d}."
+                        try:
+                            real_cid = await conversations.get_or_create_conversation(conn, conv_id, user_id=user_id)
+                            await conversations.add_message(conn, real_cid, role="user", content=message)
+                            await conversations.add_message(conn, real_cid, role="assistant", content=resp, skill_called="add_task")
+                            conv_id = real_cid
+                        except Exception as e:
+                            logger.debug(f"Could not persist message history: {e}")
+                        return {
+                            "conversation_id": conv_id,
+                            "response": resp,
+                            "message": resp,
+                            "skill_used": "add_task",
+                            "success": True,
+                            "data": task_record,
+                            "routing_latency_ms": int((time.perf_counter() - start_time) * 1000),
+                        }
+                    else:
+                        resp = (
+                            f"⚠️ A deadline named '{ex['title']}' is already scheduled for {old_d}. "
+                            f"Would you like me to shift your existing deadline to {new_d}, or is this for a completely different task? "
+                            f"I can also look into your schedules to find an optimal slot without clashes."
+                        )
+                        try:
+                            real_cid = await conversations.get_or_create_conversation(conn, conv_id, user_id=user_id)
+                            await conversations.add_message(conn, real_cid, role="user", content=message)
+                            await conversations.add_message(conn, real_cid, role="assistant", content=resp, skill_called="add_task")
+                            conv_id = real_cid
+                        except Exception as e:
+                            logger.debug(f"Could not persist message history: {e}")
+                        return {
+                            "conversation_id": conv_id,
+                            "response": resp,
+                            "message": resp,
+                            "skill_used": "add_task",
+                            "success": False,
+                            "data": {
+                                "warning": "duplicate_name",
+                                "existing_task_id": ex["id"],
+                                "existing_due_date": str(old_d),
+                                "proposed_due_date": str(new_d),
+                            },
+                            "routing_latency_ms": int((time.perf_counter() - start_time) * 1000),
+                        }
+
                 project_id = None
                 if project_name:
                     proj = await structured.get_or_create_project(conn, name=project_name, domain=domain)

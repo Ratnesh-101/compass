@@ -90,10 +90,77 @@ async def handle_add_task(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
         status = "open"
 
     notes = args.get("notes")
+    shift_existing = bool(args.get("shift_existing", False))
+    allow_different_thing = bool(args.get("allow_different_thing", False))
+    allow_duplicate = bool(args.get("allow_duplicate", False))
 
     try:
         user_id = args.get("user_id")
         async with pool.acquire() as conn:
+            existing_tasks = await structured.list_tasks(conn, user_id=user_id)
+            exact_matches = [
+                t for t in existing_tasks
+                if t["title"].strip().lower() == title.lower()
+                and (
+                    (t.get("due_date") is None and due_date is None)
+                    or (t.get("due_date") == due_date)
+                )
+                and t.get("status") != "done"
+            ]
+            if exact_matches and not allow_duplicate:
+                ex = exact_matches[0]
+                d_str = ex.get("due_date") or "unscheduled"
+                return {
+                    "response": (
+                        f"⚠️ A deadline with the exact same name '{ex['title']}' and due date ({d_str}) "
+                        f"already exists in your schedule. You cannot add the exact same deadline multiple times. "
+                        f"I can inspect your schedules to see when you have free slots or help you rebalance your tasks."
+                    ),
+                    "data": {
+                        "error": "duplicate_exact_deadline",
+                        "existing_task_id": ex["id"],
+                        "title": ex["title"],
+                        "due_date": str(d_str),
+                    },
+                }
+
+            same_name_matches = [
+                t for t in existing_tasks
+                if t["title"].strip().lower() == title.lower()
+                and t.get("status") != "done"
+            ]
+            if same_name_matches and not allow_different_thing and not allow_duplicate:
+                ex = same_name_matches[0]
+                old_d = ex.get("due_date") or "unscheduled"
+                new_d = due_date or "unscheduled"
+                if shift_existing:
+                    updated = await structured.update_task(
+                        conn,
+                        ex["id"],
+                        due_date=due_date,
+                        priority=priority,
+                        notes=notes or ex.get("notes"),
+                    )
+                    return {
+                        "response": f"Shifted existing deadline '{ex['title']}' from {old_d} to {new_d}.",
+                        "data": updated,
+                    }
+                else:
+                    return {
+                        "response": (
+                            f"⚠️ A deadline with the name '{ex['title']}' already exists, scheduled for {old_d}. "
+                            f"Would you like me to shift your existing deadline to {new_d}, or is this for a completely different thing? "
+                            f"I can also look into your schedules to find an optimal slot without clashes."
+                        ),
+                        "data": {
+                            "warning": "duplicate_name",
+                            "existing_task_id": ex["id"],
+                            "existing_due_date": str(old_d),
+                            "proposed_due_date": str(new_d),
+                            "action_required": "confirm_shift_or_different",
+                        },
+                    }
+
             project_id = None
             if project_name:
                 proj = await structured.get_or_create_project(conn, name=project_name, domain=domain)
