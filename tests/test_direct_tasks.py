@@ -16,8 +16,11 @@ from httpx import AsyncClient
 @pytest.mark.asyncio
 async def test_direct_create_task_success(client: AsyncClient):
     """Users can directly add deadlines with domain, due_date, project, and notes."""
+    import uuid
+    unique_suffix = uuid.uuid4().hex[:6]
+    title = f"Directly Created Milestone {unique_suffix}"
     payload = {
-        "title": "Directly Created Milestone",
+        "title": title,
         "domain": "hackathon",
         "project": "Demo Sprint",
         "due_date": "2026-10-15",
@@ -28,13 +31,16 @@ async def test_direct_create_task_success(client: AsyncClient):
     resp = await client.post("/api/tasks", json=payload)
     assert resp.status_code == 200
     data = resp.json()
-    assert data["title"] == "Directly Created Milestone"
+    assert data["title"] == title
     assert data["domain"] == "hackathon"
     assert data["project"] == "Demo Sprint"
     assert data["priority"] == "high"
     assert data["duration_minutes"] == 90
     assert "id" in data
     assert data["id"] is not None
+
+    if str(data["id"]).isdigit():
+        await client.delete(f"/api/tasks/{data['id']}")
 
 
 @pytest.mark.asyncio
@@ -165,5 +171,92 @@ async def test_direct_create_task_custom_and_other_domain(client: AsyncClient):
         await client.delete(f"/api/tasks/{data_other['id']}")
     if str(data_custom["id"]).isdigit():
         await client.delete(f"/api/tasks/{data_custom['id']}")
+
+
+@pytest.mark.asyncio
+async def test_direct_create_task_exact_duplicate_blocked(client: AsyncClient):
+    """Adding an exact duplicate deadline (same title & due date) must return 409 Conflict."""
+    import uuid
+    unique_name = f"Duplicate Test Milestone {uuid.uuid4().hex[:6]}"
+    payload = {
+        "title": unique_name,
+        "domain": "general",
+        "due_date": "2026-12-01",
+        "priority": "medium",
+    }
+    # First creation succeeds
+    resp1 = await client.post("/api/tasks", json=payload)
+    assert resp1.status_code == 200
+    task1 = resp1.json()
+
+    # Second creation with identical title and date must fail with 409
+    resp2 = await client.post("/api/tasks", json=payload)
+    assert resp2.status_code == 409
+    detail = resp2.json()["detail"].lower()
+    assert "duplicate deadline" in detail or "exact duplicate" in detail
+
+    # Clean up
+    if str(task1["id"]).isdigit():
+        await client.delete(f"/api/tasks/{task1['id']}")
+
+
+@pytest.mark.asyncio
+async def test_direct_create_task_same_name_shift_or_different(client: AsyncClient):
+    """Adding a task with existing name prompts for shift vs different thing; flags resolve it."""
+    import uuid
+    shared_name = f"Same Name Milestone {uuid.uuid4().hex[:6]}"
+    payload_initial = {
+        "title": shared_name,
+        "domain": "coursework",
+        "due_date": "2026-11-10",
+        "priority": "medium",
+    }
+    resp1 = await client.post("/api/tasks", json=payload_initial)
+    assert resp1.status_code == 200
+    initial_task = resp1.json()
+    task_id = initial_task["id"]
+
+    # 1. Attempting same name with different date without flags returns 409
+    payload_clash = {
+        "title": shared_name,
+        "domain": "coursework",
+        "due_date": "2026-11-20",
+    }
+    resp_clash = await client.post("/api/tasks", json=payload_clash)
+    assert resp_clash.status_code == 409
+    assert "shift" in resp_clash.json()["detail"].lower()
+
+    # 2. Shift existing deadline updates due_date on the original task
+    payload_shift = {
+        "title": shared_name,
+        "domain": "coursework",
+        "due_date": "2026-11-25",
+        "shift_existing": True,
+    }
+    resp_shift = await client.post("/api/tasks", json=payload_shift)
+    assert resp_shift.status_code == 200
+    shifted_task = resp_shift.json()
+    assert str(shifted_task["id"]) == str(task_id)
+    assert shifted_task["due_date"] == "2026-11-25"
+
+    # 3. Completely different thing creates a new distinct task
+    payload_diff = {
+        "title": shared_name,
+        "domain": "coursework",
+        "due_date": "2026-12-05",
+        "allow_different_thing": True,
+    }
+    resp_diff = await client.post("/api/tasks", json=payload_diff)
+    assert resp_diff.status_code == 200
+    diff_task = resp_diff.json()
+    assert str(diff_task["id"]) != str(task_id)
+    assert diff_task["due_date"] == "2026-12-05"
+
+    # Clean up both tasks
+    if str(task_id).isdigit():
+        await client.delete(f"/api/tasks/{task_id}")
+    if str(diff_task["id"]).isdigit():
+        await client.delete(f"/api/tasks/{diff_task['id']}")
+
 
 

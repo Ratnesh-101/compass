@@ -49,8 +49,16 @@ async def db_conn():
     try:
         yield conn
     finally:
-        await tr.rollback()
-        await conn.close()
+        try:
+            if not conn.is_closed():
+                await tr.rollback()
+        except Exception:
+            pass
+        try:
+            if not conn.is_closed():
+                await conn.close()
+        except Exception:
+            pass
 
 
 @pytest.mark.asyncio
