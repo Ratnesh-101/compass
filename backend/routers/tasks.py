@@ -436,7 +436,7 @@ async def create_frontend_task(request: Request, req: CreateTaskRequest):
                 title=title,
                 project_id=project_id,
                 due_date=parsed_date,
-                priority=req.priority,
+                priority=req.priority or "medium",
                 notes=req.notes or req.description,
                 user_id=user_id,
             )
