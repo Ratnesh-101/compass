@@ -34,8 +34,16 @@ async def _ensure_tables(pool: asyncpg.Pool) -> None:
             created_at         TIMESTAMPTZ   NOT NULL DEFAULT now(),
             updated_at         TIMESTAMPTZ   NOT NULL DEFAULT now()
         );
-        CREATE INDEX IF NOT EXISTS idx_agent_runs_status     ON agent_runs(status);
-        CREATE INDEX IF NOT EXISTS idx_agent_runs_created_at ON agent_runs(created_at);
+        ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS conversation_id TEXT;
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_status          ON agent_runs(status);
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_created_at      ON agent_runs(created_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_conversation_id ON agent_runs(conversation_id);
+
+        ALTER TABLE conversations ADD COLUMN IF NOT EXISTS title TEXT;
+        ALTER TABLE conversations ADD COLUMN IF NOT EXISTS user_id TEXT;
+        ALTER TABLE conversations ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN NOT NULL DEFAULT FALSE;
+        ALTER TABLE conversations ADD COLUMN IF NOT EXISTS is_archived BOOLEAN NOT NULL DEFAULT FALSE;
+        CREATE INDEX IF NOT EXISTS idx_conversations_last_active ON conversations(last_active_at DESC);
 
         CREATE TABLE IF NOT EXISTS agent_audit_log (
             id                 SERIAL        PRIMARY KEY,
@@ -53,6 +61,75 @@ async def _ensure_tables(pool: asyncpg.Pool) -> None:
         ALTER TABLE agent_audit_log ADD COLUMN IF NOT EXISTS is_reverted BOOLEAN NOT NULL DEFAULT FALSE;
         CREATE INDEX IF NOT EXISTS idx_agent_audit_log_run_id     ON agent_audit_log(run_id);
         CREATE INDEX IF NOT EXISTS idx_agent_audit_log_created_at ON agent_audit_log(created_at);
+
+        CREATE TABLE IF NOT EXISTS tavily_usage_log (
+            id         SERIAL       PRIMARY KEY,
+            operation  TEXT         NOT NULL,
+            credits    INTEGER      NOT NULL DEFAULT 1,
+            created_at TIMESTAMPTZ  NOT NULL DEFAULT now()
+        );
+        CREATE INDEX IF NOT EXISTS idx_tavily_usage_created_at ON tavily_usage_log(created_at);
+
+        -- Dynamic Scheduling & Calendar Extensions
+        ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_domain_check;
+        ALTER TABLE projects DROP CONSTRAINT IF EXISTS projects_domain_check;
+        ALTER TABLE memory_chunks DROP CONSTRAINT IF EXISTS memory_chunks_domain_check;
+        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS user_id VARCHAR(255) DEFAULT 'default_user';
+        CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id);
+        ALTER TABLE memory_chunks ADD COLUMN IF NOT EXISTS user_id VARCHAR(255) DEFAULT 'default_user';
+        CREATE INDEX IF NOT EXISTS idx_memory_chunks_user_id ON memory_chunks(user_id);
+        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS duration_minutes INTEGER DEFAULT 60;
+        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS scheduled_start TIMESTAMPTZ;
+        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS scheduled_end TIMESTAMPTZ;
+        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS is_fixed BOOLEAN NOT NULL DEFAULT FALSE;
+        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS recurrence_rule TEXT;
+        CREATE INDEX IF NOT EXISTS idx_tasks_scheduled_start ON tasks(scheduled_start);
+
+        CREATE TABLE IF NOT EXISTS calendar_connections (
+            id                 SERIAL        PRIMARY KEY,
+            user_id            TEXT          NOT NULL DEFAULT 'default_user',
+            provider           TEXT          NOT NULL DEFAULT 'google',
+            account_email      TEXT,
+            refresh_token      TEXT,
+            access_token       TEXT,
+            token_expiry       TIMESTAMPTZ,
+            scopes             TEXT[]        DEFAULT '{}',
+            connected_at       TIMESTAMPTZ   NOT NULL DEFAULT now(),
+            last_synced_at     TIMESTAMPTZ,
+            sync_token         TEXT
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_calendar_conn_user_provider ON calendar_connections(user_id, provider);
+
+        CREATE TABLE IF NOT EXISTS calendar_event_links (
+            id                 SERIAL        PRIMARY KEY,
+            task_id            INTEGER       NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            google_event_id    TEXT          NOT NULL,
+            calendar_id        TEXT          NOT NULL DEFAULT 'primary',
+            sync_status        TEXT          NOT NULL DEFAULT 'synced',
+            last_synced_at     TIMESTAMPTZ   NOT NULL DEFAULT now(),
+            UNIQUE(task_id, google_event_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS scheduling_preferences (
+            id                 SERIAL        PRIMARY KEY,
+            user_id            TEXT          NOT NULL DEFAULT 'default_user' UNIQUE,
+            work_start_time    TIME          NOT NULL DEFAULT '09:00:00',
+            work_end_time      TIME          NOT NULL DEFAULT '18:00:00',
+            work_days          INTEGER[]     NOT NULL DEFAULT '{1,2,3,4,5}',
+            buffer_minutes     INTEGER       NOT NULL DEFAULT 15,
+            preferred_focus    TEXT          NOT NULL DEFAULT 'morning'
+        );
+
+        CREATE TABLE IF NOT EXISTS task_dependencies (
+            id                 SERIAL        PRIMARY KEY,
+            task_id            INTEGER       NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            depends_on_task_id INTEGER       NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            created_at         TIMESTAMPTZ   NOT NULL DEFAULT now(),
+            UNIQUE(task_id, depends_on_task_id),
+            CHECK(task_id != depends_on_task_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_task_dep_task_id ON task_dependencies(task_id);
+        CREATE INDEX IF NOT EXISTS idx_task_dep_depends_on ON task_dependencies(depends_on_task_id);
         """)
 
 
@@ -74,6 +151,10 @@ async def init_pool(dsn: str | None = None) -> asyncpg.Pool:
         pool_loop = getattr(_pool, "_loop", None)
         if pool_loop is not None and not pool_loop.is_closed() and (cur_loop is None or pool_loop is cur_loop):
             return _pool
+        try:
+            _pool.terminate()
+        except Exception:
+            pass
         _pool = None
 
     if dsn is None:
@@ -107,6 +188,10 @@ async def get_pool() -> asyncpg.Pool:
     if _pool is not None:
         pool_loop = getattr(_pool, "_loop", None)
         if pool_loop is None or pool_loop.is_closed() or (cur_loop and pool_loop is not cur_loop):
+            try:
+                _pool.terminate()
+            except Exception:
+                pass
             _pool = None
 
     if _pool is None:
@@ -114,10 +199,25 @@ async def get_pool() -> asyncpg.Pool:
     return _pool
 
 
-
 async def close_pool() -> None:
     """Gracefully close the pool."""
     global _pool
     if _pool is not None:
-        await _pool.close()
+        p = _pool
         _pool = None
+        pool_loop = getattr(p, "_loop", None)
+        if pool_loop is not None and pool_loop.is_closed():
+            try:
+                p.terminate()
+            except Exception:
+                pass
+            return
+        try:
+            import asyncio
+            await asyncio.wait_for(p.close(), timeout=2.0)
+        except Exception:
+            try:
+                p.terminate()
+            except Exception:
+                pass
+

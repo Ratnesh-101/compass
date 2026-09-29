@@ -23,6 +23,23 @@ from backend.services.usage import record_usage, get_usage_summary
 
 settings = get_settings()
 
+# Opt-in Safety Gate: Refuse to run unless ALLOW_SEED=true is explicitly set in the environment
+_allow_seed = os.getenv("ALLOW_SEED", "").strip().lower()
+if _allow_seed != "true":
+    raise RuntimeError(
+        "CRITICAL ERROR: Refusing to run scripts/seed_usage.py! "
+        "Seeding requires explicit opt-in: set ALLOW_SEED=true in your environment to execute."
+    )
+
+# Safety Guard: Hard-fail if DATABASE_URL or COMPASS_API_URL points at Frankfurt production instance or Render
+_db_url = (settings.DATABASE_URL or "").lower()
+_api_base_env = os.getenv("COMPASS_API_URL", "").lower()
+if "eu-central-1" in _db_url or "onrender.com" in _api_base_env or "compass-backend" in _api_base_env:
+    raise RuntimeError(
+        "CRITICAL ERROR: Refusing to run scripts/seed_usage.py against the production instance! "
+        "Seeding is strictly restricted to local development fixtures."
+    )
+
 API_BASE = os.getenv("COMPASS_API_URL", "http://127.0.0.1:8000")
 AUTH_TOKEN = os.getenv("AUTH_TOKEN", settings.AUTH_TOKEN or "dev-token")
 HEADERS = {"Authorization": f"Bearer {AUTH_TOKEN}"}
@@ -126,25 +143,25 @@ def seed_direct_usage():
     # Seed 35 Router calls (Nano)
     for _ in range(35):
         p_min, p_max, c_min, c_max = models[settings.ROUTER_MODEL]
-        record_usage(settings.ROUTER_MODEL, random.randint(p_min, p_max), random.randint(c_min, c_max))
+        record_usage(settings.ROUTER_MODEL, random.randint(p_min, p_max), random.randint(c_min, c_max), skill="__seed__")
         total_seeded += 1
 
     # Seed 20 Super calls (Skills)
     for _ in range(20):
         p_min, p_max, c_min, c_max = models[settings.SKILL_MODEL]
-        record_usage(settings.SKILL_MODEL, random.randint(p_min, p_max), random.randint(c_min, c_max))
+        record_usage(settings.SKILL_MODEL, random.randint(p_min, p_max), random.randint(c_min, c_max), skill="__seed__")
         total_seeded += 1
 
     # Seed 18 Ultra calls (Synthesis)
     for _ in range(18):
         p_min, p_max, c_min, c_max = models[settings.SYNTHESIS_MODEL]
-        record_usage(settings.SYNTHESIS_MODEL, random.randint(p_min, p_max), random.randint(c_min, c_max))
+        record_usage(settings.SYNTHESIS_MODEL, random.randint(p_min, p_max), random.randint(c_min, c_max), skill="__seed__")
         total_seeded += 1
 
     # Seed 22 Embedding calls (Qwen3)
     for _ in range(22):
         p_min, p_max, c_min, c_max = models[settings.EMBEDDING_MODEL]
-        record_usage(settings.EMBEDDING_MODEL, random.randint(p_min, p_max), 0)
+        record_usage(settings.EMBEDDING_MODEL, random.randint(p_min, p_max), 0, skill="__seed__")
         total_seeded += 1
 
     summary = get_usage_summary()

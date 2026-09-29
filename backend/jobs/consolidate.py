@@ -215,6 +215,7 @@ async def archive_stale_threads(
         GROUP BY c.id
         HAVING COUNT(m.id) > 0
         ORDER BY c.last_active_at ASC
+        LIMIT 5
         """,
         cutoff
     )
@@ -244,30 +245,31 @@ async def archive_stale_threads(
             logger.info(f"    - Conversation {cid} already archived as chunk #{existing}.")
             continue
 
+        if dry_run:
+            archived_count += 1
+            logger.info(f"    - [DRY-RUN] Would summarize and archive conv {cid} ({len(messages)} msgs).")
+            continue
+
         summary = await summarize_messages(client, messages)
         emb = await get_embedding(summary)
 
         logger.info(f"    📦 Archiving conv {cid} ({len(messages)} msgs, last active {c['last_active_at'].date()}):")
         logger.info(f"       Summary: {summary[:120]}...")
 
-        if not dry_run:
-            await conn.execute(
-                """
-                INSERT INTO memory_chunks (domain, project_id, content, embedding, source, tags)
-                VALUES ($1, $2, $3, $4, $5, $6)
-                """,
-                "general",
-                None,
-                summary,
-                emb,
-                archive_source,
-                ["archived", "conversation_summary", f"conv_{cid}"]
-            )
-            archived_count += 1
-            logger.info(f"       ✅ Created consolidated memory chunk for {cid}.")
-        else:
-            archived_count += 1
-            logger.info(f"       [DRY-RUN] Would create memory chunk for {cid}.")
+        await conn.execute(
+            """
+            INSERT INTO memory_chunks (domain, project_id, content, embedding, source, tags)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            """,
+            "general",
+            None,
+            summary,
+            emb,
+            archive_source,
+            ["archived", "conversation_summary", f"conv_{cid}"]
+        )
+        archived_count += 1
+        logger.info(f"       ✅ Created consolidated memory chunk for {cid}.")
 
     return archived_count
 
@@ -277,8 +279,10 @@ async def archive_stale_threads(
 # ---------------------------------------------------------------------------
 
 PROACTIVE_NIGHTLY_GOAL = (
-    "Nightly Proactive Consolidation: Audit cross-domain deadlines, check for deadline conflicts "
-    "between hackathon and coursework, and synthesize tomorrow's executive briefing."
+    "Nightly Proactive Consolidation: Audit cross-domain deadlines using detect_deadline_conflicts, "
+    "check for deadline conflicts between hackathon and coursework, and synthesize tomorrow's executive briefing. "
+    "Additionally, for any task in the HACKATHON domain with a due date within 30 days, use verify_deadline to confirm "
+    "the stored date still matches public sources. Report any drift you find. Do not modify any task without confirmation."
 )
 
 
@@ -346,6 +350,37 @@ async def trigger_proactive_nightly_run(
 
 
 # ---------------------------------------------------------------------------
+# Task 5: Reactive Slipped Schedule Check
+# ---------------------------------------------------------------------------
+
+async def check_slipped_schedules(conn: asyncpg.Connection, pool: Any = None, dry_run: bool = False) -> dict:
+    """Find scheduled tasks that passed uncompleted, detect slipped downstream tasks, and log or stage re-plan."""
+    from backend.memory.structured import list_tasks, get_all_dependencies_map
+    from backend.services.scheduler import find_slipped_tasks, replan_slipped_tasks, get_available_windows
+    from backend.services.calendar import get_calendar_freebusy
+
+    tasks = await list_tasks(conn)
+    slipped = find_slipped_tasks(tasks)
+    if not slipped:
+        logger.info("  [5/5] Slipped schedule check: 0 tasks slipped past end time.")
+        return {"slipped_count": 0, "affected_count": 0, "rescheduled_count": 0}
+
+    logger.info(f"  [5/5] Found {len(slipped)} slipped task(s) past scheduled_end!")
+    dep_map = await get_all_dependencies_map(conn)
+    now = datetime.now(timezone.utc)
+    busy = await get_calendar_freebusy(now, now + timedelta(days=7), pool=pool)
+    windows = get_available_windows(busy, now, now + timedelta(days=7))
+    replan = replan_slipped_tasks(slipped, tasks, dependencies=dep_map, available_windows=windows)
+    logger.info(f"    ⚡ Reactive re-plan computed: {replan['summary']}")
+    return {
+        "slipped_count": len(slipped),
+        "slipped_task_ids": replan["slipped_task_ids"],
+        "affected_count": len(replan["affected_task_ids"]),
+        "rescheduled_count": len(replan["rescheduled"]),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Main Orchestrator
 # ---------------------------------------------------------------------------
 
@@ -379,6 +414,7 @@ async def run_consolidation(
         pruned_count = await deduplicate_vectors(conn, threshold=similarity_threshold, dry_run=dry_run)
         archived_count = await archive_stale_threads(conn, client, stale_days=stale_thread_days, dry_run=dry_run)
         proactive_res = await trigger_proactive_nightly_run(conn, client, dry_run=dry_run, pool=pool)
+        slipped_res = await check_slipped_schedules(conn, pool=pool, dry_run=dry_run)
 
         logger.info("=" * 60)
         logger.info("SUMMARY OF CONSOLIDATION:")
@@ -387,6 +423,7 @@ async def run_consolidation(
         logger.info(f"  • Stale threads archived : {archived_count}")
         if proactive_res:
             logger.info(f"  • Proactive agent run    : {proactive_res.get('status')} ({proactive_res.get('run_id')})")
+        logger.info(f"  • Slipped tasks detected : {slipped_res.get('slipped_count')}")
         logger.info("=" * 60)
 
         return {
@@ -394,6 +431,7 @@ async def run_consolidation(
             "duplicate_chunks_merged": pruned_count,
             "stale_conversations_rolled_up": archived_count,
             "proactive_nightly_run": proactive_res,
+            "slipped_schedules": slipped_res,
             # Backwards compatibility aliases
             "overdue_tasks": overdue_count,
             "pruned_chunks": pruned_count,

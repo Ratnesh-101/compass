@@ -1,9 +1,19 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import Sidebar from './components/Sidebar'
 import Timeline from './components/Timeline'
-import ChatPanel from './components/ChatPanel'
-import AgentPanel from './components/AgentPanel'
-import { checkBackendHealth, fetchTasks, sendQueryToAssistant, fetchUsageSummary } from './api/client'
+import CalendarView from './components/CalendarView'
+import NorthstarPanel from './components/NorthstarPanel'
+import AuthModal from './components/AuthModal'
+import SharedChatView from './components/SharedChatView'
+import {
+  checkBackendHealth,
+  fetchTasks,
+  sendQueryToAssistant,
+  fetchUsageSummary,
+  fetchCurrentUser,
+  getGoogleOAuthConnectUrl,
+  disconnectCalendar,
+} from './api/client'
 
 export default function App() {
   const [tasks, setTasks] = useState([])
@@ -12,6 +22,27 @@ export default function App() {
   const [backendStatus, setBackendStatus] = useState('Connecting...')
   const [conversationId, setConversationId] = useState(null)
   const [usageStats, setUsageStats] = useState(null)
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      const savedEmail = localStorage.getItem('compass_user_email') || localStorage.getItem('compass_user_id')
+      if (savedEmail && savedEmail.includes('@')) {
+        const clean = savedEmail.trim().toLowerCase()
+        return {
+          authenticated: true,
+          user_id: clean,
+          email: clean,
+          name: clean.split('@')[0].replace('.', ' ').replace(/\b\w/g, c => c.toUpperCase()),
+          calendar: { connected: false, mode: 'demo', is_simulated: true },
+        }
+      }
+    } catch {}
+    return null
+  })
+  const [showAuthModal, setShowAuthModal] = useState(false)
+  const [shareId, setShareId] = useState(() => {
+    const params = new URLSearchParams(window.location.search)
+    return params.get('share') || (window.location.pathname.startsWith('/share/') ? window.location.pathname.replace('/share/', '') : null)
+  })
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
@@ -19,6 +50,7 @@ export default function App() {
     }
   ])
   const [isTyping, setIsTyping] = useState(false)
+  const [pendingPrompt, setPendingPrompt] = useState(null)
 
   // Keep a ref to the latest tasks state for stable diffing without triggering interval re-creations
   const tasksRef = useRef([])
@@ -57,6 +89,25 @@ export default function App() {
     loadTasks(selectedDomain)
   }, [selectedDomain, loadTasks])
 
+  // Check URL query parameters on mount to prompt account selection or show OAuth errors
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('oauth_error') || params.get('select_account')) {
+      setShowAuthModal(true)
+    }
+  }, [])
+
+  const handleUserChanged = useCallback(async (newEmail) => {
+    if (newEmail) {
+      const u = await fetchCurrentUser()
+      setCurrentUser(u)
+    } else {
+      setCurrentUser({ authenticated: false, email: '' })
+    }
+    loadTasks(selectedDomain)
+    refreshUsage()
+  }, [loadTasks, selectedDomain, refreshUsage])
+
   useEffect(() => {
     let isMounted = true
 
@@ -78,6 +129,11 @@ export default function App() {
     // Immediate initial sync
     pollHealth()
     refreshUsage()
+    fetchCurrentUser().then(u => {
+      if (isMounted && u && (u.authenticated || (u.email && u.email.includes('@')))) {
+        setCurrentUser(u)
+      }
+    })
 
     // 1. Task polling interval: 3000ms
     const taskInterval = setInterval(pollTasks, 3000)
@@ -94,12 +150,17 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const domainCounts = {
-    hackathon: tasks.filter(t => t.domain === 'hackathon').length,
-    coursework: tasks.filter(t => t.domain === 'coursework').length,
-    code: tasks.filter(t => t.domain === 'code').length,
-    general: tasks.filter(t => t.domain === 'general').length,
-  }
+  const domainCounts = tasks.reduce((acc, t) => {
+    const dom = (t.domain || 'general').toLowerCase().trim()
+    acc[dom] = (acc[dom] || 0) + 1
+    return acc
+  }, {
+    hackathon: 0,
+    coursework: 0,
+    code: 0,
+    general: 0,
+    other: 0,
+  })
 
   const handleSendMessage = async (userText) => {
     setIsTyping(true)
@@ -125,8 +186,23 @@ export default function App() {
     ? `⚡ ${usageStats.total_requests ?? 0} calls · $${(usageStats.total_estimated_cost_usd ?? 0).toFixed(5)}`
     : 'Nebius • Nemotron-3'
 
+  if (shareId) {
+    return (
+      <SharedChatView
+        shareId={shareId}
+        onGoToApp={() => {
+          const url = new URL(window.location.href)
+          url.searchParams.delete('share')
+          window.history.pushState({}, '', url.pathname + (url.search ? url.search : ''))
+          setShareId(null)
+          setActiveTab('northstar')
+        }}
+      />
+    )
+  }
+
   return (
-    <div style={{ display: 'flex', height: '100vh', width: '100vw', background: '#0b0f17', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', height: '100vh', width: '100vw', background: 'var(--bg-app)', overflow: 'hidden' }}>
       <Sidebar
         activeDomain={selectedDomain}
         onSelectDomain={setSelectedDomain}
@@ -134,73 +210,45 @@ export default function App() {
         backendStatus={backendStatus}
         activeTab={activeTab}
         onSelectTab={setActiveTab}
+        usageBadge={usageBadge}
+        currentUser={currentUser}
+        onOpenAuth={() => setShowAuthModal(true)}
       />
 
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#0b0f17', minWidth: 0, overflow: 'hidden' }}>
-        <header style={{ height: '60px', borderBottom: '1px solid #1e293b', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px', flexShrink: 0 }}>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button
-              id="tab-timeline"
-              onClick={() => setActiveTab('timeline')}
-              style={{
-                padding: '7px 14px',
-                borderRadius: '6px',
-                border: 'none',
-                background: activeTab === 'timeline' ? '#1e293b' : 'transparent',
-                color: activeTab === 'timeline' ? '#fff' : '#64748b',
-                cursor: 'pointer',
-                fontWeight: '500',
-                fontSize: '13px'
-              }}>
-              📅 Timeline Feed
-            </button>
-            <button
-              id="tab-chat"
-              onClick={() => setActiveTab('chat')}
-              style={{
-                padding: '7px 14px',
-                borderRadius: '6px',
-                border: 'none',
-                background: activeTab === 'chat' ? '#1e293b' : 'transparent',
-                color: activeTab === 'chat' ? '#fff' : '#64748b',
-                cursor: 'pointer',
-                fontWeight: '500',
-                fontSize: '13px'
-              }}>
-              💬 Assistant Chat
-            </button>
-            <button
-              id="tab-agent"
-              onClick={() => setActiveTab('agent')}
-              style={{
-                padding: '7px 14px',
-                borderRadius: '6px',
-                border: 'none',
-                background: activeTab === 'agent' ? '#1e293b' : 'transparent',
-                color: activeTab === 'agent' ? '#fff' : '#64748b',
-                cursor: 'pointer',
-                fontWeight: '500',
-                fontSize: '13px'
-              }}>
-              🧠 Agent Planner
-            </button>
-          </div>
-          {/* P0.2: Live usage counter — updates after every chat message */}
-          <div id="usage-badge" className="header-model-badge" style={{ fontSize: '11px', color: '#64748b', fontFamily: 'JetBrains Mono, monospace' }}>
-            {usageBadge}
-          </div>
-        </header>
-
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'var(--bg-app)', minWidth: 0, overflow: 'hidden' }}>
         {activeTab === 'timeline' ? (
           <Timeline
             tasks={tasks}
             activeDomain={selectedDomain}
             onSelectDomain={setSelectedDomain}
+            onTasksUpdated={() => {
+              loadTasks(selectedDomain)
+              refreshUsage()
+            }}
+            onOpenNorthstar={(prompt) => {
+              setActiveTab('northstar')
+              setPendingPrompt(prompt)
+            }}
           />
-        ) : activeTab === 'agent' ? (
-          <AgentPanel />
+        ) : activeTab === 'calendar' ? (
+          <CalendarView
+            tasks={tasks}
+            activeDomain={selectedDomain}
+            onTasksUpdated={() => {
+              loadTasks(selectedDomain)
+              refreshUsage()
+            }}
+            onOpenAuthModal={() => setShowAuthModal(true)}
+          />
         ) : (
-          <ChatPanel
+          <NorthstarPanel
+            initialSubTab={
+              activeTab === 'agent' || activeTab === 'planner'
+                ? 'planner'
+                : activeTab === 'specialist'
+                ? 'specialist'
+                : 'assistant'
+            }
             messages={messages}
             setMessages={setMessages}
             conversationId={conversationId}
@@ -208,10 +256,25 @@ export default function App() {
             onSendMessage={handleSendMessage}
             isTyping={isTyping}
             onChatComplete={refreshUsage}
+            tasks={tasks}
+            backendStatus={backendStatus}
+            onTaskMutated={() => {
+              loadTasks(selectedDomain)
+              refreshUsage()
+            }}
+            onSelectTab={setActiveTab}
+            pendingPrompt={pendingPrompt}
+            onClearPendingPrompt={() => setPendingPrompt(null)}
           />
         )}
       </main>
+
+      <AuthModal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        currentUser={currentUser}
+        onUserChanged={handleUserChanged}
+      />
     </div>
   )
 }
-

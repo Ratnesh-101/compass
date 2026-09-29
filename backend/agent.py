@@ -20,10 +20,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 import uuid
 import logging
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple, cast
 
 from openai import AsyncOpenAI
@@ -36,8 +37,8 @@ logger = logging.getLogger("compass.agent")
 # ---------------------------------------------------------------------------
 # Tools that mutate state require human confirmation before execution
 # ---------------------------------------------------------------------------
-MUTATING_TOOLS = frozenset({"add_task", "edit_task", "update_task_status", "delete_task", "log_code_snippet", "log_code_context"})
-READ_ONLY_TOOLS = frozenset({"query_tasks", "query_code_context", "query_coursework_tasks", "get_hackathon_deadlines", "summarize_day", "search_web", "list_projects", "query_coursework_notes", "chat", "summarize_across_domains"})
+MUTATING_TOOLS = frozenset({"add_task", "edit_task", "update_task_status", "delete_task", "log_code_snippet", "log_code_context", "ingest_url", "apply_triage_plan", "commit_schedule"})
+READ_ONLY_TOOLS = frozenset({"query_tasks", "query_code_context", "query_coursework_tasks", "get_hackathon_deadlines", "summarize_day", "search_web", "list_projects", "query_coursework_notes", "chat", "summarize_across_domains", "verify_deadline", "assess_feasibility", "detect_deadline_conflicts", "get_calendar_availability", "propose_schedule", "detect_schedule_conflicts", "delegate_to_specialist"})
 
 # In-memory registry for live SSE confirmation events: run_id -> (asyncio.Event, outcome_dict)
 _PENDING_CONFIRMATION_EVENTS: Dict[str, Tuple[asyncio.Event, Dict[str, Any]]] = {}
@@ -46,7 +47,7 @@ _PENDING_CONFIRMATION_EVENTS: Dict[str, Tuple[asyncio.Event, Dict[str, Any]]] = 
 @dataclass
 class AgentStep:
     """One step in the agent's reasoning trace."""
-    type: str           # "think" | "tool_call" | "observe" | "confirm_request" | "confirm_ack" | "critic" | "synthesize" | "error" | "done" | "timeout"
+    type: str           # "think" | "tool_call" | "observe" | "confirm_request" | "confirm_ack" | "critic" | "synthesize" | "error" | "done" | "timeout" | "escalate"
     content: str = ""
     tool_name: Optional[str] = None
     tool_args: Optional[Dict[str, Any]] = None
@@ -59,15 +60,16 @@ class AgentStep:
 
     def to_sse(self) -> str:
         """Serialize to SSE data line."""
-        payload: Dict[str, Any] = cast(Dict[str, Any], {})
-        payload["type"] = self.type
-        payload["content"] = self.content
-        payload["step"] = self.step_number
-        payload["elapsed_ms"] = self.elapsed_ms
+        payload: Dict[str, Any] = {
+            "type": self.type,
+            "content": self.content,
+            "step": self.step_number,
+            "elapsed_ms": self.elapsed_ms,
+        }
         if self.tool_name:
             payload["tool"] = self.tool_name
         if self.tool_args:
-            cast(Dict[str, Any], payload)["args"] = cast(Any, self.tool_args)
+            payload["args"] = self.tool_args
         if self.run_id:
             payload["run_id"] = self.run_id
         if self.model_tier:
@@ -75,14 +77,44 @@ class AgentStep:
         if self.step_cost_usd is not None:
             payload["step_cost_usd"] = self.step_cost_usd
         if self.metadata:
-            cast(Dict[str, Any], payload)["metadata"] = cast(Any, self.metadata)
+            payload["metadata"] = self.metadata
         return f"data: {json.dumps(payload)}\n\n"
 
 
-def _build_agent_system_prompt(tool_names: List[str]) -> str:
+def _clean_synthesis_text(text: str) -> str:
+    """Filter out raw LLM/search citation markers (e.g. 【{"id":0,...}】 or 【...】)."""
+    if not text:
+        return ""
+    # Strip LLM internal citation artifacts like 【{"id":0,"cursor":0,"loc":0}】 or any 【...】
+    cleaned = re.sub(r'[\u3010][^\u3011]*[\u3011]', '', text)
+    cleaned = re.sub(r'[ \t]+', ' ', cleaned)
+    cleaned = re.sub(r' +([.,;:!?])', r'\1', cleaned)
+    return cleaned.strip()
+
+
+async def _extract_content_from_response(response: Any, default_text: str = "") -> str:
+    """Safely extract text content from either a ChatCompletion or an AsyncStream."""
+    if hasattr(response, "choices") and response.choices:
+        msg = getattr(response.choices[0], "message", None)
+        if msg and getattr(msg, "content", None):
+            return msg.content
+        return default_text
+    elif hasattr(response, "__aiter__"):
+        content_parts = []
+        async for chunk in response:
+            ch_choices = getattr(chunk, "choices", None) or []
+            if ch_choices:
+                delta = getattr(ch_choices[0], "delta", None)
+                if delta and getattr(delta, "content", None):
+                    content_parts.append(delta.content)
+        return "".join(content_parts) or default_text
+    return default_text
+
+
+def _build_agent_system_prompt(tool_names: List[str], abstain_first: bool = False) -> str:
     """Build the system prompt that makes Super behave as a ReAct agent."""
     tool_list = ", ".join(tool_names)
-    return (
+    prompt = (
         "You are Compass Agent, an autonomous planning and scheduling assistant. "
         "You help users manage tasks, deadlines, and code context across hackathon, coursework, and code domains.\n\n"
         "You have access to these tools: " + tool_list + ".\n\n"
@@ -100,7 +132,14 @@ def _build_agent_system_prompt(tool_names: List[str]) -> str:
         "- If a user declines a proposed action, adapt and propose a feasible alternative without modifying their declined data.\n"
         "- Be specific and actionable. Don't give vague advice.\n"
         "- If you detect deadline conflicts, propose concrete rescheduling with reasoning.\n"
+        "- Accuracy: Never emit literal bracketed placeholders like '[time]' or '[date]' when source text lacks an exact value. State 'time not shown in the retrieved excerpt' instead.\n"
     )
+    if abstain_first:
+        prompt += (
+            "- Abstain-First Policy: Check stored memory first using memory tools (query_tasks, query_code_context, query_coursework_notes). "
+            "If stored memory does not cover the question, reply with '[ABSTAIN]' and state what is missing instead of guessing.\n"
+        )
+    return prompt
 
 
 # ---------------------------------------------------------------------------
@@ -115,6 +154,7 @@ async def save_agent_run(
     accumulated_steps: List[AgentStep],
     messages: List[Dict[str, Any]],
     pending_actions: List[Dict[str, Any]],
+    conversation_id: Optional[str] = None,
 ) -> None:
     """Persist agent run state into agent_runs table."""
     try:
@@ -125,13 +165,14 @@ async def save_agent_run(
         async with pool.acquire() as conn:
             await conn.execute(
                 """
-                INSERT INTO agent_runs (id, goal, status, accumulated_steps, messages, pending_actions)
-                VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb)
+                INSERT INTO agent_runs (id, goal, status, accumulated_steps, messages, pending_actions, conversation_id)
+                VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7)
                 ON CONFLICT (id) DO UPDATE SET
                     status = EXCLUDED.status,
                     accumulated_steps = EXCLUDED.accumulated_steps,
                     messages = EXCLUDED.messages,
                     pending_actions = EXCLUDED.pending_actions,
+                    conversation_id = COALESCE(EXCLUDED.conversation_id, agent_runs.conversation_id),
                     updated_at = now()
                 """,
                 run_id,
@@ -140,6 +181,7 @@ async def save_agent_run(
                 steps_json,
                 messages_json,
                 pending_json,
+                conversation_id,
             )
     except Exception as e:
         logger.warning(f"Failed to save agent run {run_id}: {e}")
@@ -156,6 +198,7 @@ async def get_agent_run(pool: Any, run_id: str) -> Optional[Dict[str, Any]]:
                 "id": row["id"],
                 "goal": row["goal"],
                 "status": row["status"],
+                "conversation_id": row["conversation_id"] if "conversation_id" in row else None,
                 "accumulated_steps": json.loads(row["accumulated_steps"]) if isinstance(row["accumulated_steps"], str) else row["accumulated_steps"],
                 "messages": json.loads(row["messages"]) if isinstance(row["messages"], str) else row["messages"],
                 "pending_actions": json.loads(row["pending_actions"]) if isinstance(row["pending_actions"], str) else row["pending_actions"],
@@ -237,7 +280,7 @@ async def get_critique_stats(pool: Any) -> Dict[str, Any]:
     total_runs = len(rows)
     runs_with_critique = 0
     issues_flagged = 0
-    recent_evals = []
+    recent_evals: List[Dict[str, Any]] = []
 
     for r in rows:
         steps_raw = (
@@ -387,6 +430,26 @@ async def undo_last_agent_action(
             await conn.execute("DELETE FROM memory_chunks WHERE id = $1", affected_id)
             reverted_action["action"] = f"Deleted logged memory chunk #{affected_id}"
 
+        elif tool == "ingest_url":
+            args_obj = json.loads(row["args"]) if isinstance(row["args"], str) else (row["args"] or {})
+            target_url = args_obj.get("url")
+            audit_ts = row.get("created_at")
+            if target_url and audit_ts:
+                await conn.execute(
+                    "DELETE FROM memory_chunks WHERE source = $1 AND created_at >= ($2::timestamptz - interval '2 minutes')",
+                    target_url,
+                    audit_ts,
+                )
+                reverted_action["action"] = f"Deleted ingested memory chunks for {target_url}"
+            elif target_url:
+                await conn.execute("DELETE FROM memory_chunks WHERE source = $1", target_url)
+                reverted_action["action"] = f"Deleted ingested memory chunks for {target_url}"
+            elif affected_id:
+                await conn.execute("DELETE FROM memory_chunks WHERE id = $1", affected_id)
+                reverted_action["action"] = f"Deleted ingested memory chunk #{affected_id}"
+            else:
+                reverted_action["action"] = "Reverted ingested URL memory"
+
         # Mark the audit log entry as reverted
         await conn.execute("UPDATE agent_audit_log SET is_reverted = TRUE WHERE id = $1", audit_id)
 
@@ -414,6 +477,8 @@ async def run_agent(
     wait_for_confirmation: bool = False,
     client: Optional[AsyncOpenAI] = None,
     settings: Any = None,
+    conversation_id: Optional[str] = None,
+    user_id: Optional[str] = None,
 ) -> AsyncGenerator[AgentStep, None]:
     """
     Core ReAct agent loop.
@@ -461,7 +526,12 @@ async def run_agent(
 
     total_run_cost_usd: float = 0.0
     is_abstained: bool = False
+    web_escalation_used: bool = False
+    forced_tool_choice: Optional[Any] = None
     active_replan_diff: Optional[Dict[str, Any]] = None
+    abstain_first: bool = getattr(settings, "TAVILY_ABSTAIN_FIRST", False)
+    search_web_unlocked: bool = not abstain_first
+    logger.info("SETTINGS.TAVILY_ABSTAIN_FIRST loaded inside run_agent: %s (run_id=%s)", abstain_first, run_id)
 
     # Check for existing run state in database
     existing_run = await get_agent_run(pool, run_id) if pool else None
@@ -469,6 +539,8 @@ async def run_agent(
     if action in ("approve", "reject"):
         if existing_run:
             goal = existing_run.get("goal", goal)
+            if existing_run.get("conversation_id") and not conversation_id:
+                conversation_id = existing_run.get("conversation_id")
             messages = existing_run.get("messages", [])
             pending_confirmations = existing_run.get("pending_actions", [])
             step_num = len(existing_run.get("accumulated_steps", []))
@@ -534,11 +606,11 @@ async def run_agent(
             accumulated_steps.append(obs_step)
             pending_confirmations.clear()
             if pool:
-                await save_agent_run(pool, run_id, goal, "running", accumulated_steps, messages, pending_confirmations)
+                await save_agent_run(pool, run_id, goal, "running", accumulated_steps, messages, pending_confirmations, conversation_id=conversation_id)
 
         elif action == "approve":
             # EXECUTE APPROVED MUTATIONS
-            exec_results = await execute_confirmed_actions(pending_confirmations, pool, run_id=run_id)
+            exec_results = await execute_confirmed_actions(pending_confirmations, pool, run_id=run_id, user_id=user_id)
             for r in exec_results:
                 tool_result = r.get("result", {}).get("response", str(r.get("result", "")))
                 tc_id = "call_approved"
@@ -563,17 +635,38 @@ async def run_agent(
                 tools_used.append(r.get("tool", ""))
             pending_confirmations.clear()
             if pool:
-                await save_agent_run(pool, run_id, goal, "running", accumulated_steps, messages, pending_confirmations)
+                await save_agent_run(pool, run_id, goal, "running", accumulated_steps, messages, pending_confirmations, conversation_id=conversation_id)
     else:
         # New run initialization
+        conv_context = ""
+        if conversation_id and pool:
+            try:
+                from backend.memory import conversations
+                async with pool.acquire() as conn:
+                    recent_msgs = await conversations.get_recent_messages(conn, conversation_id, limit=5)
+                if recent_msgs:
+                    history_lines = [f"{m['role'].upper()}: {m['content']}" for m in recent_msgs]
+                    conv_context = "\n\nRecent User Conversation Context:\n" + "\n".join(history_lines)
+            except Exception as e:
+                logger.debug(f"Could not load conversation context: {e}")
+
+        user_content = f"{goal}{conv_context}" if conv_context else goal
+        initial_tools = [
+            t for t in agent_tools
+            if not (abstain_first and not search_web_unlocked and (
+                t.get("name") == "search_web"
+                or (isinstance(t.get("function"), dict) and t.get("function", {}).get("name") == "search_web")
+            ))
+        ]
         messages = cast(List[Dict[str, Any]], [
             {"role": "system", "content": _build_agent_system_prompt(
-                [t["function"]["name"] for t in agent_tools if "function" in t]
+                [t["function"]["name"] for t in initial_tools if "function" in t],
+                abstain_first=abstain_first,
             )},
-            {"role": "user", "content": goal},
+            {"role": "user", "content": user_content},
         ])
         if pool:
-            await save_agent_run(pool, run_id, goal, "running", accumulated_steps, messages, pending_confirmations)
+            await save_agent_run(pool, run_id, goal, "running", accumulated_steps, messages, pending_confirmations, conversation_id=conversation_id)
 
     # --- ReAct Loop ---
     for iteration in range(max_steps):
@@ -645,14 +738,29 @@ async def run_agent(
                 c_tok = 100
                 record_usage(settings.SKILL_MODEL, 200, 100)
             else:
+                current_tool_choice = forced_tool_choice if forced_tool_choice is not None else "auto"
+                forced_tool_choice = None
+
+                if abstain_first and not search_web_unlocked:
+                    current_agent_tools = [
+                        t for t in agent_tools
+                        if not (
+                            t.get("name") == "search_web"
+                            or (isinstance(t.get("function"), dict) and t.get("function", {}).get("name") == "search_web")
+                        )
+                    ]
+                else:
+                    current_agent_tools = agent_tools
+
                 completions: Any = client.chat.completions
                 response = await completions.create(
                     model=str(settings.SKILL_MODEL),
                     messages=cast(Any, messages),
-                    tools=cast(Any, agent_tools),
-                    tool_choice="auto",
-                    max_tokens=512,
+                    tools=cast(Any, current_agent_tools),
+                    tool_choice=current_tool_choice,
+                    max_tokens=1024,
                     temperature=0.4,
+                    stream=False,
                 )
 
                 # Record usage
@@ -670,7 +778,7 @@ async def run_agent(
             # --- Tool call branch ---
             if choice.message.tool_calls:
                 tc = choice.message.tool_calls[0]
-                tc_id: str = str(tc["id"]) if isinstance(tc, dict) and "id" in tc else str(getattr(tc, "id", f"call_{uuid.uuid4().hex[:8]}"))
+                tc_id = str(tc["id"]) if isinstance(tc, dict) and "id" in tc else str(getattr(tc, "id", f"call_{uuid.uuid4().hex[:8]}"))
                 if isinstance(tc, dict):
                     func_info = tc.get("function", {})
                     func_name = str(func_info.get("name", "")) if isinstance(func_info, dict) else ""
@@ -678,6 +786,49 @@ async def run_agent(
                 else:
                     func_name = str(getattr(getattr(tc, "function", None), "name", ""))
                     raw_args = str(getattr(getattr(tc, "function", None), "arguments", "{}") or "{}")
+
+                # Hard fallback: if step loop reaches penultimate iteration (max_steps - 2) without a text response,
+                # force [ABSTAIN]-equivalent behavior and trigger escalation directly,
+                # rather than waiting for forced synthesis with no search.
+                if (
+                    func_name not in ("search_web", "ingest_url", "verify_deadline")
+                    and not web_escalation_used
+                    and iteration >= max_steps - 2
+                ):
+                    try:
+                        from backend.services.tavily import tavily_available
+                        tavily_ok = tavily_available()
+                    except Exception:
+                        tavily_ok = False
+                    if tavily_ok:
+                        web_escalation_used = True
+                        search_web_unlocked = True
+                        forced_tool_choice = {"type": "function", "function": {"name": "search_web"}}
+                        step_num += 1
+                        escalate_step = AgentStep(
+                            type="escalate",
+                            content="Approaching step limit without an answer from stored memory. Escalating to live web search.",
+                            step_number=step_num,
+                            elapsed_ms=int((time.perf_counter() - step_start) * 1000),
+                            run_id=run_id,
+                            model_tier="Tavily Web Intelligence",
+                            step_cost_usd=0.0,
+                            metadata={"reason": "step_limit_fallback", "provider": "tavily"},
+                        )
+                        yield escalate_step
+                        accumulated_steps.append(escalate_step)
+
+                        messages.append({"role": "assistant", "content": "[ABSTAIN] Memory does not contain the required information."})
+                        messages.append({
+                            "role": "user",
+                            "content": (
+                                "Stored memory does not cover this question. Please call the 'search_web' tool "
+                                "now to retrieve current information from the live web to answer the goal."
+                            ),
+                        })
+                        continue
+                    else:
+                        is_abstained = True
 
                 try:
                     tool_args = json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args)
@@ -749,6 +900,7 @@ async def run_agent(
                             await save_agent_run(
                                 pool, run_id, goal, "paused",
                                 accumulated_steps, messages, pending_confirmations,
+                                conversation_id=conversation_id,
                             )
 
                         if wait_for_confirmation:
@@ -766,6 +918,7 @@ async def run_agent(
                                     await save_agent_run(
                                         pool, run_id, goal, "expired",
                                         accumulated_steps, messages, pending_confirmations,
+                                        conversation_id=conversation_id,
                                     )
                                 step_num += 1
                                 timeout_step = AgentStep(
@@ -815,7 +968,7 @@ async def run_agent(
                                 accumulated_steps.append(rej_step)
                                 pending_confirmations.clear()
                                 if pool:
-                                    await save_agent_run(pool, run_id, goal, "running", accumulated_steps, messages, pending_confirmations)
+                                    await save_agent_run(pool, run_id, goal, "running", accumulated_steps, messages, pending_confirmations, conversation_id=conversation_id)
                                 continue  # Continue loop for re-planning!
                             else:
                                 confirmed_set.add(action_key)
@@ -827,6 +980,8 @@ async def run_agent(
                 # Execute tool (either read-only or pre-confirmed mutating)
                 tool_result = ""
                 if func_name in SKILL_REGISTRY:
+                    if user_id and isinstance(tool_args, dict) and "user_id" not in tool_args:
+                        tool_args["user_id"] = user_id
                     try:
                         # Capture pre-mutation state for audit log & undo if mutating
                         prev_state = None
@@ -848,6 +1003,76 @@ async def run_agent(
                         tool_result = result.get("response", str(result.get("data", "")))
                         tools_used.append(func_name)
 
+                        # Condition (b): If abstain_first is active and any read-only memory / delegation tool
+                        # returns empty / 0 results / no-answer / error, unlock search_web
+                        _original_memory_tools = frozenset({
+                            "query_tasks",
+                            "query_coursework_notes",
+                            "query_code_context",
+                        })
+                        _widened_memory_tools = frozenset({
+                            "get_hackathon_deadlines",
+                            "delegate_to_specialist",
+                            "list_projects",
+                            "query_coursework_tasks",
+                            "detect_deadline_conflicts",
+                            "summarize_day",
+                            "summarize_across_domains",
+                        })
+                        _memory_query_tools = _original_memory_tools | _widened_memory_tools
+                        if abstain_first and func_name in _memory_query_tools:
+                            is_zero = False
+                            data_field = result.get("data")
+                            if data_field is None or (isinstance(data_field, (list, dict)) and len(data_field) == 0):
+                                is_zero = True
+                            elif isinstance(data_field, dict):
+                                if data_field.get("count") == 0:
+                                    is_zero = True
+                                elif "chunks" in data_field and len(data_field.get("chunks", [])) == 0:
+                                    is_zero = True
+                                elif "tasks" in data_field and len(data_field.get("tasks", [])) == 0:
+                                    is_zero = True
+                                elif "projects" in data_field and len(data_field.get("projects", [])) == 0:
+                                    is_zero = True
+                                elif "findings" in data_field and len(data_field.get("findings", {})) == 0:
+                                    is_zero = True
+                                elif data_field.get("status") in ("unavailable", "error"):
+                                    is_zero = True
+                                elif "error" in data_field:
+                                    is_zero = True
+
+                            resp_str = str(result.get("response", "")).lower()
+                            if any(phrase in resp_str for phrase in (
+                                "found 0", "retrieved 0", "0 task", "0 active", "0 deliverable",
+                                "0 relevant", "0 result", "0 tracked", "no tracked", "no task",
+                                "no active", "no deliverable", "no deadline", "no relevant",
+                                "no matching", "not found", "task_id is required", "error",
+                                "failed", "none found"
+                            )):
+                                is_zero = True
+
+                            # Also: if returned tasks don't match specific goal query terms (e.g. asking for Devpost deadline)
+                            if not is_zero and isinstance(data_field, dict) and "tasks" in data_field:
+                                t_list = data_field.get("tasks") or []
+                                if t_list and "devpost" in goal.lower():
+                                    if not any("devpost" in str(t).lower() for t in t_list):
+                                        is_zero = True
+
+                            # If model repeats calling the same memory tool, it clearly didn't get what it needed
+                            if tools_used.count(func_name) >= 2:
+                                is_zero = True
+
+                            if is_zero:
+                                if func_name in _original_memory_tools:
+                                    search_web_unlocked = True
+                                else:
+                                    # One-tool grace period for widened memory tools:
+                                    # Do not auto-unlock after 1 unhelpful call so model can emit [ABSTAIN]
+                                    # Fall back to silent unlock only if a 2nd memory tool is called.
+                                    memory_calls_count = sum(1 for t in tools_used if t in _memory_query_tools)
+                                    if memory_calls_count >= 2:
+                                        search_web_unlocked = True
+
                         # Capture post-mutation state and record audit log
                         if pool and func_name in MUTATING_TOOLS:
                             new_st = None
@@ -866,7 +1091,7 @@ async def run_agent(
                                 tool=func_name,
                                 args=tool_args,
                                 run_id=run_id,
-                                affected_table="tasks",
+                                affected_table="memory_chunks" if func_name in ("ingest_url", "log_code_snippet", "log_code_context") else "tasks",
                                 affected_id=affected_id,
                                 previous_state=prev_state,
                                 new_state=new_st,
@@ -881,6 +1106,7 @@ async def run_agent(
 
                 # Emit OBSERVE step
                 step_num += 1
+                obs_tier = "Tavily Web Intelligence" if func_name in ("search_web", "ingest_url", "verify_deadline") else "Neon Postgres Engine"
                 obs_step = AgentStep(
                     type="observe",
                     content=tool_result,
@@ -888,14 +1114,14 @@ async def run_agent(
                     step_number=step_num,
                     elapsed_ms=int((time.perf_counter() - step_start) * 1000),
                     run_id=run_id,
-                    model_tier="Neon Postgres Engine",
+                    model_tier=obs_tier,
                     step_cost_usd=0.0,
                 )
                 yield obs_step
                 accumulated_steps.append(obs_step)
 
                 # Add to agent context for next iteration
-                asst_payload: Dict[str, Any] = {
+                asst_payload = {
                     "role": "assistant",
                     "content": None,
                     "tool_calls": [
@@ -914,7 +1140,66 @@ async def run_agent(
             else:
                 reply = choice.message.content or ""
 
+                # --- Abstention detection BEFORE critic ---
+                # Check for abstention first so the critic-revise loop can't eat
+                # the [ABSTAIN] signal and prevent web escalation.
+                _memory_tools_called = bool(set(tools_used) & {"query_tasks", "query_code_context", "query_coursework_notes", "query_coursework_tasks", "get_hackathon_deadlines", "summarize_day", "summarize_across_domains", "list_projects", "detect_deadline_conflicts", "delegate_to_specialist"})
+                _implicit_signals = (
+                    "don't have", "do not have", "cannot find", "no information", 
+                    "not found", "not stored", "insufficient", "no record", 
+                    "unable to find", "no data", "haven't found", "have not found"
+                )
+                _is_implicit_abstention = (
+                    abstain_first
+                    and not web_escalation_used
+                    and not _memory_tools_called
+                    and "search_web" not in tools_used
+                    and any(sig in reply.lower() for sig in _implicit_signals)
+                )
+                _is_explicit_abstention = any(k in reply.upper() for k in ("[ABSTAIN]", "[ABSTENTION]", "ABSTAIN:")) or reply.strip().startswith("[ABSTAIN]")
+
+                # Epistemic Humility: Detect explicit or implicit abstention and escalate to Tavily search
+                if _is_explicit_abstention or _is_implicit_abstention:
+                    if not web_escalation_used:
+                        try:
+                            from backend.services.tavily import tavily_available
+                            tavily_ok = tavily_available()
+                        except Exception:
+                            tavily_ok = False
+                        if tavily_ok:
+                            web_escalation_used = True
+                            search_web_unlocked = True
+                            forced_tool_choice = {"type": "function", "function": {"name": "search_web"}}
+                            step_num += 1
+                            escalate_step = AgentStep(
+                                type="escalate",
+                                content="Memory doesn't cover this. Escalating to live web search rather than guessing.",
+                                step_number=step_num,
+                                elapsed_ms=int((time.perf_counter() - step_start) * 1000),
+                                run_id=run_id,
+                                model_tier="Tavily Web Intelligence",
+                                step_cost_usd=0.0,
+                                metadata={"reason": "abstention", "provider": "tavily"},
+                            )
+                            yield escalate_step
+                            accumulated_steps.append(escalate_step)
+
+                            messages.append({"role": "assistant", "content": reply})
+                            messages.append({
+                                "role": "user",
+                                "content": (
+                                    "Stored memory does not cover this question. Please call the 'search_web' tool "
+                                    "now to retrieve current information from the live web to answer the goal."
+                                ),
+                            })
+                            continue
+                        else:
+                            is_abstained = True
+                    else:
+                        is_abstained = True
+
                 # Self-critique pass: check proposed plan against gathered data (capped at 2 rounds)
+                # Only run critic if we didn't escalate above.
                 if enable_critic and reply:
                     step_num += 1
                     critic_step = await _run_critic_pass(
@@ -936,15 +1221,19 @@ async def run_agent(
                         else:
                             logger.info("Critique-revise cycle cap (2 rounds) reached; proceeding to synthesis.")
 
-                # Epistemic Humility: Detect abstention
-                if any(k in reply.upper() for k in ("[ABSTAIN]", "[ABSTENTION]", "ABSTAIN:")) or reply.strip().startswith("[ABSTAIN]"):
-                    is_abstained = True
+                # Determine provenance
+                if is_abstained:
+                    provenance = "abstained"
+                elif any(t in tools_used for t in ("search_web", "ingest_url", "verify_deadline")) or web_escalation_used:
+                    provenance = "web"
+                else:
+                    provenance = "memory"
 
                 # Emit SYNTHESIZE step
                 step_num += 1
                 synth_step = AgentStep(
                     type="synthesize",
-                    content=reply,
+                    content=_clean_synthesis_text(reply),
                     step_number=step_num,
                     elapsed_ms=int((time.perf_counter() - step_start) * 1000),
                     run_id=run_id,
@@ -953,6 +1242,9 @@ async def run_agent(
                     metadata={
                         "abstained": is_abstained,
                         "replan_diff": active_replan_diff,
+                        "source": provenance,
+                        "sources": [provenance],
+                        "web_escalation_used": web_escalation_used,
                     },
                 )
                 yield synth_step
@@ -981,14 +1273,19 @@ async def run_agent(
         try:
             messages.append({
                 "role": "user",
-                "content": "You've gathered enough information. Please produce your final comprehensive answer now.",
+                "content": (
+                    "You've gathered enough information. Please produce your final comprehensive answer now. "
+                    "Never emit literal bracketed placeholders such as '[time]' or '[date]' if an exact value was not shown in the source text; "
+                    "explicitly state 'time not shown in the retrieved excerpt' instead."
+                ),
             })
-            completions: Any = client.chat.completions
+            completions = client.chat.completions
             response = await completions.create(
                 model=str(settings.SYNTHESIS_MODEL),
                 messages=cast(Any, messages),
                 max_tokens=1024,
                 temperature=0.5,
+                stream=False,
             )
             usage = getattr(response, "usage", None)
             p_tok = usage.prompt_tokens if usage else 500
@@ -997,9 +1294,10 @@ async def run_agent(
             forced_cost = compute_step_cost(settings.SYNTHESIS_MODEL, p_tok, c_tok)
             total_run_cost_usd += forced_cost
 
-            final_text = response.choices[0].message.content or "Agent completed analysis."
-            if any(k in final_text.upper() for k in ("[ABSTAIN]", "[ABSTENTION]", "ABSTAIN:")) or final_text.strip().startswith("[ABSTAIN]"):
+            raw_text = await _extract_content_from_response(response, default_text="Agent completed analysis.")
+            if any(k in raw_text.upper() for k in ("[ABSTAIN]", "[ABSTENTION]", "ABSTAIN:")) or raw_text.strip().startswith("[ABSTAIN]"):
                 is_abstained = True
+            final_text = _clean_synthesis_text(raw_text)
 
             forced_synth = AgentStep(
                 type="synthesize",
@@ -1036,6 +1334,13 @@ async def run_agent(
         "Nemotron-3 Ultra (550B)": sum(s.step_cost_usd or 0.0 for s in accumulated_steps if s.model_tier and "Ultra" in s.model_tier),
         "Neon Postgres Engine": 0.0,
     }
+    if is_abstained:
+        run_source = "abstained"
+    elif any(t in tools_used for t in ("search_web", "ingest_url", "verify_deadline")) or web_escalation_used:
+        run_source = "web"
+    else:
+        run_source = "memory"
+
     report_card = {
         "run_id": run_id,
         "status": "completed",
@@ -1045,6 +1350,10 @@ async def run_agent(
         "critique_rounds": critique_rounds,
         "total_cost_usd": round(total_run_cost_usd, 6),
         "abstained": is_abstained,
+        "source": run_source,
+        "sources": [run_source],
+        "web_escalation_used": web_escalation_used,
+        "tavily_abstain_first": abstain_first,
         "replan_diff": active_replan_diff,
         "tier_breakdown": {k: round(v, 6) for k, v in tier_breakdown.items()},
     }
@@ -1069,7 +1378,7 @@ async def run_agent(
     accumulated_steps.append(done_step)
 
     if pool:
-        await save_agent_run(pool, run_id, goal, "completed", accumulated_steps, messages, pending_confirmations)
+        await save_agent_run(pool, run_id, goal, "completed", accumulated_steps, messages, pending_confirmations, conversation_id=conversation_id)
 
 
 async def _run_critic_pass(
@@ -1131,6 +1440,7 @@ async def _run_critic_pass(
                 ]),
                 max_tokens=384,
                 temperature=0.3,
+                stream=False,
             )
             usage = getattr(resp, "usage", None)
             p_tok = usage.prompt_tokens if usage else 300
@@ -1138,7 +1448,7 @@ async def _run_critic_pass(
             record_usage(settings.SKILL_MODEL, p_tok, c_tok)
             critic_cost = compute_step_cost(settings.SKILL_MODEL, p_tok, c_tok)
 
-            critic_text = resp.choices[0].message.content or "APPROVED: Plan looks reasonable."
+            critic_text = await _extract_content_from_response(resp, default_text="APPROVED: Plan looks reasonable.")
     except Exception as e:
         logger.warning(f"Critic pass failed: {e}")
         critic_text = "APPROVED: (Critic pass skipped due to error)"
@@ -1160,6 +1470,7 @@ async def execute_confirmed_actions(
     pool: Any,
     run_id: Optional[str] = None,
     approved_by: str = "user",
+    user_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Execute previously confirmed state-mutating actions.
 
@@ -1172,6 +1483,8 @@ async def execute_confirmed_actions(
     for action in confirmed_actions:
         tool_name = action.get("tool", "")
         tool_args = action.get("args", {})
+        if user_id and isinstance(tool_args, dict) and "user_id" not in tool_args:
+            tool_args["user_id"] = user_id
 
         if tool_name not in SKILL_REGISTRY:
             results.append({"tool": tool_name, "status": "error", "message": f"Unknown tool: {tool_name}"})
@@ -1179,7 +1492,7 @@ async def execute_confirmed_actions(
 
         previous_state = None
         affected_id = None
-        affected_table = "tasks"
+        affected_table = "memory_chunks" if tool_name in ("ingest_url", "log_code_snippet", "log_code_context") else "tasks"
 
         # Capture pre-mutation state for audit log & undo
         try:
@@ -1194,6 +1507,23 @@ async def execute_confirmed_actions(
                                 if hasattr(v, "isoformat"):
                                     previous_state[k] = v.isoformat()
                             affected_id = int(task_id)
+            elif pool and tool_name == "commit_schedule":
+                assignments = tool_args.get("assignments") or []
+                affected_ids = [a.get("task_id") for a in assignments if a.get("task_id")]
+                if affected_ids:
+                    async with pool.acquire() as conn:
+                        rows = await conn.fetch("SELECT id, scheduled_start, scheduled_end FROM tasks WHERE id = ANY($1::int[])", affected_ids)
+                        previous_state = {
+                            "tasks": [
+                                {
+                                    "task_id": r["id"],
+                                    "scheduled_start": r["scheduled_start"].isoformat() if r["scheduled_start"] else None,
+                                    "scheduled_end": r["scheduled_end"].isoformat() if r["scheduled_end"] else None,
+                                }
+                                for r in rows
+                            ]
+                        }
+                    affected_id = affected_ids[0] if affected_ids else None
         except Exception as e:
             logger.warning(f"Failed to capture pre-mutation state: {e}")
 

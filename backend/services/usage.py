@@ -52,51 +52,138 @@ def compute_step_cost(model_name: str, prompt_tokens: int, completion_tokens: in
     return round(cost, 6)
 
 
-# In-Memory State Store — initialized with baseline multi-turn activity across skills
+# In-Memory State Store — starts empty (zeroed); hydrated from usage_log on startup
 _USAGE_STATE: Dict[str, Dict[str, Any]] = {}
 
-def _record_baseline(m: str, p: int, c: int):
-    norm_key = _normalize_model_name(m)
-    pricing = PRICING_PER_1M.get(norm_key, {"prompt": 0.06, "completion": 0.24})
-    cost = round((p * pricing["prompt"] / 1_000_000.0) + (c * pricing["completion"] / 1_000_000.0), 6)
-    if norm_key not in _USAGE_STATE:
-        _USAGE_STATE[norm_key] = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "cost": 0.0}
-    entry = _USAGE_STATE[norm_key]
-    entry["calls"] += 1
-    entry["prompt_tokens"] += p
-    entry["completion_tokens"] += c
-    entry["cost"] = round(entry["cost"] + cost, 6)
-    _USAGE_STATE[m] = entry
 
-def _init_default_usage():
-    """Populate sustained baseline activity across all 4 models (dozens per model) so live counter & admin usage reflect authentic usage."""
-    import random
-    rng = random.Random(42)
+async def hydrate_usage_from_db(pool=None) -> Dict[str, Any]:
+    """Hydrate in-memory _USAGE_STATE from the persistent usage_log table in Neon PostgreSQL.
 
-    # 35 Nano calls (Router fires on every incoming message)
-    for _ in range(35):
-        p = rng.randint(60, 180)
-        c = rng.randint(20, 60)
-        _record_baseline("nemotron-nano", p, c)
+    Ensures usage dashboards and admin commands reflect genuine historical database telemetry.
+    """
+    global _USAGE_STATE
+    if pool is None:
+        try:
+            from backend.memory.db import get_pool
+            pool = await get_pool()
+        except Exception:
+            return _USAGE_STATE
+    if not pool:
+        return _USAGE_STATE
 
-    # 20 Super calls (Skill execution: add_task, query_tasks, code context)
-    for _ in range(20):
-        p = rng.randint(150, 400)
-        c = rng.randint(80, 220)
-        _record_baseline("nemotron-super", p, c)
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT model,
+                       COUNT(*) as calls,
+                       COALESCE(SUM(input_tokens), 0) as prompt_tokens,
+                       COALESCE(SUM(output_tokens), 0) as completion_tokens,
+                       COALESCE(SUM(estimated_cost_usd), 0.0) as cost
+                FROM usage_log
+                GROUP BY model
+                """
+            )
+            new_state: Dict[str, Dict[str, Any]] = {}
+            for r in rows:
+                norm_key = _normalize_model_name(r["model"])
+                if norm_key not in new_state:
+                    new_state[norm_key] = {
+                        "calls": 0,
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "cost": 0.0,
+                    }
+                entry = new_state[norm_key]
+                entry["calls"] += int(r["calls"])
+                entry["prompt_tokens"] += int(r["prompt_tokens"])
+                entry["completion_tokens"] += int(r["completion_tokens"])
+                entry["cost"] = round(entry["cost"] + float(r["cost"]), 6)
+                new_state[r["model"]] = entry
 
-    # 18 Ultra calls (Cross-domain synthesis: summarize_day, multi-project roadmap)
-    for _ in range(18):
-        p = rng.randint(450, 950)
-        c = rng.randint(250, 600)
-        _record_baseline("nemotron-ultra", p, c)
+            _USAGE_STATE = new_state
+            logger.info(f"Hydrated usage state from usage_log: {len(rows)} model groups loaded.")
 
-    # 22 Qwen3 Embedding calls (Vector memory indexing & similarity queries)
-    for _ in range(22):
-        p = rng.randint(48, 160)
-        _record_baseline("qwen3-embedding", p, 0)
+            # Hydrate Tavily credit telemetry
+            try:
+                tavily_rows = await conn.fetch(
+                    "SELECT operation, COUNT(*) as calls, COALESCE(SUM(credits), 0) as credits FROM tavily_usage_log GROUP BY operation"
+                )
+                for tr in tavily_rows:
+                    op = tr["operation"]
+                    _TAVILY_STATE[op] = {"calls": int(tr["calls"]), "credits": int(tr["credits"])}
+                logger.info(f"Hydrated Tavily credits: {get_tavily_summary()['total_credits']} total credits.")
+            except Exception as te:
+                logger.debug(f"Could not hydrate tavily_usage_log (table might be initializing): {te}")
+    except Exception as e:
+        logger.warning(f"Failed to hydrate usage from DB: {e}")
 
-_init_default_usage()
+    return _USAGE_STATE
+
+
+# Tavily credit state store — starts at 0, tracked separately from token costs
+_TAVILY_STATE: Dict[str, Dict[str, int]] = {
+    "search": {"calls": 0, "credits": 0},
+    "extract": {"calls": 0, "credits": 0},
+}
+
+
+def get_tavily_summary() -> Dict[str, Any]:
+    """Return consolidated Tavily credit accounting summary."""
+    total_credits = sum(v.get("credits", 0) for v in _TAVILY_STATE.values())
+    total_calls = sum(v.get("calls", 0) for v in _TAVILY_STATE.values())
+    return {
+        "by_operation": {k: dict(v) for k, v in _TAVILY_STATE.items()},
+        "total_credits": total_credits,
+        "total_calls": total_calls,
+    }
+
+
+async def _persist_tavily_to_db(
+    operation: str,
+    credits: int,
+    conn: Optional[asyncpg.Connection] = None,
+) -> None:
+    """Insert a record into tavily_usage_log table."""
+    try:
+        if conn is not None:
+            await conn.execute(
+                "INSERT INTO tavily_usage_log (operation, credits) VALUES ($1, $2)",
+                operation, credits,
+            )
+        else:
+            from backend.memory.db import get_pool
+            pool = await get_pool()
+            async with pool.acquire() as db_conn:
+                await db_conn.execute(
+                    "INSERT INTO tavily_usage_log (operation, credits) VALUES ($1, $2)",
+                    operation, credits,
+                )
+    except Exception as err:
+        logger.warning(f"Failed to persist tavily_usage_log: {err}")
+
+
+async def record_tavily_credits(
+    operation: str,
+    credits: int,
+    conn: Optional[asyncpg.Connection] = None,
+) -> None:
+    """Record Tavily credit usage and persist asynchronously with strong reference."""
+    import asyncio
+    st = _TAVILY_STATE.setdefault(operation, {"calls": 0, "credits": 0})
+    st["calls"] += 1
+    st["credits"] += credits
+
+    try:
+        loop = asyncio.get_running_loop()
+        task = loop.create_task(_persist_tavily_to_db(operation, credits, conn=conn))
+        _BACKGROUND_TASKS.add(task)
+        task.add_done_callback(_on_persist_done)
+    except RuntimeError:
+        pass
+
+    logger.info(f"Tavily credit recorded: operation={operation}, credits={credits}")
+
 
 
 # Background task set to prevent premature garbage collection of in-flight writes
@@ -271,5 +358,6 @@ def get_usage_summary() -> Dict[str, Any]:
                 "cost": f"${v['estimated_cost_usd']:.6f}"
             }
             for k, v in by_model.items()
-        ]
+        ],
+        "tavily": get_tavily_summary(),
     }

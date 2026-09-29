@@ -41,6 +41,7 @@ CREATE TABLE tasks (
     priority    TEXT         DEFAULT 'medium'
                              CHECK (priority IN ('low','medium','high','urgent')),
     notes       TEXT,
+    user_id     TEXT,        -- Account owner identifier for memory isolation
     created_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
@@ -54,6 +55,7 @@ CREATE INDEX idx_tasks_domain     ON tasks(domain);
 CREATE INDEX idx_tasks_status     ON tasks(status);
 CREATE INDEX idx_tasks_due_date   ON tasks(due_date);
 CREATE INDEX idx_tasks_project_id ON tasks(project_id);
+CREATE INDEX idx_tasks_user_id    ON tasks(user_id);
 
 -- ============================================================
 -- Memory Chunks — vector store for semantic search
@@ -75,6 +77,7 @@ CREATE TABLE memory_chunks (
     embedding   VECTOR(768),
     source      TEXT,        -- e.g. repo URL, course name, file path
     tags        TEXT[],
+    user_id     TEXT,        -- Account owner identifier for memory isolation
     created_at  TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
@@ -82,6 +85,7 @@ CREATE INDEX idx_memory_chunks_embedding   ON memory_chunks USING hnsw (embeddin
 CREATE INDEX idx_memory_chunks_domain      ON memory_chunks(domain);
 CREATE INDEX idx_memory_chunks_project_id  ON memory_chunks(project_id);
 CREATE INDEX idx_memory_chunks_tags        ON memory_chunks USING gin(tags);
+CREATE INDEX idx_memory_chunks_user_id     ON memory_chunks(user_id);
 
 -- ============================================================
 -- Conversations — chat sessions
@@ -163,4 +167,16 @@ CREATE TABLE IF NOT EXISTS agent_audit_log (
 
 CREATE INDEX IF NOT EXISTS idx_agent_audit_log_run_id     ON agent_audit_log(run_id);
 CREATE INDEX IF NOT EXISTS idx_agent_audit_log_created_at ON agent_audit_log(created_at);
+
+-- ============================================================
+-- Tavily Usage Log — credit consumption tracking
+-- ============================================================
+CREATE TABLE IF NOT EXISTS tavily_usage_log (
+    id         SERIAL       PRIMARY KEY,
+    operation  TEXT         NOT NULL,   -- 'search' | 'extract'
+    credits    INTEGER      NOT NULL DEFAULT 1,
+    created_at TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_tavily_usage_created_at ON tavily_usage_log(created_at);
 
