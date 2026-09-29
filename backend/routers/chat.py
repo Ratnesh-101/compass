@@ -108,21 +108,58 @@ async def list_past_conversations(
 
 # ---- PATCH /api/conversations/{conversation_id} ---------------------------
 @router.patch("/api/conversations/{conversation_id}")
-async def update_past_conversation(conversation_id: str, payload: ConversationUpdate):
-    """Update title, pinned state, or archive state of a conversation."""
+async def update_past_conversation(
+    conversation_id: str,
+    payload: ConversationUpdate,
+    request: Request,
+):
+    """Update title, pinned state, archive state, or shared status of a conversation."""
     pool = await get_pool()
     if not pool:
         return {"ok": False, "error": "Database unavailable"}
     try:
+        cid = uuid.UUID(conversation_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid conversation ID")
+
+    try:
         async with pool.acquire() as conn:
+            # Check ownership (IDOR prevention)
+            has_user_col = await conn.fetchval(
+                "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'conversations' AND column_name = 'user_id')"
+            )
+            if has_user_col:
+                conv_row = await conn.fetchrow("SELECT user_id FROM conversations WHERE id = $1", cid)
+                if not conv_row:
+                    raise HTTPException(status_code=404, detail="Conversation not found")
+
+                user_id = _get_current_user_id(request)
+                auth_header = request.headers.get("authorization", "")
+                is_admin = False
+                if auth_header.startswith("Bearer "):
+                    token = auth_header[7:].strip()
+                    from backend.config import get_settings
+                    import hmac
+                    s = get_settings()
+                    if token and s.AUTH_TOKEN and hmac.compare_digest(token, s.AUTH_TOKEN):
+                        is_admin = True
+
+                conv_owner = conv_row.get("user_id")
+                if not is_admin and conv_owner:
+                    if not user_id or user_id.lower() != conv_owner.lower():
+                        raise HTTPException(status_code=403, detail="Forbidden: You do not have permission to modify this conversation.")
+
             ok = await conversations.update_conversation(
                 conn,
                 conversation_id,
                 title=payload.title,
                 is_pinned=payload.is_pinned,
                 is_archived=payload.is_archived,
+                is_shared=payload.is_shared,
             )
             return {"ok": ok}
+    except HTTPException:
+        raise
     except Exception:
         logger.exception("Error updating past conversation: %s", conversation_id)
         return {"ok": False, "error": "Failed to update conversation"}
@@ -130,15 +167,47 @@ async def update_past_conversation(conversation_id: str, payload: ConversationUp
 
 # ---- DELETE /api/conversations/{conversation_id} --------------------------
 @router.delete("/api/conversations/{conversation_id}")
-async def delete_past_conversation(conversation_id: str):
+async def delete_past_conversation(conversation_id: str, request: Request):
     """Delete a past conversation session and its messages."""
     pool = await get_pool()
     if not pool:
         return {"ok": False, "error": "Database unavailable"}
     try:
+        cid = uuid.UUID(conversation_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid conversation ID")
+
+    try:
         async with pool.acquire() as conn:
+            # Check ownership (IDOR prevention)
+            has_user_col = await conn.fetchval(
+                "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'conversations' AND column_name = 'user_id')"
+            )
+            if has_user_col:
+                conv_row = await conn.fetchrow("SELECT user_id FROM conversations WHERE id = $1", cid)
+                if not conv_row:
+                    raise HTTPException(status_code=404, detail="Conversation not found")
+
+                user_id = _get_current_user_id(request)
+                auth_header = request.headers.get("authorization", "")
+                is_admin = False
+                if auth_header.startswith("Bearer "):
+                    token = auth_header[7:].strip()
+                    from backend.config import get_settings
+                    import hmac
+                    s = get_settings()
+                    if token and s.AUTH_TOKEN and hmac.compare_digest(token, s.AUTH_TOKEN):
+                        is_admin = True
+
+                conv_owner = conv_row.get("user_id")
+                if not is_admin and conv_owner:
+                    if not user_id or user_id.lower() != conv_owner.lower():
+                        raise HTTPException(status_code=403, detail="Forbidden: You do not have permission to delete this conversation.")
+
             ok = await conversations.delete_conversation(conn, conversation_id)
             return {"ok": ok}
+    except HTTPException:
+        raise
     except Exception:
         logger.exception("Failed to delete conversation: %s", conversation_id)
         return {"ok": False, "error": "Failed to delete conversation"}
@@ -146,20 +215,44 @@ async def delete_past_conversation(conversation_id: str):
 
 # ---- GET /api/share/{conversation_id} -------------------------------------
 @router.get("/api/share/{conversation_id}")
-async def get_shared_conversation(conversation_id: str):
+async def get_shared_conversation(conversation_id: str, request: Request):
     """Retrieve shared conversation details and its messages publicly."""
     try:
         pool = await get_pool()
         if not pool:
             raise HTTPException(status_code=503, detail="Database unavailable")
         async with pool.acquire() as conn:
-            cid = uuid.UUID(conversation_id)
+            try:
+                cid = uuid.UUID(conversation_id)
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=400, detail="Invalid conversation ID")
+
+            has_shared_col = await conn.fetchval(
+                "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'conversations' AND column_name = 'is_shared')"
+            )
+            has_user_col = await conn.fetchval(
+                "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'conversations' AND column_name = 'user_id')"
+            )
+
+            cols = ["id", "started_at", "last_active_at", "COALESCE(title, 'Chat Session') AS title"]
+            if has_shared_col:
+                cols.append("is_shared")
+            if has_user_col:
+                cols.append("user_id")
+
             conv_row = await conn.fetchrow(
-                "SELECT id, started_at, last_active_at, COALESCE(title, 'Chat Session') AS title FROM conversations WHERE id = $1",
+                f"SELECT {', '.join(cols)} FROM conversations WHERE id = $1",
                 cid
             )
             if not conv_row:
                 raise HTTPException(status_code=404, detail="Conversation not found")
+
+            # Privacy gate: If is_shared column exists, only allow public access if is_shared is TRUE or caller is the owner
+            if has_shared_col and not conv_row.get("is_shared"):
+                user_id = _get_current_user_id(request)
+                owner = conv_row.get("user_id") if has_user_col else None
+                if not owner or not user_id or user_id.lower() != owner.lower():
+                    raise HTTPException(status_code=403, detail="This conversation is private and has not been shared.")
 
             rows = await conversations.get_recent_messages(conn, conversation_id, limit=100)
             messages = [
