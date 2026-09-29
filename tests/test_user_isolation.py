@@ -10,9 +10,9 @@ from backend.services.oauth import generate_google_oauth_url, is_google_oauth_co
 @pytest.mark.asyncio
 async def test_oauth_prompt_has_select_account():
     """Verify that Google OAuth authorization URL forces account selection so users aren't auto-logged into the wrong Google account."""
-    url = generate_google_oauth_url(login_hint="kumarinandan911@gmail.com")
+    url = generate_google_oauth_url(login_hint="alice@example.com")
     assert "prompt=select_account" in url
-    assert "login_hint=kumarinandan911%40gmail.com" in url
+    assert "login_hint=alice%40example.com" in url
 
 
 @pytest.mark.asyncio
@@ -20,8 +20,8 @@ async def test_account_selection_and_task_isolation(client: AsyncClient):
     """Verify that tasks created by User A are isolated from User B."""
     import uuid
     unique_title = f"User A Private Milestone {uuid.uuid4().hex[:6]}"
-    user_a = "kumarinandan911@gmail.com"
-    user_b = "himynameisratnesh12@gmail.com"
+    user_a = "alice@example.com"
+    user_b = "bob@example.com"
 
     # User A creates a task
     res_a = await client.post(
@@ -52,7 +52,7 @@ async def test_account_selection_and_task_isolation(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_select_account_endpoint(client: AsyncClient):
     """Test switching active account via POST /api/auth/select-account."""
-    target = "kumarinandan911@gmail.com"
+    target = "alice@example.com"
     res = await client.post("/api/auth/select-account", json={"email": target})
     assert res.status_code == 200
     data = res.json()
