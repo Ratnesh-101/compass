@@ -18,13 +18,15 @@ async def test_oauth_prompt_has_select_account():
 @pytest.mark.asyncio
 async def test_account_selection_and_task_isolation(client: AsyncClient):
     """Verify that tasks created by User A are isolated from User B."""
+    import uuid
+    unique_title = f"User A Private Milestone {uuid.uuid4().hex[:6]}"
     user_a = "kumarinandan911@gmail.com"
     user_b = "himynameisratnesh12@gmail.com"
 
     # User A creates a task
     res_a = await client.post(
         "/api/tasks",
-        json={"title": "User A Private Milestone", "domain": "code"},
+        json={"title": unique_title, "domain": "code"},
         headers={"x-user-id": user_a},
     )
     assert res_a.status_code == 200
