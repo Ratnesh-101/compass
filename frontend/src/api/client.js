@@ -50,8 +50,7 @@ export const FALLBACK_TASKS = [
     timestamp: '3 hours ago'
   }
 ]
-
-const DEFAULT_ACCOUNTS = ['himynameisratnesh12@gmail.com', 'kumarinandan911@gmail.com']
+const DEFAULT_ACCOUNTS = ['demo@compass.app', 'researcher@compass.app']
 
 export function getKnownAccounts() {
   try {
@@ -111,8 +110,9 @@ export function getCurrentUserId() {
     : Math.random().toString(36).slice(2, 14)
   uid = `anon_${randomPart}`
   localStorage.setItem('compass_user_id', uid)
+  const secureFlag = typeof window !== 'undefined' && window.location.protocol === 'https:' ? '; Secure' : ''
   try {
-    document.cookie = `compass_user_id=${encodeURIComponent(uid)}; path=/; max-age=31536000; SameSite=Lax`
+    document.cookie = `compass_user_id=${encodeURIComponent(uid)}; path=/; max-age=31536000; SameSite=Lax${secureFlag}`
   } catch {
     // Cookie storage fallback
   }
@@ -120,6 +120,7 @@ export function getCurrentUserId() {
 }
 
 export function setCurrentUserId(userId) {
+  const secureFlag = typeof window !== 'undefined' && window.location.protocol === 'https:' ? '; Secure' : ''
   if (userId && userId.trim()) {
     const clean = userId.trim().toLowerCase()
     localStorage.setItem('compass_user_id', clean)
@@ -128,7 +129,7 @@ export function setCurrentUserId(userId) {
       addKnownAccount(clean)
     }
     try {
-      document.cookie = `compass_user_id=${encodeURIComponent(clean)}; path=/; max-age=31536000; SameSite=Lax`
+      document.cookie = `compass_user_id=${encodeURIComponent(clean)}; path=/; max-age=31536000; SameSite=Lax${secureFlag}`
     } catch {
       // Ignore in restricted environments
     }
@@ -136,7 +137,7 @@ export function setCurrentUserId(userId) {
     localStorage.removeItem('compass_user_id')
     localStorage.removeItem('compass_user_email')
     try {
-      document.cookie = `compass_user_id=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`
+      document.cookie = `compass_user_id=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT${secureFlag}`
     } catch {
       // Ignore
     }
@@ -623,7 +624,10 @@ export async function updateTask(taskId, updateData) {
 export async function dispatchSpecialist({ capability, user_goal, relevant_context }) {
   const res = await fetch(`${API_BASE}/api/specialist/dispatch`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeaders(),
+    },
     body: JSON.stringify({
       capability,
       user_goal,
