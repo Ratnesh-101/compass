@@ -258,7 +258,7 @@ export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged 
                         {accEmail}
                       </div>
                       <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                        {accEmail === 'himynameisratnesh12@gmail.com' ? 'Ratnesh Singh (Primary User Account)' : 'Isolated Workspace'}
+                        {accEmail === 'demo@compass.app' ? 'Demo Workspace (Primary)' : 'Isolated Workspace'}
                       </div>
                     </div>
                   </div>

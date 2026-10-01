@@ -103,5 +103,5 @@ async def trigger_consolidation(
             stale_conversations_rolled_up=report.get("stale_conversations_rolled_up", 0),
         )
     except Exception as e:
-        logger.error(f"Consolidation job failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Consolidation job error: {e}")
+        logger.error(f"Consolidation job failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Consolidation job failed. Check server logs for details.")
