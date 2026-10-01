@@ -127,6 +127,7 @@ class ConversationUpdate(BaseModel):
     title: Optional[str] = None
     is_pinned: Optional[bool] = None
     is_archived: Optional[bool] = None
+    is_shared: Optional[bool] = None
 
 
 class ConsolidateRequest(BaseModel):

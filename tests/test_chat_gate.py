@@ -65,6 +65,10 @@ async def test_chat_gate_allows_add_task():
         task_id = res["data"]["id"]
 
         # Clean up the created task
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            await conn.execute("DELETE FROM tasks WHERE id = $1", task_id)
+        try:
+            pool = await get_pool()
+            if pool:
+                async with pool.acquire() as conn:
+                    await conn.execute("DELETE FROM tasks WHERE id = $1", int(task_id))
+        except Exception:
+            pass
