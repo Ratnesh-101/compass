@@ -40,7 +40,7 @@ jobs:
           python -c "import json; from backend.main import app; schema = app.openapi(); json.dump(schema, open('openapi.json', 'w'), indent=2); print('Successfully exported OpenAPI specification with', len(schema['paths']), 'endpoints')"
 
       - name: Upload OpenAPI Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: compass-openapi-spec
           path: openapi.json
