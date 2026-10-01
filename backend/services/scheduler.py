@@ -675,11 +675,13 @@ def estimate_task_effort_hours(task: Dict[str, Any]) -> float:
         except (ValueError, TypeError):
             pass
 
-    # 2. Textual hints in title or notes
-    text_corpus = f"{task.get('title', '')} {task.get('notes', '')} {task.get('description', '')}"
+    # 2. Textual hints in title or notes (capped length and linear regex to avoid ReDoS)
+    text_corpus = f"{task.get('title', '')} {task.get('notes', '')} {task.get('description', '')}"[:500]
     if text_corpus.strip():
-        # Match hours: e.g. "36-hour", "36 hours", "8 hrs", "2.5h"
-        m_hr = re.search(r'\b(\d+(?:\.\d+)?)\s*-?\s*(?:hour|hours|hr|hrs|h)\b', text_corpus, re.IGNORECASE)
+        # Normalize hyphens so '36-hour' becomes '36 hour'
+        normalized_corpus = text_corpus.replace("-", " ")
+        # Match hours: e.g. "36 hour", "36 hours", "8 hrs", "2.5h"
+        m_hr = re.search(r'\b(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h)\b', normalized_corpus, re.IGNORECASE)
         if m_hr:
             try:
                 hrs = float(m_hr.group(1))
@@ -688,8 +690,8 @@ def estimate_task_effort_hours(task: Dict[str, Any]) -> float:
             except ValueError:
                 pass
 
-        # Match minutes: e.g. "90 min", "45 minutes", "30m"
-        m_min = re.search(r'\b(\d+(?:\.\d+)?)\s*-?\s*(?:minute|minutes|min|mins)\b', text_corpus, re.IGNORECASE)
+        # Match minutes: e.g. "90 min", "45 minutes"
+        m_min = re.search(r'\b(\d+(?:\.\d+)?)\s*(?:minutes?|mins?)\b', normalized_corpus, re.IGNORECASE)
         if m_min:
             try:
                 mins = float(m_min.group(1))
