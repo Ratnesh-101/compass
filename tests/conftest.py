@@ -24,6 +24,16 @@ sys.unraisablehook = _quiet_unraisablehook
 
 # Match prod by endpoint id from env PROD_DB_ENDPOINT
 prod_endpoint_id = os.environ.get("PROD_DB_ENDPOINT", "ep-sweet-fire-b2y9w95z").strip()
+
+if not (os.environ.get("TEST_DATABASE_URL") or os.environ.get("DATABASE_URL")):
+    env_file = _project_root / ".env"
+    if env_file.exists():
+        try:
+            from dotenv import load_dotenv
+            load_dotenv(env_file)
+        except ImportError:
+            pass
+
 test_db_url = os.environ.get("TEST_DATABASE_URL") or os.environ.get("DATABASE_URL")
 
 # Set DATABASE_URL from test_db_url before importing backend

@@ -1,19 +1,29 @@
-"""
-Compass — Specialist Multi-Agent Dispatch Router.
-"""
-
-from fastapi import APIRouter, Depends
-from backend.dependencies import rate_limit
+import hmac
+from fastapi import APIRouter, Depends, Request, HTTPException
+from backend.dependencies import rate_limit, _get_current_user_id
 from backend.memory.db import get_pool
+from backend.config import get_settings
 
 router = APIRouter(tags=["specialist"])
 
 
 @router.post("/api/specialist/dispatch", dependencies=[Depends(rate_limit)])
-async def dispatch_specialist_endpoint(request_data: dict):
+async def dispatch_specialist_endpoint(request_data: dict, request: Request):
     """Direct thin API endpoint for the Specialist Multi-Agent System UI.
-    Validates request -> delegates to SpecialistDispatcher -> returns structured SpecialistResult.
+    Validates request -> verifies user/auth -> delegates to SpecialistDispatcher -> returns structured SpecialistResult.
     """
+    settings = get_settings()
+
+    # Verify authorization (bearer token or session/user identity)
+    auth_header = request.headers.get("authorization", "")
+    token = auth_header[7:].strip() if auth_header.startswith("Bearer ") else ""
+    user_id = _get_current_user_id(request)
+
+    if settings.is_production():
+        is_token_valid = bool(token and settings.AUTH_TOKEN and hmac.compare_digest(token, settings.AUTH_TOKEN))
+        if not is_token_valid and not user_id:
+            raise HTTPException(status_code=401, detail="Unauthorized: valid bearer token or authenticated user session required.")
+
     from backend.agents.specialist import SpecialistRequest, SpecialistDispatcher
     pool = await get_pool()
 
