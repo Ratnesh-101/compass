@@ -139,8 +139,12 @@ def get_available_windows(
             b_end = item.end + buf_td
             label = item.label
         elif isinstance(item, dict):
-            b_start = _ensure_utc(item.get("start") or item.get("scheduled_start")) - buf_td
-            b_end = _ensure_utc(item.get("end") or item.get("scheduled_end")) + buf_td
+            raw_start = item.get("start") or item.get("scheduled_start")
+            raw_end = item.get("end") or item.get("scheduled_end")
+            if raw_start is None or raw_end is None:
+                continue
+            b_start = _ensure_utc(raw_start) - buf_td
+            b_end = _ensure_utc(raw_end) + buf_td
             label = item.get("title") or item.get("label")
         else:
             continue
@@ -223,7 +227,7 @@ def allocate_task_slots(
     dep_map: Dict[int, List[int]] = {}
     if dependencies:
         for k, v in dependencies.items():
-            dep_map[int(k)] = [int(x) for x in v]
+            dep_map[k] = list(v)
     for t in tasks:
         tid = t.get("id")
         if tid is not None and t.get("depends_on"):
@@ -233,7 +237,7 @@ def allocate_task_slots(
     scheduled_map: Dict[int, Dict[str, Any]] = {}
     if existing_scheduled_map:
         for k, v in existing_scheduled_map.items():
-            scheduled_map[int(k)] = {
+            scheduled_map[k] = {
                 "scheduled_start": _ensure_utc(v["scheduled_start"]),
                 "scheduled_end": _ensure_utc(v["scheduled_end"]),
             }
@@ -540,9 +544,11 @@ def detect_schedule_conflicts(
 
     if external_events:
         for ev in external_events:
-            if (ev.get("start") or ev.get("scheduled_start")) and (ev.get("end") or ev.get("scheduled_end")):
-                start = _ensure_utc(ev.get("start") or ev.get("scheduled_start"))
-                end = _ensure_utc(ev.get("end") or ev.get("scheduled_end"))
+            ev_start = ev.get("start") or ev.get("scheduled_start")
+            ev_end = ev.get("end") or ev.get("scheduled_end")
+            if ev_start is not None and ev_end is not None:
+                start = _ensure_utc(ev_start)
+                end = _ensure_utc(ev_end)
                 items.append((start, end, ev, "external"))
 
     items.sort(key=lambda x: x[0])
