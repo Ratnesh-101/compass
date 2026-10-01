@@ -5,8 +5,11 @@ import json
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-# Enforce isolated test branch DB
-TEST_URL = "postgresql://neondb_owner:npg_7wyhI0aBgbEn@ep-broad-recipe-b2e5ssds-pooler.c-6.eu-central-1.aws.neon.tech/neondb?sslmode=require"
+# Enforce isolated test branch DB — NEVER hardcode credentials; use env vars.
+TEST_URL = os.environ.get("TEST_DATABASE_URL")
+if not TEST_URL:
+    print("ERROR: TEST_DATABASE_URL environment variable is not set.", file=sys.stderr)
+    sys.exit(1)
 os.environ["DATABASE_URL"] = TEST_URL
 os.environ["TEST_DATABASE_URL"] = TEST_URL
 

@@ -270,8 +270,9 @@ async def update_conversation(
     title: Optional[str] = None,
     is_pinned: Optional[bool] = None,
     is_archived: Optional[bool] = None,
+    is_shared: Optional[bool] = None,
 ) -> bool:
-    """Update title, pinned status, or archive status of a conversation."""
+    """Update title, pinned status, archive status, or shared status of a conversation."""
     try:
         cid = uuid.UUID(conversation_id)
         updates: List[str] = []
@@ -299,6 +300,15 @@ async def update_conversation(
                 await conn.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS is_archived BOOLEAN NOT NULL DEFAULT FALSE")
             params.append(bool(is_archived))
             updates.append(f"is_archived = ${len(params)}")
+
+        if is_shared is not None:
+            has_shared = await conn.fetchval(
+                "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'conversations' AND column_name = 'is_shared')"
+            )
+            if not has_shared:
+                await conn.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS is_shared BOOLEAN NOT NULL DEFAULT FALSE")
+            params.append(bool(is_shared))
+            updates.append(f"is_shared = ${len(params)}")
 
         if not updates:
             return True

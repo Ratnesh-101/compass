@@ -5,7 +5,10 @@ Uses pydantic-settings to load from environment variables and .env file.
 All model IDs, database URLs, and auth tokens are configured here.
 """
 
+import json
 from functools import lru_cache
+from typing import Any
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -85,6 +88,23 @@ class Settings(BaseSettings):
         "https://compass-frontend.vercel.app",
         "https://compass.nebius.app",
     ]
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v: Any) -> list[str]:
+        if isinstance(v, list):
+            return [str(item).strip() for item in v if item]
+        if isinstance(v, str):
+            val = v.strip()
+            if val.startswith("[") and val.endswith("]"):
+                try:
+                    loaded = json.loads(val)
+                    if isinstance(loaded, list):
+                        return [str(item).strip() for item in loaded if item]
+                except Exception:
+                    val = val[1:-1]
+            return [orig.strip().strip("'\"") for orig in val.split(",") if orig.strip()]
+        return []
 
     # --- Cost tracking (USD per 1M tokens, verified Nebius Token Factory rates) ---
     COST_PER_1M_INPUT: dict[str, float] = {
