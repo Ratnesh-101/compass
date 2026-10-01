@@ -74,7 +74,9 @@ Compass is powered by a multi-tiered architecture orchestrated across Nebius Tok
 
 ---
 
-## 6. Feedback for Nebius & NVIDIA
+## 6. Feedback for Nebius & NVIDIA (Targeting Most Valuable Feedback Award)
+
+> **Complete Comprehensive Report**: See [NEBIUS_PLATFORM_FEEDBACK.md](../NEBIUS_PLATFORM_FEEDBACK.md) for full benchmark telemetry, MoE architectural analysis, and reproducible code samples.
 
 * **Nebius Token Factory**: Model inference speeds were exceptional. The Nemotron Nano response latency consistently hovered around 350-400ms, making conversational interaction feel instant.
 * **Matryoshka Support**: The ability to pass the `dimensions` parameter directly in the embeddings API call without client-side slicing significantly reduced network overhead and storage costs.
