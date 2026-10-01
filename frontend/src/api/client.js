@@ -110,17 +110,19 @@ export function getCurrentUserId() {
     : Math.random().toString(36).slice(2, 14)
   uid = `anon_${randomPart}`
   localStorage.setItem('compass_user_id', uid)
-  const secureFlag = typeof window !== 'undefined' && window.location.protocol === 'https:' ? '; Secure' : ''
-  try {
-    document.cookie = `compass_user_id=${encodeURIComponent(uid)}; path=/; max-age=31536000; SameSite=Lax${secureFlag}`
-  } catch {
-    // Cookie storage fallback
+  const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:'
+  if (isHttps) {
+    try {
+      document.cookie = `compass_user_id=${encodeURIComponent(uid)}; path=/; max-age=31536000; SameSite=Lax; Secure`
+    } catch {
+      // Cookie storage fallback
+    }
   }
   return uid
 }
 
 export function setCurrentUserId(userId) {
-  const secureFlag = typeof window !== 'undefined' && window.location.protocol === 'https:' ? '; Secure' : ''
+  const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:'
   if (userId && userId.trim()) {
     const clean = userId.trim().toLowerCase()
     localStorage.setItem('compass_user_id', clean)
@@ -128,18 +130,22 @@ export function setCurrentUserId(userId) {
       localStorage.setItem('compass_user_email', clean)
       addKnownAccount(clean)
     }
-    try {
-      document.cookie = `compass_user_id=${encodeURIComponent(clean)}; path=/; max-age=31536000; SameSite=Lax${secureFlag}`
-    } catch {
-      // Ignore in restricted environments
+    if (isHttps) {
+      try {
+        document.cookie = `compass_user_id=${encodeURIComponent(clean)}; path=/; max-age=31536000; SameSite=Lax; Secure`
+      } catch {
+        // Ignore in restricted environments
+      }
     }
   } else {
     localStorage.removeItem('compass_user_id')
     localStorage.removeItem('compass_user_email')
-    try {
-      document.cookie = `compass_user_id=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT${secureFlag}`
-    } catch {
-      // Ignore
+    if (isHttps) {
+      try {
+        document.cookie = `compass_user_id=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure`
+      } catch {
+        // Ignore
+      }
     }
   }
 }
