@@ -24,8 +24,13 @@ PRIORITY_WEIGHTS: Dict[str, int] = {
 }
 
 
-def _ensure_utc(dt: datetime | str | date) -> datetime:
+def _ensure_utc(dt: datetime | str | date | Dict[str, Any]) -> datetime:
     """Normalize input datetime to UTC timezone-aware datetime."""
+    if isinstance(dt, dict):
+        raw = dt.get("dateTime") or dt.get("date") or dt.get("start") or dt.get("end")
+        if raw is not None:
+            return _ensure_utc(raw)
+        raise ValueError(f"Cannot extract datetime from dict: {dt}")
     if isinstance(dt, str):
         # Handle ISO strings
         clean_str = dt.replace("Z", "+00:00")
@@ -227,8 +232,8 @@ def allocate_task_slots(
     # Normalize dependencies map
     dep_map: Dict[int, List[int]] = {}
     if dependencies:
-        for k, v in dependencies.items():
-            dep_map[k] = list(v)
+        for dep_k, dep_v in dependencies.items():
+            dep_map[dep_k] = list(dep_v)
     for t in tasks:
         tid = t.get("id")
         if tid is not None and t.get("depends_on"):
@@ -237,10 +242,10 @@ def allocate_task_slots(
     # Map of already scheduled tasks (from previous state or prior batches)
     scheduled_map: Dict[int, Dict[str, Any]] = {}
     if existing_scheduled_map:
-        for k, v in existing_scheduled_map.items():
-            scheduled_map[k] = {
-                "scheduled_start": _ensure_utc(v["scheduled_start"]),
-                "scheduled_end": _ensure_utc(v["scheduled_end"]),
+        for sched_k, sched_data in existing_scheduled_map.items():
+            scheduled_map[sched_k] = {
+                "scheduled_start": _ensure_utc(sched_data["scheduled_start"]),
+                "scheduled_end": _ensure_utc(sched_data["scheduled_end"]),
             }
 
     # Sort key for tasks that are ready
@@ -548,9 +553,12 @@ def detect_schedule_conflicts(
             ev_start = ev.get("start") or ev.get("scheduled_start")
             ev_end = ev.get("end") or ev.get("scheduled_end")
             if ev_start is not None and ev_end is not None:
-                start = _ensure_utc(ev_start)
-                end = _ensure_utc(ev_end)
-                items.append((start, end, ev, "external"))
+                try:
+                    start = _ensure_utc(ev_start)
+                    end = _ensure_utc(ev_end)
+                    items.append((start, end, ev, "external"))
+                except Exception:
+                    continue
 
     items.sort(key=lambda x: x[0])
 
@@ -836,11 +844,14 @@ def check_proactive_cognitive_conflicts(
             ev_start = ev.get("start") or ev.get("scheduled_start")
             ev_end = ev.get("end") or ev.get("scheduled_end")
             if ev_start and ev_end:
-                s_dt = _ensure_utc(ev_start)
-                e_dt = _ensure_utc(ev_end)
-                if s_dt.date() in scope_dates or e_dt.date() in scope_dates:
-                    dur_hrs = max(0.0, (e_dt - s_dt).total_seconds() / 3600.0)
-                    external_busy_hours += dur_hrs
+                try:
+                    s_dt = _ensure_utc(ev_start)
+                    e_dt = _ensure_utc(ev_end)
+                    if s_dt.date() in scope_dates or e_dt.date() in scope_dates:
+                        dur_hrs = max(0.0, (e_dt - s_dt).total_seconds() / 3600.0)
+                        external_busy_hours += dur_hrs
+                except Exception:
+                    continue
 
     # 5. Arithmetic capacity evaluation
     total_demand = round(proposed_hours + cross_domain_hours + same_domain_hours + external_busy_hours, 1)
