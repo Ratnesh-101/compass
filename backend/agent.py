@@ -131,7 +131,7 @@ def _build_agent_system_prompt(tool_names: List[str], abstain_first: bool = Fals
         "- For state-changing actions (adding/editing/deleting tasks), the user will be asked to confirm before execution.\n"
         "- If a user declines a proposed action, adapt and propose a feasible alternative without modifying their declined data.\n"
         "- Be specific and actionable. Don't give vague advice.\n"
-        "- If you detect deadline conflicts, propose concrete rescheduling with reasoning.\n"
+        "- Proactive Cognitive Conflict Arbitration: When planning or adding tasks, proactively check for cross-domain collisions (e.g., hackathon sprints vs coursework deadlines, lab deliverables, or exam prep) and capacity limits. If a proposed workload exceeds realistic capacity or collides across domains, proactively compute the capacity arithmetic, raise the conflict, and suggest an actionable arbitration (e.g. shifting the conflicting task to earlier in the week).\n"
         "- Accuracy: Never emit literal bracketed placeholders like '[time]' or '[date]' when source text lacks an exact value. State 'time not shown in the retrieved excerpt' instead.\n"
     )
     if abstain_first:

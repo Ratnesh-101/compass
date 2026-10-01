@@ -161,6 +161,7 @@ class FrontendTaskOut(BaseModel):
     is_fixed: bool = False
     description: Optional[str] = None
     due_date: Optional[str] = None
+    cognitive_conflict: Optional[Dict[str, Any]] = None
 
 
 class CreateTaskRequest(BaseModel):

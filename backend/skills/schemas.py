@@ -52,6 +52,10 @@ ADD_TASK_TOOL: Dict[str, Any] = {
                     "type": "boolean",
                     "description": "Bypass exact duplicate check",
                 },
+                "duration_minutes": {
+                    "type": "integer",
+                    "description": "Estimated duration in minutes (e.g. 60 for 1 hr, 2160 for 36-hour sprint)",
+                },
             },
             "required": ["title"],
         },

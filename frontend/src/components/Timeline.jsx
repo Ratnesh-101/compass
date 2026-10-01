@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { createTask, deleteTask, updateTask } from '../api/client'
+import { createTask, deleteTask, updateTask, seedJudgeDemoPersona } from '../api/client'
 
 const KNOWN_FIELDS = new Set([
   'id', 'domain', 'project', 'timestamp', 'title', 'tags',
@@ -1151,9 +1151,26 @@ function TaskDetailModal({ task, onClose, onDelete, onUpdated }) {
   )
 }
 
-export default function Timeline({ tasks, activeDomain, onSelectDomain, onTasksUpdated, onOpenNorthstar }) {
+export default function Timeline({ tasks, activeDomain, onSelectDomain, onTasksUpdated, onOpenNorthstar, onOpenTelemetry }) {
   const [selectedTask, setSelectedTask] = useState(null)
   const [showAddModal, setShowAddModal] = useState(false)
+  const [seedingPersona, setSeedingPersona] = useState(false)
+  const [seedSuccess, setSeedSuccess] = useState(false)
+
+  const handleSeedJudgePersona = async () => {
+    setSeedingPersona(true)
+    try {
+      await seedJudgeDemoPersona()
+      setSeedSuccess(true)
+      setTimeout(() => setSeedSuccess(false), 3000)
+      if (onTasksUpdated) onTasksUpdated()
+    } catch (err) {
+      alert(`Could not load judge persona: ${err.message}`)
+    } finally {
+      setSeedingPersona(false)
+    }
+  }
+
   const filtered = activeDomain === 'all' ? tasks : tasks.filter(t => t.domain === activeDomain)
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })
 
@@ -1205,36 +1222,105 @@ export default function Timeline({ tasks, activeDomain, onSelectDomain, onTasksU
           </p>
         </div>
 
-        <button
-          id="btn-add-deadline"
-          onClick={() => setShowAddModal(true)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
-            color: '#ffffff',
-            border: 'none',
-            padding: '10px 18px',
-            borderRadius: '10px',
-            fontSize: '13.5px',
-            fontWeight: '600',
-            cursor: 'pointer',
-            boxShadow: '0 4px 14px rgba(37, 99, 235, 0.35)',
-            transition: 'all 0.15s ease',
-            flexShrink: 0
-          }}
-          onMouseEnter={e => {
-            e.currentTarget.style.transform = 'translateY(-1px)'
-            e.currentTarget.style.boxShadow = '0 6px 18px rgba(37, 99, 235, 0.45)'
-          }}
-          onMouseLeave={e => {
-            e.currentTarget.style.transform = 'translateY(0)'
-            e.currentTarget.style.boxShadow = '0 4px 14px rgba(37, 99, 235, 0.35)'
-          }}
-        >
-          <span style={{ fontSize: '16px', fontWeight: '700', lineHeight: 1 }}>+</span> Add Deadline
-        </button>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+          {onOpenTelemetry && (
+            <button
+              id="btn-open-telemetry"
+              type="button"
+              onClick={onOpenTelemetry}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: 'rgba(245, 166, 35, 0.1)',
+                color: '#fbbf24',
+                border: '1px solid rgba(245, 166, 35, 0.35)',
+                padding: '9px 14px',
+                borderRadius: '10px',
+                fontSize: '13px',
+                fontWeight: '700',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.background = 'rgba(245, 166, 35, 0.2)'
+                e.currentTarget.style.transform = 'translateY(-1px)'
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.background = 'rgba(245, 166, 35, 0.1)'
+                e.currentTarget.style.transform = 'translateY(0)'
+              }}
+              title="Inspect live Nebius Token Factory token consumption and NVIDIA model hierarchy"
+            >
+              <span>⚡</span>
+              <span>Nebius & NVIDIA Telemetry</span>
+            </button>
+          )}
+
+          <button
+            id="btn-seed-judge-persona"
+            type="button"
+            onClick={handleSeedJudgePersona}
+            disabled={seedingPersona}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: seedSuccess ? 'rgba(16, 185, 129, 0.15)' : 'rgba(96, 165, 250, 0.12)',
+              color: seedSuccess ? '#34d399' : '#60a5fa',
+              border: `1px solid ${seedSuccess ? 'rgba(16, 185, 129, 0.4)' : 'rgba(96, 165, 250, 0.35)'}`,
+              padding: '9px 14px',
+              borderRadius: '10px',
+              fontSize: '13px',
+              fontWeight: '700',
+              cursor: seedingPersona ? 'wait' : 'pointer',
+              transition: 'all 0.15s ease',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.background = seedSuccess ? 'rgba(16, 185, 129, 0.25)' : 'rgba(96, 165, 250, 0.22)'
+              e.currentTarget.style.transform = 'translateY(-1px)'
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = seedSuccess ? 'rgba(16, 185, 129, 0.15)' : 'rgba(96, 165, 250, 0.12)'
+              e.currentTarget.style.transform = 'translateY(0)'
+            }}
+            title="1-Click Demo: Populates sample multi-domain tasks and vector memory for hackathon judges"
+          >
+            <span>{seedSuccess ? '✓' : '🎯'}</span>
+            <span>{seedingPersona ? 'Loading...' : seedSuccess ? 'Demo Persona Loaded!' : 'Load Judge Persona'}</span>
+          </button>
+
+          <button
+            id="btn-add-deadline"
+            onClick={() => setShowAddModal(true)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+              color: '#ffffff',
+              border: 'none',
+              padding: '10px 18px',
+              borderRadius: '10px',
+              fontSize: '13.5px',
+              fontWeight: '600',
+              cursor: 'pointer',
+              boxShadow: '0 4px 14px rgba(37, 99, 235, 0.35)',
+              transition: 'all 0.15s ease',
+              flexShrink: 0
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.transform = 'translateY(-1px)'
+              e.currentTarget.style.boxShadow = '0 6px 18px rgba(37, 99, 235, 0.45)'
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.transform = 'translateY(0)'
+              e.currentTarget.style.boxShadow = '0 4px 14px rgba(37, 99, 235, 0.35)'
+            }}
+          >
+            <span style={{ fontSize: '16px', fontWeight: '700', lineHeight: 1 }}>+</span> Add Deadline
+          </button>
+        </div>
       </div>
 
       {/* Filter pills */}

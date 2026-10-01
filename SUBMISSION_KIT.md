@@ -156,7 +156,9 @@ Tavily search and extract calls are partitioned into `tavily_usage_log`, trackin
 
 ## 📝 Part 3: Nebius & NVIDIA Developer Feedback (For the $100 Award)
 
-### Feedback on Nebius Token Factory & NVIDIA Nemotron Models
+> **Complete Comprehensive Report**: See [NEBIUS_PLATFORM_FEEDBACK.md](file:///Users/nandani/Downloads/compass/NEBIUS_PLATFORM_FEEDBACK.md) for full benchmark telemetry, MoE architectural analysis, and reproducible code samples.
+
+### Summary Feedback on Nebius Token Factory & NVIDIA Nemotron Models
 1. **Nemotron-3 Nano (30B) Native Function Calling**:
    - *Praise*: Function calling latency is noticeably snappy in practice, rivaling fast sub-8B models while providing dependable schema adherence. Throughout our multi-turn test suites and live planner loops, Nano reliably adhered to JSON function calling schemas without emit errors.
    - *Constructive Suggestion*: When multiple tools are passed in `tools`, Nano occasionally emits multiple sequential tool calls in a single response turn where the OpenAI spec expects one or an array. Clearer documentation on multi-tool calling conventions in Token Factory would save developers integration time.

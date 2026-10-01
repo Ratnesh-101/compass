@@ -378,6 +378,13 @@ async def test_verify_deadline_reports_drift(monkeypatch):
     assert "2026-09-17" in res["summary"]
     assert "September 24, 2026" in res["data"]["results"][0]["content"]
     assert "<untrusted_web_content>" in res["fenced_context"]
+    assert "drift_analysis" in res["data"]
+    drift = res["data"]["drift_analysis"]
+    assert drift["has_drift"] is True
+    assert drift["drift_verdict"] == "SCHEDULE_DRIFT"
+    assert drift["live_date"] == "2026-09-24"
+    assert drift["drift_days"] == 7
+    assert "Schedule Drift Detected" in res["summary"]
 
 
 # ---------------------------------------------------------------------------

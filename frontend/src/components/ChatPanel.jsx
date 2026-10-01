@@ -1212,10 +1212,10 @@ export default function ChatPanel({
         {/* Quick prompt suggestions */}
         <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', overflowX: 'auto', paddingBottom: '4px' }}>
           {[
-            { icon: '📋', text: 'What tasks do I have coming up?' },
-            { icon: '⚡', text: 'Prioritize my deadlines for today' },
-            { icon: '📅', text: 'Check for schedule conflicts' },
-            { icon: '➕', text: 'Add task: Finish project slides' },
+            { icon: '⚠️', text: 'Check my weekend schedule for conflicts across hackathon and coursework' },
+            { icon: '🧠', text: 'Why did we choose 768-dim Matryoshka embeddings for pgvector?' },
+            { icon: '🌐', text: 'Verify the Nebius hackathon deadline on Devpost' },
+            { icon: '⚡', text: "Prioritize today's deliverables and run multi-domain triage" },
           ].map((item, idx) => (
             <button
               key={idx}

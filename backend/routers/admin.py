@@ -37,9 +37,10 @@ async def get_usage(_token: str = Depends(verify_token)):
 
 
 @router.get("/api/usage/summary")
+@router.get("/api/telemetry")
 async def get_public_usage_summary():
-    """Public lightweight usage summary for the frontend live token counter.
-    No authentication required — returns only aggregated totals, not per-model breakdowns.
+    """Public usage summary and Nebius/NVIDIA architectural telemetry.
+    No authentication required — returns aggregate tokens, model breakdown, and cost savings.
     """
     from backend.services.usage import get_usage_summary, hydrate_usage_from_db, _USAGE_STATE
     if not _USAGE_STATE:
@@ -48,13 +49,7 @@ async def get_public_usage_summary():
             await hydrate_usage_from_db(pool)
         except Exception:
             pass
-    full = get_usage_summary()
-    return {
-        "total_requests": full.get("total_requests", 0),
-        "total_input_tokens": full.get("total_input_tokens", 0),
-        "total_output_tokens": full.get("total_output_tokens", 0),
-        "total_estimated_cost_usd": full.get("total_estimated_cost_usd", 0.0),
-    }
+    return get_usage_summary()
 
 
 @router.get("/health", response_model=HealthResponse)

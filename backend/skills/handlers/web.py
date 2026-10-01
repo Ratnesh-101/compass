@@ -4,8 +4,10 @@ Compass — Web Search and Ingestion Skills.
 Handlers for live web searching, web page ingestion, and deadline verification using Tavily.
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
+from datetime import datetime, date
 import logging
+import re
 
 from backend.skills.registry import register_skill
 
@@ -199,6 +201,89 @@ async def handle_ingest_url(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
     }
 
 
+def _parse_date_candidate(text: str) -> Optional[date]:
+    """Attempt parsing standard date string formats."""
+    clean = re.sub(r'(\d+)(st|nd|rd|th)', r'\1', text.strip())
+    clean = clean.replace(",", " ")
+    clean = " ".join(clean.split())
+    for fmt in ("%B %d %Y", "%b %d %Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(clean, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _detect_deadline_drift_from_snippets(stored_due_str: str, results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Parse dates from live search snippets and compare with stored due date."""
+    stored_d: Optional[date] = None
+    if stored_due_str and stored_due_str != "none":
+        try:
+            stored_d = date.fromisoformat(stored_due_str[:10])
+        except Exception:
+            pass
+
+    months = r"(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)"
+    date_pattern = re.compile(
+        rf"\b({months}\s+\d{{1,2}}(?:st|nd|rd|th)?(?:,?\s+\d{{4}})?|\d{{4}}-\d{{2}}-\d{{2}})\b",
+        re.IGNORECASE,
+    )
+
+    detected_date: Optional[date] = None
+    source_url: Optional[str] = None
+    snippet_evidence: Optional[str] = None
+
+    for r in results:
+        content = (r.get("content") or "") + " " + (r.get("title") or "")
+        matches = date_pattern.findall(content)
+        for m in matches:
+            raw_match = m
+            if not re.search(r'\d{4}', raw_match):
+                year_to_use = stored_d.year if stored_d else 2026
+                raw_match = f"{raw_match}, {year_to_use}"
+            parsed = _parse_date_candidate(raw_match)
+            if parsed:
+                detected_date = parsed
+                source_url = r.get("url")
+                snippet_evidence = (r.get("content") or "")[:300].strip()
+                break
+        if detected_date:
+            break
+
+    if not stored_d or not detected_date:
+        return {
+            "has_drift": False,
+            "drift_verdict": "UNVERIFIED_AMBIGUOUS",
+            "stored_date": stored_due_str,
+            "live_date": detected_date.isoformat() if detected_date else None,
+            "drift_days": 0,
+            "direction": "unverified",
+            "source_url": source_url,
+            "evidence": snippet_evidence,
+        }
+
+    drift_days = (detected_date - stored_d).days
+    has_drift = drift_days != 0
+
+    if has_drift:
+        direction = "extended / postponed" if drift_days > 0 else "moved earlier"
+        verdict = "SCHEDULE_DRIFT"
+    else:
+        direction = "confirmed matching"
+        verdict = "CONFIRMED_ACCURATE"
+
+    return {
+        "has_drift": has_drift,
+        "drift_verdict": verdict,
+        "stored_date": stored_d.isoformat(),
+        "live_date": detected_date.isoformat(),
+        "drift_days": drift_days,
+        "direction": direction,
+        "source_url": source_url,
+        "evidence": snippet_evidence,
+    }
+
+
 @register_skill("verify_deadline")
 async def handle_verify_deadline(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
     """Compare a stored task's due date against live web sources to detect drift."""
@@ -252,7 +337,21 @@ async def handle_verify_deadline(args: Dict[str, Any], pool: Any) -> Dict[str, A
 
     results = resp.get("results", [])
     fenced = tavily_service.fence_web_content(results)
-    summary = f"Checked '{task_title}' (stored due: {stored_due}) against {len(results)} live source(s)."
+    drift_info = _detect_deadline_drift_from_snippets(stored_due, results)
+
+    base_summary = f"Checked '{task_title}' (stored due: {stored_due}) against {len(results)} live source(s)."
+
+    if drift_info["has_drift"]:
+        drift_note = (
+            f"\n⚠️ Schedule Drift Detected: Official source ({drift_info['source_url'] or 'web'}) "
+            f"indicates deadline is {drift_info['live_date']} ({drift_info['direction']} by {abs(drift_info['drift_days'])} days)."
+        )
+        full_summary = f"{base_summary}{drift_note}"
+    elif drift_info["drift_verdict"] == "CONFIRMED_ACCURATE":
+        drift_note = f"\n✅ Confirmed Accurate: Stored deadline ({stored_due}) matches live official source."
+        full_summary = f"{base_summary}{drift_note}"
+    else:
+        full_summary = base_summary
 
     return {
         "success": True,
@@ -260,10 +359,11 @@ async def handle_verify_deadline(args: Dict[str, Any], pool: Any) -> Dict[str, A
             "task": dict(task),
             "results": results,
             "citations": [r.get("url") for r in results if r.get("url")],
+            "drift_analysis": drift_info,
             "source": "web",
         },
         "fenced_context": fenced,
-        "summary": summary,
-        "response": summary,
+        "summary": full_summary,
+        "response": full_summary,
         "error": None,
     }

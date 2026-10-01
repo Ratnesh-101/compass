@@ -5,6 +5,7 @@ import CalendarView from './components/CalendarView'
 import NorthstarPanel from './components/NorthstarPanel'
 import AuthModal from './components/AuthModal'
 import SharedChatView from './components/SharedChatView'
+import NebiusTelemetryModal from './components/NebiusTelemetryModal'
 import {
   checkBackendHealth,
   fetchTasks,
@@ -22,6 +23,7 @@ export default function App() {
   const [backendStatus, setBackendStatus] = useState('Connecting...')
   const [conversationId, setConversationId] = useState(null)
   const [usageStats, setUsageStats] = useState(null)
+  const [showTelemetryModal, setShowTelemetryModal] = useState(false)
   const [currentUser, setCurrentUser] = useState(() => {
     try {
       const savedEmail = localStorage.getItem('compass_user_email') || localStorage.getItem('compass_user_id')
@@ -213,6 +215,7 @@ export default function App() {
         usageBadge={usageBadge}
         currentUser={currentUser}
         onOpenAuth={() => setShowAuthModal(true)}
+        onOpenTelemetry={() => setShowTelemetryModal(true)}
       />
 
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'var(--bg-app)', minWidth: 0, overflow: 'hidden' }}>
@@ -229,6 +232,7 @@ export default function App() {
               setActiveTab('northstar')
               setPendingPrompt(prompt)
             }}
+            onOpenTelemetry={() => setShowTelemetryModal(true)}
           />
         ) : activeTab === 'calendar' ? (
           <CalendarView
@@ -274,6 +278,13 @@ export default function App() {
         onClose={() => setShowAuthModal(false)}
         currentUser={currentUser}
         onUserChanged={handleUserChanged}
+      />
+
+      <NebiusTelemetryModal
+        isOpen={showTelemetryModal}
+        onClose={() => setShowTelemetryModal(false)}
+        usageStats={usageStats}
+        onRefresh={refreshUsage}
       />
     </div>
   )

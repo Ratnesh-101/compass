@@ -753,4 +753,25 @@ export async function fetchSharedConversation(conversationId) {
   }
 }
 
+/**
+ * Seed or refresh the Dual-Degree Hackathon Competitor demo persona for judges.
+ */
+export async function seedJudgeDemoPersona() {
+  try {
+    const res = await fetch(`${API_BASE}/api/demo/seed`, {
+      method: 'POST',
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || `Failed to seed demo persona (HTTP ${res.status})`)
+    }
+    return await res.json()
+  } catch (err) {
+    console.warn('Demo persona seed error:', err)
+    throw err
+  }
+}
+
+
 

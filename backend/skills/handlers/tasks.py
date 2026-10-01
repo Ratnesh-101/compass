@@ -177,8 +177,46 @@ async def handle_add_task(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
                 notes=notes,
                 user_id=user_id,
             )
+            dur_arg = args.get("duration_minutes")
+            if dur_arg:
+                try:
+                    await structured.update_task(conn, task_record["id"], duration_minutes=int(dur_arg))
+                    task_record["duration_minutes"] = int(dur_arg)
+                except Exception as dex:
+                    logger.debug(f"Could not persist duration_minutes: {dex}")
+
+            # Proactive Cognitive Conflict Detection
+            conflict_info = None
+            try:
+                from backend.services.scheduler import check_proactive_cognitive_conflicts
+                conflict_info = check_proactive_cognitive_conflicts(
+                    proposed_task={
+                        "id": task_record.get("id"),
+                        "title": title,
+                        "domain": domain,
+                        "due_date": str(due_date) if due_date else None,
+                        "priority": priority,
+                        "notes": notes,
+                        "duration_minutes": task_record.get("duration_minutes"),
+                    },
+                    existing_tasks=existing_tasks,
+                )
+            except Exception as conf_err:
+                logger.debug(f"Conflict detection skipped: {conf_err}")
+
+        base_summary = f"Added task #{task_record.get('id')}: '{title}' in {domain}."
+        if conflict_info and conflict_info.get("has_conflict"):
+            final_summary = f"{base_summary}\n\n{conflict_info['alert_message']}"
+            return {
+                "response": final_summary,
+                "data": {
+                    **task_record,
+                    "cognitive_conflict": conflict_info,
+                },
+            }
+
         return {
-            "response": f"Added task #{task_record.get('id')}: '{title}' in {domain}.",
+            "response": base_summary,
             "data": task_record,
         }
     except Exception as e:

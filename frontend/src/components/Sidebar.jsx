@@ -16,6 +16,7 @@ export default function Sidebar({
   usageBadge,
   currentUser,
   onOpenAuth,
+  onOpenTelemetry,
 }) {
   const isOnline = backendStatus.toLowerCase().includes('neon') || backendStatus.toLowerCase().includes('live')
   const totalActive = Object.values(domainCounts || {}).reduce((sum, n) => sum + (typeof n === 'number' ? n : 0), 0)
@@ -187,11 +188,30 @@ export default function Sidebar({
           {backendStatus}
         </div>
         {usageBadge && (
-          <div id="sidebar-usage-badge" className="mono" style={{
-            fontSize: '10px', color: 'var(--text-muted)', paddingLeft: '15px',
-            marginTop: '6px', paddingTop: '6px', borderTop: '1px solid rgba(255,255,255,0.06)'
-          }}>
-            {usageBadge}
+          <div
+            id="sidebar-usage-badge"
+            className="mono"
+            onClick={() => onOpenTelemetry && onOpenTelemetry()}
+            style={{
+              fontSize: '10.5px',
+              color: 'var(--brand, #fbbf24)',
+              padding: '6px 10px',
+              marginTop: '8px',
+              borderRadius: '7px',
+              background: 'rgba(245, 166, 35, 0.08)',
+              border: '1px solid rgba(245, 166, 35, 0.22)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              transition: 'all 0.15s ease',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'rgba(245, 166, 35, 0.16)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'rgba(245, 166, 35, 0.08)'}
+            title="Click to inspect live Nebius Token Factory & NVIDIA telemetry"
+          >
+            <span>{usageBadge}</span>
+            <span style={{ fontSize: '10px', opacity: 0.85 }}>📊</span>
           </div>
         )}
       </div>
