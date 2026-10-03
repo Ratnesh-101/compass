@@ -1,6 +1,6 @@
 """
 Tests for Specialist Multi-Agent System (Coursework, Research, Calendar, Memory)
-and delegation from Northstar (Main Agent).
+and delegation from Compass.
 """
 
 import pytest

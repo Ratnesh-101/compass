@@ -5,8 +5,8 @@ Exposes specialized domain agents (Coursework, Research, Calendar, Memory)
 coordinated by a SpecialistDispatcher.
 
 Specialist agents perform narrow domain analysis and return structured results
-to the Main Agent (Northstar). Mutations are returned as proposed_actions
-and MUST be gated by Northstar's confirmation mechanism before DB execution.
+to Compass. Mutations are returned as proposed_actions
+and MUST be gated by Compass's confirmation mechanism before DB execution.
 """
 
 from __future__ import annotations
@@ -17,13 +17,21 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger("compass.agents.specialist")
 
+SPECIALIST_SYSTEM_PROMPT = """You are Compass's specialist response engine, handling instant lookups across four domains: Coursework, Research, Calendar, and Memory. Your purpose is to resolve queries with minimum latency.
+
+STRICT EXECUTION PROTOCOL:
+1. ZERO PREAMBLE: Never use conversational filler, greetings, or transitional phrases ("Let me check," "Here is the info," "Routing to...").
+2. INSTANT TOOL EXECUTION: Determine the domain and fire the required tool immediately. Your very first output token must be the tool call. Do not explain your choice.
+3. DIRECT, COMPACT RESPONSES: Once a tool returns data, deliver the final answer instantly using tight bullet points or direct sentences.
+4. NO INTERNAL MONOLOGUE: Stop generating tokens the exact second the request is satisfied."""
+
 
 # ---------------------------------------------------------------------------
 # Structured Request / Response Schemas
 # ---------------------------------------------------------------------------
 
 class SpecialistRequest(BaseModel):
-    """Structured request sent from Northstar (Main Agent) to Specialist Multi-Agent System."""
+    """Structured request sent from Compass to Specialist Multi-Agent System."""
 
     capability: Literal["coursework", "research", "calendar", "memory"]
     user_goal: str
@@ -32,7 +40,7 @@ class SpecialistRequest(BaseModel):
 
 
 class SpecialistResult(BaseModel):
-    """Structured response returned from Specialist Multi-Agent System to Northstar."""
+    """Structured response returned from Specialist Multi-Agent System to Compass."""
 
     capability: str
     status: Literal["success", "unavailable", "error"] = "success"
@@ -40,6 +48,7 @@ class SpecialistResult(BaseModel):
     findings: Dict[str, Any] = Field(default_factory=dict)
     proposed_actions: List[Dict[str, Any]] = Field(default_factory=list)
     requires_confirmation: bool = False
+    system_prompt: Optional[str] = SPECIALIST_SYSTEM_PROMPT
 
 
 # ---------------------------------------------------------------------------

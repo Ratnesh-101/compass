@@ -104,7 +104,7 @@ async def handle_create_task(conn, req: CreateTaskRequest, user_id: Optional[str
         d_str = ex.get("due_date") or "unscheduled"
         raise HTTPException(
             status_code=409,
-            detail=f"Duplicate deadline: '{title}' is already scheduled for {d_str}. Exact duplicate deadlines cannot be added. Ask Northstar to look into schedules or choose a different date."
+            detail=f"Duplicate deadline: '{title}' is already scheduled for {d_str}. Exact duplicate deadlines cannot be added. Ask Compass to look into schedules or choose a different date."
         )
 
     same_name_matches = [

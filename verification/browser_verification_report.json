@@ -6,7 +6,7 @@
   "capabilities_verified": [
     "Multi-domain timeline workspace (Hackathon, Coursework, Code, General)",
     "Domain-specific timeline filtering (?domain=hackathon)",
-    "Northstar AI Copilot with dynamic routing and live token tracking",
+    "Compass Assistant and Planner with dynamic routing and live token tracking",
     "Agent Planner ReAct loop with confirmation gating on mutating tools",
     "Approval Gate prompt (Approve vs Reject)",
     "Safe rejection flow without data mutation",

@@ -56,6 +56,9 @@ async def test_per_ip_rate_limiting_exceeded(client: AsyncClient, monkeypatch):
         AsyncMock(return_value={"response": "pong", "conversation_id": "mock-conv", "skill_used": "chat"}),
     )
 
+    from backend.dependencies import _rate_store
+    _rate_store.clear()
+
     test_ip = "198.51.100.42"
     headers = {"X-Forwarded-For": test_ip}
 

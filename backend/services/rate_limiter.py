@@ -192,7 +192,7 @@ async def enforce_mint_rate_limit(request: Request) -> None:
     if not allowed:
         raise HTTPException(
             status_code=429,
-            detail=f"Guest session creation limit reached for this IP (max {hourly_limit} per hour). Please try again later or log in.",
+            detail=f"Guest token minting rate limit exceeded: session creation limit reached for this IP (max {hourly_limit} per hour). Please try again later or log in.",
             headers={"Retry-After": str(retry_after)},
         )
 

@@ -23,9 +23,9 @@ Below is our comprehensive developer feedback, divided into **Production Strengt
 
 ## 2. Production Strengths: What Nebius Got Right
 
-### 2.1 Phenomenal Latency & TTFT on H100 SXM5 Infrastructure
-- **Nemotron-3 Nano (30B A3B)** demonstrated consistent **Time-To-First-Token (TTFT) under 380ms** across our multi-turn skill-dispatch benchmarks.
-- In our intent classification pipeline (`backend/agent.py`), Nano correctly extracted tool arguments (`domain`, `due_date`, `priority`, `duration_minutes`) with a 99.2% zero-shot accuracy, eliminating the need for complex fallback regexes.
+### 2.1 Fast Interactive Latency on H100 SXM5 Infrastructure
+- **Nemotron-3 Nano (30B A3B)** demonstrated fast and responsive interactive token generation across our multi-turn skill-dispatch flows.
+- In our intent classification pipeline (`backend/agent.py`), Nano correctly extracted tool arguments (`domain`, `due_date`, `priority`, `duration_minutes`) without requiring brittle regex fallbacks.
 
 ### 2.2 Drop-in OpenAI SDK Compatibility
 - Nebius Token Factory adheres strictly to the OpenAI v1 REST specification. Switching Compass from standard providers to Nebius required changing only two configuration variables:
@@ -37,11 +37,11 @@ Below is our comprehensive developer feedback, divided into **Production Strengt
   ```
 - Streaming Server-Sent Events (SSE) worked reliably with `client.chat.completions.create(stream=True)`.
 
-### 2.3 Incredible MoE Unit Economics
-- Because Nemotron uses fine-grained Mixture-of-Experts (MoE) routing, active parameter counts remain tiny relative to model capacity:
-  - Nano 30B activates only **3.2B parameters** per token ($0.20 / 1M tokens).
-  - Super 120B activates only **12B parameters** per token ($0.60 / 1M tokens).
-- In our live telemetry benchmarks, running a full 106-turn triage evaluation on Nebius cost **$0.019**—a **92.4% cost savings** compared to running the same workload on monolithic frontier models (GPT-4o / Claude 3.5 Sonnet).
+### 2.3 Compelling MoE Unit Economics
+- Because Nemotron uses fine-grained Mixture-of-Experts (MoE) routing, active parameter counts remain tiny relative to overall parameter capacity:
+  - Nano 30B activates only **3.2B parameters** per token ($0.06 input / $0.24 output per 1M tokens on Token Factory).
+  - Super 120B activates only **12B parameters** per token ($0.30 input / $0.90 output per 1M tokens).
+- Routing routine intent classification and tool invocation to Nano rather than general frontier models ($10.00 / $30.00 per 1M on standard GPT-4) dramatically reduces inference costs by orders of magnitude while preserving high reasoning fidelity.
 
 ---
 

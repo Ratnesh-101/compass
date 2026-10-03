@@ -1,4 +1,16 @@
 import React from 'react'
+import {
+  RotateCcw,
+  CheckCircle2,
+  History,
+  Plus,
+  Trash2,
+  Edit3,
+  FileText,
+  Calendar,
+  Sparkles,
+  RefreshCw,
+} from 'lucide-react'
 
 function friendlyAction(tool) {
   const map = {
@@ -68,123 +80,195 @@ function formatActivityItem(item) {
   return friendlyAction(item.tool)
 }
 
+function getActivityIcon(tool) {
+  if (tool === 'add_task') return Plus
+  if (tool === 'delete_task') return Trash2
+  if (tool === 'edit_task' || tool === 'update_task_status') return Edit3
+  if (tool === 'commit_schedule' || tool === 'schedule_event') return Calendar
+  return FileText
+}
+
 export default function ActivityFeed({
   activityList = [],
   onRefresh,
   onRevertItem,
 }) {
   return (
-    <div id="agent-activity-feed" style={{
-      marginTop: '24px',
-      borderTop: '1px solid var(--border)',
-      paddingTop: '16px',
-    }}>
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: '10px',
-      }}>
+    <div
+      id="agent-activity-feed"
+      style={{
+        marginTop: '24px',
+        borderTop: '1px solid #e2e8f0',
+        paddingTop: '18px',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: '12px',
+        }}
+      >
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{
-            fontSize: '13px',
-            fontWeight: '700',
-            color: 'var(--text-primary)',
-          }}>
-            📋 Recent changes{activityList.length > 0 ? ` (${activityList.length})` : ''}
+          <History size={16} color="#6366f1" />
+          <span
+            style={{
+              fontSize: '13.5px',
+              fontWeight: '700',
+              color: '#0f172a',
+            }}
+          >
+            Audit Log & Mutation History{activityList.length > 0 ? ` (${activityList.length})` : ''}
           </span>
         </div>
         <button
           onClick={onRefresh}
           style={{
-            fontSize: '11px',
-            background: 'transparent',
-            border: 'none',
-            color: 'var(--primary)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '5px',
+            fontSize: '12px',
+            fontWeight: '600',
+            background: '#ffffff',
+            border: '1px solid #e2e8f0',
+            borderRadius: '6px',
+            padding: '4px 10px',
+            color: '#475569',
             cursor: 'pointer',
           }}
+          onMouseEnter={e => (e.currentTarget.style.background = '#f8fafc')}
+          onMouseLeave={e => (e.currentTarget.style.background = '#ffffff')}
         >
-          ↻ Refresh
+          <RefreshCw size={12} />
+          <span>Refresh</span>
         </button>
       </div>
 
       {activityList.length === 0 ? (
-        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic', padding: '8px 0' }}>
-          No changes made by the assistant yet.
+        <div
+          style={{
+            fontSize: '12.5px',
+            color: '#94a3b8',
+            fontStyle: 'italic',
+            padding: '12px 0',
+            textAlign: 'center',
+            background: '#f8fafc',
+            borderRadius: '8px',
+            border: '1px dashed #e2e8f0',
+          }}
+        >
+          No automated state changes made by the assistant yet.
         </div>
       ) : (
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '6px',
-          maxHeight: '260px',
-          overflowY: 'auto',
-          overscrollBehavior: 'contain',
-          paddingRight: '2px',
-        }}>
-          {activityList.map((item) => (
-            <div
-              key={item.id}
-              className="agent-activity-item"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '9px 12px',
-                background: item.is_reverted ? 'var(--bg-card)' : 'var(--bg-card-soft)',
-                border: `1px solid var(--border)`,
-                borderRadius: '8px',
-                fontSize: '12px',
-                opacity: item.is_reverted ? 0.55 : 1,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '14px' }}>
-                  {item.tool === 'add_task' ? '➕' : item.tool === 'delete_task' ? '🗑️' : item.tool?.includes('ingest') ? '📥' : '✏️'}
-                </span>
-                <span style={{ color: 'var(--text-primary)', fontWeight: '600', fontSize: '12.5px' }}>
-                  {formatActivityItem(item)}
-                </span>
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                  {formatFriendlyTime(item.created_at)}
-                </span>
-                {item.is_reverted && (
-                  <span style={{
-                    fontSize: '10px',
-                    padding: '1px 7px',
-                    borderRadius: '10px',
-                    fontWeight: '700',
-                    background: 'rgba(239, 68, 68, 0.1)',
-                    color: '#dc2626',
-                    border: '1px solid rgba(239, 68, 68, 0.25)',
-                  }}>
-                    Undone
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
+            maxHeight: '280px',
+            overflowY: 'auto',
+            overscrollBehavior: 'contain',
+            paddingRight: '2px',
+          }}
+        >
+          {activityList.map((item) => {
+            const Icon = getActivityIcon(item.tool)
+            return (
+              <div
+                key={item.id}
+                className="agent-activity-item"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '10px 14px',
+                  background: item.is_reverted ? '#f8fafc' : '#ffffff',
+                  border: `1px solid ${item.is_reverted ? '#e2e8f0' : '#cbd5e1'}`,
+                  borderRadius: '10px',
+                  fontSize: '12.5px',
+                  opacity: item.is_reverted ? 0.6 : 1,
+                  boxShadow: item.is_reverted ? 'none' : '0 1px 2px rgba(0,0,0,0.03)',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                  <div
+                    style={{
+                      width: '26px',
+                      height: '26px',
+                      borderRadius: '6px',
+                      background: item.is_reverted ? '#f1f5f9' : 'rgba(99, 102, 241, 0.1)',
+                      color: item.is_reverted ? '#94a3b8' : '#6366f1',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <Icon size={14} />
+                  </div>
+                  <span style={{ color: '#0f172a', fontWeight: '600' }}>
+                    {formatActivityItem(item)}
                   </span>
+                  <span style={{ fontSize: '11px', color: '#94a3b8' }}>
+                    {formatFriendlyTime(item.created_at)}
+                  </span>
+                  {item.is_reverted && (
+                    <span
+                      style={{
+                        fontSize: '10.5px',
+                        padding: '1px 8px',
+                        borderRadius: '10px',
+                        fontWeight: '700',
+                        background: 'rgba(239, 68, 68, 0.1)',
+                        color: '#dc2626',
+                        border: '1px solid rgba(239, 68, 68, 0.25)',
+                      }}
+                    >
+                      Reverted
+                    </span>
+                  )}
+                </div>
+
+                {!item.is_reverted && (
+                  <button
+                    className="agent-revert-btn"
+                    onClick={() => onRevertItem(item.id)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      padding: '5px 12px',
+                      background: '#ffffff',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: '6px',
+                      color: '#475569',
+                      fontSize: '11.5px',
+                      fontWeight: '600',
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                      flexShrink: 0,
+                      transition: 'all 0.15s ease',
+                    }}
+                    onMouseEnter={e => {
+                      e.currentTarget.style.borderColor = '#ef4444'
+                      e.currentTarget.style.color = '#ef4444'
+                      e.currentTarget.style.background = '#fef2f2'
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.borderColor = '#cbd5e1'
+                      e.currentTarget.style.color = '#475569'
+                      e.currentTarget.style.background = '#ffffff'
+                    }}
+                  >
+                    <RotateCcw size={12} />
+                    <span>Undo</span>
+                  </button>
                 )}
               </div>
-
-              {!item.is_reverted && (
-                <button
-                  className="agent-revert-btn"
-                  onClick={() => onRevertItem(item.id)}
-                  style={{
-                    padding: '4px 10px',
-                    background: 'var(--bg-card)',
-                    border: '1px solid var(--border)',
-                    borderRadius: '6px',
-                    color: 'var(--text-secondary)',
-                    fontSize: '11px',
-                    fontWeight: '600',
-                    cursor: 'pointer',
-                    whiteSpace: 'nowrap',
-                    flexShrink: 0,
-                  }}
-                >
-                  ↩️ Undo
-                </button>
-              )}
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>

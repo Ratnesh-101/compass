@@ -22,13 +22,17 @@ def check_models_catalog(base_url: str, api_key: str, required_models: Set[str],
         return
 
     clean_base = base_url.rstrip("/")
+    if not clean_base.startswith(("https://", "http://")):
+        logger.warning("Invalid URL scheme for Nebius base_url: %s", clean_base)
+        return
+
     url = f"{clean_base}/models"
     req = urllib.request.Request(
         url,
         headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
     )
     try:
-        with urllib.request.urlopen(req, timeout=10.0) as resp:
+        with urllib.request.urlopen(req, timeout=10.0) as resp:  # nosec B310
             data = json.loads(resp.read().decode())
             available_ids = {m["id"] for m in data.get("data", [])}
     except Exception as e:

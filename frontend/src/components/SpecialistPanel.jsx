@@ -237,7 +237,7 @@ export default function SpecialistPanel({ onTaskMutated }) {
             <div style={{ background: 'var(--hackathon-bg)', border: '1px solid rgba(245, 166, 35, 0.4)', borderRadius: '8px', padding: '12px 14px', fontSize: '12px', color: 'var(--hackathon-text)' }}>
               <strong style={{ color: 'var(--hackathon-text)' }}>📋 Proposed Mutating Actions:</strong>
               <div style={{ marginTop: '4px', fontSize: '11px', color: 'var(--text-primary)', fontFamily: 'JetBrains Mono, monospace' }}>
-                Specialist returned {result.proposed_actions.length} proposed action(s). These are passed back to Northstar for confirmation gate approval before execution.
+                Specialist returned {result.proposed_actions.length} proposed action(s). These are passed back to Compass for confirmation gate approval before execution.
               </div>
             </div>
           )}

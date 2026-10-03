@@ -11,8 +11,8 @@ export default function NebiusTelemetryModal({ isOpen, onClose, usageStats, onRe
   const inputTokens = stats.total_input_tokens ?? 0
   const outputTokens = stats.total_output_tokens ?? 0
   const totalCost = stats.total_estimated_cost_usd ?? 0.0
-  const savingsPct = stats.cost_savings_pct ?? 92.4
-  const gpt4Cost = stats.gpt4_baseline_cost_usd ?? (totalCost * 12.5)
+  const savingsPct = stats.cost_savings_pct ?? 0.0
+  const gpt4Cost = stats.gpt4_baseline_cost_usd ?? 0.0
 
   const breakdown = stats.breakdown || [
     {
@@ -240,10 +240,10 @@ export default function NebiusTelemetryModal({ isOpen, onClose, usageStats, onRe
               Cost Reduction
             </div>
             <div style={{ fontSize: '24px', fontWeight: '800', color: '#34d399', marginTop: '4px' }}>
-              {savingsPct}%
+              {savingsPct > 0 ? `${savingsPct}%` : 'Tiered MoE'}
             </div>
             <div style={{ fontSize: '11px', color: 'rgba(52, 211, 153, 0.85)', marginTop: '2px' }}>
-              vs Monolithic GPT-4 (~${gpt4Cost.toFixed(2)})
+              {gpt4Cost > 0 ? `vs Monolithic GPT-4 (~$${gpt4Cost.toFixed(2)})` : 'Relative to frontier monolithic pricing'}
             </div>
           </div>
         </div>

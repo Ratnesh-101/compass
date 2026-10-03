@@ -1,16 +1,27 @@
 import React from 'react'
+import {
+  CheckCircle2,
+  XCircle,
+  AlertTriangle,
+  FileEdit,
+  ShieldAlert,
+  Calendar,
+  Trash2,
+  PlusCircle,
+  Undo2,
+} from 'lucide-react'
 
 function friendlyAction(tool) {
   const map = {
-    add_task: 'Added a task',
-    edit_task: 'Updated a task',
-    delete_task: 'Deleted a task',
-    update_task_status: 'Changed task status',
-    ingest_url: 'Saved web page',
-    ingest_text: 'Saved note',
-    apply_triage_plan: 'Adjusted schedule',
-    schedule_event: 'Scheduled event',
-    commit_schedule: 'Scheduled tasks',
+    add_task: 'Create Task',
+    edit_task: 'Update Task',
+    delete_task: 'Delete Task',
+    update_task_status: 'Update Task Status',
+    ingest_url: 'Index Web Resource',
+    ingest_text: 'Store Context Memory',
+    apply_triage_plan: 'Execute Schedule Adjustment',
+    schedule_event: 'Book Calendar Slot',
+    commit_schedule: 'Commit Batch Schedule',
   }
   return map[tool] || (tool || '').replace(/_/g, ' ')
 }
@@ -21,25 +32,32 @@ export function formatActionDescription(action) {
   const tool = action.tool
   const args = action.args || {}
   if (tool === 'add_task') {
-    return `Add task: "${args.title || 'New Task'}"`
+    return `Create task: "${args.title || 'New Task'}" (${args.domain || 'general'})`
   }
   if (tool === 'edit_task') {
     return `Update task: "${args.title || `Task #${args.task_id || ''}`}"`
   }
   if (tool === 'delete_task') {
-    return `Delete task #${args.task_id || ''}`
+    return `Permanently remove task #${args.task_id || ''}`
   }
   if (tool === 'update_task_status') {
     const status = args.status || 'done'
     return `Mark task #${args.task_id || ''} as ${status === 'done' ? 'completed' : status}`
   }
   if (tool === 'schedule_event' || tool === 'commit_schedule') {
-    return `Schedule "${args.title || 'event'}" on calendar`
+    return `Reserve calendar time slot for "${args.title || 'event'}"`
   }
   if (tool === 'apply_triage_plan') {
-    return 'Adjust task plan to balance workload'
+    return 'Rebalance task deadlines to prevent cognitive burnout'
   }
   return friendlyAction(tool)
+}
+
+function getActionIcon(tool) {
+  if (tool === 'add_task') return PlusCircle
+  if (tool === 'delete_task') return Trash2
+  if (tool === 'schedule_event' || tool === 'commit_schedule') return Calendar
+  return FileEdit
 }
 
 export default function ConfirmationGate({
@@ -52,90 +70,157 @@ export default function ConfirmationGate({
   if (!pendingActions || pendingActions.length === 0) return null
 
   return (
-    <div style={{
-      background: 'rgba(99, 102, 241, 0.05)',
-      border: '1px solid rgba(99, 102, 241, 0.25)',
-      borderRadius: '10px',
-      padding: '16px',
-      marginTop: '8px',
-    }}>
-      <div style={{ fontSize: '15px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '6px' }}>
-        🙋 Ready to make {pendingActions.length} change{pendingActions.length !== 1 ? 's' : ''} — is that ok?
-      </div>
-      <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '14px' }}>
-        Nothing has been saved yet. Review below, then say yes or no. You can always undo changes.
-      </div>
-      {pendingActions.map((action, i) => (
-        <div key={i} style={{
-          background: 'var(--bg-card)',
-          borderRadius: '8px',
-          padding: '10px 14px',
-          marginBottom: '6px',
-          fontSize: '13px',
-          color: 'var(--text-primary)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px',
-          border: '1px solid var(--border)',
-        }}>
-          <span style={{ fontSize: '16px' }}>📝</span>
-          <span style={{ fontWeight: '500' }}>{formatActionDescription(action)}</span>
+    <div
+      style={{
+        background: '#ffffff',
+        border: '1.5px solid #818cf8',
+        borderRadius: '12px',
+        padding: '20px',
+        marginTop: '12px',
+        marginBottom: '16px',
+        boxShadow: '0 4px 20px rgba(99, 102, 241, 0.12)',
+      }}
+    >
+      {/* Header with Safety Shield */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+        <div
+          style={{
+            width: '32px',
+            height: '32px',
+            borderRadius: '8px',
+            background: 'rgba(99, 102, 241, 0.12)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#6366f1',
+          }}
+        >
+          <ShieldAlert size={18} />
         </div>
-      ))}
-      <div style={{ marginTop: '12px' }}>
+        <div>
+          <div style={{ fontSize: '15px', fontWeight: '800', color: '#0f172a', letterSpacing: '-0.3px' }}>
+            Specialist Confirmation Gate — {pendingActions.length} Pending Action{pendingActions.length !== 1 ? 's' : ''}
+          </div>
+          <div style={{ fontSize: '12.5px', color: '#64748b' }}>
+            Zero-mutation safety protocol: AI proposed changes require your explicit authorization.
+          </div>
+        </div>
+      </div>
+
+      {/* Action List */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', margin: '14px 0' }}>
+        {pendingActions.map((action, i) => {
+          const ActionIcon = getActionIcon(action.tool)
+          const isDestructive = action.tool === 'delete_task'
+          return (
+            <div
+              key={i}
+              style={{
+                background: isDestructive ? '#fef2f2' : '#f8fafc',
+                border: `1px solid ${isDestructive ? '#fecaca' : '#e2e8f0'}`,
+                borderRadius: '8px',
+                padding: '10px 14px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+              }}
+            >
+              <ActionIcon size={16} color={isDestructive ? '#ef4444' : '#6366f1'} />
+              <div style={{ flex: 1, fontSize: '13px', color: isDestructive ? '#991b1b' : '#0f172a', fontWeight: '500' }}>
+                {formatActionDescription(action)}
+              </div>
+              <span
+                style={{
+                  fontSize: '11px',
+                  fontWeight: '700',
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                  background: isDestructive ? 'rgba(239, 68, 68, 0.1)' : 'rgba(99, 102, 241, 0.1)',
+                  color: isDestructive ? '#dc2626' : '#4f46e5',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.04em',
+                }}
+              >
+                {friendlyAction(action.tool)}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Rejection / Modification Guidance Input */}
+      <div style={{ marginBottom: '14px' }}>
         <input
           id="agent-reject-input"
           type="text"
           value={rejectFeedback}
           onChange={e => setRejectFeedback(e.target.value)}
-          placeholder="Optional: tell me what NOT to change (e.g. 'don't touch my exam date')…"
+          placeholder="Optional revision guidance (e.g. 'Keep current due date, just reduce duration')..."
           style={{
             width: '100%',
-            padding: '9px 12px',
-            background: 'var(--bg-card)',
-            border: '1px solid var(--border)',
+            padding: '10px 14px',
+            background: '#ffffff',
+            border: '1px solid #cbd5e1',
             borderRadius: '8px',
-            color: 'var(--text-primary)',
+            color: '#0f172a',
             fontSize: '13px',
-            marginBottom: '10px',
             outline: 'none',
             boxSizing: 'border-box',
-            fontFamily: 'Inter, system-ui, sans-serif',
           }}
+          onFocus={e => (e.target.style.borderColor = '#6366f1')}
+          onBlur={e => (e.target.style.borderColor = '#cbd5e1')}
         />
       </div>
-      <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+
+      {/* Executive Decision Buttons */}
+      <div style={{ display: 'flex', gap: '10px' }}>
         <button
           id="agent-approve-btn"
           onClick={onApprove}
           style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '7px',
             padding: '9px 20px',
-            background: '#16a34a',
+            background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
             border: 'none',
             borderRadius: '8px',
-            color: '#fff',
-            fontSize: '14px',
-            fontWeight: '600',
+            color: '#ffffff',
+            fontSize: '13.5px',
+            fontWeight: '700',
             cursor: 'pointer',
+            boxShadow: '0 2px 8px rgba(22, 163, 74, 0.3)',
+            transition: 'all 0.15s ease',
           }}
+          onMouseEnter={e => (e.currentTarget.style.transform = 'translateY(-1px)')}
+          onMouseLeave={e => (e.currentTarget.style.transform = 'translateY(0)')}
         >
-          ✅ Yes, go ahead
+          <CheckCircle2 size={16} />
+          <span>Authorize Changes</span>
         </button>
+
         <button
           id="agent-reject-btn"
           onClick={onReject}
           style={{
-            padding: '9px 20px',
-            background: 'transparent',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '7px',
+            padding: '9px 18px',
+            background: '#ffffff',
             border: '1px solid #ef4444',
             borderRadius: '8px',
             color: '#dc2626',
-            fontSize: '14px',
+            fontSize: '13.5px',
             fontWeight: '600',
             cursor: 'pointer',
+            transition: 'all 0.15s ease',
           }}
+          onMouseEnter={e => (e.currentTarget.style.background = '#fef2f2')}
+          onMouseLeave={e => (e.currentTarget.style.background = '#ffffff')}
         >
-          ❌ No, try a different way
+          <XCircle size={16} />
+          <span>Reject / Re-plan</span>
         </button>
       </div>
     </div>

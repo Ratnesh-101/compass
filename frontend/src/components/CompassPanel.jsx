@@ -3,7 +3,7 @@ import ChatPanel from './ChatPanel'
 import AgentPanel from './AgentPanel'
 import SpecialistPanel from './SpecialistPanel'
 
-export default function NorthstarPanel({
+export default function CompassPanel({
   initialSubTab = 'assistant',
   messages,
   setMessages,
@@ -36,7 +36,7 @@ export default function NorthstarPanel({
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100vh', minWidth: 0, overflow: 'hidden', background: 'var(--bg-app)' }}>
-      {/* Northstar Header Sub-bar */}
+      {/* Header Sub-bar */}
       <div style={{
         height: '52px',
         borderBottom: '1px solid var(--border)',
@@ -51,7 +51,7 @@ export default function NorthstarPanel({
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
           <span style={{ fontSize: '18px' }}>🧭</span>
           <span style={{ fontSize: '14px', fontWeight: '800', color: 'var(--text-primary)', letterSpacing: '-0.2px' }}>
-            Northstar AI
+            Compass
           </span>
           <span style={{
             fontSize: '11px',
@@ -62,14 +62,14 @@ export default function NorthstarPanel({
             borderRadius: '10px',
             whiteSpace: 'nowrap'
           }}>
-            All-in-One Copilot & Autonomous Agents
+            Assistant & Planner
           </span>
         </div>
 
         {/* View Toggle */}
         <div style={{ display: 'flex', background: 'var(--bg-card-soft)', padding: '3px', borderRadius: '8px', border: '1px solid var(--border)', flexShrink: 0 }}>
           <button
-            id="northstar-subtab-chat"
+            id="compass-subtab-chat"
             onClick={() => setActiveSubTab('assistant')}
             style={{
               padding: '5px 14px',
@@ -83,10 +83,10 @@ export default function NorthstarPanel({
               cursor: 'pointer',
               transition: 'all 0.15s ease',
             }}>
-            💬 Chat Copilot
+            💬 Chat
           </button>
           <button
-            id="northstar-subtab-planner"
+            id="compass-subtab-planner"
             onClick={() => setActiveSubTab('planner')}
             style={{
               padding: '5px 14px',
@@ -100,10 +100,10 @@ export default function NorthstarPanel({
               cursor: 'pointer',
               transition: 'all 0.15s ease',
             }}>
-            📋 Goal Planner
+            📋 Planner
           </button>
           <button
-            id="northstar-subtab-specialist"
+            id="compass-subtab-specialist"
             onClick={() => setActiveSubTab('specialist')}
             style={{
               padding: '5px 14px',
@@ -117,7 +117,7 @@ export default function NorthstarPanel({
               cursor: 'pointer',
               transition: 'all 0.15s ease',
             }}>
-            🧠 Specialist Agents
+            🧠 Specialists
           </button>
         </div>
       </div>

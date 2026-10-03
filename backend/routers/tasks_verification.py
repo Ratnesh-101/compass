@@ -195,7 +195,7 @@ async def seed_demo_persona_endpoint(request: Request):
                     "Compass 3-Tier NVIDIA Nemotron Architecture: Nemotron-3 Nano (30B MoE, 3B active) executes sub-400ms "
                     "intent routing; Nemotron-3 Super (120B MoE, 12B active) executes ReAct multi-step planning and grounded "
                     "code retrieval; Nemotron-3 Ultra (550B MoE, 55B active) executes executive roadmaps. "
-                    "Hosted on Nebius Token Factory on NVIDIA Tensor Core H100/H200 GPUs with 92.4% cost savings over monolithic models."
+                    "Hosted on Nebius Token Factory on NVIDIA Tensor Core H100/H200 GPUs with active MoE parameter routing."
                 ),
                 "tags": ["nemotron", "nvidia", "nebius", "routing", "moe"],
             },

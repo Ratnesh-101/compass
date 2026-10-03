@@ -138,12 +138,13 @@ def test_safe_client_ip_handles_forwarded_for(monkeypatch):
     ip = get_client_ip(mock_request)
     assert ip == "198.51.100.15"
 
-    # Cloudflare connecting IP is ignored by default unless explicitly enabled
+    # Cloudflare connecting IP is ignored when TRUST_CF_CONNECTING_IP is False
+    from backend.config import get_settings
+    monkeypatch.setattr(get_settings(), "TRUST_CF_CONNECTING_IP", False)
     mock_request.headers = {"cf-connecting-ip": "203.0.113.88", "x-forwarded-for": "spoofed-ip, 198.51.100.15"}
     assert get_client_ip(mock_request) == "198.51.100.15"
 
     # Cloudflare connecting IP is honored when TRUST_CF_CONNECTING_IP is True
-    from backend.config import get_settings
     monkeypatch.setattr(get_settings(), "TRUST_CF_CONNECTING_IP", True)
     assert get_client_ip(mock_request) == "203.0.113.88"
 

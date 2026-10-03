@@ -15,7 +15,7 @@ Per official Devpost Hackathon rules regarding pre-existing work, the following 
    - Tuned prompt schemas for zero-shot structured JSON extraction across Nemotron model tiers.
    - Integrated `Qwen/Qwen3-Embedding-8B` with 768-dimension Matryoshka truncation to comply with PostgreSQL's 2,000-dimension HNSW indexing ceiling.
 
-2. **Autonomous ReAct Agent Loop ("Northstar") & Confirmation Gates**:
+2. **Autonomous ReAct Agent Loop ("Compass Planner") & Confirmation Gates**:
    - Engineered an autonomous multi-step reasoning agent with planning, tool invocation, and an independent critic pass (`agent_critic.py`).
    - Implemented strict Human Confirmation Gates: all state-mutating actions (`add_task`, `edit_task`, `delete_task`, `apply_triage_plan`, `ingest_url`) halt and require explicit user approval before executing against the database.
    - Added full transaction rollback and audit trails via PostgreSQL `agent_audit_log`.

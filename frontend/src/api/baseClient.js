@@ -2,9 +2,10 @@
 // Handles base URL resolution, guest identity, user session, and common headers.
 
 export const API_BASE = (
-  import.meta.env.DEV
-    ? (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000')
-    : ''
+  import.meta.env.VITE_API_BASE_URL ||
+  (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    ? 'http://localhost:8000'
+    : '')
 ).replace(/\/$/, '')
 
 export const FALLBACK_TASKS = [
@@ -203,7 +204,7 @@ export function getAuthHeaders(extraHeaders = {}) {
   if (guestId) {
     headers['x-guest-id'] = guestId
   }
-  const token = localStorage.getItem('compass_auth_token') || (import.meta.env.DEV ? 'dev-token' : '')
+  const token = localStorage.getItem('compass_auth_token') || (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') ? 'dev-token' : '')
   if (token && !headers['Authorization']) {
     headers['Authorization'] = `Bearer ${token}`
   }

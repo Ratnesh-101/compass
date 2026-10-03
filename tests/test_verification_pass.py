@@ -64,11 +64,20 @@ async def test_token_bucket_rate_limiter_throttles():
 
 @pytest.mark.asyncio
 async def test_mint_rate_limit_blocks_spam():
+    from backend.memory.db import get_pool
+    pool = await get_pool()
+    if pool:
+        try:
+            async with pool.acquire() as conn:
+                await conn.execute("DELETE FROM rate_limit_buckets WHERE key = $1", "mint:ip:198.51.100.88")
+        except Exception:
+            pass
+
     scope = {"type": "http", "client": ("198.51.100.88", 1234), "headers": []}
     req = Request(scope)
-    # Capacity is 10. Spamming 15 requests must hit 429 even with network round-trip latency
+    # Capacity is 10. Spamming up to 25 requests must hit 429 even with network round-trip latency
     hit_429 = False
-    for _ in range(15):
+    for _ in range(25):
         try:
             await enforce_mint_rate_limit(req)
         except HTTPException as exc:

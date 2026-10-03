@@ -34,6 +34,9 @@ DEPENDENCY_DIRS = {
     'node_modules',
     'venv',
     '.venv',
+    '.venv312',
+    '.venv_py39',
+    '.python312',
     'env',
     '__pycache__',
     '.pytest_cache',
@@ -181,13 +184,26 @@ def audit_repository(root: Path, max_lines: int = 700, warn_lines: int = 500):
         rel_dir = Path(dirpath).relative_to(root)
         dir_parts = [p.lower() for p in rel_dir.parts]
 
+        # Prune subdirectories in-place so os.walk does not recurse into them
+        dirnames[:] = [
+            d for d in dirnames
+            if d.lower() != '.git'
+            and d.lower() not in DEPENDENCY_DIRS
+            and not d.lower().startswith('.venv')
+            and not d.lower().startswith('venv')
+            and not d.lower().startswith('.python')
+            and d.lower() not in IDE_METADATA_DIRS
+            and d.lower() not in BUILD_OUTPUT_DIRS
+            and d.lower() not in VENDOR_DIRS
+        ]
+
         # Check if entire directory is Git metadata
         if any(p == '.git' for p in dir_parts):
             categories['GIT_METADATA'].extend(filenames)
             continue
 
         # Check if entire directory is dependencies/environment
-        if any(p in DEPENDENCY_DIRS for p in dir_parts):
+        if any(p in DEPENDENCY_DIRS or p.startswith('.venv') or p.startswith('venv') or p.startswith('.python') for p in dir_parts):
             categories['DEPENDENCY'].extend(filenames)
             continue
 

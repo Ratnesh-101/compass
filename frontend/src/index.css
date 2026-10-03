@@ -5,46 +5,49 @@
 }
 
 :root {
-  --bg-app: #faf8f3;
+  --bg-app: #f8fafc;
   --bg-card: #ffffff;
-  --bg-card-soft: #fdfaf3;
-  --bg-sidebar: #16152a;
-  --bg-sidebar-active: #232145;
+  --bg-card-soft: #f1f5f9;
+  --bg-sidebar: #0f172a;
+  --bg-sidebar-active: #1e293b;
+  --bg-sidebar-hover: rgba(255, 255, 255, 0.05);
 
-  --text-primary: #1f1b2e;
-  --text-secondary: #6b6478;
-  --text-muted: #9993a3;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
 
-  --brand: #f5a623;
-  --brand-dark: #d9890a;
+  --brand: #f59e0b;
+  --brand-dark: #d97706;
+  --brand-purple: #6366f1;
+  --brand-purple-dark: #4f46e5;
+  --brand-purple-soft: rgba(99, 102, 241, 0.1);
 
-  --hackathon: #f5a623;
-  --coursework: #6c5ce7;
-  --code: #14b884;
-  --general: #7a92a3;
+  --hackathon: #f59e0b;
+  --coursework: #3b82f6;
+  --code: #10b981;
+  --general: #64748b;
 
-  --border: #ece7dc;
-  --shadow-sm: 0 1px 2px rgba(31, 27, 46, 0.04);
-  --shadow-md: 0 4px 16px rgba(31, 27, 46, 0.06);
+  --border: #e2e8f0;
+  --border-soft: #f1f5f9;
+  --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.04);
 
-  --text-on-dark: #f4f1fb;
-  --text-on-dark-muted: #8e8aa6;
+  --text-on-dark: #f8fafc;
+  --text-on-dark-muted: #94a3b8;
 
-  --hackathon-bg: #fef3dd;
-  --hackathon-text: #9a6208;
-  --coursework-bg: #ece9fd;
-  --coursework-text: #4b3fc9;
-  --code-bg: #e1f8ee;
-  --code-text: #0d8a63;
-  --general-bg: #eef2f4;
-  --general-text: #52717f;
-  --danger-bg: #fdeaea;
+  --hackathon-bg: #fffbeb;
+  --hackathon-text: #b45309;
+  --coursework-bg: #eff6ff;
+  --coursework-text: #1d4ed8;
+  --code-bg: #ecfdf5;
+  --code-text: #047857;
+  --general-bg: #f8fafc;
+  --general-text: #475569;
+  --danger-bg: #fef2f2;
 
-  --border-soft: #f1ede3;
-  --shadow-lg: 0 12px 32px rgba(31, 27, 46, 0.10);
-
-  /* Compatibility aliases for legacy/subagent component tokens */
-  --text-main: #1f1b2e;
+  /* Compatibility aliases */
+  --text-main: #0f172a;
   --bg-input: #ffffff;
   --bg-modal: #ffffff;
 }

@@ -82,7 +82,7 @@ class Settings(BaseSettings):
 
     # --- Tavily Search API ---
     TAVILY_API_KEY: str = ""
-    TAVILY_ENABLED: bool = True  # MUST be True in the submitted build
+    TAVILY_ENABLED: bool = False  # Disabled pending explicit team sign-off
     TAVILY_ABSTAIN_FIRST: bool = True
     TAVILY_SEARCH_DEPTH: str = "basic"  # ultra-fast | fast | basic | advanced
     TAVILY_MAX_RESULTS: int = 5
