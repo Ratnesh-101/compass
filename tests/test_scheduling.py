@@ -151,7 +151,7 @@ def test_conflict_detection():
         {"task_id": 1, "title": "Task 1", "scheduled_start": "2026-09-21T10:00:00Z", "scheduled_end": "2026-09-21T11:00:00Z"},
         {"task_id": 2, "title": "Task 2", "scheduled_start": "2026-09-21T10:30:00Z", "scheduled_end": "2026-09-21T11:30:00Z"},
     ]
-    conflicts = detect_schedule_conflicts(scheduled)
+    conflicts = detect_schedule_conflicts(scheduled, current_time="2026-09-21T00:00:00Z")
     assert len(conflicts) == 1
     assert conflicts[0]["conflict_type"] == "overlap"
 
