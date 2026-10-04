@@ -178,15 +178,34 @@ export default function ChatPanel({
           console.warn('[SSE Stream Error — falling back to non-streaming chat]', err)
           setIsStreaming(false)
           setStreamingText('')
-          if (onSendMessage) {
-            const reply = await onSendMessage(text)
-            if (reply) {
-              streamAssistantResponse(reply)
-            } else {
-              isSendingRef.current = false
+          try {
+            if (onSendMessage) {
+              const reply = await onSendMessage(text)
+              if (reply) {
+                streamAssistantResponse(reply)
+                return
+              }
             }
-          } else {
+            setMessages(prev => [
+              ...prev,
+              {
+                role: 'assistant',
+                text: "I encountered an issue connecting to Compass. Please verify the service is running and try again.",
+              },
+            ])
+          } catch (fallbackErr) {
+            console.error('[Chat Fallback Error]', fallbackErr)
+            setMessages(prev => [
+              ...prev,
+              {
+                role: 'assistant',
+                text: "I encountered an issue connecting to Compass. Please verify the service is running and try again.",
+              },
+            ])
+          } finally {
             isSendingRef.current = false
+            setIsStreaming(false)
+            setStreamingText('')
           }
         }
       })
@@ -194,15 +213,34 @@ export default function ChatPanel({
       console.warn('[SSE Stream Failed — falling back to non-streaming chat]', err)
       setIsStreaming(false)
       setStreamingText('')
-      if (onSendMessage) {
-        const reply = await onSendMessage(text)
-        if (reply) {
-          streamAssistantResponse(reply)
-        } else {
-          isSendingRef.current = false
+      try {
+        if (onSendMessage) {
+          const reply = await onSendMessage(text)
+          if (reply) {
+            streamAssistantResponse(reply)
+            return
+          }
         }
-      } else {
+        setMessages(prev => [
+          ...prev,
+          {
+            role: 'assistant',
+            text: "I encountered an issue connecting to Compass. Please verify the service is running and try again.",
+          },
+        ])
+      } catch (fallbackErr) {
+        console.error('[Chat Fallback Error]', fallbackErr)
+        setMessages(prev => [
+          ...prev,
+          {
+            role: 'assistant',
+            text: "I encountered an issue connecting to Compass. Please verify the service is running and try again.",
+          },
+        ])
+      } finally {
         isSendingRef.current = false
+        setIsStreaming(false)
+        setStreamingText('')
       }
     }
   }

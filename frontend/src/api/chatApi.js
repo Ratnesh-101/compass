@@ -65,7 +65,14 @@ export async function streamQueryFromAssistant(prompt, conversationId, { onToken
     })
 
     if (!res.ok) {
-      throw new Error(`SSE endpoint returned HTTP ${res.status}`)
+      let errText = ''
+      try {
+        const errJson = await res.json()
+        errText = errJson.detail || errJson.message || `HTTP ${res.status}`
+      } catch {
+        errText = `HTTP ${res.status}`
+      }
+      throw new Error(`SSE endpoint returned ${errText}`)
     }
 
     const reader = res.body.getReader()
@@ -88,24 +95,29 @@ export async function streamQueryFromAssistant(prompt, conversationId, { onToken
         if (!trimmed || !trimmed.startsWith('data:')) continue
         const jsonStr = trimmed.slice(5).trim()
         if (!jsonStr) continue
+
+        let evt = null
         try {
-          const evt = JSON.parse(jsonStr)
-          if (evt.type === 'token') {
-            fullResponse += evt.value
-            if (onToken) onToken(evt.value, fullResponse)
-          } else if (evt.type === 'replace') {
-            // Server detected a tool call after partial streaming —
-            // discard any leaked markup and replace with the clean response.
-            fullResponse = evt.value || ''
-            if (onToken) onToken(fullResponse, fullResponse)
-          } else if (evt.type === 'done') {
-            if (evt.conversation_id) lastConvId = evt.conversation_id
-            if (evt.skill_used) lastSkill = evt.skill_used
-          } else if (evt.type === 'error') {
-            throw new Error(evt.message || 'Stream error')
-          }
+          evt = JSON.parse(jsonStr)
         } catch (e) {
           console.warn('[Compass SSE Parse Error]', e, jsonStr)
+          continue
+        }
+
+        if (evt.type === 'token') {
+          fullResponse += evt.value
+          if (onToken) onToken(evt.value, fullResponse)
+        } else if (evt.type === 'replace') {
+          // Server detected a tool call after partial streaming —
+          // discard any leaked markup and replace with the clean response.
+          fullResponse = evt.value || ''
+          if (onToken) onToken(fullResponse, fullResponse)
+        } else if (evt.type === 'done') {
+          if (evt.conversation_id) lastConvId = evt.conversation_id
+          if (evt.skill_used) lastSkill = evt.skill_used
+        } else if (evt.type === 'error') {
+          const errMsg = evt.detail || evt.message || 'Stream error'
+          throw new Error(errMsg)
         }
       }
     }

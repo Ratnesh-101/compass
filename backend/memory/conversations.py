@@ -190,10 +190,14 @@ async def get_recent_messages(
     rows = await conn.fetch(
         """
         SELECT id, role, content, skill_called, created_at
-        FROM messages
-        WHERE conversation_id = $1
+        FROM (
+            SELECT id, role, content, skill_called, created_at
+            FROM messages
+            WHERE conversation_id = $1
+            ORDER BY created_at DESC, id DESC
+            LIMIT $2
+        ) sub
         ORDER BY created_at ASC, id ASC
-        LIMIT $2
         """,
         cid, limit
     )
