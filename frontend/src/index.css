@@ -49,6 +49,52 @@
   --bg-modal: #ffffff;
 }
 
+/* Dark Mode */
+:root[data-theme="dark"] {
+  --bg-app: #0f0f1a;
+  --bg-card: #1a1a2e;
+  --bg-card-soft: #151528;
+  --bg-sidebar: #0d0c18;
+  --bg-sidebar-active: #1f1d38;
+
+  --text-primary: #f4f1fb;
+  --text-secondary: #b8b4cc;
+  --text-muted: #7a7688;
+
+  --brand: #f5a623;
+  --brand-dark: #ffd966;
+
+  --hackathon: #ffd966;
+  --coursework: #a78bfa;
+  --code: #34d399;
+  --general: #94a3b8;
+
+  --border: #2d2a42;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
+
+  --text-on-dark: #f4f1fb;
+  --text-on-dark-muted: #8e8aa6;
+
+  --hackathon-bg: #332b0d;
+  --hackathon-text: #ffd966;
+  --coursework-bg: #2b2340;
+  --coursework-text: #d8b4fe;
+  --code-bg: #0d3d2d;
+  --code-text: #34d399;
+  --general-bg: #1e293b;
+  --general-text: #cbd5e1;
+  --danger-bg: #4a1f1f;
+
+  --border-soft: #2a273e;
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.5);
+
+  /* Compatibility aliases */
+  --text-main: #f4f1fb;
+  --bg-input: #1a1a2e;
+  --bg-modal: #1a1a2e;
+}
+
 html, body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   background-color: var(--bg-app);

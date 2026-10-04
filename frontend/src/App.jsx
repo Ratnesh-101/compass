@@ -63,6 +63,20 @@ export default function App() {
   const tasksRef = useRef([])
   tasksRef.current = tasks
 
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    try {
+      const saved = localStorage.getItem('compass_dark_mode')
+      return saved ? JSON.parse(saved) : false
+    } catch {
+      return false
+    }
+  })
+
+  useEffect(() => {
+    localStorage.setItem('compass_dark_mode', JSON.stringify(isDarkMode))
+    document.documentElement.setAttribute('data-theme', isDarkMode ? 'dark' : 'light')
+  }, [isDarkMode])
+
   // Refresh usage stats from the backend (public endpoint, no auth required)
   const refreshUsage = useCallback(async () => {
     const stats = await fetchUsageSummary()
@@ -263,6 +277,8 @@ export default function App() {
         currentUser={currentUser}
         onOpenAuth={() => setShowAuthModal(true)}
         onOpenTelemetry={() => setShowTelemetryModal(true)}
+        isDarkMode={isDarkMode}
+        onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
       />
 
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'var(--bg-app)', minWidth: 0, overflow: 'hidden' }}>
@@ -347,4 +363,4 @@ export default function App() {
       />
     </div>
   )
-}
+}

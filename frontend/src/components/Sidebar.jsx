@@ -17,6 +17,8 @@ export default function Sidebar({
   currentUser,
   onOpenAuth,
   onOpenTelemetry,
+  isDarkMode,
+  onToggleDarkMode,
 }) {
   const isOnline = backendStatus.toLowerCase().includes('neon') || backendStatus.toLowerCase().includes('live')
   const totalActive = Object.values(domainCounts || {}).reduce((sum, n) => sum + (typeof n === 'number' ? n : 0), 0)
@@ -118,6 +120,40 @@ export default function Sidebar({
           </button>
         ))}
       </div>
+
+      {/* Dark Mode Toggle Button */}
+      <button
+        id="sidebar-dark-mode-btn"
+        onClick={onToggleDarkMode}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '8px',
+          padding: '12px 14px',
+          borderRadius: '10px',
+          background: isDarkMode ? 'rgba(245, 166, 35, 0.2)' : 'rgba(245, 166, 35, 0.12)',
+          border: `1px solid ${isDarkMode ? 'rgba(245, 166, 35, 0.4)' : 'rgba(245, 166, 35, 0.25)'}`,
+          cursor: 'pointer',
+          marginBottom: '16px',
+          transition: 'all 0.15s ease',
+          color: 'var(--text-on-dark)',
+          fontSize: '13px',
+          fontWeight: '600',
+          width: '100%',
+        }}
+        onMouseEnter={e => {
+          e.currentTarget.style.background = isDarkMode ? 'rgba(245, 166, 35, 0.3)' : 'rgba(245, 166, 35, 0.2)'
+          e.currentTarget.style.transform = 'translateY(-2px)'
+        }}
+        onMouseLeave={e => {
+          e.currentTarget.style.background = isDarkMode ? 'rgba(245, 166, 35, 0.2)' : 'rgba(245, 166, 35, 0.12)'
+          e.currentTarget.style.transform = 'translateY(0)'
+        }}
+      >
+        <span style={{ fontSize: '16px' }}>{isDarkMode ? '☀️' : '🌙'}</span>
+        <span>{isDarkMode ? 'Light Mode' : 'Dark Mode'}</span>
+      </button>
 
       {/* Domain Isolation Metrics */}
       <div style={{ marginBottom: 'auto' }}>
