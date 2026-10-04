@@ -1,10 +1,9 @@
 import React from 'react'
 
 const NAV_ITEMS = [
-  { key: 'northstar', icon: '🧭', label: 'Northstar', sub: 'Main AI Assistant' },
-  { key: 'specialist', icon: '🧠', label: 'Specialist Team', sub: 'Specialized Multi-Agent' },
-  { key: 'timeline', icon: '▦', label: 'Timeline', sub: 'Team feed' },
-  { key: 'calendar', icon: '🗓️', label: 'Schedule', sub: 'Calendar & Sync' },
+  { key: 'timeline', icon: '▦', label: 'Timeline', sub: 'Tasks & deadlines' },
+  { key: 'northstar', icon: '🧭', label: 'Northstar AI', sub: 'Copilot, planner & agents' },
+  { key: 'calendar', icon: '🗓️', label: 'Schedule', sub: 'Calendar & Google sync' },
 ]
 
 export default function Sidebar({
@@ -14,10 +13,33 @@ export default function Sidebar({
   backendStatus,
   activeTab,
   onSelectTab,
-  usageBadge
+  usageBadge,
+  currentUser,
+  onOpenAuth,
+  onOpenTelemetry,
 }) {
   const isOnline = backendStatus.toLowerCase().includes('neon') || backendStatus.toLowerCase().includes('live')
-  const totalActive = (domainCounts.hackathon || 0) + (domainCounts.coursework || 0) + (domainCounts.code || 0) + (domainCounts.general || 0)
+  const totalActive = Object.values(domainCounts || {}).reduce((sum, n) => sum + (typeof n === 'number' ? n : 0), 0)
+
+  const baseDomains = [
+    { key: 'hackathon', label: 'Hackathon', icon: '🚀', color: '#fbbf24' },
+    { key: 'coursework', label: 'Coursework', icon: '📚', color: '#60a5fa' },
+    { key: 'code', label: 'Code', icon: '💻', color: '#34d399' },
+    { key: 'general', label: 'General', icon: '🌐', color: '#94a3b8' },
+    { key: 'other', label: 'Other', icon: '🏷️', color: '#a78bfa' },
+  ]
+
+  // Show any user-defined custom domains present in active tasks
+  const extraDomains = Object.keys(domainCounts || {})
+    .filter(k => !baseDomains.some(b => b.key === k) && ((domainCounts[k] || 0) > 0 || activeDomain === k))
+    .map(k => ({
+      key: k,
+      label: k.charAt(0).toUpperCase() + k.slice(1),
+      icon: '🏷️',
+      color: '#c084fc'
+    }))
+
+  const displayDomains = [...baseDomains, ...extraDomains]
 
   return (
     <aside style={{
@@ -33,8 +55,27 @@ export default function Sidebar({
       height: '100vh',
       overflowY: 'auto'
     }}>
-      {/* Brand Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px', padding: '0 4px' }}>
+      {/* Brand Header — clickable to return to default page (Timeline) */}
+      <div
+        id="sidebar-brand-header"
+        onClick={() => {
+          onSelectTab('timeline')
+          if (onSelectDomain) onSelectDomain('all')
+        }}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          marginBottom: '24px',
+          padding: '0 4px',
+          cursor: 'pointer',
+          userSelect: 'none',
+          transition: 'opacity 0.15s ease',
+        }}
+        onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
+        onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+        title="Compass Workspace — Click to return to default Timeline Feed"
+      >
         <div style={{
           width: '38px',
           height: '38px',
@@ -44,13 +85,14 @@ export default function Sidebar({
           alignItems: 'center',
           justifyContent: 'center',
           fontSize: '18px',
-          flexShrink: 0
+          flexShrink: 0,
+          boxShadow: '0 4px 12px rgba(245, 166, 35, 0.25)'
         }}>
           🧭
         </div>
         <div>
-          <h1 style={{ fontSize: '16px', fontWeight: '800', letterSpacing: '-0.3px', color: 'var(--text-primary)' }}>Compass</h1>
-          <p style={{ fontSize: '10.5px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: '600' }}>Workspace</p>
+          <h1 style={{ fontSize: '16px', fontWeight: '800', letterSpacing: '-0.3px', color: 'var(--text-on-dark)', margin: 0 }}>Compass</h1>
+          <p style={{ fontSize: '10.5px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: '600', margin: 0 }}>Workspace</p>
         </div>
       </div>
 
@@ -68,7 +110,7 @@ export default function Sidebar({
           >
             <span className="nav-icon">{item.icon}</span>
             <span>
-              <div style={{ fontSize: '13.5px', fontWeight: '700', color: activeTab === item.key ? 'var(--text-primary)' : 'inherit' }}>
+              <div style={{ fontSize: '13.5px', fontWeight: '700', color: activeTab === item.key ? 'var(--text-on-dark)' : 'inherit' }}>
                 {item.label}
               </div>
               <div style={{ fontSize: '11px', opacity: 0.75 }}>{item.sub}</div>
@@ -90,12 +132,7 @@ export default function Sidebar({
           )}
         </div>
 
-        {[
-          { key: 'hackathon', label: 'Hackathon', icon: '🚀', color: '#fbbf24' },
-          { key: 'coursework', label: 'Coursework', icon: '📚', color: '#60a5fa' },
-          { key: 'code', label: 'Code', icon: '💻', color: '#34d399' },
-          { key: 'general', label: 'General', icon: '🌐', color: '#94a3b8' },
-        ].map(dom => (
+        {displayDomains.map(dom => (
           <div
             key={dom.key}
             onClick={() => onSelectDomain(dom.key)}
@@ -110,7 +147,7 @@ export default function Sidebar({
               background: activeDomain === dom.key ? 'var(--bg-sidebar-active)' : 'transparent',
               transition: 'background 0.15s ease'
             }}>
-            <span style={{ fontSize: '13px', color: activeDomain === dom.key ? 'var(--text-primary)' : 'var(--text-secondary)', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '13px', color: activeDomain === dom.key ? 'var(--text-on-dark)' : 'var(--text-secondary)', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span>{dom.icon}</span> {dom.label}
             </span>
             <span style={{
@@ -143,7 +180,7 @@ export default function Sidebar({
             background: isOnline ? '#34d399' : '#f5a623',
             flexShrink: 0
           }} />
-          <span style={{ fontSize: '12.5px', fontWeight: '700', color: 'var(--text-primary)' }}>
+          <span style={{ fontSize: '12.5px', fontWeight: '700', color: 'var(--text-on-dark)' }}>
             {isOnline ? `${totalActive} tasks synced` : 'Reconnecting'}
           </span>
         </div>
@@ -151,13 +188,75 @@ export default function Sidebar({
           {backendStatus}
         </div>
         {usageBadge && (
-          <div id="sidebar-usage-badge" className="mono" style={{
-            fontSize: '10px', color: 'var(--text-muted)', paddingLeft: '15px',
-            marginTop: '6px', paddingTop: '6px', borderTop: '1px solid rgba(255,255,255,0.06)'
-          }}>
-            {usageBadge}
+          <div
+            id="sidebar-usage-badge"
+            className="mono"
+            onClick={() => onOpenTelemetry && onOpenTelemetry()}
+            style={{
+              fontSize: '10.5px',
+              color: 'var(--brand, #fbbf24)',
+              padding: '6px 10px',
+              marginTop: '8px',
+              borderRadius: '7px',
+              background: 'rgba(245, 166, 35, 0.08)',
+              border: '1px solid rgba(245, 166, 35, 0.22)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              transition: 'all 0.15s ease',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'rgba(245, 166, 35, 0.16)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'rgba(245, 166, 35, 0.08)'}
+            title="Click to inspect live Nebius Token Factory & NVIDIA telemetry"
+          >
+            <span>{usageBadge}</span>
+            <span style={{ fontSize: '10px', opacity: 0.85 }}>📊</span>
           </div>
         )}
+      </div>
+
+      {/* Account / Workspace Switcher */}
+      <div
+        id="sidebar-account-btn"
+        onClick={() => onOpenAuth && onOpenAuth()}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '10px 12px',
+          borderRadius: '10px',
+          background: 'rgba(255, 255, 255, 0.04)',
+          border: '1px solid rgba(255, 255, 255, 0.08)',
+          cursor: 'pointer',
+          marginTop: '12px',
+          transition: 'all 0.15s ease'
+        }}
+        onMouseEnter={e => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'}
+        onMouseLeave={e => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.04)'}
+        title="Manage Account & Google Calendar"
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+          <span style={{ fontSize: '13px' }}>👤</span>
+          <div style={{ minWidth: 0 }}>
+            <div style={{
+              fontSize: '12px',
+              color: 'var(--text-on-dark)',
+              fontWeight: '600',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap'
+            }}>
+              {currentUser?.authenticated ? currentUser.email : 'Sign in / Account'}
+            </div>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+              {currentUser?.calendar?.connected ? 'Google Calendar ✓' : 'Isolated Workspace'}
+            </div>
+          </div>
+        </div>
+        <span style={{ fontSize: '11px', color: 'var(--brand)', fontWeight: '700', flexShrink: 0, paddingLeft: '6px' }}>
+          {currentUser?.authenticated ? 'Switch ▾' : 'Login ▾'}
+        </span>
       </div>
     </aside>
   )

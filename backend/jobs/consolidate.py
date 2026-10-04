@@ -215,6 +215,7 @@ async def archive_stale_threads(
         GROUP BY c.id
         HAVING COUNT(m.id) > 0
         ORDER BY c.last_active_at ASC
+        LIMIT 5
         """,
         cutoff
     )
@@ -244,30 +245,31 @@ async def archive_stale_threads(
             logger.info(f"    - Conversation {cid} already archived as chunk #{existing}.")
             continue
 
+        if dry_run:
+            archived_count += 1
+            logger.info(f"    - [DRY-RUN] Would summarize and archive conv {cid} ({len(messages)} msgs).")
+            continue
+
         summary = await summarize_messages(client, messages)
         emb = await get_embedding(summary)
 
         logger.info(f"    📦 Archiving conv {cid} ({len(messages)} msgs, last active {c['last_active_at'].date()}):")
         logger.info(f"       Summary: {summary[:120]}...")
 
-        if not dry_run:
-            await conn.execute(
-                """
-                INSERT INTO memory_chunks (domain, project_id, content, embedding, source, tags)
-                VALUES ($1, $2, $3, $4, $5, $6)
-                """,
-                "general",
-                None,
-                summary,
-                emb,
-                archive_source,
-                ["archived", "conversation_summary", f"conv_{cid}"]
-            )
-            archived_count += 1
-            logger.info(f"       ✅ Created consolidated memory chunk for {cid}.")
-        else:
-            archived_count += 1
-            logger.info(f"       [DRY-RUN] Would create memory chunk for {cid}.")
+        await conn.execute(
+            """
+            INSERT INTO memory_chunks (domain, project_id, content, embedding, source, tags)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            """,
+            "general",
+            None,
+            summary,
+            emb,
+            archive_source,
+            ["archived", "conversation_summary", f"conv_{cid}"]
+        )
+        archived_count += 1
+        logger.info(f"       ✅ Created consolidated memory chunk for {cid}.")
 
     return archived_count
 
@@ -414,11 +416,19 @@ async def run_consolidation(
         proactive_res = await trigger_proactive_nightly_run(conn, client, dry_run=dry_run, pool=pool)
         slipped_res = await check_slipped_schedules(conn, pool=pool, dry_run=dry_run)
 
+        # Cleanup stale rate limit buckets and expired guest sessions
+        from backend.services.rate_limiter import cleanup_stale_rate_limit_buckets
+        from backend.services.budgets import prune_expired_guests
+        stale_buckets = await cleanup_stale_rate_limit_buckets(older_than_hours=24)
+        pruned_guests = await prune_expired_guests(retention_days=int(getattr(settings, "GUEST_RETENTION_DAYS", 30)), pool=pool)
+
         logger.info("=" * 60)
         logger.info("SUMMARY OF CONSOLIDATION:")
         logger.info(f"  • Overdue tasks flagged  : {overdue_count}")
         logger.info(f"  • Duplicate chunks pruned: {pruned_count}")
         logger.info(f"  • Stale threads archived : {archived_count}")
+        logger.info(f"  • Rate limit buckets pruned: {stale_buckets}")
+        logger.info(f"  • Expired guests pruned  : {pruned_guests}")
         if proactive_res:
             logger.info(f"  • Proactive agent run    : {proactive_res.get('status')} ({proactive_res.get('run_id')})")
         logger.info(f"  • Slipped tasks detected : {slipped_res.get('slipped_count')}")

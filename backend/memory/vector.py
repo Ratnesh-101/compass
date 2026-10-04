@@ -16,6 +16,13 @@ settings = get_settings()
 DbConn = Union[asyncpg.Connection, PoolConnectionProxy]
 
 
+def compute_content_hash(content: str) -> str:
+    """Normalize text content (trim, lower, collapse whitespace) and compute SHA-256 hash."""
+    import hashlib
+    normalized = " ".join(content.strip().lower().split())
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
 async def store_chunk(
     conn: DbConn,
     content: str,
@@ -23,17 +30,22 @@ async def store_chunk(
     project_id: Optional[int] = None,
     source: Optional[str] = None,
     tags: Optional[List[str]] = None,
+    user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Store text content along with its 768-dim vector in memory_chunks."""
+    """Store text content along with its 768-dim vector in memory_chunks with strict deduplication via content_hash."""
+    content_hash = compute_content_hash(content)
     embedding = await get_embedding(content)
 
     row = await conn.fetchrow(
         """
-        INSERT INTO memory_chunks (domain, project_id, content, embedding, source, tags)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING id, domain, project_id, content, source, tags, created_at
+        INSERT INTO memory_chunks (domain, project_id, content, embedding, source, tags, user_id, content_hash)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        ON CONFLICT (user_id, content_hash) DO UPDATE
+        SET source = COALESCE(EXCLUDED.source, memory_chunks.source),
+            tags = EXCLUDED.tags
+        RETURNING id, domain, project_id, content, source, tags, user_id, created_at
         """,
-        domain, project_id, content, embedding, source, tags or []
+        domain, project_id, content, embedding, source, tags or [], user_id, content_hash
     )
     return dict(row) if row else {}
 
@@ -43,32 +55,59 @@ async def search_chunks(
     query: str,
     domain: Optional[str] = None,
     limit: int = 5,
+    user_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Search memory chunks by cosine similarity using the HNSW index."""
+    """Search memory chunks by cosine similarity with per-account isolation."""
     query_vec = await get_embedding(query)
 
-    if domain:
-        rows = await conn.fetch(
-            """
-            SELECT id, domain, project_id, content, source, tags, created_at,
-                   1 - (embedding <=> $1) AS similarity
-            FROM memory_chunks
-            WHERE domain = $2
-            ORDER BY embedding <=> $1 ASC
-            LIMIT $3
-            """,
-            query_vec, domain, limit
-        )
+    if user_id:
+        if domain:
+            rows = await conn.fetch(
+                """
+                SELECT id, domain, project_id, content, source, tags, created_at, user_id,
+                       1 - (embedding <=> $1) AS similarity
+                FROM memory_chunks
+                WHERE domain = $2 AND (user_id = $3 OR user_id IS NULL)
+                ORDER BY embedding <=> $1 ASC
+                LIMIT $4
+                """,
+                query_vec, domain, user_id, limit
+            )
+        else:
+            rows = await conn.fetch(
+                """
+                SELECT id, domain, project_id, content, source, tags, created_at, user_id,
+                       1 - (embedding <=> $1) AS similarity
+                FROM memory_chunks
+                WHERE (user_id = $2 OR user_id IS NULL)
+                ORDER BY embedding <=> $1 ASC
+                LIMIT $3
+                """,
+                query_vec, user_id, limit
+            )
     else:
-        rows = await conn.fetch(
-            """
-            SELECT id, domain, project_id, content, source, tags, created_at,
-                   1 - (embedding <=> $1) AS similarity
-            FROM memory_chunks
-            ORDER BY embedding <=> $1 ASC
-            LIMIT $2
-            """,
-            query_vec, limit
-        )
+        if domain:
+            rows = await conn.fetch(
+                """
+                SELECT id, domain, project_id, content, source, tags, created_at, user_id,
+                       1 - (embedding <=> $1) AS similarity
+                FROM memory_chunks
+                WHERE domain = $2
+                ORDER BY embedding <=> $1 ASC
+                LIMIT $3
+                """,
+                query_vec, domain, limit
+            )
+        else:
+            rows = await conn.fetch(
+                """
+                SELECT id, domain, project_id, content, source, tags, created_at, user_id,
+                       1 - (embedding <=> $1) AS similarity
+                FROM memory_chunks
+                ORDER BY embedding <=> $1 ASC
+                LIMIT $2
+                """,
+                query_vec, limit
+            )
 
     return [dict(r) for r in rows]

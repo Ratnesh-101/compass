@@ -13,6 +13,7 @@ import sys
 import time
 import httpx
 from pathlib import Path
+from urllib.parse import urlparse
 
 # Add project root to path
 _root = Path(__file__).resolve().parent.parent
@@ -33,8 +34,12 @@ if _allow_seed != "true":
 
 # Safety Guard: Hard-fail if DATABASE_URL or COMPASS_API_URL points at Frankfurt production instance or Render
 _db_url = (settings.DATABASE_URL or "").lower()
-_api_base_env = os.getenv("COMPASS_API_URL", "").lower()
-if "eu-central-1" in _db_url or "onrender.com" in _api_base_env or "compass-backend" in _api_base_env:
+_api_base_env = os.getenv("COMPASS_API_URL", "")
+_parsed_api_base = urlparse(_api_base_env)
+_api_host = ((_parsed_api_base.hostname or _parsed_api_base.netloc or "")).lower()
+_is_render_host = _api_host == "onrender.com" or _api_host.endswith(".onrender.com")
+_is_compass_backend_host = "compass-backend" in _api_host
+if "eu-central-1" in _db_url or _is_render_host or _is_compass_backend_host:
     raise RuntimeError(
         "CRITICAL ERROR: Refusing to run scripts/seed_usage.py against the production instance! "
         "Seeding is strictly restricted to local development fixtures."

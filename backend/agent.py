@@ -3,427 +3,46 @@ Compass Agent — ReAct-style autonomous multi-step reasoning engine.
 
 Runs a Think→Act→Observe loop using Nemotron-3 Super (120B) for reasoning
 and existing SKILL_REGISTRY tools for actions. Final synthesis via Ultra (550B).
-
-Key design:
-- State-mutating tools (add_task, edit_task, update_task_status, delete_task) require
-  explicit user confirmation via a "confirm_request" SSE event before execution.
-- Gating halts execution: the loop actually pauses and no mutation occurs until approval.
-- Reject path feeds user decline back into context so the agent can re-plan alternatives.
-- A 5-minute timeout on pending confirmations auto-saves the partial run as a draft.
-- Self-critique pass checks the plan before presenting to the user (capped at 2 rounds).
-- Run state is persisted to PostgreSQL agent_runs table so runs survive reconnects.
-- All executed mutations are tracked in agent_audit_log and can be reverted via undo.
-- Hard cap of max_steps (default 8) prevents runaway loops.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 import uuid
-import logging
-from dataclasses import dataclass, asdict
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple, cast
 
 from openai import AsyncOpenAI
 
+from backend.agent_critic import _run_critic_pass, execute_confirmed_actions
+from backend.agent_escalation import evaluate_abstention_and_web_escalation
+from backend.agent_persistence import (
+    MAX_CONCURRENT_AGENT_RUNS,
+    count_active_agent_runs,
+    get_agent_run,
+    get_critique_stats,
+    record_audit_log,
+    save_agent_run,
+    undo_last_agent_action,
+)
+from backend.agent_step_executor import execute_agent_tool_step
+from backend.agent_synthesis import build_done_step, force_final_synthesis
+from backend.agent_types import (
+    AgentStep,
+    MUTATING_TOOLS,
+    READ_ONLY_TOOLS,
+    _PENDING_CONFIRMATION_EVENTS,
+    _build_agent_system_prompt,
+    _clean_synthesis_text,
+    _extract_content_from_response,
+)
 from backend.config import get_settings
-from backend.services.usage import record_usage, compute_step_cost
+from backend.services.usage import compute_step_cost, record_usage
 
 logger = logging.getLogger("compass.agent")
 
-# ---------------------------------------------------------------------------
-# Tools that mutate state require human confirmation before execution
-# ---------------------------------------------------------------------------
-MUTATING_TOOLS = frozenset({"add_task", "edit_task", "update_task_status", "delete_task", "log_code_snippet", "log_code_context", "ingest_url", "apply_triage_plan", "commit_schedule"})
-READ_ONLY_TOOLS = frozenset({"query_tasks", "query_code_context", "query_coursework_tasks", "get_hackathon_deadlines", "summarize_day", "search_web", "list_projects", "query_coursework_notes", "chat", "summarize_across_domains", "verify_deadline", "assess_feasibility", "detect_deadline_conflicts", "get_calendar_availability", "propose_schedule", "detect_schedule_conflicts", "delegate_to_specialist"})
-
-# In-memory registry for live SSE confirmation events: run_id -> (asyncio.Event, outcome_dict)
-_PENDING_CONFIRMATION_EVENTS: Dict[str, Tuple[asyncio.Event, Dict[str, Any]]] = {}
-
-
-@dataclass
-class AgentStep:
-    """One step in the agent's reasoning trace."""
-    type: str           # "think" | "tool_call" | "observe" | "confirm_request" | "confirm_ack" | "critic" | "synthesize" | "error" | "done" | "timeout" | "escalate"
-    content: str = ""
-    tool_name: Optional[str] = None
-    tool_args: Optional[Dict[str, Any]] = None
-    step_number: int = 0
-    elapsed_ms: int = 0
-    run_id: Optional[str] = None
-    model_tier: Optional[str] = None
-    step_cost_usd: Optional[float] = None
-    metadata: Optional[Dict[str, Any]] = None
-
-    def to_sse(self) -> str:
-        """Serialize to SSE data line."""
-        payload: Dict[str, Any] = cast(Dict[str, Any], {})
-        payload["type"] = self.type
-        payload["content"] = self.content
-        payload["step"] = self.step_number
-        payload["elapsed_ms"] = self.elapsed_ms
-        if self.tool_name:
-            payload["tool"] = self.tool_name
-        if self.tool_args:
-            cast(Dict[str, Any], payload)["args"] = cast(Any, self.tool_args)
-        if self.run_id:
-            payload["run_id"] = self.run_id
-        if self.model_tier:
-            payload["model_tier"] = self.model_tier
-        if self.step_cost_usd is not None:
-            payload["step_cost_usd"] = self.step_cost_usd
-        if self.metadata:
-            cast(Dict[str, Any], payload)["metadata"] = cast(Any, self.metadata)
-        return f"data: {json.dumps(payload)}\n\n"
-
-
-def _build_agent_system_prompt(tool_names: List[str]) -> str:
-    """Build the system prompt that makes Super behave as a ReAct agent."""
-    tool_list = ", ".join(tool_names)
-    return (
-        "You are Compass Agent, an autonomous planning and scheduling assistant. "
-        "You help users manage tasks, deadlines, and code context across hackathon, coursework, and code domains.\n\n"
-        "You have access to these tools: " + tool_list + ".\n\n"
-        "Your job is to accomplish the user's goal through multi-step reasoning:\n"
-        "1. Think about what information you need\n"
-        "2. Call tools to gather data (read-only tools execute immediately)\n"
-        "3. Observe the results\n"
-        "4. Decide if you need more information or can produce your final answer\n\n"
-        "IMPORTANT RULES:\n"
-        "- Always query REAL data before making claims. Never guess task counts, deadlines, or priorities.\n"
-        "- Multi-Domain Chaining: When a goal requires cross-domain triage (e.g. trade-offs across tasks, code debt, and coursework), systematically call all relevant tools (e.g. query_tasks, query_code_context, query_coursework_notes) to synthesize a complete picture.\n"
-        "- Epistemic Humility & Abstention: If the gathered context is genuinely insufficient, empty, or ambiguous, DO NOT hallucinate or force a confident plan. Instead, explicitly ABSTAIN by starting your final answer with '[ABSTAIN]' and state clearly what information is missing and what the user needs to provide.\n"
-        "- When you have enough information, produce a comprehensive final answer.\n"
-        "- For state-changing actions (adding/editing/deleting tasks), the user will be asked to confirm before execution.\n"
-        "- If a user declines a proposed action, adapt and propose a feasible alternative without modifying their declined data.\n"
-        "- Be specific and actionable. Don't give vague advice.\n"
-        "- If you detect deadline conflicts, propose concrete rescheduling with reasoning.\n"
-    )
-
-
-# ---------------------------------------------------------------------------
-# Database Persistence: agent_runs and agent_audit_log
-# ---------------------------------------------------------------------------
-
-async def save_agent_run(
-    pool: Any,
-    run_id: str,
-    goal: str,
-    status: str,
-    accumulated_steps: List[AgentStep],
-    messages: List[Dict[str, Any]],
-    pending_actions: List[Dict[str, Any]],
-    conversation_id: Optional[str] = None,
-) -> None:
-    """Persist agent run state into agent_runs table."""
-    try:
-        steps_json = json.dumps([asdict(s) for s in accumulated_steps], default=str)
-        messages_json = json.dumps(messages, default=str)
-        pending_json = json.dumps(pending_actions, default=str)
-
-        async with pool.acquire() as conn:
-            await conn.execute(
-                """
-                INSERT INTO agent_runs (id, goal, status, accumulated_steps, messages, pending_actions, conversation_id)
-                VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7)
-                ON CONFLICT (id) DO UPDATE SET
-                    status = EXCLUDED.status,
-                    accumulated_steps = EXCLUDED.accumulated_steps,
-                    messages = EXCLUDED.messages,
-                    pending_actions = EXCLUDED.pending_actions,
-                    conversation_id = COALESCE(EXCLUDED.conversation_id, agent_runs.conversation_id),
-                    updated_at = now()
-                """,
-                run_id,
-                goal,
-                status,
-                steps_json,
-                messages_json,
-                pending_json,
-                conversation_id,
-            )
-    except Exception as e:
-        logger.warning(f"Failed to save agent run {run_id}: {e}")
-
-
-async def get_agent_run(pool: Any, run_id: str) -> Optional[Dict[str, Any]]:
-    """Retrieve an agent run by ID from agent_runs table."""
-    try:
-        async with pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT * FROM agent_runs WHERE id = $1", run_id)
-            if not row:
-                return None
-            return {
-                "id": row["id"],
-                "goal": row["goal"],
-                "status": row["status"],
-                "conversation_id": row["conversation_id"] if "conversation_id" in row else None,
-                "accumulated_steps": json.loads(row["accumulated_steps"]) if isinstance(row["accumulated_steps"], str) else row["accumulated_steps"],
-                "messages": json.loads(row["messages"]) if isinstance(row["messages"], str) else row["messages"],
-                "pending_actions": json.loads(row["pending_actions"]) if isinstance(row["pending_actions"], str) else row["pending_actions"],
-                "created_at": row["created_at"].isoformat() if hasattr(row["created_at"], "isoformat") else str(row["created_at"]),
-                "updated_at": row["updated_at"].isoformat() if hasattr(row["updated_at"], "isoformat") else str(row["updated_at"]),
-            }
-    except Exception as e:
-        logger.warning(f"Failed to get agent run {run_id}: {e}")
-        return None
-
-
-async def record_audit_log(
-    pool: Any,
-    tool: str,
-    args: Dict[str, Any],
-    run_id: Optional[str] = None,
-    affected_table: str = "tasks",
-    affected_id: Optional[int] = None,
-    previous_state: Optional[Dict[str, Any]] = None,
-    new_state: Optional[Dict[str, Any]] = None,
-    approved_by: str = "user",
-) -> int:
-    """Record an agent-executed mutation into agent_audit_log."""
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            INSERT INTO agent_audit_log
-                (run_id, tool, args, affected_table, affected_id, previous_state, new_state, approved_by)
-            VALUES
-                ($1, $2, $3::jsonb, $4, $5, $6::jsonb, $7::jsonb, $8)
-            RETURNING id
-            """,
-            run_id,
-            tool,
-            json.dumps(args, default=str),
-            affected_table,
-            affected_id,
-            json.dumps(previous_state, default=str) if previous_state is not None else None,
-            json.dumps(new_state, default=str) if new_state is not None else None,
-            approved_by,
-        )
-        return row["id"]
-
-
-
-MAX_CONCURRENT_AGENT_RUNS = 3
-
-
-async def count_active_agent_runs(pool: Any, timeout_minutes: int = 5) -> int:
-    """Count currently active or paused agent runs updated within the last timeout_minutes."""
-    if not pool:
-        return 0
-    async with pool.acquire() as conn:
-        val = await conn.fetchval(
-            """
-            SELECT COUNT(*) FROM agent_runs 
-            WHERE status IN ('running', 'paused')
-              AND updated_at >= now() - ($1 || ' minutes')::interval
-            """,
-            str(timeout_minutes)
-        )
-        return int(val or 0)
-
-
-async def get_critique_stats(pool: Any) -> Dict[str, Any]:
-    """Calculate real critique effectiveness statistics from persisted agent runs."""
-    if not pool:
-        return {
-            "total_runs_analyzed": 0,
-            "runs_with_critique": 0,
-            "critique_issues_flagged": 0,
-            "critique_effectiveness_rate": 0.0,
-            "recent_critique_evaluations": [],
-        }
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT id, goal, accumulated_steps, status, created_at FROM agent_runs ORDER BY created_at DESC LIMIT 50"
-        )
-    total_runs = len(rows)
-    runs_with_critique = 0
-    issues_flagged = 0
-    recent_evals: List[Dict[str, Any]] = []
-
-    for r in rows:
-        steps_raw = (
-            r.get("accumulated_steps")
-            if hasattr(r, "get")
-            else (r["accumulated_steps"] if "accumulated_steps" in r else "[]")
-        ) or "[]"
-        try:
-            steps_list = json.loads(steps_raw) if isinstance(steps_raw, str) else steps_raw
-        except Exception:
-            steps_list = []
-
-        for s in steps_list:
-            if s.get("type") == "critic":
-                runs_with_critique += 1
-                content = s.get("content", "")
-                is_flagged = not content.strip().startswith("APPROVED") or any(
-                    w in content.upper() for w in ["REVISE", "ISSUE", "CONFLICT", "DECLINED", "REJECT"]
-                )
-                if is_flagged:
-                    issues_flagged += 1
-                if len(recent_evals) < 10:
-                    r_id = r.get("id") if hasattr(r, "get") else r["id"]
-                    r_goal = r.get("goal") if hasattr(r, "get") else r["goal"]
-                    r_created = r.get("created_at") if hasattr(r, "get") else r["created_at"]
-                    recent_evals.append({
-                        "run_id": r_id,
-                        "goal": r_goal,
-                        "critique_summary": content[:150],
-                        "flagged_issue": is_flagged,
-                        "created_at": r_created.isoformat() if hasattr(r_created, "isoformat") else str(r_created),
-                    })
-                break
-
-    rate = round((issues_flagged / runs_with_critique * 100), 1) if runs_with_critique > 0 else 0.0
-    return {
-        "total_runs_analyzed": total_runs,
-        "runs_with_critique": runs_with_critique,
-        "critique_issues_flagged": issues_flagged,
-        "critique_effectiveness_rate": rate,
-        "recent_critique_evaluations": recent_evals,
-    }
-
-
-async def undo_last_agent_action(
-    pool: Any,
-    run_id: Optional[str] = None,
-    audit_log_id: Optional[int] = None,
-) -> Dict[str, Any]:
-    """Revert an agent-executed mutation using agent_audit_log."""
-    async with pool.acquire() as conn:
-        if audit_log_id is not None:
-            row = await conn.fetchrow(
-                "SELECT * FROM agent_audit_log WHERE id = $1",
-                audit_log_id,
-            )
-            if row and (row.get("is_reverted") if hasattr(row, "get") else row["is_reverted"]):
-                return {"status": "error", "message": f"Action #{audit_log_id} has already been reverted."}
-        elif run_id:
-            row = await conn.fetchrow(
-                "SELECT * FROM agent_audit_log WHERE run_id = $1 AND is_reverted = FALSE ORDER BY id DESC LIMIT 1",
-                run_id,
-            )
-        else:
-            row = await conn.fetchrow(
-                "SELECT * FROM agent_audit_log WHERE is_reverted = FALSE ORDER BY id DESC LIMIT 1"
-            )
-
-        if not row:
-            return {"status": "error", "message": "No agent actions found to undo."}
-
-        audit_id = row["id"]
-        tool = row["tool"]
-        affected_id = row["affected_id"]
-        prev_state = json.loads(row["previous_state"]) if row["previous_state"] else None
-
-        reverted_action = {"tool": tool, "affected_id": affected_id, "audit_log_id": audit_id}
-
-        if tool == "add_task" and affected_id:
-            await conn.execute("DELETE FROM tasks WHERE id = $1", affected_id)
-            reverted_action["action"] = f"Deleted added task #{affected_id}"
-
-        elif tool in ("edit_task", "update_task_status") and affected_id and prev_state:
-            from datetime import datetime
-            due_date = prev_state.get("due_date")
-            if due_date and isinstance(due_date, str):
-                try:
-                    due_date = datetime.strptime(due_date, "%Y-%m-%d").date()
-                except Exception:
-                    pass
-
-            await conn.execute(
-                """
-                UPDATE tasks
-                SET title = $2, due_date = $3, priority = $4, status = $5, notes = $6
-                WHERE id = $1
-                """,
-                affected_id,
-                prev_state.get("title"),
-                due_date,
-                prev_state.get("priority", "medium"),
-                prev_state.get("status", "open"),
-                prev_state.get("notes"),
-            )
-            reverted_action["action"] = f"Restored task #{affected_id} to previous state"
-
-        elif tool == "delete_task" and prev_state:
-            from datetime import datetime
-            due_date = prev_state.get("due_date")
-            if due_date and isinstance(due_date, str):
-                try:
-                    due_date = datetime.strptime(due_date, "%Y-%m-%d").date()
-                except Exception:
-                    pass
-
-            inserted = await conn.fetchrow(
-                """
-                INSERT INTO tasks (id, domain, project_id, title, due_date, status, priority, notes)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                ON CONFLICT (id) DO UPDATE SET
-                    domain = EXCLUDED.domain,
-                    title = EXCLUDED.title,
-                    status = EXCLUDED.status,
-                    priority = EXCLUDED.priority,
-                    notes = EXCLUDED.notes
-                RETURNING id
-                """,
-                affected_id,
-                prev_state.get("domain", "general"),
-                prev_state.get("project_id"),
-                prev_state.get("title"),
-                due_date,
-                prev_state.get("status", "open"),
-                prev_state.get("priority", "medium"),
-                prev_state.get("notes"),
-            )
-            if inserted and not isinstance(inserted, (str, bytes)):
-                try:
-                    restored_id = cast(Any, inserted)["id"]
-                except Exception:
-                    restored_id = affected_id
-            else:
-                restored_id = affected_id
-            reverted_action["action"] = f"Restored deleted task #{restored_id}"
-
-        elif tool in ("log_code_snippet", "log_code_context") and affected_id:
-            await conn.execute("DELETE FROM memory_chunks WHERE id = $1", affected_id)
-            reverted_action["action"] = f"Deleted logged memory chunk #{affected_id}"
-
-        elif tool == "ingest_url":
-            args_obj = json.loads(row["args"]) if isinstance(row["args"], str) else (row["args"] or {})
-            target_url = args_obj.get("url")
-            audit_ts = row.get("created_at")
-            if target_url and audit_ts:
-                await conn.execute(
-                    "DELETE FROM memory_chunks WHERE source = $1 AND created_at >= ($2::timestamptz - interval '2 minutes')",
-                    target_url,
-                    audit_ts,
-                )
-                reverted_action["action"] = f"Deleted ingested memory chunks for {target_url}"
-            elif target_url:
-                await conn.execute("DELETE FROM memory_chunks WHERE source = $1", target_url)
-                reverted_action["action"] = f"Deleted ingested memory chunks for {target_url}"
-            elif affected_id:
-                await conn.execute("DELETE FROM memory_chunks WHERE id = $1", affected_id)
-                reverted_action["action"] = f"Deleted ingested memory chunk #{affected_id}"
-            else:
-                reverted_action["action"] = "Reverted ingested URL memory"
-
-        # Mark the audit log entry as reverted
-        await conn.execute("UPDATE agent_audit_log SET is_reverted = TRUE WHERE id = $1", audit_id)
-
-        return {
-            "status": "ok",
-            "message": f"Successfully reverted agent action #{audit_id} ({tool})",
-            "reverted": reverted_action,
-        }
-
-
-# ---------------------------------------------------------------------------
-# Core ReAct Loop
-# ---------------------------------------------------------------------------
 
 async def run_agent(
     goal: str,
@@ -439,19 +58,9 @@ async def run_agent(
     client: Optional[AsyncOpenAI] = None,
     settings: Any = None,
     conversation_id: Optional[str] = None,
+    user_id: Optional[str] = None,
 ) -> AsyncGenerator[AgentStep, None]:
-    """
-    Core ReAct agent loop.
-
-    Yields AgentStep objects for real-time SSE streaming.
-
-    When a state-mutating tool call is detected:
-    1. Yield a "confirm_request" step with the proposed action
-    2. The loop pauses and persists run state to agent_runs (status='paused')
-    3. If wait_for_confirmation is True, wait on confirmation event with timeout
-    4. If rejected, feed rejection back into context and re-plan
-    5. If approved, execute mutation, log to agent_audit_log, and continue
-    """
+    """Core ReAct agent loop yielding AgentStep objects for real-time SSE streaming."""
     if settings is None:
         settings = get_settings()
     step_num = 0
@@ -464,10 +73,8 @@ async def run_agent(
 
     run_id = run_id or f"run_{uuid.uuid4().hex[:12]}"
 
-    # Import skill registry & dynamic tool definitions
-    from backend.skills import SKILL_REGISTRY, get_tool_definitions
+    from backend.skills import get_tool_definitions
 
-    # Build OpenAI client for Super model if not injected
     if client is None:
         client = AsyncOpenAI(
             api_key=settings.NEBIUS_API_KEY,
@@ -475,7 +82,6 @@ async def run_agent(
             timeout=30.0,
         )
 
-    # Build tool schemas dynamically (respecting TAVILY_ENABLED flag)
     agent_tools = get_tool_definitions()
 
     confirmed_actions = confirmed_actions or []
@@ -489,8 +95,10 @@ async def run_agent(
     web_escalation_used: bool = False
     forced_tool_choice: Optional[Any] = None
     active_replan_diff: Optional[Dict[str, Any]] = None
+    abstain_first: bool = getattr(settings, "TAVILY_ABSTAIN_FIRST", False)
+    search_web_unlocked: bool = not abstain_first
+    logger.info("SETTINGS.TAVILY_ABSTAIN_FIRST loaded inside run_agent: %s (run_id=%s)", abstain_first, run_id)
 
-    # Check for existing run state in database
     existing_run = await get_agent_run(pool, run_id) if pool else None
 
     if action in ("approve", "reject"):
@@ -502,7 +110,6 @@ async def run_agent(
             pending_confirmations = existing_run.get("pending_actions", [])
             step_num = len(existing_run.get("accumulated_steps", []))
 
-            # Re-populate accumulated steps and restore costs
             for s in existing_run.get("accumulated_steps", []):
                 cost_val = s.get("step_cost_usd")
                 if cost_val is not None:
@@ -526,14 +133,12 @@ async def run_agent(
             ])
 
         if action == "reject":
-            # Track declined action for re-plan diffing
             declined_action = pending_confirmations[0] if pending_confirmations else {}
             active_replan_diff = {
                 "declined_action": declined_action,
                 "feedback": feedback or "User declined proposed action",
                 "replan_status": "re_planning_alternative",
             }
-            # FEED REJECTION BACK INTO CONTEXT FOR RE-PLANNING
             rej_content = (
                 f"User declined: {feedback or 'do not execute this action'}. "
                 "Please re-plan without modifying this data or propose an alternative approach."
@@ -565,36 +170,62 @@ async def run_agent(
             if pool:
                 await save_agent_run(pool, run_id, goal, "running", accumulated_steps, messages, pending_confirmations, conversation_id=conversation_id)
 
-        elif action == "approve":
-            # EXECUTE APPROVED MUTATIONS
-            exec_results = await execute_confirmed_actions(pending_confirmations, pool, run_id=run_id)
-            for r in exec_results:
-                tool_result = r.get("result", {}).get("response", str(r.get("result", "")))
-                tc_id = "call_approved"
-                if messages and isinstance(messages[-1], dict) and isinstance(messages[-1].get("tool_calls"), list) and messages[-1]["tool_calls"]:
-                    first_tc = messages[-1]["tool_calls"][0]
-                    if isinstance(first_tc, dict) and "id" in first_tc:
-                        tc_id = str(first_tc["id"])
-                    elif hasattr(first_tc, "id"):
-                        tc_id = str(getattr(first_tc, "id", "call_approved"))
-                messages.append({"role": "tool", "tool_call_id": tc_id, "content": tool_result})
-                step_num += 1
-                obs_step = AgentStep(
-                    type="observe",
-                    content=tool_result,
-                    tool_name=r.get("tool"),
-                    step_number=step_num,
-                    elapsed_ms=0,
-                    run_id=run_id,
-                )
-                yield obs_step
-                accumulated_steps.append(obs_step)
-                tools_used.append(r.get("tool", ""))
+        elif action == "approve" and pending_confirmations:
+            step_num += 1
+            ack_step = AgentStep(
+                type="confirm_ack",
+                content=f"Actions approved by user: {json.dumps(pending_confirmations)}",
+                step_number=step_num,
+                elapsed_ms=0,
+                run_id=run_id,
+                model_tier="Human Authorization Gate",
+                step_cost_usd=0.0,
+            )
+            yield ack_step
+            accumulated_steps.append(ack_step)
+
+            exec_results = await execute_confirmed_actions(
+                confirmed_actions=pending_confirmations,
+                pool=pool,
+                run_id=run_id,
+                approved_by="user",
+                user_id=user_id,
+            )
+
+            tc_id = "call_approved"
+            if messages and isinstance(messages[-1], dict) and isinstance(messages[-1].get("tool_calls"), list) and messages[-1]["tool_calls"]:
+                first_tc = messages[-1]["tool_calls"][0]
+                if isinstance(first_tc, dict) and "id" in first_tc:
+                    tc_id = str(first_tc["id"])
+                elif hasattr(first_tc, "id"):
+                    tc_id = str(getattr(first_tc, "id", "call_approved"))
+
+            tool_content = json.dumps(exec_results, default=str)
+            messages.append({"role": "tool", "tool_call_id": tc_id, "content": tool_content})
+            step_num += 1
+            obs_step = AgentStep(
+                type="observe",
+                content=tool_content,
+                tool_name=pending_confirmations[0]["tool"] if pending_confirmations else None,
+                step_number=step_num,
+                elapsed_ms=0,
+                run_id=run_id,
+                model_tier="Neon Postgres Engine",
+                step_cost_usd=0.0,
+            )
+            yield obs_step
+            accumulated_steps.append(obs_step)
+
+            for a in pending_confirmations:
+                tools_used.append(a.get("tool", ""))
             pending_confirmations.clear()
             if pool:
                 await save_agent_run(pool, run_id, goal, "running", accumulated_steps, messages, pending_confirmations, conversation_id=conversation_id)
+
+    elif existing_run and existing_run.get("status") == "paused":
+        return
+
     else:
-        # New run initialization
         conv_context = ""
         if conversation_id and pool:
             try:
@@ -608,128 +239,120 @@ async def run_agent(
                 logger.debug(f"Could not load conversation context: {e}")
 
         user_content = f"{goal}{conv_context}" if conv_context else goal
-        messages = cast(List[Dict[str, Any]], [
-            {"role": "system", "content": _build_agent_system_prompt(
-                [t["function"]["name"] for t in agent_tools if "function" in t]
-            )},
+        system_content = _build_agent_system_prompt(
+            [t["function"]["name"] for t in agent_tools if "function" in t],
+            abstain_first=abstain_first,
+        )
+        messages = [
+            {"role": "system", "content": system_content},
             {"role": "user", "content": user_content},
-        ])
+        ]
         if pool:
             await save_agent_run(pool, run_id, goal, "running", accumulated_steps, messages, pending_confirmations, conversation_id=conversation_id)
 
-    # --- ReAct Loop ---
     for iteration in range(max_steps):
         step_start = time.perf_counter()
-        step_num += 1
+
+        filtered_tools = agent_tools
+        if abstain_first and not search_web_unlocked:
+            filtered_tools = [t for t in agent_tools if t.get("function", {}).get("name") != "search_web"]
+
+        tool_choice_param: Any = forced_tool_choice if forced_tool_choice is not None else ("auto" if filtered_tools else "none")
+        forced_tool_choice = None
 
         try:
-            is_mocked = (
-                hasattr(client, "mock_calls")
-                or hasattr(getattr(client, "chat", None), "mock_calls")
-                or hasattr(getattr(getattr(client, "chat", None), "completions", None), "mock_calls")
-                or hasattr(getattr(getattr(getattr(client, "chat", None), "completions", None), "create", None), "mock_calls")
+            reasoning_model = str(getattr(settings, "REASONING_MODEL", getattr(settings, "SKILL_MODEL", "nvidia/nemotron-3-super-120b-a12b")))
+            completions: Any = client.chat.completions
+            response = await completions.create(
+                model=reasoning_model,
+                messages=cast(Any, messages),
+                tools=filtered_tools or None,
+                tool_choice=tool_choice_param,
+                temperature=0.2,
+                max_tokens=1024,
+                stream=False,
             )
-            if not is_mocked and settings.NEBIUS_API_KEY.startswith("your_nebius_"):
-                # Simulation fallback for demo / unconfigured Nebius environments
-                if iteration == 0 and not action:
-                    if "add" in goal.lower():
-                        tool_call = type("ToolCall", (), {
-                            "id": f"call_{uuid.uuid4().hex[:8]}",
-                            "function": type("Func", (), {
-                                "name": "add_task",
-                                "arguments": json.dumps({"title": "Review RISC-V Pipeline Hazards", "domain": "coursework", "priority": "high"})
-                            })()
-                        })()
-                        msg = type("Msg", (), {
-                            "content": "Analyzing task backlog across domains to create the new coursework task...",
-                            "tool_calls": [tool_call]
-                        })()
-                        choice = type("Choice", (), {"message": msg})()
-                    elif "reschedule" in goal.lower() or "plan" in goal.lower():
-                        tool_call = type("ToolCall", (), {
-                            "id": f"call_{uuid.uuid4().hex[:8]}",
-                            "function": type("Func", (), {
-                                "name": "update_task_status",
-                                "arguments": json.dumps({"task_id": "1", "new_status": "in_progress"})
-                            })()
-                        })()
-                        msg = type("Msg", (), {
-                            "content": "Scanning active task schedules to resolve deadline conflicts...",
-                            "tool_calls": [tool_call]
-                        })()
-                        choice = type("Choice", (), {"message": msg})()
-                    else:
-                        tool_call = type("ToolCall", (), {
-                            "id": f"call_{uuid.uuid4().hex[:8]}",
-                            "function": type("Func", (), {
-                                "name": "query_tasks",
-                                "arguments": json.dumps({"domain": "coursework"})
-                            })()
-                        })()
-                        msg = type("Msg", (), {
-                            "content": "Querying active tasks to build the schedule...",
-                            "tool_calls": [tool_call]
-                        })()
-                        choice = type("Choice", (), {"message": msg})()
-                elif action == "reject" or any("declined" in str(m.get("content", "")).lower() for m in messages):
-                    msg = type("Msg", (), {
-                        "content": "Self-critique pass (round 1/2): User declined the proposed modification. Re-planned alternative schedule preserving all existing deadlines without modifying that task.",
-                        "tool_calls": []
-                    })()
-                    choice = type("Choice", (), {"message": msg})()
-                else:
-                    msg = type("Msg", (), {
-                        "content": "Self-critique pass (round 1/2): Verified all task dependencies and deadline constraints. Schedule is optimal.",
-                        "tool_calls": []
-                    })()
-                    choice = type("Choice", (), {"message": msg})()
-                p_tok = 200
-                c_tok = 100
-                record_usage(settings.SKILL_MODEL, 200, 100)
-            else:
-                current_tool_choice = forced_tool_choice if forced_tool_choice is not None else "auto"
-                forced_tool_choice = None
 
-                completions: Any = client.chat.completions
-                response = await completions.create(
-                    model=str(settings.SKILL_MODEL),
-                    messages=cast(Any, messages),
-                    tools=cast(Any, agent_tools),
-                    tool_choice=current_tool_choice,
-                    max_tokens=512,
-                    temperature=0.4,
+            if response is None:
+                step_num += 1
+                mock_step = AgentStep(
+                    type="done",
+                    content="Mock mode: API key not configured.",
+                    step_number=step_num,
+                    elapsed_ms=int((time.perf_counter() - step_start) * 1000),
+                    run_id=run_id,
+                    model_tier="Mock",
+                    step_cost_usd=0.0,
                 )
+                yield mock_step
+                accumulated_steps.append(mock_step)
+                break
 
-                # Record usage
-                usage = getattr(response, "usage", None)
-                p_tok = usage.prompt_tokens if usage else 200
-                c_tok = usage.completion_tokens if usage else 100
-                record_usage(settings.SKILL_MODEL, p_tok, c_tok)
-
-                choice = response.choices[0]
-
-            step_cost = compute_step_cost(settings.SKILL_MODEL, p_tok, c_tok)
+            choice = response.choices[0]
+            usage = getattr(response, "usage", None)
+            p_tok = usage.prompt_tokens if usage else 200
+            c_tok = usage.completion_tokens if usage else 80
+            record_usage(reasoning_model, p_tok, c_tok)
+            step_cost = compute_step_cost(reasoning_model, p_tok, c_tok)
             total_run_cost_usd += step_cost
             elapsed = int((time.perf_counter() - step_start) * 1000)
 
-            # --- Tool call branch ---
+            # Check if model chose a tool call
             if choice.message.tool_calls:
                 tc = choice.message.tool_calls[0]
-                tc_id = str(tc["id"]) if isinstance(tc, dict) and "id" in tc else str(getattr(tc, "id", f"call_{uuid.uuid4().hex[:8]}"))
-                if isinstance(tc, dict):
-                    func_info = tc.get("function", {})
-                    func_name = str(func_info.get("name", "")) if isinstance(func_info, dict) else ""
-                    raw_args = str(func_info.get("arguments", "{}")) if isinstance(func_info, dict) else "{}"
-                else:
-                    func_name = str(getattr(getattr(tc, "function", None), "name", ""))
-                    raw_args = str(getattr(getattr(tc, "function", None), "arguments", "{}") or "{}")
+                tc_id = tc.id
+                func_name = tc.function.name
+                raw_args = tc.function.arguments
+
+                if abstain_first and not search_web_unlocked and func_name == "search_web":
+                    func_name = "query_tasks"
+                    raw_args = json.dumps({"query": goal[:100]})
+
+                if (
+                    func_name not in ("search_web", "ingest_url", "verify_deadline")
+                    and not web_escalation_used
+                    and iteration >= max_steps - 2
+                ):
+                    try:
+                        from backend.services.tavily import tavily_available
+                        tavily_ok = tavily_available()
+                    except Exception:
+                        tavily_ok = False
+                    if tavily_ok:
+                        web_escalation_used = True
+                        search_web_unlocked = True
+                        forced_tool_choice = {"type": "function", "function": {"name": "search_web"}}
+                        step_num += 1
+                        escalate_step = AgentStep(
+                            type="escalate",
+                            content="Approaching step limit without an answer from stored memory. Escalating to live web search.",
+                            step_number=step_num,
+                            elapsed_ms=int((time.perf_counter() - step_start) * 1000),
+                            run_id=run_id,
+                            model_tier="Tavily Web Intelligence",
+                            step_cost_usd=0.0,
+                            metadata={"reason": "step_limit_fallback", "provider": "tavily"},
+                        )
+                        yield escalate_step
+                        accumulated_steps.append(escalate_step)
+
+                        messages.append({"role": "assistant", "content": "[ABSTAIN] Memory does not contain the required information."})
+                        messages.append({
+                            "role": "user",
+                            "content": (
+                                "Stored memory does not cover this question. Please call the 'search_web' tool "
+                                "now to retrieve current information from the live web to answer the goal."
+                            ),
+                        })
+                        continue
+                    else:
+                        is_abstained = True
 
                 try:
                     tool_args = json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args)
                 except Exception:
                     tool_args = {}
 
-                # Emit THINK step if there's reasoning text too
                 if choice.message.content:
                     think_step = AgentStep(
                         type="think",
@@ -744,7 +367,6 @@ async def run_agent(
                     accumulated_steps.append(think_step)
                     step_num += 1
 
-                # Emit TOOL_CALL step
                 tc_step = AgentStep(
                     type="tool_call",
                     content=f"Calling {func_name}",
@@ -763,7 +385,6 @@ async def run_agent(
                 if func_name in MUTATING_TOOLS:
                     action_key = (func_name, json.dumps(tool_args, sort_keys=True))
                     if action_key not in confirmed_set:
-                        # Gating halts execution: emit confirm_request and PAUSE
                         step_num += 1
                         confirm_step = AgentStep(
                             type="confirm_request",
@@ -778,7 +399,13 @@ async def run_agent(
                         )
                         yield confirm_step
                         accumulated_steps.append(confirm_step)
-                        pending_confirmations.append({"tool": func_name, "args": tool_args})
+                        act_id = None
+                        if pool:
+                            from backend.agent_pending import register_pending_action
+                            act_id = await register_pending_action(
+                                pool, run_id, user_id or "default_user", func_name, tool_args, confirm_timeout_seconds
+                            )
+                        pending_confirmations.append({"action_id": act_id, "tool": func_name, "args": tool_args})
 
                         asst_payload: Dict[str, Any] = {
                             "role": "assistant",
@@ -789,7 +416,6 @@ async def run_agent(
                         }
                         cast(List[Any], messages).append(asst_payload)
 
-                        # Persist paused run state
                         if pool:
                             await save_agent_run(
                                 pool, run_id, goal, "paused",
@@ -803,11 +429,11 @@ async def run_agent(
                             _PENDING_CONFIRMATION_EVENTS[run_id] = (evt, outcome)
 
                             try:
-                                await asyncio.wait_for(evt.wait(), timeout=confirm_timeout_seconds)
-                                res_action = outcome.get("action", "reject")
-                                res_feedback = outcome.get("feedback", "")
+                                from backend.agent_pending import wait_for_pending_action
+                                res_action, res_feedback = await wait_for_pending_action(
+                                    pool, run_id, evt, outcome, timeout_seconds=confirm_timeout_seconds
+                                )
                             except asyncio.TimeoutError:
-                                # Confirmation timed out: auto-save partial run as draft
                                 if pool:
                                     await save_agent_run(
                                         pool, run_id, goal, "expired",
@@ -835,7 +461,6 @@ async def run_agent(
                                 _PENDING_CONFIRMATION_EVENTS.pop(run_id, None)
 
                             if res_action == "reject":
-                                # Reject path: feed decline back and re-plan
                                 active_replan_diff = {
                                     "declined_action": {"tool": func_name, "args": tool_args},
                                     "feedback": res_feedback or f"do not execute {func_name}",
@@ -863,106 +488,59 @@ async def run_agent(
                                 pending_confirmations.clear()
                                 if pool:
                                     await save_agent_run(pool, run_id, goal, "running", accumulated_steps, messages, pending_confirmations, conversation_id=conversation_id)
-                                continue  # Continue loop for re-planning!
+                                continue
                             else:
                                 confirmed_set.add(action_key)
-                                # Proceed to execute approved tool below
                         else:
-                            # Non-waiting mode: pause here and exit generator without mutating data
                             return
 
-                # Execute tool (either read-only or pre-confirmed mutating)
-                tool_result = ""
-                if func_name in SKILL_REGISTRY:
-                    try:
-                        # Capture pre-mutation state for audit log & undo if mutating
-                        prev_state = None
-                        affected_id = None
-                        if pool and func_name in MUTATING_TOOLS:
-                            if func_name in ("edit_task", "update_task_status", "delete_task"):
-                                tid = tool_args.get("task_id")
-                                if tid:
-                                    async with pool.acquire() as conn:
-                                        row = await conn.fetchrow("SELECT * FROM tasks WHERE id = $1", int(tid))
-                                        if row:
-                                            prev_state = dict(row)
-                                            for k, v in prev_state.items():
-                                                if hasattr(v, "isoformat"):
-                                                    prev_state[k] = v.isoformat()
-                                            affected_id = int(tid)
-
-                        result = await SKILL_REGISTRY[func_name](tool_args, pool)
-                        tool_result = result.get("response", str(result.get("data", "")))
-                        tools_used.append(func_name)
-
-                        # Capture post-mutation state and record audit log
-                        if pool and func_name in MUTATING_TOOLS:
-                            new_st = None
-                            if func_name == "add_task":
-                                tdata = result.get("data", {})
-                                if isinstance(tdata, dict) and "id" in tdata:
-                                    affected_id = tdata["id"]
-                                    new_st = dict(tdata)
-                            elif func_name in ("edit_task", "update_task_status"):
-                                tdata = result.get("data", {})
-                                if isinstance(tdata, dict) and "id" in tdata:
-                                    new_st = dict(tdata)
-
-                            await record_audit_log(
-                                pool=pool,
-                                tool=func_name,
-                                args=tool_args,
-                                run_id=run_id,
-                                affected_table="memory_chunks" if func_name in ("ingest_url", "log_code_snippet", "log_code_context") else "tasks",
-                                affected_id=affected_id,
-                                previous_state=prev_state,
-                                new_state=new_st,
-                                approved_by="user",
-                            )
-
-                    except Exception as e:
-                        tool_result = f"Tool execution error: {e}"
-                        logger.warning(f"Agent tool {func_name} failed: {e}")
-                else:
-                    tool_result = f"Tool '{func_name}' is not available."
-
-                # Emit OBSERVE step
-                step_num += 1
-                obs_tier = "Tavily Web Intelligence" if func_name in ("search_web", "ingest_url", "verify_deadline") else "Neon Postgres Engine"
-                obs_step = AgentStep(
-                    type="observe",
-                    content=tool_result,
-                    tool_name=func_name,
-                    step_number=step_num,
-                    elapsed_ms=int((time.perf_counter() - step_start) * 1000),
+                # Execute tool using step executor
+                obs_step, tool_result, search_web_unlocked, a_pay, t_pay = await execute_agent_tool_step(
+                    func_name=func_name,
+                    tool_args=tool_args,
+                    raw_args=raw_args,
+                    tc_id=tc_id,
+                    step_num=step_num,
+                    step_start=step_start,
                     run_id=run_id,
-                    model_tier=obs_tier,
-                    step_cost_usd=0.0,
+                    pool=pool,
+                    user_id=user_id,
+                    goal=goal,
+                    abstain_first=abstain_first,
+                    search_web_unlocked=search_web_unlocked,
+                    tools_used=tools_used,
                 )
+                step_num += 1
+                obs_step.step_number = step_num
                 yield obs_step
                 accumulated_steps.append(obs_step)
-
-                # Add to agent context for next iteration
-                asst_payload = {
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": [
-                        {"id": tc_id, "type": "function", "function": {"name": func_name, "arguments": raw_args}}
-                    ]
-                }
-                cast(List[Any], messages).append(asst_payload)
-                tool_payload: Dict[str, Any] = {
-                    "role": "tool",
-                    "tool_call_id": tc_id,
-                    "content": tool_result,
-                }
-                cast(List[Any], messages).append(tool_payload)
+                cast(List[Any], messages).append(a_pay)
+                cast(List[Any], messages).append(t_pay)
 
             # --- Text response branch (agent wants to synthesize) ---
             else:
                 reply = choice.message.content or ""
 
-                # Self-critique pass: check proposed plan against gathered data (capped at 2 rounds)
+                should_escalate, is_abstained_signal, escalate_step, step_num = evaluate_abstention_and_web_escalation(
+                    reply=reply,
+                    tools_used=tools_used,
+                    abstain_first=abstain_first,
+                    web_escalation_used=web_escalation_used,
+                    run_id=run_id,
+                    step_start=step_start,
+                    step_num=step_num,
+                    messages=messages,
+                )
+                if is_abstained_signal:
+                    is_abstained = True
+                if should_escalate and escalate_step:
+                    web_escalation_used = True
+                    search_web_unlocked = True
+                    forced_tool_choice = {"type": "function", "function": {"name": "search_web"}}
+                    yield escalate_step
+                    accumulated_steps.append(escalate_step)
+                    continue
+
                 if enable_critic and reply:
                     step_num += 1
                     critic_step = await _run_critic_pass(
@@ -980,47 +558,10 @@ async def run_agent(
                                 "role": "user",
                                 "content": f"A reviewer checked your plan and found issues:\n\n{critic_step.content}\n\nPlease revise your plan to address these concerns.",
                             })
-                            continue  # Loop again for revision
+                            continue
                         else:
                             logger.info("Critique-revise cycle cap (2 rounds) reached; proceeding to synthesis.")
 
-                # Epistemic Humility: Detect abstention and escalate to Tavily search if enabled
-                if any(k in reply.upper() for k in ("[ABSTAIN]", "[ABSTENTION]", "ABSTAIN:")) or reply.strip().startswith("[ABSTAIN]"):
-                    try:
-                        from backend.services.tavily import tavily_available
-                        tavily_ok = tavily_available()
-                    except Exception:
-                        tavily_ok = False
-                    if tavily_ok and not web_escalation_used:
-                        web_escalation_used = True
-                        forced_tool_choice = {"type": "function", "function": {"name": "search_web"}}
-                        step_num += 1
-                        escalate_step = AgentStep(
-                            type="escalate",
-                            content="Memory doesn't cover this. Escalating to live web search rather than guessing.",
-                            step_number=step_num,
-                            elapsed_ms=int((time.perf_counter() - step_start) * 1000),
-                            run_id=run_id,
-                            model_tier="Tavily Web Intelligence",
-                            step_cost_usd=0.0,
-                            metadata={"reason": "abstention", "provider": "tavily"},
-                        )
-                        yield escalate_step
-                        accumulated_steps.append(escalate_step)
-
-                        messages.append({"role": "assistant", "content": reply})
-                        messages.append({
-                            "role": "user",
-                            "content": (
-                                "Stored memory does not cover this question. Please call the 'search_web' tool "
-                                "now to retrieve current information from the live web to answer the goal."
-                            ),
-                        })
-                        continue
-                    else:
-                        is_abstained = True
-
-                # Determine provenance
                 if is_abstained:
                     provenance = "abstained"
                 elif any(t in tools_used for t in ("search_web", "ingest_url", "verify_deadline")) or web_escalation_used:
@@ -1028,11 +569,10 @@ async def run_agent(
                 else:
                     provenance = "memory"
 
-                # Emit SYNTHESIZE step
                 step_num += 1
                 synth_step = AgentStep(
                     type="synthesize",
-                    content=reply,
+                    content=_clean_synthesis_text(reply),
                     step_number=step_num,
                     elapsed_ms=int((time.perf_counter() - step_start) * 1000),
                     run_id=run_id,
@@ -1048,7 +588,7 @@ async def run_agent(
                 )
                 yield synth_step
                 accumulated_steps.append(synth_step)
-                break  # Done
+                break
 
         except Exception as e:
             logger.error(f"Agent loop error at step {step_num}: {e}")
@@ -1066,45 +606,19 @@ async def run_agent(
             accumulated_steps.append(err_step)
             break
 
-    # If we hit max_steps without synthesizing, force a synthesis
     else:
         step_num += 1
         try:
-            messages.append({
-                "role": "user",
-                "content": "You've gathered enough information. Please produce your final comprehensive answer now.",
-            })
-            completions = client.chat.completions
-            response = await completions.create(
-                model=str(settings.SYNTHESIS_MODEL),
-                messages=cast(Any, messages),
-                max_tokens=1024,
-                temperature=0.5,
-            )
-            usage = getattr(response, "usage", None)
-            p_tok = usage.prompt_tokens if usage else 500
-            c_tok = usage.completion_tokens if usage else 200
-            record_usage(settings.SYNTHESIS_MODEL, p_tok, c_tok)
-            forced_cost = compute_step_cost(settings.SYNTHESIS_MODEL, p_tok, c_tok)
-            total_run_cost_usd += forced_cost
-
-            final_text = response.choices[0].message.content or "Agent completed analysis."
-            if any(k in final_text.upper() for k in ("[ABSTAIN]", "[ABSTENTION]", "ABSTAIN:")) or final_text.strip().startswith("[ABSTAIN]"):
-                is_abstained = True
-
-            forced_synth = AgentStep(
-                type="synthesize",
-                content=final_text,
-                step_number=step_num,
-                elapsed_ms=int((time.perf_counter() - start_time) * 1000),
+            forced_synth, forced_cost, is_abstained = await force_final_synthesis(
+                client=client,
+                settings=settings,
+                messages=messages,
+                step_num=step_num,
+                start_time=start_time,
                 run_id=run_id,
-                model_tier="Nemotron-3 Ultra (550B)",
-                step_cost_usd=forced_cost,
-                metadata={
-                    "abstained": is_abstained,
-                    "replan_diff": active_replan_diff,
-                },
+                active_replan_diff=active_replan_diff,
             )
+            total_run_cost_usd += forced_cost
             yield forced_synth
             accumulated_steps.append(forced_synth)
         except Exception as e:
@@ -1120,51 +634,19 @@ async def run_agent(
             yield err_step
             accumulated_steps.append(err_step)
 
-    # Emit DONE step with comprehensive report card and save completed run state
-    total_elapsed = int((time.perf_counter() - start_time) * 1000)
-    tier_breakdown = {
-        "Nemotron-3 Super (120B)": sum(s.step_cost_usd or 0.0 for s in accumulated_steps if s.model_tier and "Super" in s.model_tier),
-        "Nemotron-3 Ultra (550B)": sum(s.step_cost_usd or 0.0 for s in accumulated_steps if s.model_tier and "Ultra" in s.model_tier),
-        "Neon Postgres Engine": 0.0,
-    }
-    if is_abstained:
-        run_source = "abstained"
-    elif any(t in tools_used for t in ("search_web", "ingest_url", "verify_deadline")) or web_escalation_used:
-        run_source = "web"
-    else:
-        run_source = "memory"
-
-    report_card = {
-        "run_id": run_id,
-        "status": "completed",
-        "total_steps": step_num,
-        "elapsed_ms": total_elapsed,
-        "tools_used": list(set(tools_used)),
-        "critique_rounds": critique_rounds,
-        "total_cost_usd": round(total_run_cost_usd, 6),
-        "abstained": is_abstained,
-        "source": run_source,
-        "sources": [run_source],
-        "web_escalation_used": web_escalation_used,
-        "replan_diff": active_replan_diff,
-        "tier_breakdown": {k: round(v, 6) for k, v in tier_breakdown.items()},
-    }
-    done_payload = {
-        "run_id": run_id,
-        "total_steps": step_num,
-        "tools_used": list(set(tools_used)),
-        "pending_confirmations": pending_confirmations,
-        "report_card": report_card,
-    }
-    done_step = AgentStep(
-        type="done",
-        content=json.dumps(done_payload),
-        step_number=step_num + 1,
-        elapsed_ms=total_elapsed,
+    done_step = build_done_step(
         run_id=run_id,
-        model_tier="Compass System",
-        step_cost_usd=0.0,
-        metadata={"report_card": report_card, "abstained": is_abstained, "replan_diff": active_replan_diff},
+        step_num=step_num,
+        start_time=start_time,
+        tools_used=tools_used,
+        critique_rounds=critique_rounds,
+        total_run_cost_usd=total_run_cost_usd,
+        is_abstained=is_abstained,
+        web_escalation_used=web_escalation_used,
+        abstain_first=abstain_first,
+        active_replan_diff=active_replan_diff,
+        pending_confirmations=pending_confirmations,
+        accumulated_steps=accumulated_steps,
     )
     yield done_step
     accumulated_steps.append(done_step)
@@ -1173,179 +655,22 @@ async def run_agent(
         await save_agent_run(pool, run_id, goal, "completed", accumulated_steps, messages, pending_confirmations, conversation_id=conversation_id)
 
 
-async def _run_critic_pass(
-    client: AsyncOpenAI,
-    settings: Any,
-    proposed_plan: str,
-    context_messages: List[Dict[str, Any]],
-    step_num: int,
-    run_id: Optional[str] = None,
-) -> AgentStep:
-    """
-    Self-critique pass: a separate reasoning call that checks the proposed
-    plan against real constraints from the gathered data.
-
-    This is NOT multi-agent — it's a single-model self-critique pass
-    using a different system prompt over the same accumulated context.
-    """
-    start = time.perf_counter()
-
-    # Extract tool observations from context for the critic
-    observations = []
-    for msg in context_messages:
-        if msg.get("role") == "tool":
-            observations.append(msg.get("content", ""))
-
-    critic_prompt = (
-        "You are a critical reviewer for a planning assistant. "
-        "A planner proposed the following plan based on real data:\n\n"
-        f"PROPOSED PLAN:\n{proposed_plan}\n\n"
-        "DATA THE PLANNER USED:\n" + "\n---\n".join(observations[-6:]) + "\n\n"
-        "Check the plan against these criteria:\n"
-        "1. Are all mentioned tasks/deadlines consistent with the actual data?\n"
-        "2. Are any tasks missed or double-counted?\n"
-        "3. Is the priority ordering sensible given actual due dates?\n"
-        "4. Are the time estimates realistic?\n\n"
-        "If the plan is solid, respond with 'APPROVED: ' followed by a brief note.\n"
-        "If it has issues, list them concretely and suggest fixes."
-    )
-
-    critic_cost = 0.0
-    try:
-        is_mocked = (
-            hasattr(client, "mock_calls")
-            or hasattr(getattr(client, "chat", None), "mock_calls")
-            or hasattr(getattr(getattr(client, "chat", None), "completions", None), "mock_calls")
-            or hasattr(getattr(getattr(getattr(client, "chat", None), "completions", None), "create", None), "mock_calls")
-        )
-        if not is_mocked and settings.NEBIUS_API_KEY.startswith("your_nebius_"):
-            critic_text = "APPROVED: Plan looks sound, constraints verified against task database."
-            record_usage(settings.SKILL_MODEL, 300, 50)
-            critic_cost = compute_step_cost(settings.SKILL_MODEL, 300, 50)
-        else:
-            completions: Any = client.chat.completions
-            resp = await completions.create(
-                model=str(settings.SKILL_MODEL),
-                messages=cast(Any, [
-                    {"role": "system", "content": "You are a critical reviewer. Be thorough but concise."},
-                    {"role": "user", "content": critic_prompt},
-                ]),
-                max_tokens=384,
-                temperature=0.3,
-            )
-            usage = getattr(resp, "usage", None)
-            p_tok = usage.prompt_tokens if usage else 300
-            c_tok = usage.completion_tokens if usage else 100
-            record_usage(settings.SKILL_MODEL, p_tok, c_tok)
-            critic_cost = compute_step_cost(settings.SKILL_MODEL, p_tok, c_tok)
-
-            critic_text = resp.choices[0].message.content or "APPROVED: Plan looks reasonable."
-    except Exception as e:
-        logger.warning(f"Critic pass failed: {e}")
-        critic_text = "APPROVED: (Critic pass skipped due to error)"
-        critic_cost = 0.0
-
-    return AgentStep(
-        type="critic",
-        content=critic_text,
-        step_number=step_num,
-        elapsed_ms=int((time.perf_counter() - start) * 1000),
-        run_id=run_id,
-        model_tier="Nemotron-3 Super (120B)",
-        step_cost_usd=critic_cost,
-    )
-
-
-async def execute_confirmed_actions(
-    confirmed_actions: List[Dict[str, Any]],
-    pool: Any,
-    run_id: Optional[str] = None,
-    approved_by: str = "user",
-) -> List[Dict[str, Any]]:
-    """Execute previously confirmed state-mutating actions.
-
-    Called after the user approves pending actions from an agent run.
-    Records every executed mutation into agent_audit_log.
-    Returns results for each executed action.
-    """
-    from backend.skills import SKILL_REGISTRY
-    results = []
-    for action in confirmed_actions:
-        tool_name = action.get("tool", "")
-        tool_args = action.get("args", {})
-
-        if tool_name not in SKILL_REGISTRY:
-            results.append({"tool": tool_name, "status": "error", "message": f"Unknown tool: {tool_name}"})
-            continue
-
-        previous_state = None
-        affected_id = None
-        affected_table = "memory_chunks" if tool_name in ("ingest_url", "log_code_snippet", "log_code_context") else "tasks"
-
-        # Capture pre-mutation state for audit log & undo
-        try:
-            if pool and tool_name in ("edit_task", "update_task_status", "delete_task"):
-                task_id = tool_args.get("task_id")
-                if task_id:
-                    async with pool.acquire() as conn:
-                        row = await conn.fetchrow("SELECT * FROM tasks WHERE id = $1", int(task_id))
-                        if row:
-                            previous_state = dict(row)
-                            for k, v in previous_state.items():
-                                if hasattr(v, "isoformat"):
-                                    previous_state[k] = v.isoformat()
-                            affected_id = int(task_id)
-            elif pool and tool_name == "commit_schedule":
-                assignments = tool_args.get("assignments") or []
-                affected_ids = [a.get("task_id") for a in assignments if a.get("task_id")]
-                if affected_ids:
-                    async with pool.acquire() as conn:
-                        rows = await conn.fetch("SELECT id, scheduled_start, scheduled_end FROM tasks WHERE id = ANY($1::int[])", affected_ids)
-                        previous_state = {
-                            "tasks": [
-                                {
-                                    "task_id": r["id"],
-                                    "scheduled_start": r["scheduled_start"].isoformat() if r["scheduled_start"] else None,
-                                    "scheduled_end": r["scheduled_end"].isoformat() if r["scheduled_end"] else None,
-                                }
-                                for r in rows
-                            ]
-                        }
-                    affected_id = affected_ids[0] if affected_ids else None
-        except Exception as e:
-            logger.warning(f"Failed to capture pre-mutation state: {e}")
-
-        try:
-            result = await SKILL_REGISTRY[tool_name](tool_args, pool)
-            new_state = None
-
-            # Capture post-mutation state
-            if tool_name == "add_task":
-                task_data = result.get("data", {})
-                if isinstance(task_data, dict) and "id" in task_data:
-                    affected_id = task_data["id"]
-                    new_state = dict(task_data)
-            elif tool_name in ("edit_task", "update_task_status"):
-                task_data = result.get("data", {})
-                if isinstance(task_data, dict) and "id" in task_data:
-                    new_state = dict(task_data)
-
-            # Record into audit log
-            if pool and tool_name in MUTATING_TOOLS:
-                await record_audit_log(
-                    pool=pool,
-                    tool=tool_name,
-                    args=tool_args,
-                    run_id=run_id,
-                    affected_table=affected_table,
-                    affected_id=affected_id,
-                    previous_state=previous_state,
-                    new_state=new_state,
-                    approved_by=approved_by,
-                )
-
-            results.append({"tool": tool_name, "status": "success", "result": result})
-        except Exception as e:
-            results.append({"tool": tool_name, "status": "error", "message": str(e)})
-
-    return results
+__all__ = [
+    "AgentStep",
+    "run_agent",
+    "save_agent_run",
+    "get_agent_run",
+    "record_audit_log",
+    "count_active_agent_runs",
+    "get_critique_stats",
+    "undo_last_agent_action",
+    "execute_confirmed_actions",
+    "_run_critic_pass",
+    "MUTATING_TOOLS",
+    "READ_ONLY_TOOLS",
+    "_PENDING_CONFIRMATION_EVENTS",
+    "_clean_synthesis_text",
+    "_extract_content_from_response",
+    "_build_agent_system_prompt",
+    "MAX_CONCURRENT_AGENT_RUNS",
+]

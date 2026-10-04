@@ -3,7 +3,7 @@
 > **Evaluation Document for Hackathon Reviewers & Technical Judges**  
 > *Audit Completed: September 2026*  
 > *Repository: [Ratnesh-101/compass](https://github.com/Ratnesh-101/compass)*  
-> *Live Frontend: [compass-kappa-nine.vercel.app](https://compass-kappa-nine.vercel.app)*  
+> *Live Frontend: [compass-farmlytics.vercel.app](https://compass-farmlytics.vercel.app)*  
 > *Live Backend: [compass-backend-qryu.onrender.com](https://compass-backend-qryu.onrender.com)*  
 
 ---
@@ -18,7 +18,7 @@ Compass is a personal cognitive assistant that integrates task management, code 
 
 ### Actual Request Flow
 When a user submits a message via the web UI or CLI:
-1. **Client Dispatch**: The request reaches the Vercel edge deployment (`https://compass-kappa-nine.vercel.app/api/chat`).
+1. **Client Dispatch**: The request reaches the Vercel edge deployment (`https://compass-farmlytics.vercel.app/api/chat`).
 2. **Reverse Proxy Rewrite**: `vercel.json` transparently proxies the request to the FastAPI container hosted on Render (`https://compass-backend-qryu.onrender.com/api/chat`), bypassing cross-origin browser blockers.
 3. **Intent Routing (`nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`)**: The backend formats recent conversation history from PostgreSQL and calls Nemotron-3 Nano on Nebius Token Factory via OpenAI function calling. Nano inspects the registered tools (`TOOL_DEFINITIONS`) and returns a tool call (e.g. `add_task`, `query_code_context`, `summarize_day`) or a general response.
 4. **Skill Execution & Memory Retrieval**:
@@ -188,9 +188,9 @@ CREATE INDEX idx_usage_log_created_at ON usage_log(created_at);
 ```
 
 ### Real Hosting Split
-- **Frontend**: Hosted on **Vercel** (`https://compass-kappa-nine.vercel.app`). Built with Vite + Vanilla CSS/TS. Configured with a same-origin reverse proxy in `vercel.json` routing `/api/:path*`, `/chat`, and `/health` directly to Render.
+- **Frontend**: Hosted on **Vercel** (`https://compass-farmlytics.vercel.app`). Built with Vite + Vanilla CSS/TS. Configured with a same-origin reverse proxy in `vercel.json` routing `/api/:path*`, `/chat`, and `/health` directly to Render.
 - **Backend**: Hosted on **Render** (`https://compass-backend-qryu.onrender.com`). Docker container running FastAPI with Python 3.12, Uvicorn, and asyncpg.
-- **Database**: Hosted on **Neon Serverless PostgreSQL** (Frankfurt `eu-central-1`). PostgreSQL 16 with `pgvector` extension and connection pooling (`ep-sweet-fire-b2y9w95z-pooler`).
+- **Database**: Hosted on **Neon Serverless PostgreSQL** (Frankfurt `eu-central-1`). PostgreSQL 16 with `pgvector` extension and connection pooling (`neon-pooler`).
 - **Inference & Embeddings**: Hosted on **Nebius Token Factory** (`https://api.tokenfactory.nebius.com/v1/`). Handles 100% of LLM inference (Nano, Super, Ultra) and vector embeddings (Qwen3).
 - **Nebius Serverless Compute**: Deployment manifests for Nebius Serverless Compute are provided in [`deploy/serverless_endpoint.yaml`](./deploy/serverless_endpoint.yaml) and [`deploy/serverless_job.yaml`](./deploy/serverless_job.yaml). For hackathon evaluation and zero-downtime reliability, the demo is currently served on Render (backend) and Vercel (frontend), with 100% of LLM inference powered by Nebius Token Factory.
 
@@ -205,7 +205,7 @@ Crucially, there is an important architectural distinction between **mutation-ad
 
 | Feature / Subsystem | Status | Exact Evidence |
 | :--- | :---: | :--- |
-| **End-to-End Chat Flow** | **PASS** | `POST https://compass-kappa-nine.vercel.app/api/chat` with `{"message": "what tasks are due?"}` returns `200 OK` in 1.2s: `{"response":"Found 23 task(s): 'Review RISC-V pipeline hazards lecture'..."}`. |
+| **End-to-End Chat Flow** | **PASS** | `POST https://compass-farmlytics.vercel.app/api/chat` with `{"message": "what tasks are due?"}` returns `200 OK` in 1.2s: `{"response":"Found 23 task(s): 'Review RISC-V pipeline hazards lecture'..."}`. |
 | **Skill: `add_task`** | **PASS** | `pytest tests/test_multi_turn.py`: Turn 1 successfully parsed parameters and inserted a new task into the `tasks` table. |
 | **Skill: `query_tasks`** | **PASS** | Triggered via `compass ask "what tasks are due?"`: retrieved 23 open records from Neon database. |
 | **Skill: `query_code_context`** | **PASS** | Triggered via `compass ask "Search our code context for how Matryoshka embeddings and pgvector are configured in Compass"`: retrieved vector chunks and returned synthesis. |
@@ -223,7 +223,7 @@ Crucially, there is an important architectural distinction between **mutation-ad
 | **Web Frontend Functionality** | **PASS** | **Live Server-Side Filtering**: Timeline filter buttons trigger genuine network requests to `/api/tasks?domain=<domain>` rather than client-side array slicing.<br/>**Live Header Counter**: Header token/cost badge dynamically polls `/api/usage/summary` and updates after every chat message turn. |
 | **CLI Verification & Streaming** | **PASS** | `compass ask`, `compass chat`, `compass log`, `compass tasks`, `compass admin usage`, `compass add`, and `compass status` all executed and verified against live backend. Both `ask` and `chat` stream tokens live via SSE (`/api/chat/stream`). |
 | **API Rate Limiting** | **PASS** | In-memory sliding-window limiter (30 requests/minute per client IP) on `/api/chat` and `/api/chat/stream`, returning `HTTP 429 Too Many Requests` with `Retry-After` header when exceeded. |
-| **Public Deployment** | **PASS** | Vercel (`https://compass-kappa-nine.vercel.app`) and Render (`https://compass-backend-qryu.onrender.com`) both returning `{"status":"ok","database":"connected","db_connected":true}`. |
+| **Public Deployment** | **PASS** | Vercel (`https://compass-farmlytics.vercel.app`) and Render (`https://compass-backend-qryu.onrender.com`) both returning `{"status":"ok","database":"connected","db_connected":true}`. |
 
 ---
 
@@ -234,17 +234,20 @@ Crucially, there is an important architectural distinction between **mutation-ad
 2. **Header Token Counter**: Wired to live data via `/api/usage/summary` public endpoint, refreshed automatically after each chat message.
 3. **Per-IP Rate Limiting**: Added sliding-window limiter (30 req/min) returning HTTP 429 on burst abuse.
 4. **CLI SSE Streaming**: Updated `compass ask` and `compass chat` to consume `/api/chat/stream` for live token-by-token streaming.
-5. **Web Intelligence via Tavily**: Implemented `search_web`, `ingest_url`, and `verify_deadline` via `AsyncTavilyClient`, bounded epistemic abstention escalation (`[ABSTAIN]`), and isolated credit accounting in `tavily_usage_log`.
+5. **Web Intelligence via Tavily**: Implemented `search_web`, `ingest_url`, and `verify_deadline` via `AsyncTavilyClient`, bounded epistemic abstention escalation (`[ABSTAIN]`), explicit year provenance detection, and isolated credit accounting in `tavily_usage_log`.
 6. **Usage Telemetry Evidence**: Created `scripts/seed_usage.py` populating multi-dozen calls per model (Nano: 42, Super: 20, Ultra: 18, Qwen3: 26; 106 total) in `usage_log`.
+7. **Round 6 Multi-Worker Session Sync & Revocation**: Added 10-second TTL in-memory session cache backed by Postgres `sessions` table with continuous background synchronization loop (`start_session_sync_loop`) guaranteeing cross-worker revocation propagation in ≤10s.
+8. **Signed Edge HMAC Client IP**: Upgraded Vercel Edge middleware and backend security service to sign and verify `${client_ip}|${timestamp}|${signature}` payload, preventing IP spoofing across proxy layers.
+9. **Startup Model Catalog Verification**: Added startup validation (`check_models_catalog`) querying Nebius `/models` to fail loudly if any required model is missing from the catalog (eliminating silent production fallbacks).
+10. **Comprehensive Negative Cross-Identity Test Suite**: Implemented programmatic AST-based route verification (`scripts/verify_route_table.py`) enforcing 1-to-1 negative boundary test coverage across all 48 user-data routes via `@pytest.mark.route`.
 
 ### Honest Current State of Compute
 1. **Nebius Serverless Compute**: Manifests in `deploy/serverless_endpoint.yaml` and `deploy/serverless_job.yaml` are complete and syntactically verified. For hackathon evaluation and zero-downtime reliability, backend compute is served on Render and frontend on Vercel, with 100% of LLM inference, routing, and embeddings running on Nebius Token Factory.
 2. **Nightly Memory Consolidation Job**: Runs via local CLI (`compass admin consolidate`), on-demand API (`POST /api/agent/trigger-nightly`), and cron runner; ready for Nebius Serverless Job.
 
 ### Deliberately Deferred Future Work (Out of Scope for Hackathon Pass)
-1. **Multi-Tenant User Authentication**: Full JWT/OAuth auth flow (currently uses shared bearer token for single-user copilot).
-2. **External Calendar & LMS Integrations**: Google Calendar sync and Canvas LMS ingestion.
-3. **GitHub Webhook Ingestion**: Automatic real-time commit/PR memory ingestion via webhooks.
+1. **External LMS Integrations**: Deep Canvas LMS assignment auto-ingestion.
+2. **GitHub Webhook Ingestion**: Automatic real-time commit/PR memory ingestion via webhooks.
 
 ---
 
@@ -256,7 +259,7 @@ Queried directly from `compass admin usage` and `/api/usage/summary` after multi
 - **Total Tokens Consumed**: 36,688 tokens (24,130 input / 12,558 output)
 - **Total Observed Spend**: **$0.0199 USD** (~2 cents)
 - **Funded Credit Remaining**: **>$28.98 USD** out of $29.00 allocated credit.
-- **Automated Test Suite**: 72 passed, 0 skipped, 0 failed (100% passing) across unit, integration, agent loop, and multi-domain suites.
+- **Automated Test Suite**: 352 passed, 0 failed (100% passing: 304 baseline + 48 negative cross-identity boundary tests) across unit, integration, agent loop, specialist confirm gate, multi-worker session sync, and cross-identity isolation suites.
 
 ### Cost Tiering Alignment
 In Compass's token accounting engine (`backend/services/usage.py`), per-token costs are computed using effective blended rates per 1,000,000 tokens (USD):
@@ -277,7 +280,7 @@ In Compass's token accounting engine (`backend/services/usage.py`), per-token co
 | **Public GitHub Repository & OSI License** | **PASS** | Public repo at [Ratnesh-101/compass](https://github.com/Ratnesh-101/compass) with standard [MIT License](https://github.com/Ratnesh-101/compass/blob/main/LICENSE). |
 | **Tested Setup Instructions in README** | **PASS** | Full step-by-step setup in `README.md` verified against a fresh virtualenv, including exact environment variables and test commands. |
 | **Documented Nemotron & Nebius Architecture** | **PASS** | Dedicated Architecture section in `README.md` detailing three-tier Nemotron model routing, Matryoshka truncation, and Nebius Token Factory endpoints. |
-| **Working Demo URL** | **PASS** | Live public URL: [compass-kappa-nine.vercel.app](https://compass-kappa-nine.vercel.app). Accessible worldwide with zero login walls or client IP restrictions. |
+| **Working Demo URL** | **PASS** | Live public URL: [compass-farmlytics.vercel.app](https://compass-farmlytics.vercel.app). Accessible worldwide with zero login walls or client IP restrictions. |
 | **Demo Video** | **NOT YET** | Video demo is not yet recorded; planned following this final verification audit. |
 
 ---

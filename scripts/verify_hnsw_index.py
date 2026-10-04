@@ -11,7 +11,7 @@ from backend.config import get_settings
 
 async def verify_hnsw():
     dsn = get_settings().DATABASE_URL
-    print(f"Connecting to Neon to check HNSW index...")
+    print("Connecting to Neon to check HNSW index...")
     conn = await asyncpg.connect(dsn)
     try:
         # Check pgvector extension

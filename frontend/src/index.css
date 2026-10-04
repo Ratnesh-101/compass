@@ -5,35 +5,57 @@
 }
 
 :root {
-  --bg-app: #0b0f17;
-  --bg-card: #111827;
-  --bg-card-soft: #161f30;
-  --bg-sidebar: #0d131f;
-  --bg-sidebar-active: #1e293b;
+  --bg-app: #faf8f3;
+  --bg-card: #ffffff;
+  --bg-card-soft: #fdfaf3;
+  --bg-sidebar: #16152a;
+  --bg-sidebar-active: #232145;
 
-  --text-primary: #f8fafc;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
+  --text-primary: #1f1b2e;
+  --text-secondary: #6b6478;
+  --text-muted: #9993a3;
 
   --brand: #f5a623;
   --brand-dark: #d9890a;
 
   --hackathon: #f5a623;
-  --coursework: #3b82f6;
-  --code: #10b981;
-  --general: #64748b;
+  --coursework: #6c5ce7;
+  --code: #14b884;
+  --general: #7a92a3;
 
-  --border: #1e293b;
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --border: #ece7dc;
+  --shadow-sm: 0 1px 2px rgba(31, 27, 46, 0.04);
+  --shadow-md: 0 4px 16px rgba(31, 27, 46, 0.06);
+
+  --text-on-dark: #f4f1fb;
+  --text-on-dark-muted: #8e8aa6;
+
+  --hackathon-bg: #fef3dd;
+  --hackathon-text: #9a6208;
+  --coursework-bg: #ece9fd;
+  --coursework-text: #4b3fc9;
+  --code-bg: #e1f8ee;
+  --code-text: #0d8a63;
+  --general-bg: #eef2f4;
+  --general-text: #52717f;
+  --danger-bg: #fdeaea;
+
+  --border-soft: #f1ede3;
+  --shadow-lg: 0 12px 32px rgba(31, 27, 46, 0.10);
+
+  /* Compatibility aliases for legacy/subagent component tokens */
+  --text-main: #1f1b2e;
+  --bg-input: #ffffff;
+  --bg-modal: #ffffff;
 }
 
-body {
+html, body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   background-color: var(--bg-app);
   color: var(--text-primary);
   min-height: 100vh;
   overflow-x: hidden;
+  overscroll-behavior: none;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -202,12 +224,12 @@ code, pre, .mono {
 
 .nav-item:hover {
   background: rgba(255, 255, 255, 0.05);
-  color: var(--text-primary);
+  color: var(--text-on-dark);
 }
 
 .nav-item.active {
   background: var(--bg-sidebar-active);
-  color: var(--text-primary);
+  color: var(--text-on-dark);   
 }
 
 .nav-item .nav-icon {
@@ -233,12 +255,13 @@ code, pre, .mono {
 
 .card-hackathon:hover, .card-coursework:hover, .card-code:hover, .card-general:hover {
   transform: translateY(-1px);
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-md);
 }
 
 .timeline-container {
   padding: 28px 32px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   flex: 1;
   min-width: 0;
   width: 100%;

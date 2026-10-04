@@ -129,24 +129,26 @@ async def test_ingest_url_stores_768_dim_chunks(monkeypatch):
         "project": "Tavily Integration",
     }, pool=pool)
 
-    assert res["success"] is True
-    assert res["data"]["chunks_stored"] >= 1
-    assert res["data"]["domain"] == "code"
+    try:
+        assert res["success"] is True
+        assert res["data"]["chunks_stored"] >= 1
+        assert res["data"]["domain"] == "code"
 
-    # Verify directly from database
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT content, source, tags, vector_dims(embedding) as dims "
-            "FROM memory_chunks WHERE source = $1 ORDER BY id DESC LIMIT 1",
-            "https://example.com/test-article",
-        )
-        assert row is not None
-        assert row["source"] == "https://example.com/test-article"
-        assert row["dims"] == 768
-        assert "tavily-extract" in row["tags"]
-
-        # Cleanup
-        await conn.execute("DELETE FROM memory_chunks WHERE source = $1", "https://example.com/test-article")
+        # Verify directly from database
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT content, source, tags, vector_dims(embedding) as dims "
+                "FROM memory_chunks WHERE source = $1 ORDER BY id DESC LIMIT 1",
+                "https://example.com/test-article",
+            )
+            assert row is not None
+            assert row["source"] == "https://example.com/test-article"
+            assert row["dims"] == 768
+            assert "tavily-extract" in row["tags"]
+    finally:
+        # Guaranteed Cleanup
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM memory_chunks WHERE source = $1", "https://example.com/test-article")
 
 
 # ---------------------------------------------------------------------------
@@ -169,35 +171,40 @@ async def test_ingest_url_undo_removes_chunks(monkeypatch):
     pool = await get_pool()
     test_url = "https://example.com/undo-test-url"
 
-    # 1. Store test chunk
-    mock_extract = {
-        "results": [{"url": test_url, "raw_content": "Temporary content to be undone."}]
-    }
-    monkeypatch.setattr(tavily_service, "extract", AsyncMock(return_value=mock_extract))
-    monkeypatch.setattr(tavily_service, "tavily_available", lambda: True)
-    monkeypatch.setattr("backend.memory.vector.get_embedding", AsyncMock(return_value=[0.05] * 768))
+    try:
+        # 1. Store test chunk
+        mock_extract = {
+            "results": [{"url": test_url, "raw_content": "Temporary content to be undone."}]
+        }
+        monkeypatch.setattr(tavily_service, "extract", AsyncMock(return_value=mock_extract))
+        monkeypatch.setattr(tavily_service, "tavily_available", lambda: True)
+        monkeypatch.setattr("backend.memory.vector.get_embedding", AsyncMock(return_value=[0.05] * 768))
 
-    res = await handle_ingest_url({"url": test_url, "domain": "general"}, pool=pool)
-    assert res["success"] is True
+        res = await handle_ingest_url({"url": test_url, "domain": "general"}, pool=pool)
+        assert res["success"] is True
 
-    # 2. Record simulated audit log entry for this action
-    from backend.agent import record_audit_log
-    audit_id = await record_audit_log(
-        pool=pool,
-        tool="ingest_url",
-        args={"url": test_url, "domain": "general"},
-        affected_table="memory_chunks",
-    )
+        # 2. Record simulated audit log entry for this action
+        from backend.agent import record_audit_log
+        audit_id = await record_audit_log(
+            pool=pool,
+            tool="ingest_url",
+            args={"url": test_url, "domain": "general"},
+            affected_table="memory_chunks",
+        )
 
-    # Verify chunk exists
-    async with pool.acquire() as conn:
-        count_before = await conn.fetchval("SELECT count(*) FROM memory_chunks WHERE source = $1", test_url)
-        assert count_before >= 1
+        # Verify chunk exists
+        async with pool.acquire() as conn:
+            count_before = await conn.fetchval("SELECT count(*) FROM memory_chunks WHERE source = $1", test_url)
+            assert count_before >= 1
 
-    # 3. Call undo
-    undo_res = await undo_last_agent_action(pool, audit_log_id=audit_id)
-    assert undo_res["status"] == "ok"
-    assert "Deleted ingested memory chunks" in undo_res["reverted"]["action"]
+        # 3. Call undo
+        undo_res = await undo_last_agent_action(pool, audit_log_id=audit_id)
+        assert undo_res["status"] == "ok"
+        assert "Deleted ingested memory chunks" in undo_res["reverted"]["action"]
+    finally:
+        # Guaranteed cleanup fallback
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM memory_chunks WHERE source = $1", test_url)
 
     # 4. Verify chunk was deleted
     async with pool.acquire() as conn:
@@ -371,3 +378,12 @@ async def test_verify_deadline_reports_drift(monkeypatch):
     assert "2026-09-17" in res["summary"]
     assert "September 24, 2026" in res["data"]["results"][0]["content"]
     assert "<untrusted_web_content>" in res["fenced_context"]
+    assert "drift_analysis" in res["data"]
+    drift = res["data"]["drift_analysis"]
+    assert drift["has_drift"] is True
+    assert drift["drift_verdict"] == "SCHEDULE_DRIFT"
+    assert drift["live_date"] == "2026-09-24"
+    assert drift["drift_days"] == 7
+    assert "Schedule Drift Detected" in res["summary"]
+
+

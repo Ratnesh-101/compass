@@ -190,10 +190,10 @@ def main():
         is_top_1 = top_1_id == expected_id
         is_in_top_3 = any(item["id"] == expected_id for _, item in top_3)
 
-        print(f"\n──────────────────────────────────────────────────────────────────────")
+        print("\n──────────────────────────────────────────────────────────────────────")
         print(f"QUERY {q_idx}: \"{query_text}\"")
         print(f"Expected Match: #{expected_id} [{expected_domain}]")
-        print(f"Top-3 Nearest Neighbors (Cosine Distance):")
+        print("Top-3 Nearest Neighbors (Cosine Distance):")
 
         for rank, (dist, item) in enumerate(top_3, 1):
             match_marker = "🎯" if item["id"] == expected_id else "  "
@@ -203,7 +203,7 @@ def main():
         if is_top_1:
             print(f"  ✅ Result: EXACT TOP-1 MATCH (Distance = {top_3[0][0]:.4f})")
         elif is_in_top_3:
-            print(f"  ⚠️ Result: Found in Top-3, but not Top-1")
+            print("  ⚠️ Result: Found in Top-3, but not Top-1")
         else:
             print(f"  ❌ Result: FAILED — expected item #{expected_id} was not in Top-3")
             all_passed = False

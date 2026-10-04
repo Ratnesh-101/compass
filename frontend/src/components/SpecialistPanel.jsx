@@ -6,9 +6,9 @@ const SPECIALISTS = [
     key: 'coursework',
     name: 'Coursework Agent',
     icon: '📚',
-    color: '#60a5fa',
-    bg: 'rgba(96, 165, 250, 0.1)',
-    border: 'rgba(96, 165, 250, 0.3)',
+    color: '#6c5ce7',
+    bg: 'var(--coursework-bg)',
+    border: 'rgba(108, 92, 231, 0.3)',
     desc: 'Academic assignments, lab notes, exams & CS 61C context',
     placeholder: 'Ask about upcoming assignments, CS 61C RISC-V labs, or coursework notes...',
   },
@@ -16,9 +16,9 @@ const SPECIALISTS = [
     key: 'research',
     name: 'Research Agent',
     icon: '🔎',
-    color: '#fbbf24',
-    bg: 'rgba(251, 191, 36, 0.1)',
-    border: 'rgba(251, 191, 36, 0.3)',
+    color: '#d9890a',
+    bg: 'var(--hackathon-bg)',
+    border: 'rgba(245, 166, 35, 0.3)',
     desc: 'Real-time web search, hackathon rules & deadline verification',
     placeholder: 'Verify hackathon submission rules, research APIs, or check external deadlines...',
   },
@@ -26,9 +26,9 @@ const SPECIALISTS = [
     key: 'calendar',
     name: 'Calendar Agent',
     icon: '📅',
-    color: '#34d399',
-    bg: 'rgba(52, 211, 153, 0.1)',
-    border: 'rgba(52, 211, 153, 0.3)',
+    color: '#0d8a63',
+    bg: 'var(--code-bg)',
+    border: 'rgba(20, 184, 132, 0.3)',
     desc: 'Google Calendar sync, free time windows & conflict detection',
     placeholder: 'Find free time slots tomorrow, check calendar conflicts, or schedule focus time...',
   },
@@ -36,9 +36,9 @@ const SPECIALISTS = [
     key: 'memory',
     name: 'Memory Agent',
     icon: '🧠',
-    color: '#c084fc',
-    bg: 'rgba(192, 132, 252, 0.1)',
-    border: 'rgba(192, 132, 252, 0.3)',
+    color: '#6c5ce7',
+    bg: 'var(--coursework-bg)',
+    border: 'rgba(108, 92, 231, 0.3)',
     desc: 'Vector memory (768-dim Matryoshka), code context & task backlog',
     placeholder: 'Search long-term memory, code embeddings, or task history...',
   },
@@ -90,16 +90,16 @@ export default function SpecialistPanel({ onTaskMutated }) {
   const activeSpecObj = SPECIALISTS.find(s => s.key === selectedSpecialist)
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: 'calc(100vh - 60px)', overflowY: 'auto', padding: '24px', background: '#0b0f17' }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto', padding: '24px', background: 'var(--bg-app)' }}>
       {/* Header Banner */}
-      <div style={{ marginBottom: '24px', background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.6), rgba(15, 23, 42, 0.8))', border: '1px solid #1e293b', borderRadius: '12px', padding: '20px' }}>
+      <div style={{ marginBottom: '24px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px', padding: '20px', boxShadow: 'var(--shadow-sm)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
           <span style={{ fontSize: '28px' }}>🧠</span>
           <div>
-            <h2 style={{ margin: 0, fontSize: '18px', fontWeight: '800', color: '#f8fafc', letterSpacing: '-0.3px' }}>
+            <h2 style={{ margin: 0, fontSize: '18px', fontWeight: '800', color: 'var(--text-primary)', letterSpacing: '-0.3px' }}>
               Specialist Multi-Agent System
             </h2>
-            <p style={{ margin: '4px 0 0', fontSize: '12.5px', color: '#94a3b8' }}>
+            <p style={{ margin: '4px 0 0', fontSize: '12.5px', color: 'var(--text-secondary)' }}>
               Direct access to Compass's domain-specialized AI team. Pure read-only analysis & structured findings.
             </p>
           </div>
@@ -114,17 +114,18 @@ export default function SpecialistPanel({ onTaskMutated }) {
             padding: '14px',
             borderRadius: '10px',
             cursor: 'pointer',
-            background: selectedSpecialist === null ? 'rgba(99, 102, 241, 0.15)' : '#111827',
-            border: `1px solid ${selectedSpecialist === null ? '#6366f1' : '#1f2937'}`,
+            background: selectedSpecialist === null ? 'var(--coursework-bg)' : 'var(--bg-card)',
+            border: `1px solid ${selectedSpecialist === null ? 'var(--coursework)' : 'var(--border)'}`,
+            boxShadow: 'var(--shadow-sm)',
             transition: 'all 0.15s ease',
           }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
             <span style={{ fontSize: '16px' }}>🧭</span>
-            <span style={{ fontWeight: '700', fontSize: '13px', color: selectedSpecialist === null ? '#818cf8' : '#e2e8f0' }}>
+            <span style={{ fontWeight: '700', fontSize: '13px', color: selectedSpecialist === null ? 'var(--coursework-text)' : 'var(--text-primary)' }}>
               Auto Dispatcher
             </span>
           </div>
-          <p style={{ margin: 0, fontSize: '11px', color: '#94a3b8', lineHeight: '1.4' }}>
+          <p style={{ margin: 0, fontSize: '11.5px', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
             Automatically selects the best specialist based on your prompt.
           </p>
         </div>
@@ -139,17 +140,18 @@ export default function SpecialistPanel({ onTaskMutated }) {
                 padding: '14px',
                 borderRadius: '10px',
                 cursor: 'pointer',
-                background: isSelected ? spec.bg : '#111827',
-                border: `1px solid ${isSelected ? spec.color : '#1f2937'}`,
+                background: isSelected ? spec.bg : 'var(--bg-card)',
+                border: `1px solid ${isSelected ? spec.color : 'var(--border)'}`,
+                boxShadow: 'var(--shadow-sm)',
                 transition: 'all 0.15s ease',
               }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
                 <span style={{ fontSize: '16px' }}>{spec.icon}</span>
-                <span style={{ fontWeight: '700', fontSize: '13px', color: isSelected ? spec.color : '#e2e8f0' }}>
+                <span style={{ fontWeight: '700', fontSize: '13px', color: isSelected ? spec.color : 'var(--text-primary)' }}>
                   {spec.name}
                 </span>
               </div>
-              <p style={{ margin: 0, fontSize: '11px', color: '#94a3b8', lineHeight: '1.4' }}>
+              <p style={{ margin: 0, fontSize: '11.5px', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
                 {spec.desc}
               </p>
             </div>
@@ -158,8 +160,8 @@ export default function SpecialistPanel({ onTaskMutated }) {
       </div>
 
       {/* Query Form */}
-      <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: '12px', padding: '16px', marginBottom: '20px' }}>
-        <div style={{ fontSize: '12px', fontWeight: '700', color: activeSpecObj ? activeSpecObj.color : '#818cf8', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+      <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px', padding: '16px', marginBottom: '20px', boxShadow: 'var(--shadow-sm)' }}>
+        <div style={{ fontSize: '12px', fontWeight: '700', color: activeSpecObj ? activeSpecObj.color : 'var(--brand-dark)', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
           <span>{activeSpecObj ? activeSpecObj.icon : '⚡'}</span>
           <span>Targeting: {activeSpecObj ? activeSpecObj.name : 'Auto-routed Specialist Dispatcher'}</span>
         </div>
@@ -175,9 +177,9 @@ export default function SpecialistPanel({ onTaskMutated }) {
               flex: 1,
               padding: '12px 16px',
               borderRadius: '8px',
-              background: '#0b0f17',
-              border: '1px solid #374151',
-              color: '#fff',
+              background: 'var(--bg-app)',
+              border: '1px solid var(--border)',
+              color: 'var(--text-primary)',
               fontSize: '13.5px',
               outline: 'none',
             }}
@@ -188,9 +190,9 @@ export default function SpecialistPanel({ onTaskMutated }) {
             style={{
               padding: '0 20px',
               borderRadius: '8px',
-              background: activeSpecObj ? activeSpecObj.color : '#6366f1',
+              background: activeSpecObj ? activeSpecObj.color : 'var(--brand)',
               border: 'none',
-              color: '#0b0f17',
+              color: '#ffffff',
               fontWeight: '700',
               fontSize: '13px',
               cursor: (isSubmitting || !goal.trim()) ? 'not-allowed' : 'pointer',
@@ -203,38 +205,38 @@ export default function SpecialistPanel({ onTaskMutated }) {
 
       {/* Error state */}
       {error && (
-        <div style={{ padding: '14px 16px', borderRadius: '8px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid #ef4444', color: '#f87171', fontSize: '13px', marginBottom: '20px' }}>
+        <div style={{ padding: '14px 16px', borderRadius: '8px', background: 'var(--danger-bg)', border: '1px solid #ef4444', color: '#b91c1c', fontSize: '13px', marginBottom: '20px' }}>
           ⚠️ {error}
         </div>
       )}
 
       {/* Results View */}
       {result && (
-        <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: '12px', padding: '20px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', borderBottom: '1px solid #1f2937', paddingBottom: '12px' }}>
+        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px', padding: '20px', boxShadow: 'var(--shadow-md)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', borderBottom: '1px solid var(--border)', paddingBottom: '12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span style={{ fontSize: '18px' }}>
                 {SPECIALISTS.find(s => s.key === result.capability)?.icon || '⚡'}
               </span>
-              <span style={{ fontSize: '14px', fontWeight: '700', color: SPECIALISTS.find(s => s.key === result.capability)?.color || '#60a5fa', textTransform: 'capitalize' }}>
+              <span style={{ fontSize: '14px', fontWeight: '700', color: SPECIALISTS.find(s => s.key === result.capability)?.color || 'var(--text-primary)', textTransform: 'capitalize' }}>
                 {result.capability} Specialist Analysis
               </span>
             </div>
-            <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '10px', background: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', border: '1px solid rgba(34, 197, 94, 0.3)', fontFamily: 'JetBrains Mono, monospace' }}>
+            <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '10px', background: 'var(--code-bg)', color: 'var(--code-text)', border: '1px solid rgba(20, 184, 132, 0.3)', fontFamily: 'JetBrains Mono, monospace', fontWeight: '700' }}>
               {result.status.toUpperCase()}
             </span>
           </div>
 
           {/* Summary Box */}
-          <div style={{ fontSize: '13.5px', color: '#f1f5f9', lineHeight: '1.6', whiteSpace: 'pre-wrap', marginBottom: '16px' }}>
+          <div style={{ fontSize: '13.5px', color: 'var(--text-primary)', lineHeight: '1.6', whiteSpace: 'pre-wrap', marginBottom: '16px' }}>
             {result.summary}
           </div>
 
           {/* Proposed Actions Notice (if any) */}
           {result.proposed_actions && result.proposed_actions.length > 0 && (
-            <div style={{ background: 'rgba(251, 191, 36, 0.1)', border: '1px solid rgba(251, 191, 36, 0.3)', borderRadius: '8px', padding: '12px 14px', fontSize: '12px', color: '#fbbf24' }}>
-              <strong style={{ color: '#fbbf24' }}>📋 Proposed Mutating Actions:</strong>
-              <div style={{ marginTop: '4px', fontSize: '11px', color: '#e2e8f0', fontFamily: 'JetBrains Mono, monospace' }}>
+            <div style={{ background: 'var(--hackathon-bg)', border: '1px solid rgba(245, 166, 35, 0.4)', borderRadius: '8px', padding: '12px 14px', fontSize: '12px', color: 'var(--hackathon-text)' }}>
+              <strong style={{ color: 'var(--hackathon-text)' }}>📋 Proposed Mutating Actions:</strong>
+              <div style={{ marginTop: '4px', fontSize: '11px', color: 'var(--text-primary)', fontFamily: 'JetBrains Mono, monospace' }}>
                 Specialist returned {result.proposed_actions.length} proposed action(s). These are passed back to Northstar for confirmation gate approval before execution.
               </div>
             </div>

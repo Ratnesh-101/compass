@@ -1,25 +1,25 @@
 # Compass — 3-Minute Demo Video Script
 
-* **Target Duration**: 3:00 minutes
-* **Audience**: Hackathon judges, software engineers, dev community
-* **Goal**: Prove real-time multi-domain capture, sub-400ms routing with Nemotron Nano, lossless 768-dim vector memory, and cross-domain synthesis.
+> **Target Duration**: 2 minutes 44 seconds (Devpost Hard Ceiling: ≤ 3:00 | Safety Buffer: 16s)  
+> **Presenter**: Calm, confident, technical pace (85 – 110 wpm).  
+> **Setup**: Split screen or browser with [https://compass-farmlytics.vercel.app](https://compass-farmlytics.vercel.app) and terminal with `compass status`.
 
----
-
-## Shot-by-Shot Sequence
-
-| Timestamp | Surface | Action & Screen Content | Key Narrative & Audio Script |
-| :--- | :--- | :--- | :--- |
-| **0:00 – 0:45** | **Terminal (CLI)** | 1. Run `compass status` showing active multi-domain counts (Hackathon 🚀, Coursework 📚, Code 💻).<br/>2. Run `compass log "Configured Matryoshka 768-dim embeddings with Nebius Token Factory" --domain code --project "Compass" --tags nebius,vector`. | *"As developers, researchers, and students, we constantly suffer from context switching fatigue. We jump from hackathons to university coursework to scattered repos, and standard LLMs forget everything between sessions. Meet Compass: your persistent personal AI assistant, powered by Nebius Token Factory and NVIDIA Nemotron models. One shared brain, accessible from your terminal or browser."* |
-| **0:45 – 1:45** | **Browser (UI)** | 1. Open `http://localhost:5173`.<br/>2. Inspect sidebar metrics updating dynamically.<br/>3. Navigate to **Timeline** view showing the newly logged vector chunk from the CLI alongside countdown badges. | *"Everything you log in the terminal is instantly synchronized to your web dashboard. Notice the visual domain isolation: amber for high-stakes hackathons, blue for coursework deadlines, and green for code context. In the background, Nebius Token Factory embedded our snippet using Qwen3-Embedding at 768 dimensions, stored natively in Neon Serverless PostgreSQL with an HNSW index."* |
-| **1:45 – 2:30** | **Browser (Chat)** | 1. Open Chat panel.<br/>2. Type: *"What are my top deliverables across coursework and hackathon before Friday?"*<br/>3. Watch response stream with parsed tasks, domain badges, and next steps. | *"When you ask a complex question, NVIDIA Nemotron-3 Nano handles routing in under 400ms using native OpenAI function calling. It dispatches to our specialized skills, pulls from structured memory and pgvector, and escalates to Nemotron-3 Ultra to synthesize a cohesive daily roadmap across all domains."* |
-| **2:30 – 3:00** | **Terminal / UI** | 1. Switch to terminal: run `compass admin usage`.<br/>2. Show model breakdown table with total cost under a few cents.<br/>3. Display Mermaid architecture diagram from `README.md`. | *"Finally, full transparency: running `compass admin usage` breaks down our actual Token Factory cost across Nano, Super, and Ultra. By leveraging Matryoshka 768-dimension truncation, we stay within pgvector's HNSW index ceiling while getting 100% Top-1 recall. Compass gives you persistent cognitive memory without the latency or cost overhead."* |
+| Timestamp | Video Screen Action | Spoken Narration (Script) |
+| :--- | :--- | :--- |
+| **0:00 – 0:25** | Open Compass dashboard showing the clean interface with unified timeline, domain badges, and Northstar AI workspace. | *"Hey everyone! Meet Compass, an autonomous AI copilot built for intense academic and hackathon workloads. Most assistants guess when they don't know, hallucinate arithmetic, and mutate databases unchecked. Compass was built with three strict safety principles: epistemic web grounding, guaranteed human confirmation gates, and deterministic capacity realism."* |
+| **0:25 – 1:05** | **Pillar 1: Epistemic Abstention → Tavily Web Escalation (`search_web`).** In chat, ask: `What is the official submission deadline date for the Nebius x NVIDIA AI Hackathon on Devpost?` Show the agent loop emitting `[ABSTAIN]`, an `escalate` step appearing, and live Tavily citations rendered inside XML untrusted fences. | *"Watch what happens when memory doesn't have the answer: instead of hallucinating a fake date, Compass explicitly abstains with an `[ABSTAIN]` token. The agent loop intercepts this and forces an escalation to live Tavily Web Intelligence. Notice the fenced untrusted content: live web data is quarantined so indirect prompt injections cannot compromise the tool-calling loop."* |
+| **1:05 – 1:45** | **Pillar 2: Confirm-Gate Reject → Re-Plan.** In Agent Planner, enter goal: `Reschedule my coursework tasks to finish the hackathon demo today`. The agent suggests modifying task deadlines and pauses with amber `CONFIRMATION REQUIRED`. Click **Reject** and provide feedback: `Do not postpone my CS 61C lab`. Watch the agent re-plan an alternative schedule live without touching the database. | *"Now let's see state safety. Compass separates read tools from mutating tools. When the agent attempts to modify deadlines, it halts. Zero database writes occur before human authorization. When I reject the modification and ask it to preserve my CS 61C lab, the agent feeds refusal context into Nemotron-3 Super, re-planning alternative hours while keeping our database 100% pristine."* |
+| **1:45 – 2:20** | **Pillar 3: The Realist Disagreement & Arithmetic Safety.** In chat or CLI, run triage / feasibility: `Can I finish all my hackathon and coursework deliverables in 1 hour per day this week?` Compass returns **Infeasible (Demand: 31.4h, Effective Capacity: 4.0h [nominal 5.0h with 80% safety margin])** with a triage breakdown: 2 kept (4.0h), 8 deferred, and 2 dropped. | *"Finally, meet The Realist. Most AI planners enthusiastically promise you can do 30 hours of work in an afternoon. Compass never trusts math to the LLM: our feasibility engine computes hard deterministic capacity arithmetic. When demand (31.4 hours) exceeds effective capacity (4.0 hours), it disagrees with the user, flags burnout risk, and proposes an actionable triage plan: keeping 2 critical coursework items (4.0h), deferring 8 time-sensitive deliverables, and dropping 2 non-critical items."* |
+| **2:20 – 2:38** | **Pillar 4: Tavily Web Memory & Staleness Detection (`ingest_url` & `verify_deadline`).**<br/>1. In chat, submit: `Ingest contest schedule: https://nebiusglobalaihackathon.devpost.com/details/dates`. Watch the agent pause with `CONFIRMATION REQUIRED` showing the URL. Click **Confirm** — Compass extracts, sanitizes, and embeds the page into pgvector memory. In a follow-up query, ask: `What did we ingest from Devpost dates?` — Compass retrieves the stored chunk.<br/>2. In a clearly-labeled demo scenario, run `verify_deadline` against a task with a deliberately stale date (`2026-10-15`). Compass queries Tavily live, finds the actual `Oct 30, 2026` deadline, and flags the 15-day drift with source citations. | *"With memory-first design, ingesting the Devpost schedule pauses at a human confirm-gate before vector embedding. And when deadlines shift, `verify_deadline` queries live Tavily search as ground truth, catching real 15-day drift instantly."* |
+| **2:38 – 2:45** | Click 3 dots on chat sidebar, click **Share**, show instant public link (`/?share=...`), then conclude. | *"Compass: Hierarchical Nemotron routing, three Tavily web intelligence tools, strict human confirm-gates, and uncompromising capacity realism. Built on Nebius, Neon, and Tavily. Thank you!"* |
 
 ---
 
 ## Recording Checklist
-- [ ] Backend running: `uvicorn backend.main:app --port 8000` (or `docker compose up`)
-- [ ] Frontend running: `npm run dev` in `frontend/` (accessible at `http://localhost:5173`)
-- [ ] Database seeded: `python scripts/seed_data.py`
-- [ ] Terminal window formatted cleanly with high-contrast font
+- [ ] Production web app open: `https://compass-farmlytics.vercel.app` (or local dev)
+- [ ] Clean browser window at 1080p, 100% zoom
+- [ ] Devpost dates URL ready: `https://nebiusglobalaihackathon.devpost.com/details/dates`
+- [ ] Demo stale task seeded: "Nebius Submission Draft" with date `2026-10-15`
 - [ ] Audio normalized with clear microphone input
+- [ ] Total recorded runtime verified ≤ 3:00 (target ~2:50)
+

@@ -1,29 +1,55 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import Sidebar from './components/Sidebar'
 import Timeline from './components/Timeline'
-import ChatPanel from './components/ChatPanel'
-import AgentPanel from './components/AgentPanel'
 import CalendarView from './components/CalendarView'
 import NorthstarPanel from './components/NorthstarPanel'
-import SpecialistPanel from './components/SpecialistPanel'
+import AuthModal from './components/AuthModal'
+import MigrationModal from './components/MigrationModal'
+import SharedChatView from './components/SharedChatView'
+import NebiusTelemetryModal from './components/NebiusTelemetryModal'
 import {
   checkBackendHealth,
   fetchTasks,
   sendQueryToAssistant,
   fetchUsageSummary,
   fetchCurrentUser,
-  getGoogleOAuthConnectUrl,
-  disconnectCalendar,
+  seedJudgeDemoPersona,
+  initGuestSession,
+  fetchMigrationStatus,
 } from './api/client'
 
 export default function App() {
   const [tasks, setTasks] = useState([])
-  const [activeTab, setActiveTab] = useState('northstar')
+  const [activeTab, setActiveTab] = useState('timeline')
   const [selectedDomain, setSelectedDomain] = useState('all')
   const [backendStatus, setBackendStatus] = useState('Connecting...')
   const [conversationId, setConversationId] = useState(null)
   const [usageStats, setUsageStats] = useState(null)
-  const [currentUser, setCurrentUser] = useState(null)
+  const [showTelemetryModal, setShowTelemetryModal] = useState(false)
+  const [showMigrationModal, setShowMigrationModal] = useState(false)
+  const [guestConversationsCount, setGuestConversationsCount] = useState(0)
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      const savedEmail = localStorage.getItem('compass_user_email') || localStorage.getItem('compass_user_id')
+      if (savedEmail && savedEmail.includes('@')) {
+        const clean = savedEmail.trim().toLowerCase()
+        return {
+          authenticated: true,
+          user_id: clean,
+          email: clean,
+          name: clean.split('@')[0].replace('.', ' ').replace(/\b\w/g, c => c.toUpperCase()),
+          calendar: { connected: false, mode: 'demo', is_simulated: true },
+        }
+      }
+    } catch {}
+    return null
+  })
+  const [showAuthModal, setShowAuthModal] = useState(false)
+
+  const [shareId, setShareId] = useState(() => {
+    const params = new URLSearchParams(window.location.search)
+    return params.get('share') || (window.location.pathname.startsWith('/share/') ? window.location.pathname.replace('/share/', '') : null)
+  })
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
@@ -31,6 +57,7 @@ export default function App() {
     }
   ])
   const [isTyping, setIsTyping] = useState(false)
+  const [pendingPrompt, setPendingPrompt] = useState(null)
 
   // Keep a ref to the latest tasks state for stable diffing without triggering interval re-creations
   const tasksRef = useRef([])
@@ -69,8 +96,68 @@ export default function App() {
     loadTasks(selectedDomain)
   }, [selectedDomain, loadTasks])
 
+  // Check URL query parameters on mount to prompt account selection or show OAuth errors
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('oauth_error') || params.get('select_account')) {
+      setShowAuthModal(true)
+    }
+  }, [])
+
+  // Auto-seed demo data on first visit so judges never see an empty workspace
+  useEffect(() => {
+    const alreadySeeded = localStorage.getItem('compass_demo_seeded')
+    if (alreadySeeded) return
+
+    let cancelled = false
+    const doSeed = async () => {
+      try {
+        await seedJudgeDemoPersona()
+        if (!cancelled) {
+          localStorage.setItem('compass_demo_seeded', '1')
+          // Refresh tasks so the timeline populates immediately
+          loadTasks(selectedDomain)
+        }
+      } catch (err) {
+        console.warn('[Compass] Auto-seed skipped:', err.message)
+      }
+    }
+
+    // Small delay to let the health check and initial task fetch settle first
+    const timer = setTimeout(doSeed, 1500)
+    return () => { cancelled = true; clearTimeout(timer) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const checkMigration = useCallback(async () => {
+    try {
+      const status = await fetchMigrationStatus()
+      if (status.has_guest_data && status.guest_conversations_count > 0) {
+        setGuestConversationsCount(status.guest_conversations_count)
+        setShowMigrationModal(true)
+      }
+    } catch (e) {
+      console.warn('Migration status check skipped:', e)
+    }
+  }, [])
+
+  const handleUserChanged = useCallback(async (newEmail) => {
+    if (newEmail) {
+      const u = await fetchCurrentUser()
+      setCurrentUser(u)
+      checkMigration()
+    } else {
+      setCurrentUser({ authenticated: false, email: '' })
+    }
+    loadTasks(selectedDomain)
+    refreshUsage()
+  }, [loadTasks, selectedDomain, refreshUsage, checkMigration])
+
   useEffect(() => {
     let isMounted = true
+
+    // Initialize anonymous guest session immediately so unauthenticated users can chat & persist context
+    initGuestSession()
 
     // Health Polling (Every 10 seconds)
     const pollHealth = async () => {
@@ -91,7 +178,10 @@ export default function App() {
     pollHealth()
     refreshUsage()
     fetchCurrentUser().then(u => {
-      if (isMounted && u) setCurrentUser(u)
+      if (isMounted && u && (u.authenticated || (u.email && u.email.includes('@')))) {
+        setCurrentUser(u)
+        checkMigration()
+      }
     })
 
     // 1. Task polling interval: 3000ms
@@ -109,12 +199,17 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const domainCounts = {
-    hackathon: tasks.filter(t => t.domain === 'hackathon').length,
-    coursework: tasks.filter(t => t.domain === 'coursework').length,
-    code: tasks.filter(t => t.domain === 'code').length,
-    general: tasks.filter(t => t.domain === 'general').length,
-  }
+  const domainCounts = tasks.reduce((acc, t) => {
+    const dom = (t.domain || 'general').toLowerCase().trim()
+    acc[dom] = (acc[dom] || 0) + 1
+    return acc
+  }, {
+    hackathon: 0,
+    coursework: 0,
+    code: 0,
+    general: 0,
+    other: 0,
+  })
 
   const handleSendMessage = async (userText) => {
     setIsTyping(true)
@@ -140,8 +235,23 @@ export default function App() {
     ? `⚡ ${usageStats.total_requests ?? 0} calls · $${(usageStats.total_estimated_cost_usd ?? 0).toFixed(5)}`
     : 'Nebius • Nemotron-3'
 
+  if (shareId) {
+    return (
+      <SharedChatView
+        shareId={shareId}
+        onGoToApp={() => {
+          const url = new URL(window.location.href)
+          url.searchParams.delete('share')
+          window.history.pushState({}, '', url.pathname + (url.search ? url.search : ''))
+          setShareId(null)
+          setActiveTab('northstar')
+        }}
+      />
+    )
+  }
+
   return (
-    <div style={{ display: 'flex', height: '100vh', width: '100vw', background: '#0b0f17', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', height: '100vh', width: '100vw', background: 'var(--bg-app)', overflow: 'hidden' }}>
       <Sidebar
         activeDomain={selectedDomain}
         onSelectDomain={setSelectedDomain}
@@ -150,159 +260,13 @@ export default function App() {
         activeTab={activeTab}
         onSelectTab={setActiveTab}
         usageBadge={usageBadge}
+        currentUser={currentUser}
+        onOpenAuth={() => setShowAuthModal(true)}
+        onOpenTelemetry={() => setShowTelemetryModal(true)}
       />
 
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#0b0f17', minWidth: 0, overflow: 'hidden' }}>
-        <header style={{ height: '60px', borderBottom: '1px solid #1e293b', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px', flexShrink: 0 }}>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button
-              id="tab-northstar"
-              onClick={() => setActiveTab('northstar')}
-              style={{
-                padding: '7px 14px',
-                borderRadius: '6px',
-                border: 'none',
-                background: activeTab === 'northstar' ? '#1e293b' : 'transparent',
-                color: activeTab === 'northstar' ? '#fff' : '#64748b',
-                cursor: 'pointer',
-                fontWeight: '500',
-                fontSize: '13px'
-              }}>
-              🧭 Northstar AI
-            </button>
-            <button
-              id="tab-specialist"
-              onClick={() => setActiveTab('specialist')}
-              style={{
-                padding: '7px 14px',
-                borderRadius: '6px',
-                border: 'none',
-                background: activeTab === 'specialist' ? '#1e293b' : 'transparent',
-                color: activeTab === 'specialist' ? '#fff' : '#64748b',
-                cursor: 'pointer',
-                fontWeight: '500',
-                fontSize: '13px'
-              }}>
-              🧠 Specialist Team
-            </button>
-            <button
-              id="tab-timeline"
-              onClick={() => setActiveTab('timeline')}
-              style={{
-                padding: '7px 14px',
-                borderRadius: '6px',
-                border: 'none',
-                background: activeTab === 'timeline' ? '#1e293b' : 'transparent',
-                color: activeTab === 'timeline' ? '#fff' : '#64748b',
-                cursor: 'pointer',
-                fontWeight: '500',
-                fontSize: '13px'
-              }}>
-              📅 Timeline Feed
-            </button>
-            <button
-              id="tab-calendar"
-              onClick={() => setActiveTab('calendar')}
-              style={{
-                padding: '7px 14px',
-                borderRadius: '6px',
-                border: 'none',
-                background: activeTab === 'calendar' ? '#1e293b' : 'transparent',
-                color: activeTab === 'calendar' ? '#fff' : '#64748b',
-                cursor: 'pointer',
-                fontWeight: '500',
-                fontSize: '13px'
-              }}>
-              🗓️ Schedule & Calendar
-            </button>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-            {/* P0.2: Live usage counter — updates after every chat message */}
-            <div id="usage-badge" className="header-model-badge" style={{ fontSize: '11px', color: '#64748b', fontFamily: 'JetBrains Mono, monospace' }}>
-              {usageBadge}
-            </div>
-
-            {/* Google User Profile / Login Pill */}
-            {currentUser && currentUser.authenticated ? (
-              <div
-                id="user-profile-badge"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  background: 'rgba(30, 41, 59, 0.8)',
-                  border: '1px solid #334155',
-                  padding: '4px 10px',
-                  borderRadius: '20px',
-                  fontSize: '12px',
-                  color: '#e2e8f0',
-                }}>
-                <span style={{
-                  width: '7px',
-                  height: '7px',
-                  borderRadius: '50%',
-                  background: '#10b981',
-                  boxShadow: '0 0 6px #10b981',
-                }} />
-                <span style={{ fontWeight: '500', color: '#f8fafc', maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {currentUser.email}
-                </span>
-                <button
-                  onClick={async () => {
-                    await disconnectCalendar()
-                    setCurrentUser({ authenticated: false, email: '' })
-                  }}
-                  title="Sign out / Disconnect"
-                  style={{
-                    background: 'transparent',
-                    border: 'none',
-                    color: '#94a3b8',
-                    cursor: 'pointer',
-                    fontSize: '11px',
-                    padding: '0 2px',
-                  }}>
-                  ✕
-                </button>
-              </div>
-            ) : (
-              <a
-                id="header-btn-google-login"
-                href={getGoogleOAuthConnectUrl()}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '5px 12px',
-                  borderRadius: '8px',
-                  background: 'rgba(59, 130, 246, 0.12)',
-                  border: '1px solid rgba(59, 130, 246, 0.35)',
-                  color: '#60a5fa',
-                  fontSize: '12px',
-                  fontWeight: '500',
-                  textDecoration: 'none',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                }}>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-                  <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                  <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05"/>
-                  <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" fill="#EA4335"/>
-                </svg>
-                Sign in with Google
-              </a>
-            )}
-          </div>
-        </header>
-
-        {activeTab === 'specialist' ? (
-          <SpecialistPanel
-            onTaskMutated={() => {
-              loadTasks(selectedDomain)
-              refreshUsage()
-            }}
-          />
-        ) : activeTab === 'timeline' ? (
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'var(--bg-app)', minWidth: 0, overflow: 'hidden' }}>
+        {activeTab === 'timeline' ? (
           <Timeline
             tasks={tasks}
             activeDomain={selectedDomain}
@@ -311,6 +275,11 @@ export default function App() {
               loadTasks(selectedDomain)
               refreshUsage()
             }}
+            onOpenNorthstar={(prompt) => {
+              setActiveTab('northstar')
+              setPendingPrompt(prompt)
+            }}
+            onOpenTelemetry={() => setShowTelemetryModal(true)}
           />
         ) : activeTab === 'calendar' ? (
           <CalendarView
@@ -320,27 +289,17 @@ export default function App() {
               loadTasks(selectedDomain)
               refreshUsage()
             }}
-          />
-        ) : activeTab === 'agent' ? (
-          <AgentPanel
-            onTaskMutated={() => {
-              loadTasks(selectedDomain)
-              refreshUsage()
-            }}
-            conversationId={conversationId}
-          />
-        ) : activeTab === 'chat' ? (
-          <ChatPanel
-            messages={messages}
-            setMessages={setMessages}
-            conversationId={conversationId}
-            setConversationId={setConversationId}
-            onSendMessage={handleSendMessage}
-            isTyping={isTyping}
-            onChatComplete={refreshUsage}
+            onOpenAuthModal={() => setShowAuthModal(true)}
           />
         ) : (
           <NorthstarPanel
+            initialSubTab={
+              activeTab === 'agent' || activeTab === 'planner'
+                ? 'planner'
+                : activeTab === 'specialist'
+                ? 'specialist'
+                : 'assistant'
+            }
             messages={messages}
             setMessages={setMessages}
             conversationId={conversationId}
@@ -348,14 +307,44 @@ export default function App() {
             onSendMessage={handleSendMessage}
             isTyping={isTyping}
             onChatComplete={refreshUsage}
+            tasks={tasks}
+            backendStatus={backendStatus}
             onTaskMutated={() => {
               loadTasks(selectedDomain)
               refreshUsage()
             }}
+            onSelectTab={setActiveTab}
+            pendingPrompt={pendingPrompt}
+            onClearPendingPrompt={() => setPendingPrompt(null)}
+            onOpenMigration={() => setShowMigrationModal(true)}
           />
         )}
       </main>
+
+      <AuthModal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        currentUser={currentUser}
+        onUserChanged={handleUserChanged}
+      />
+
+      <MigrationModal
+        isOpen={showMigrationModal}
+        onClose={() => setShowMigrationModal(false)}
+        guestConversationsCount={guestConversationsCount}
+        onMigrationComplete={() => {
+          setShowMigrationModal(false)
+          loadTasks(selectedDomain)
+          refreshUsage()
+        }}
+      />
+
+      <NebiusTelemetryModal
+        isOpen={showTelemetryModal}
+        onClose={() => setShowTelemetryModal(false)}
+        usageStats={usageStats}
+        onRefresh={refreshUsage}
+      />
     </div>
   )
-}
-
+}

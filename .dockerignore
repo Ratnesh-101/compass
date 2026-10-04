@@ -1,0 +1,51 @@
+# Compass Backend — .dockerignore
+# Prevents unnecessary files from entering the build context.
+# Build context is the repo root (set in docker-compose and CI).
+
+# Python caches
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.venv/
+*.egg-info/
+
+# Node / Frontend (not needed for backend image)
+frontend/
+node_modules/
+
+# Test files (not needed in production image)
+tests/
+scripts/
+cleanup_demo_baseline.py
+
+# Documentation and repo files
+docs/
+*.md
+LICENSE
+verification/
+deploy/
+
+# Local env files (must never enter image)
+.env
+.env.*
+.env.production*
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# IDE
+.vscode/
+.agents/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker artifacts themselves
+docker-compose*.yml

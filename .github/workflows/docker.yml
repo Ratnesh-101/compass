@@ -1,37 +1,55 @@
 name: Docker Build Verification
 
+# This workflow runs on Docker-specific path changes to give fast feedback
+# without waiting for the full backend test suite to finish.
+# The main CI workflow (ci.yml) also includes Docker validation on every PR.
+
 on:
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
       - 'backend/Dockerfile'
       - 'backend/requirements.txt'
-      - 'backend/**'
       - 'frontend/Dockerfile'
       - 'frontend/package*.json'
-      - 'frontend/**'
       - 'docker-compose.yml'
+      - '.dockerignore'
+      - 'frontend/.dockerignore'
       - '.github/workflows/docker.yml'
   pull_request:
-    branches: [ main ]
+    branches: [main]
     paths:
       - 'backend/Dockerfile'
       - 'backend/requirements.txt'
-      - 'backend/**'
       - 'frontend/Dockerfile'
       - 'frontend/package*.json'
-      - 'frontend/**'
       - 'docker-compose.yml'
+      - '.dockerignore'
+      - 'frontend/.dockerignore'
       - '.github/workflows/docker.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
+  validate-compose:
+    name: Validate Docker Compose Config
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate docker-compose.yml
+        run: docker compose config --quiet
+
   build-backend:
     name: Build Backend Image
     runs-on: ubuntu-latest
+    needs: validate-compose
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -39,17 +57,18 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build Backend Image
-        uses: docker/build-push-action@v5
+      - name: Build backend image
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: backend/Dockerfile
           push: false
-          tags: compass-backend:test
+          tags: compass-backend:ci
 
   build-frontend:
     name: Build Frontend Image
     runs-on: ubuntu-latest
+    needs: validate-compose
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -57,10 +76,10 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build Frontend Image
-        uses: docker/build-push-action@v5
+      - name: Build frontend image
+        uses: docker/build-push-action@v7
         with:
           context: ./frontend
           file: frontend/Dockerfile
           push: false
-          tags: compass-frontend:test
+          tags: compass-frontend:ci

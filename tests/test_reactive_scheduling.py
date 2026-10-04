@@ -13,6 +13,7 @@ Tests cover:
 """
 
 from datetime import datetime, date, time, timedelta, timezone
+from urllib.parse import urlparse
 import pytest
 from httpx import AsyncClient
 
@@ -241,14 +242,18 @@ def test_detect_schedule_conflicts_slipped_and_deadline():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_oauth_endpoints(client: AsyncClient):
+async def test_oauth_endpoints(client: AsyncClient, monkeypatch):
     """GET /api/calendar/connect and callback endpoint integration."""
+    monkeypatch.setattr("backend.services.oauth.is_google_oauth_configured", lambda: True)
+    monkeypatch.setattr("backend.routers.auth.is_google_oauth_configured", lambda: True, raising=False)
     # 1. Connect URL
     resp = await client.get("/api/calendar/connect")
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "ok"
-    assert "accounts.google.com" in data["url"]
+    parsed_oauth_url = urlparse(data["url"])
+    assert parsed_oauth_url.scheme == "https"
+    assert parsed_oauth_url.hostname == "accounts.google.com"
 
     # 2. Callback redirect with mock code
     callback_resp = await client.get("/api/calendar/callback?code=test_mock_oauth_code")
@@ -256,8 +261,9 @@ async def test_oauth_endpoints(client: AsyncClient):
     assert "text/html" in callback_resp.headers.get("content-type", "")
     assert "Google Calendar Connected" in callback_resp.text
 
-    # 3. Disconnect
-    disc_resp = await client.post("/api/calendar/disconnect")
+    # 3. Disconnect with the session cookie issued by callback
+    session_token = callback_resp.cookies.get("compass_session")
+    disc_resp = await client.post("/api/calendar/disconnect", headers={"Cookie": f"compass_session={session_token}"})
     assert disc_resp.status_code == 200
     assert disc_resp.json()["status"] == "ok"
 

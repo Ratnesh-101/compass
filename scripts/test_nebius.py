@@ -60,7 +60,7 @@ def verify_embedding_dimension(client: OpenAI) -> int | None:
         )
         vector = response.data[0].embedding
         dim = len(vector)
-        print(f"  ✅  Embedding returned successfully")
+        print("  ✅  Embedding returned successfully")
         print(f"  📐  EMBEDDING_DIMENSION = {dim}")
         print(f"  🧮  Sample (first 5 values): {vector[:5]}")
 
@@ -143,23 +143,23 @@ def verify_tool_calling(client: OpenAI) -> bool | None:
             tc: Any = choice.message.tool_calls[0]
             func_name = getattr(getattr(tc, "function", None), "name", None) or getattr(tc, "name", "unknown")
             func_args = getattr(getattr(tc, "function", None), "arguments", None) or getattr(tc, "arguments", "{}")
-            print(f"  ✅  TOOL_CALLING_SUPPORTED = True")
+            print("  ✅  TOOL_CALLING_SUPPORTED = True")
             print(f"  🔧  Function called: {func_name}")
             print(f"  📦  Arguments: {func_args}")
             return True
         else:
             # Model responded with text instead of a tool call — partial support
             content_preview = (choice.message.content or "")[:200]
-            print(f"  ⚠️  Model responded with text instead of a tool call.")
+            print("  ⚠️  Model responded with text instead of a tool call.")
             print(f"       Response: {content_preview}")
-            print(f"  📋  TOOL_CALLING_SUPPORTED = True (but model chose not to call)")
+            print("  📋  TOOL_CALLING_SUPPORTED = True (but model chose not to call)")
             return True
 
     except Exception as e:
         error_str = str(e).lower()
         if "unsupported" in error_str or "tool" in error_str or "function" in error_str:
-            print(f"  ⚠️  FALLBACK_JSON_REQUIRED = True")
-            print(f"       Tool calling not supported by this model/endpoint.")
+            print("  ⚠️  FALLBACK_JSON_REQUIRED = True")
+            print("       Tool calling not supported by this model/endpoint.")
             print(f"       Error: {e}")
             return False
         else:
@@ -197,11 +197,11 @@ def main() -> None:
     print(DIVIDER)
     print(f"  EMBEDDING_DIMENSION     = {dim or 'FAILED'}")
     if tool_support is True:
-        print(f"  TOOL_CALLING_SUPPORTED  = True")
+        print("  TOOL_CALLING_SUPPORTED  = True")
     elif tool_support is False:
-        print(f"  FALLBACK_JSON_REQUIRED  = True")
+        print("  FALLBACK_JSON_REQUIRED  = True")
     else:
-        print(f"  TOOL_CALLING            = INCONCLUSIVE (check errors above)")
+        print("  TOOL_CALLING            = INCONCLUSIVE (check errors above)")
     print()
 
 

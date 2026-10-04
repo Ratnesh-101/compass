@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Sequence
 import uuid
 import logging
 
+from backend.config import get_settings
 from backend.services.scheduler import _ensure_utc, TimeWindow
 
 logger = logging.getLogger("compass.calendar")
@@ -25,9 +26,25 @@ logger = logging.getLogger("compass.calendar")
 
 async def get_calendar_connection_status(
     pool: Any = None,
-    user_id: str = "default_user",
+    user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Retrieve the current calendar connection status with honest mode reporting."""
+    """Retrieve the current calendar connection status strictly for the specified user."""
+    settings = get_settings()
+    is_dev = settings.is_development()
+
+    if not user_id:
+        return {
+            "connected": False,
+            "provider": "google",
+            "account_email": None,
+            "connected_at": None,
+            "last_synced_at": None,
+            "mode": "demo" if is_dev else "live",
+            "is_simulated": is_dev,
+            "label": "Google Calendar: Not signed in (Demo Mode)" if is_dev else "Google Calendar: Not signed in",
+            "note": "Sign in to connect your Google Calendar" if is_dev else "Sign in to connect your live Google Calendar via OAuth",
+        }
+
     if pool is not None:
         try:
             async with pool.acquire() as conn:
@@ -35,39 +52,53 @@ async def get_calendar_connection_status(
                     """
                     SELECT provider, account_email, access_token, connected_at, last_synced_at
                     FROM calendar_connections
-                    WHERE (user_id = $1 OR account_email = $1 OR $1 = 'default_user') AND provider = 'google'
-                    ORDER BY CASE WHEN (user_id = $1 OR account_email = $1) THEN 0 ELSE 1 END, last_synced_at DESC NULLS LAST
+                    WHERE (user_id = $1 OR account_email = $1) AND provider = 'google'
+                    ORDER BY last_synced_at DESC NULLS LAST
                     LIMIT 1
                     """,
                     user_id,
                 )
                 if row and row["access_token"]:
-                    email = row["account_email"] or "user@gmail.com"
+                    from backend.services.oauth import decrypt_token
+                    decrypted = decrypt_token(row["access_token"])
+                    is_mock = not decrypted or decrypted.startswith("mock_")
+                    if is_mock and not is_dev:
+                        return {
+                            "connected": False,
+                            "provider": "google",
+                            "account_email": None,
+                            "connected_at": None,
+                            "last_synced_at": None,
+                            "mode": "live",
+                            "is_simulated": False,
+                            "label": "Google Calendar: Not connected",
+                            "note": "Live Google Calendar OAuth connection required in production.",
+                        }
+                    email = row["account_email"] or user_id or "user@gmail.com"
                     return {
                         "connected": True,
                         "provider": row["provider"],
                         "account_email": email,
                         "connected_at": row["connected_at"].isoformat() if row["connected_at"] else None,
                         "last_synced_at": row["last_synced_at"].isoformat() if row["last_synced_at"] else None,
-                        "mode": "live",
-                        "is_simulated": False,
-                        "label": f"Google Calendar: {email} (Live OAuth Connected)",
-                        "note": "Live Google Calendar connected via OAuth",
+                        "mode": "live" if not is_mock else "demo",
+                        "is_simulated": is_mock and is_dev,
+                        "label": f"Google Calendar: {email} (Live OAuth Connected)" if not is_mock else f"Google Calendar: {email} (Quick Demo Mode — Live OAuth not connected)",
+                        "note": "Live Google Calendar connected via OAuth" if not is_mock else "Simulated demo mode via Quick-Connect",
                     }
         except Exception as e:
             logger.warning(f"Could not read calendar_connections: {e}")
 
-    # Honest default state: Simulated demo mode
     return {
         "connected": False,
         "provider": "google",
-        "account_email": "demo-scholar@compass.ai",
-        "connected_at": datetime.now(timezone.utc).isoformat(),
-        "last_synced_at": datetime.now(timezone.utc).isoformat(),
-        "mode": "demo",
-        "is_simulated": True,
-        "label": "Google Calendar: demo-scholar@compass.ai (simulated / demo mode — live OAuth not yet connected)",
-        "note": "simulated / demo mode — live OAuth not yet connected",
+        "account_email": user_id,
+        "connected_at": None,
+        "last_synced_at": None,
+        "mode": "demo" if is_dev else "live",
+        "is_simulated": is_dev,
+        "label": f"Google Calendar: {user_id} (Demo Mode — not linked)" if is_dev else f"Google Calendar: {user_id} (Not linked)",
+        "note": "Calendar not yet linked via Google OAuth",
     }
 
 
@@ -217,7 +248,9 @@ async def get_calendar_freebusy(
             logger.warning(f"Live Google Calendar freebusy query failed, falling back to simulated: {e}")
 
     # 3. Simulated Google Calendar events (honest fallback for hackathon demo & offline testing)
-    if include_simulated and (not has_live_connection or len(busy_blocks) <= 1):
+    # Strictly forbidden and disabled when ENVIRONMENT is unset or 'production' (requires development mode)
+    settings = get_settings()
+    if include_simulated and settings.is_development() and (not has_live_connection or len(busy_blocks) <= 1):
         curr = start_utc.date()
         end_d = end_utc.date()
         while curr <= end_d:
@@ -453,26 +486,44 @@ async def sync_all_tasks_to_google_calendar(
     pool: Any,
     user_id: str = "default_user",
 ) -> Dict[str, Any]:
-    """Synchronize all scheduled tasks to the user's Google Calendar."""
+    """Synchronize all scheduled tasks and deadlines to the user's Google Calendar."""
     if pool is None:
         return {"success": False, "count": 0, "message": "Database not connected"}
 
     async with pool.acquire() as conn:
         tasks = await conn.fetch(
             """
-            SELECT id, title, domain, priority, notes, scheduled_start, scheduled_end
+            SELECT id, title, domain, priority, notes, duration_minutes, due_date, scheduled_start, scheduled_end
             FROM tasks
-            WHERE scheduled_start IS NOT NULL AND scheduled_end IS NOT NULL
-            ORDER BY scheduled_start ASC
-            """
+            WHERE (user_id = $1 OR user_id IS NULL)
+              AND (
+                (scheduled_start IS NOT NULL AND scheduled_end IS NOT NULL)
+                OR due_date IS NOT NULL
+              )
+            ORDER BY COALESCE(scheduled_start, due_date) ASC
+            """,
+            user_id,
         )
 
+    access_token = await get_valid_access_token_for_user(pool, user_id)
+    token_is_live = bool(access_token and not access_token.startswith("mock_"))
+
     synced_events = []
+    live_count = 0
+    simulated_count = 0
     for t in tasks:
+        start_dt = t["scheduled_start"]
+        end_dt = t["scheduled_end"]
+        if not start_dt or not end_dt:
+            due = _ensure_utc(t["due_date"])
+            dur = t.get("duration_minutes") or 60
+            start_dt = due - timedelta(minutes=dur)
+            end_dt = due
+
         res = await link_calendar_event(
             task_id=t["id"],
-            start_dt=t["scheduled_start"],
-            end_dt=t["scheduled_end"],
+            start_dt=start_dt,
+            end_dt=end_dt,
             title=t["title"],
             pool=pool,
             user_id=user_id,
@@ -481,6 +532,10 @@ async def sync_all_tasks_to_google_calendar(
             notes=t["notes"] or "",
         )
         synced_events.append(res)
+        if res.get("mode") == "live":
+            live_count += 1
+        else:
+            simulated_count += 1
 
     # Update last_synced_at timestamp on user connection
     try:
@@ -496,9 +551,26 @@ async def sync_all_tasks_to_google_calendar(
     except Exception as e:
         logger.warning(f"Could not update last_synced_at: {e}")
 
+    is_live = token_is_live and live_count > 0
+    if token_is_live:
+        if live_count > 0:
+            msg = f"Successfully synced {live_count} tasks directly to Google Calendar API."
+        else:
+            msg = "Google Calendar is live connected, but there were no scheduled tasks or deadlines to sync."
+            is_live = True
+    else:
+        msg = (
+            f"Slotted {simulated_count} tasks in Compass (Demo Mode). Because live Google OAuth credentials are not connected, "
+            f"use 'Export .ics Feed' to subscribe, or connect your Google Account for live synchronization."
+        )
+
     return {
         "success": True,
         "count": len(synced_events),
+        "live_count": live_count,
+        "simulated_count": simulated_count,
+        "is_live": is_live,
+        "message": msg,
         "events": synced_events,
         "user_id": user_id,
     }

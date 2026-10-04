@@ -112,6 +112,20 @@ _INJECTION_PATTERNS = [
 _INJECTION_RE = re.compile("|".join(_INJECTION_PATTERNS), re.IGNORECASE)
 
 
+def sanitize_untrusted_text(text: str) -> str:
+    """Disarm closing XML tags and prompt injection delimiters in untrusted web text."""
+    if not text:
+        return ""
+    # Strip any XML tags that match known framing/tool/system delimiters
+    sanitized = re.sub(
+        r"<\s*/?\s*(untrusted_web_content|web_source|research_evidence|evidence|system|instructions?|tool_call|function_call)\b[^>]*>",
+        "[stripped_tag]",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return sanitized
+
+
 def scan_for_injection(text: str) -> List[str]:
     """Return any injection-like phrases found in untrusted web text."""
     return [m.group(0) for m in _INJECTION_RE.finditer(text or "")]
@@ -124,12 +138,13 @@ def fence_web_content(chunks: List[Dict[str, Any]], max_chars: int = 2000) -> st
     """
     parts = []
     for c in chunks:
-        body = (c.get("content") or "")[:max_chars]
-        flagged = scan_for_injection(body)
+        raw_body = (c.get("content") or "")[:max_chars]
+        flagged = scan_for_injection(raw_body)
         if flagged:
             logger.warning(
                 "Injection-like content from %s: %r", c.get("url"), flagged[:3]
             )
+        body = sanitize_untrusted_text(raw_body)
         parts.append(
             f"<web_source url={c.get('url')!r} score={c.get('score')}>\n"
             f"{body}\n"

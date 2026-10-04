@@ -3,7 +3,7 @@
 ## 1. Project Overview
 * **Tagline**: Productivity copilot and agent with persistent memory across hackathons, coursework, and code repositories.
 * **Track / Category**: Best Apps and Agents Track (powered by Nebius Token Factory & NVIDIA Nemotron Models).
-* **Team**: Ratnesh Singh (VIT+IIT, Infra / Deployment / Backend), Nandani (Frontend / UI), Rhythm (Memory / Skills).
+* **Team**: Ratnesh Singh (VIT+IIT, Infra / Deployment / Backend), Nandani (Frontend / UI), Rhythm (Memory / Skills), Kunal (Frontend UI Contributions).
 
 ---
 
@@ -22,6 +22,12 @@ Standard LLM chats lose context between sessions, while rigid task trackers lack
 * **Instant Conversational Task Dispatch**: Users say natural instructions like *"Schedule Compass submission video on Oct 30 under Hackathon"*, and Compass parses, fuzzy-resolves the project, and persists it into PostgreSQL.
 * **Cross-Session Vector Retrieval**: Semantically recalls snippets, architecture decisions, and coursework notes using pgvector cosine search.
 * **Autonomous Memory Consolidation**: A nightly worker flags overdue deadlines, merges near-duplicate vector chunks, and rolls up stale conversations into dense long-term summaries.
+* **Real-Time Tavily Web Intelligence Suite**:
+  - `search_web`: Live grounded web search when memory abstains.
+  - `ingest_url`: Human-gated Tavily Extract pipeline with injection quarantine, embedding 768-dim chunks into persistent memory.
+  - `verify_deadline`: Proactively checks stored deadlines against live contest sources to catch schedule drift.
+* **Strict Human Confirmation Gates**: ReAct planner pauses with amber approval requests for all state-mutating actions with 0 writes before approval.
+* **The Realist Feasibility Engine**: Disagrees when workloads exceed actual capacity (nominal - 20% margin) and proposes deterministic triage plans.
 
 ---
 
@@ -68,7 +74,9 @@ Compass is powered by a multi-tiered architecture orchestrated across Nebius Tok
 
 ---
 
-## 6. Feedback for Nebius & NVIDIA
+## 6. Feedback for Nebius & NVIDIA (Targeting Most Valuable Feedback Award)
+
+> **Complete Comprehensive Report**: See [NEBIUS_PLATFORM_FEEDBACK.md](../NEBIUS_PLATFORM_FEEDBACK.md) for full benchmark telemetry, MoE architectural analysis, and reproducible code samples.
 
 * **Nebius Token Factory**: Model inference speeds were exceptional. The Nemotron Nano response latency consistently hovered around 350-400ms, making conversational interaction feel instant.
 * **Matryoshka Support**: The ability to pass the `dimensions` parameter directly in the embeddings API call without client-side slicing significantly reduced network overhead and storage costs.

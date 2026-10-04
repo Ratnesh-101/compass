@@ -143,30 +143,47 @@ async def run_research_specialist(
 async def run_calendar_specialist(
     request: SpecialistRequest, pool: Any = None
 ) -> SpecialistResult:
-    """Specialist Agent for calendar availability, schedule conflicts, and time-blocking."""
+    """Specialist Agent for calendar availability, schedule conflicts, and time-blocking.
+    Directly delegates capacity and workload feasibility queries to The Realist (assess_feasibility).
+    """
     from backend.skills import (
         handle_get_calendar_availability,
         handle_detect_schedule_conflicts,
+        handle_assess_feasibility,
     )
 
     goal = request.user_goal.strip()
     findings: Dict[str, Any] = {}
     summary_parts: List[str] = []
 
-    # 1. Fetch calendar availability
+    # 1. Feasibility & Workload Analysis (delegating directly to The Realist)
+    is_feasibility_query = any(k in goal.lower() for k in [
+        "feasible", "feasibility", "capacity", "overload", "hours per day",
+        "workload", "triage", "can i finish", "enough time", "burnout"
+    ])
+    if is_feasibility_query:
+        try:
+            feas_res = await handle_assess_feasibility({"days": 7, "hours_per_day": 4.0}, pool)
+            findings["feasibility_assessment"] = feas_res.get("data", {})
+            if feas_res.get("response"):
+                summary_parts.append(feas_res["response"])
+        except Exception as e:
+            logger.warning(f"[CalendarSpecialist] Feasibility assessment failed: {e}")
+
+    # 2. Fetch calendar availability
     try:
         avail_res = await handle_get_calendar_availability({}, pool)
         findings["availability"] = avail_res.get("data", {})
-        if avail_res.get("response"):
+        if avail_res.get("response") and not is_feasibility_query:
             summary_parts.append(avail_res["response"])
     except Exception as e:
         logger.warning(f"[CalendarSpecialist] Availability query failed: {e}")
 
-    # 2. Detect schedule conflicts
+    # 3. Detect schedule conflicts
     try:
         conf_res = await handle_detect_schedule_conflicts({}, pool)
         findings["conflicts"] = conf_res.get("data", {})
-        if conf_res.get("response"):
+        if conf_res.get("response") and not summary_parts:
             summary_parts.append(conf_res["response"])
     except Exception as e:
         logger.warning(f"[CalendarSpecialist] Conflict check failed: {e}")

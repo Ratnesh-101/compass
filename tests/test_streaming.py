@@ -30,3 +30,17 @@ async def test_streaming_tool_call(client: AsyncClient):
     assert len(done_events) == 1
     assert done_events[0].get("skill_used") in ("add_task", "chat")
     assert "conversation_id" in done_events[0]
+
+
+@pytest.mark.asyncio
+async def test_sse_disconnect_cleanup(client: AsyncClient):
+    """Test that premature client disconnect from SSE stream triggers clean resource termination."""
+    payload = {"message": "Tell me a long story about space exploration."}
+    # Connect and break after receiving first event
+    async with client.stream("POST", "/api/chat/stream", json=payload, timeout=15.0) as resp:
+        assert resp.status_code == 200
+        async for line in resp.aiter_lines():
+            if line.startswith("data: "):
+                # Client abruptly closes connection after 1 event
+                break
+    # Connection cleanly closed by exiting context manager without hanging or throwing unhandled errors

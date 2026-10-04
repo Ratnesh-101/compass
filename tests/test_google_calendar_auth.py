@@ -4,6 +4,7 @@ Compass — Google OAuth & Google Calendar Event Synchronization Tests.
 
 from datetime import datetime, timezone, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
+from urllib.parse import urlparse
 import pytest
 
 from backend.services.oauth import (
@@ -40,6 +41,7 @@ def test_token_encryption_and_decryption():
     """Verify HMAC-authenticated encryption and decryption roundtrip."""
     secret_token = "ya29.a0AfH6SMD_real_live_google_access_token_12345"
     enc = encrypt_token(secret_token)
+    assert enc is not None
     assert enc.startswith("enc:")
     assert enc != secret_token
 
@@ -74,7 +76,8 @@ async def test_create_google_calendar_event_simulated():
     )
     assert res["status"] == "confirmed"
     assert "id" in res
-    assert "calendar.google.com" in res["htmlLink"]
+    parsed_link = urlparse(res["htmlLink"])
+    assert parsed_link.hostname == "calendar.google.com"
 
 
 @pytest.mark.asyncio
