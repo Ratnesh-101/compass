@@ -256,12 +256,28 @@ async def test_memory_profile_db_queries():
 
 
 @pytest.mark.asyncio
-async def test_profile_facts_api_endpoints(client: AsyncClient):
-    """Verify GET and DELETE /api/profile/facts endpoints."""
+async def test_profile_facts_api_endpoints(client: AsyncClient, auth_headers: dict):
+    """Verify GET and DELETE /api/profile/facts endpoints enforce Bearer auth."""
     mock_pool = MagicMock()
     mock_conn = AsyncMock()
     mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
 
+    # 1. No token -> 401
+    resp_no_token = await client.get("/api/profile/facts")
+    assert resp_no_token.status_code in (401, 403)
+
+    resp_del_no_token = await client.delete("/api/profile/facts/name")
+    assert resp_del_no_token.status_code in (401, 403)
+
+    # 2. Wrong token -> 401
+    wrong_headers = {"Authorization": "Bearer invalid_secret_token_123"}
+    resp_wrong = await client.get("/api/profile/facts", headers=wrong_headers)
+    assert resp_wrong.status_code in (401, 403)
+
+    resp_del_wrong = await client.delete("/api/profile/facts/name", headers=wrong_headers)
+    assert resp_del_wrong.status_code in (401, 403)
+
+    # 3. Correct token -> 200
     with patch("backend.routers.profile.get_pool", new_callable=AsyncMock) as mock_get_pool, \
          patch("backend.routers.profile.get_profile_facts", new_callable=AsyncMock) as mock_get_facts, \
          patch("backend.routers.profile.delete_profile_fact", new_callable=AsyncMock) as mock_del_fact:
@@ -271,14 +287,14 @@ async def test_profile_facts_api_endpoints(client: AsyncClient):
         mock_del_fact.return_value = True
 
         # Test GET /api/profile/facts
-        resp_get = await client.get("/api/profile/facts")
+        resp_get = await client.get("/api/profile/facts", headers=auth_headers)
         assert resp_get.status_code == 200
         data_get = resp_get.json()
         assert "facts" in data_get
         assert data_get["facts"]["name"] == "Jordan"
 
         # Test DELETE /api/profile/facts/{key}
-        resp_del = await client.delete("/api/profile/facts/name")
+        resp_del = await client.delete("/api/profile/facts/name", headers=auth_headers)
         assert resp_del.status_code == 200
         data_del = resp_del.json()
         assert data_del["success"] is True
@@ -286,5 +302,6 @@ async def test_profile_facts_api_endpoints(client: AsyncClient):
 
         # Test DELETE 404 when key not found
         mock_del_fact.return_value = False
-        resp_del_404 = await client.delete("/api/profile/facts/nonexistent")
+        resp_del_404 = await client.delete("/api/profile/facts/nonexistent", headers=auth_headers)
         assert resp_del_404.status_code == 404
+

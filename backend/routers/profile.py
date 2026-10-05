@@ -6,8 +6,8 @@ Endpoints for inspecting and managing persistent user profile facts (name, goals
 
 from typing import Any, Dict
 import logging
-from fastapi import APIRouter, HTTPException, Request
-from backend.dependencies import _get_current_identity, _get_or_create_user_id
+from fastapi import APIRouter, Depends, HTTPException, Request
+from backend.dependencies import _get_current_identity, _get_or_create_user_id, verify_token
 from backend.memory.db import get_pool
 from backend.memory.profile import get_profile_facts, delete_profile_fact
 
@@ -17,7 +17,10 @@ router = APIRouter(prefix="/api/profile", tags=["profile"])
 
 
 @router.get("/facts")
-async def get_facts(request: Request) -> Dict[str, Any]:
+async def get_facts(
+    request: Request,
+    _token: str = Depends(verify_token),
+) -> Dict[str, Any]:
     """Retrieve all stored profile facts for the authenticated user."""
     pool = await get_pool()
     if not pool:
@@ -33,8 +36,13 @@ async def get_facts(request: Request) -> Dict[str, Any]:
 
 
 @router.delete("/facts/{key}")
-async def delete_fact(key: str, request: Request) -> Dict[str, Any]:
+async def delete_fact(
+    key: str,
+    request: Request,
+    _token: str = Depends(verify_token),
+) -> Dict[str, Any]:
     """Remove a stored profile fact by key."""
+
     pool = await get_pool()
     if not pool:
         raise HTTPException(status_code=503, detail="Database unavailable")
