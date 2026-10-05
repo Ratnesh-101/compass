@@ -5,6 +5,7 @@ import {
   fetchConversationMessages,
   fetchMemoryOverview,
   fetchMigrationStatus,
+  fetchProfileFacts,
   getCurrentUserId,
 } from '../api/client'
 import ChatHistoryDrawer from './chat/ChatHistoryDrawer'
@@ -24,6 +25,7 @@ export default function ChatPanel({
   const [pastConversations, setPastConversations] = useState([])
   const [pastPlans, setPastPlans] = useState([])
   const [memoryOverview, setMemoryOverview] = useState(null)
+  const [profileFacts, setProfileFacts] = useState({})
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [guestMigrationCount, setGuestMigrationCount] = useState(0)
   const [toast, setToast] = useState(null)
@@ -36,9 +38,10 @@ export default function ChatPanel({
   const loadHistoryData = async () => {
     setLoadingHistory(true)
     try {
-      const [convs, mem] = await Promise.all([
+      const [convs, mem, facts] = await Promise.all([
         fetchConversations(50, true),
         fetchMemoryOverview(),
+        fetchProfileFacts(),
       ])
       if (convs) {
         const sorted = [...convs].sort((a, b) => {
@@ -50,6 +53,9 @@ export default function ChatPanel({
       if (mem) {
         setMemoryOverview(mem)
         if (mem.recent_plans) setPastPlans(mem.recent_plans)
+      }
+      if (facts && typeof facts === 'object') {
+        setProfileFacts(facts)
       }
       const uid = getCurrentUserId()
       if (uid && uid.includes('@')) {
@@ -485,6 +491,9 @@ export default function ChatPanel({
             streamingText={streamingText}
             isTyping={isTyping}
             messagesEndRef={messagesEndRef}
+            profileFacts={profileFacts}
+            pastConversations={pastConversations}
+            onSendMessage={handleSend}
           />
 
           <ChatInputBar

@@ -593,3 +593,32 @@ code, pre, .mono {
     display: none !important;
   }
 }
+
+/* Persona Suggestion Chips */
+.persona-suggestion-chip {
+  padding: 8px 16px;
+  border-radius: 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  box-shadow: var(--shadow-sm);
+}
+
+.persona-suggestion-chip:hover {
+  border-color: var(--coursework);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+  background: var(--bg-card-soft);
+}
+
+.persona-suggestion-chip:active {
+  transform: translateY(0);
+}
+

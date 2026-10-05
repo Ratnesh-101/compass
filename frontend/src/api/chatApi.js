@@ -256,3 +256,36 @@ export async function seedJudgeDemoPersona() {
     throw err
   }
 }
+
+/**
+ * Fetch persistent user profile facts (name, goals, preferences).
+ */
+export async function fetchProfileFacts() {
+  try {
+    const res = await fetch(`${API_BASE}/api/profile/facts`, {
+      headers: getAuthHeaders(),
+    })
+    if (!res.ok) return {}
+    const data = await res.json()
+    return data.facts || {}
+  } catch {
+    return {}
+  }
+}
+
+/**
+ * Delete a persistent profile fact by key.
+ */
+export async function deleteProfileFact(key) {
+  if (!key) return false
+  try {
+    const res = await fetch(`${API_BASE}/api/profile/facts/${encodeURIComponent(key)}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
