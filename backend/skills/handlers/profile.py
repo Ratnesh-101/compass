@@ -8,7 +8,12 @@ personal details (name, goals, preferences) across conversations.
 from typing import Any, Dict
 import logging
 from backend.skills.registry import register_skill
-from backend.memory.profile import set_profile_fact, delete_profile_fact
+from backend.memory.profile import (
+    set_profile_fact,
+    delete_profile_fact,
+    sanitize_fact_key,
+    sanitize_fact_value,
+)
 
 logger = logging.getLogger("compass.skills.profile")
 
@@ -16,8 +21,10 @@ logger = logging.getLogger("compass.skills.profile")
 @register_skill("remember_fact")
 async def handle_remember_fact(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
     """Store or update an explicit personal fact or preference."""
-    key = str(args.get("key", "")).strip().lower()
-    value = str(args.get("value", "")).strip()
+    raw_key = str(args.get("key", ""))
+    raw_value = str(args.get("value", ""))
+    key = sanitize_fact_key(raw_key)
+    value = sanitize_fact_value(raw_value)
     user_id = str(args.get("user_id") or "default_user")
 
     if not key or not value:

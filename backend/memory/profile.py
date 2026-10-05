@@ -57,6 +57,24 @@ async def list_profile_facts_records(
         return []
 
 
+MAX_KEY_LENGTH = 40
+MAX_VALUE_LENGTH = 200
+
+
+def sanitize_fact_key(key: str) -> str:
+    """Sanitize and cap fact key to prevent injection and unbounded growth."""
+    cleaned = str(key).replace("\r", " ").replace("\n", " ").strip().lower()
+    cleaned = " ".join(cleaned.split())
+    return cleaned[:MAX_KEY_LENGTH]
+
+
+def sanitize_fact_value(value: str) -> str:
+    """Sanitize and cap fact value to prevent injection and unbounded growth."""
+    cleaned = str(value).replace("\r", " ").replace("\n", " ").strip()
+    cleaned = " ".join(cleaned.split())
+    return cleaned[:MAX_VALUE_LENGTH]
+
+
 async def set_profile_fact(
     conn: DbConn,
     key: str,
@@ -64,12 +82,15 @@ async def set_profile_fact(
     user_id: str = "default_user",
     source_message_id: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """Insert or update a profile fact for a user.
+    """Insert or update a profile fact for a user with length caps and sanitization.
 
     If key exists, updates value and updated_at timestamp.
     """
-    clean_key = key.strip().lower()
-    clean_val = value.strip()
+    clean_key = sanitize_fact_key(key)
+    clean_val = sanitize_fact_value(value)
+    if not clean_key or not clean_val:
+        return {}
+
     row = await conn.fetchrow(
         """
         INSERT INTO user_profile_facts (user_id, key, value, source_message_id, created_at, updated_at)
@@ -86,6 +107,7 @@ async def set_profile_fact(
         clean_val,
         source_message_id,
     )
+
     return dict(row) if row else {}
 
 
