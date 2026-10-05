@@ -23,6 +23,8 @@ export default function Sidebar({
   onDomainDeleted,
   theme = 'light',
   onToggleTheme,
+  mobileOpen = false,
+  onCloseMobile,
 }) {
   const [showCreateDomainModal, setShowCreateDomainModal] = React.useState(false)
   const [confirmDeleteKey, setConfirmDeleteKey] = React.useState(null)
@@ -77,7 +79,7 @@ export default function Sidebar({
 
   return (
     <aside
-      className={`compass-sidebar ${isCollapsed ? 'sidebar-collapsed' : 'sidebar-expanded'}`}
+      className={`compass-sidebar ${isCollapsed ? 'sidebar-collapsed' : 'sidebar-expanded'} ${mobileOpen ? 'mobile-open' : ''}`}
       style={{
         width: isCollapsed ? '68px' : '260px',
         minWidth: isCollapsed ? '68px' : '240px',
@@ -123,7 +125,11 @@ export default function Sidebar({
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px', padding: '0 4px', userSelect: 'none' }}>
           <div
             id="sidebar-brand-header"
-            onClick={() => { onSelectTab('timeline'); if (onSelectDomain) onSelectDomain('all') }}
+            onClick={() => {
+              onSelectTab('timeline')
+              if (onSelectDomain) onSelectDomain('all')
+              if (onCloseMobile) onCloseMobile()
+            }}
             style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', transition: 'opacity 0.15s ease', minWidth: 0 }}
             onMouseEnter={e => (e.currentTarget.style.opacity = '0.85')}
             onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
@@ -137,17 +143,45 @@ export default function Sidebar({
               <p style={{ fontSize: '10.5px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: '600', margin: 0 }}>Workspace</p>
             </div>
           </div>
-          <button
-            id="sidebar-collapse-toggle"
-            onClick={toggleCollapsed}
-            title="Collapse sidebar"
-            aria-label="Collapse sidebar"
-            style={{ background: 'transparent', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '6px', color: 'var(--text-muted)', cursor: 'pointer', width: '26px', height: '26px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', lineHeight: 1, padding: 0, transition: 'all 0.15s ease', flexShrink: 0 }}
-            onMouseEnter={e => { e.currentTarget.style.color = 'var(--text-on-dark)'; e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'; e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)' }}
-            onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)' }}
-          >
-            ‹
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {onCloseMobile && (
+              <button
+                id="mobile-drawer-close"
+                className="mobile-close-btn"
+                onClick={onCloseMobile}
+                title="Close sidebar"
+                aria-label="Close navigation drawer"
+                style={{
+                  background: 'rgba(255, 255, 255, 0.08)',
+                  border: 'none',
+                  borderRadius: '8px',
+                  color: 'var(--text-on-dark)',
+                  cursor: 'pointer',
+                  width: '30px',
+                  height: '30px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '15px',
+                  lineHeight: 1,
+                  flexShrink: 0,
+                }}
+              >
+                ✕
+              </button>
+            )}
+            <button
+              id="sidebar-collapse-toggle"
+              onClick={toggleCollapsed}
+              title="Collapse sidebar"
+              aria-label="Collapse sidebar"
+              style={{ background: 'transparent', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '6px', color: 'var(--text-muted)', cursor: 'pointer', width: '26px', height: '26px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', lineHeight: 1, padding: 0, transition: 'all 0.15s ease', flexShrink: 0 }}
+              onMouseEnter={e => { e.currentTarget.style.color = 'var(--text-on-dark)'; e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'; e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)' }}
+              onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)' }}
+            >
+              ‹
+            </button>
+          </div>
         </div>
       )}
 
@@ -159,12 +193,20 @@ export default function Sidebar({
           </p>
         )}
         {NAV_ITEMS.map(item => {
-          const isActive = activeTab === item.key || (item.key === 'compass' && (activeTab === 'northstar' || activeTab === 'assistant' || activeTab === 'planner' || activeTab === 'agent'))
+          const isActive =
+            item.key === 'timeline'
+              ? activeTab === 'timeline' && activeDomain === 'all'
+              : item.key === 'compass'
+              ? activeTab === 'compass' || activeTab === 'northstar' || activeTab === 'assistant' || activeTab === 'planner' || activeTab === 'agent'
+              : activeTab === item.key
           return (
             <button
               key={item.key}
               id={`sidebar-tab-${item.key}`}
-              onClick={() => onSelectTab(item.key)}
+              onClick={() => {
+                onSelectTab(item.key)
+                if (onCloseMobile) onCloseMobile()
+              }}
               className={`nav-item ${isActive ? 'active' : ''}`}
               title={item.label}
               style={isCollapsed ? { justifyContent: 'center', padding: '8px 0', width: '100%', gap: 0 } : undefined}
@@ -203,12 +245,14 @@ export default function Sidebar({
                   cursor: 'pointer',
                   fontSize: '14px',
                   lineHeight: 1,
-                  padding: '2px 4px',
+                  padding: '4px 6px',
                   borderRadius: '4px',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   transition: 'all 0.15s ease',
+                  minWidth: '28px',
+                  minHeight: '28px',
                 }}
                 onMouseEnter={e => {
                   e.currentTarget.style.color = 'var(--text-on-dark)'
@@ -223,7 +267,13 @@ export default function Sidebar({
               </button>
             </div>
             {activeDomain !== 'all' && (
-              <span onClick={() => onSelectDomain('all')} style={{ fontSize: '10px', color: 'var(--brand)', cursor: 'pointer', fontWeight: '700' }}>
+              <span
+                onClick={() => {
+                  onSelectDomain('all')
+                  if (onCloseMobile) onCloseMobile()
+                }}
+                style={{ fontSize: '10px', color: 'var(--brand)', cursor: 'pointer', fontWeight: '700', padding: '2px 4px' }}
+              >
                 Reset
               </span>
             )}
@@ -232,12 +282,15 @@ export default function Sidebar({
 
         {displayDomains.map(dom => {
           const isCustom = !baseDomains.some(b => b.key === dom.key)
-          const isSelected = activeDomain === dom.key
+          const isSelected = activeTab === 'timeline' && activeDomain === dom.key
           return (
             <div
               key={dom.key}
               id={`sidebar-domain-${dom.key}`}
-              onClick={() => onSelectDomain(dom.key)}
+              onClick={() => {
+                onSelectDomain(dom.key)
+                if (onCloseMobile) onCloseMobile()
+              }}
               title={isCollapsed ? `${dom.label} (${domainCounts[dom.key] ?? 0})` : dom.label}
               style={{
                 padding: isCollapsed ? '6px 0' : '8px 10px',
@@ -251,6 +304,7 @@ export default function Sidebar({
                 transition: 'background 0.15s ease',
                 width: '100%',
                 boxSizing: 'border-box',
+                minHeight: '38px',
               }}
               onMouseEnter={e => {
                 if (!isSelected) e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)'

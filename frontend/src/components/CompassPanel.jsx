@@ -37,22 +37,23 @@ export default function CompassPanel({
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100vh', minWidth: 0, overflow: 'hidden', background: 'var(--bg-app)' }}>
       {/* Header Sub-bar */}
       <div style={{
-        height: '52px',
+        minHeight: '48px',
         borderBottom: '1px solid var(--border)',
         background: 'var(--bg-card)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: '0 20px',
+        padding: '0 16px',
         flexShrink: 0,
-        gap: '12px',
+        gap: '10px',
+        flexWrap: 'wrap',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
           <span style={{ fontSize: '18px' }}>🧭</span>
           <span style={{ fontSize: '14px', fontWeight: '800', color: 'var(--text-primary)', letterSpacing: '-0.2px' }}>
             Compass
           </span>
-          <span style={{
+          <span className="sidebar-specs-card" style={{
             fontSize: '11px',
             color: 'var(--text-muted)',
             background: 'var(--bg-card-soft)',

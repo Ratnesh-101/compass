@@ -6,7 +6,8 @@ import CompassPanel from './components/CompassPanel'
 import AuthModal from './components/AuthModal'
 import MigrationModal from './components/MigrationModal'
 import NebiusTelemetryModal from './components/NebiusTelemetryModal'
-import { getCustomDomains, removeCustomDomain } from './components/timeline/domainMeta'
+import { getCustomDomains, removeCustomDomain, getDomainMeta } from './components/timeline/domainMeta'
+import { parseLocation, buildUrl } from './router'
 import {
   checkBackendHealth,
   fetchTasks,
@@ -22,8 +23,10 @@ export default function App() {
   const [tasks, setTasks] = useState([])
   const [allTasks, setAllTasks] = useState([])
   const [customDomains, setCustomDomains] = useState(() => getCustomDomains())
-  const [activeTab, setActiveTab] = useState('timeline')
-  const [selectedDomain, setSelectedDomain] = useState('all')
+  const initialNav = useMemo(() => parseLocation(), [])
+  const [activeTab, setActiveTab] = useState(() => initialNav.tab)
+  const [selectedDomain, setSelectedDomain] = useState(() => initialNav.domain)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [backendStatus, setBackendStatus] = useState('Connecting...')
   const [conversationId, setConversationId] = useState(null)
   const [usageStats, setUsageStats] = useState(null)
@@ -99,6 +102,31 @@ export default function App() {
 
   const toggleTheme = useCallback(() => {
     setTheme(prev => (prev === 'dark' ? 'light' : 'dark'))
+  }, [])
+
+  const navigateTo = useCallback((tab, domain = 'all', replace = false) => {
+    setActiveTab(tab)
+    setSelectedDomain(domain)
+    const targetUrl = buildUrl(tab, domain)
+    const currentUrl = window.location.pathname + window.location.search
+    if (currentUrl !== targetUrl) {
+      if (replace) {
+        window.history.replaceState({ tab, domain }, '', targetUrl)
+      } else {
+        window.history.pushState({ tab, domain }, '', targetUrl)
+      }
+    }
+  }, [])
+
+  // Synchronize browser Back/Forward navigation
+  useEffect(() => {
+    const handlePopState = () => {
+      const loc = parseLocation()
+      setActiveTab(loc.tab)
+      setSelectedDomain(loc.domain)
+    }
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
   }, [])
 
   // Keep a ref to the latest tasks state for stable diffing without triggering interval re-creations
@@ -269,20 +297,46 @@ export default function App() {
     return counts
   }, [allTasks, tasks, customDomains])
 
+  const handleSelectTab = useCallback((tabKey) => {
+    if (tabKey === 'timeline') {
+      navigateTo('timeline', 'all')
+    } else if (tabKey === 'compass' || tabKey === 'assistant' || tabKey === 'planner') {
+      navigateTo('compass', 'all')
+    } else if (tabKey === 'calendar' || tabKey === 'schedule') {
+      navigateTo('calendar', 'all')
+    } else {
+      navigateTo(tabKey, 'all')
+    }
+    setMobileMenuOpen(false)
+  }, [navigateTo])
+
+  const handleSelectDomain = useCallback((domainKey) => {
+    navigateTo('timeline', domainKey || 'all')
+    setMobileMenuOpen(false)
+  }, [navigateTo])
+
   const handleDomainCreated = useCallback((newDomain) => {
     setCustomDomains(prev => {
       const filtered = prev.filter(d => d.key !== newDomain.key)
       return [...filtered, newDomain]
     })
-    setSelectedDomain(newDomain.key)
-  }, [])
+    navigateTo('timeline', newDomain.key)
+    setMobileMenuOpen(false)
+  }, [navigateTo])
 
   const handleDomainDeleted = useCallback((domainKey) => {
     removeCustomDomain(domainKey)
     setCustomDomains(prev => prev.filter(d => d.key !== domainKey))
     if (selectedDomain === domainKey) {
-      setSelectedDomain('all')
+      navigateTo('timeline', 'all')
     }
+  }, [selectedDomain, navigateTo])
+
+  const currentDomainMeta = useMemo(() => {
+    if (!selectedDomain || selectedDomain === 'all') {
+      return { label: 'All Domains', icon: '▦' }
+    }
+    return getDomainMeta(selectedDomain)
   }, [selectedDomain])
 
   const handleSendMessage = async (userText) => {
@@ -310,14 +364,23 @@ export default function App() {
     : 'Nebius • Nemotron-3'
 
   return (
-    <div style={{ display: 'flex', height: '100vh', width: '100%', background: 'var(--bg-app)', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', height: '100vh', width: '100%', background: 'var(--bg-app)', overflow: 'hidden', position: 'relative' }}>
+      {/* Mobile Drawer Backdrop */}
+      {mobileMenuOpen && (
+        <div
+          id="mobile-drawer-backdrop"
+          className="mobile-drawer-backdrop"
+          onClick={() => setMobileMenuOpen(false)}
+        />
+      )}
+
       <Sidebar
         activeDomain={selectedDomain}
-        onSelectDomain={setSelectedDomain}
+        onSelectDomain={handleSelectDomain}
         domainCounts={domainCounts}
         backendStatus={backendStatus}
         activeTab={activeTab}
-        onSelectTab={setActiveTab}
+        onSelectTab={handleSelectTab}
         usageBadge={usageBadge}
         currentUser={currentUser}
         onOpenAuth={() => setShowAuthModal(true)}
@@ -327,15 +390,84 @@ export default function App() {
         onDomainDeleted={handleDomainDeleted}
         theme={theme}
         onToggleTheme={toggleTheme}
+        mobileOpen={mobileMenuOpen}
+        onCloseMobile={() => setMobileMenuOpen(false)}
       />
 
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'var(--bg-app)', minWidth: 0, overflow: 'hidden' }}>
+        {/* Mobile Header Bar */}
+        <header className="mobile-header">
+          <button
+            id="mobile-menu-button"
+            type="button"
+            onClick={() => setMobileMenuOpen(true)}
+            aria-label="Open Navigation Menu"
+            title="Open navigation menu"
+            style={{
+              background: 'var(--bg-card-soft)',
+              border: '1px solid var(--border)',
+              borderRadius: '8px',
+              width: '40px',
+              height: '40px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--text-primary)',
+              cursor: 'pointer',
+              fontSize: '18px',
+            }}
+          >
+            ☰
+          </button>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+            <span style={{ fontSize: '18px' }}>
+              {activeTab === 'compass' ? '🧭' : activeTab === 'calendar' ? '🗓️' : currentDomainMeta.icon}
+            </span>
+            <span style={{ fontSize: '14px', fontWeight: '800', color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {activeTab === 'compass'
+                ? 'Compass Assistant'
+                : activeTab === 'calendar'
+                ? 'Schedule'
+                : selectedDomain === 'all'
+                ? 'Timeline Feed'
+                : `${currentDomainMeta.label} Domain`}
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {toggleTheme && (
+              <button
+                id="mobile-theme-toggle"
+                type="button"
+                onClick={toggleTheme}
+                aria-label="Toggle Theme"
+                style={{
+                  background: 'var(--bg-card-soft)',
+                  border: '1px solid var(--border)',
+                  borderRadius: '8px',
+                  width: '40px',
+                  height: '40px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--text-primary)',
+                  cursor: 'pointer',
+                  fontSize: '16px',
+                }}
+              >
+                {theme === 'dark' ? '🌙' : '☀️'}
+              </button>
+            )}
+          </div>
+        </header>
+
         {activeTab === 'timeline' ? (
           <Timeline
             tasks={tasks}
             allTasks={allTasks}
             activeDomain={selectedDomain}
-            onSelectDomain={setSelectedDomain}
+            onSelectDomain={handleSelectDomain}
             customDomains={customDomains}
             theme={theme}
             onToggleTheme={toggleTheme}
@@ -344,7 +476,7 @@ export default function App() {
               refreshUsage()
             }}
             onOpenCompass={(prompt) => {
-              setActiveTab('compass')
+              navigateTo('compass', 'all')
               setPendingPrompt(prompt)
             }}
             onOpenTelemetry={() => setShowTelemetryModal(true)}
@@ -379,7 +511,7 @@ export default function App() {
               loadTasks(selectedDomain)
               refreshUsage()
             }}
-            onSelectTab={setActiveTab}
+            onSelectTab={handleSelectTab}
             pendingPrompt={pendingPrompt}
             onClearPendingPrompt={() => setPendingPrompt(null)}
             onOpenMigration={() => setShowMigrationModal(true)}

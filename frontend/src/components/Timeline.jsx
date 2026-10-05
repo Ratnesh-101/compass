@@ -91,7 +91,10 @@ export default function Timeline({
     }
   }
 
-  const filtered = activeDomain === 'all' ? tasks : tasks.filter(t => t.domain === activeDomain)
+  const domainMeta = activeDomain !== 'all' ? getDomainMeta(activeDomain) : null
+  const filtered = activeDomain === 'all'
+    ? tasks
+    : tasks.filter(t => (t.domain || 'general').toLowerCase().trim() === activeDomain)
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })
   const hasFallbackTasks = Array.isArray(tasks) && tasks.some(t => t.is_fallback)
 
@@ -121,11 +124,46 @@ export default function Timeline({
       {/* Header with Direct Add Deadline Button */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '22px', gap: '16px', flexWrap: 'wrap' }}>
         <div>
-          <h2 style={{ fontSize: '24px', fontWeight: '800', color: 'var(--text-primary)', letterSpacing: '-0.4px', margin: 0 }}>
-            Timeline Feed <span className="serif-accent" style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>— {today}</span>
-          </h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <h2 style={{ fontSize: '24px', fontWeight: '800', color: 'var(--text-primary)', letterSpacing: '-0.4px', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {domainMeta ? (
+                <>
+                  <span style={{ fontSize: '22px' }}>{domainMeta.icon}</span>
+                  <span>{domainMeta.label} Domain</span>
+                </>
+              ) : (
+                <span>Timeline Feed</span>
+              )}
+              <span className="serif-accent" style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>— {today}</span>
+            </h2>
+            {domainMeta && (
+              <button
+                type="button"
+                id="btn-return-all-domains"
+                onClick={() => onSelectDomain('all')}
+                style={{
+                  background: 'var(--bg-card)',
+                  border: '1px solid var(--border)',
+                  color: 'var(--text-secondary)',
+                  padding: '3px 10px',
+                  borderRadius: '12px',
+                  fontSize: '11px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.color = 'var(--brand)'; e.currentTarget.style.borderColor = 'var(--brand)' }}
+                onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-secondary)'; e.currentTarget.style.borderColor = 'var(--border)' }}
+                title="View all domains"
+              >
+                ← View all
+              </button>
+            )}
+          </div>
           <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '4px', marginBottom: 0 }}>
-            What's happening across your workspace today
+            {domainMeta
+              ? `Deadlines, context, and focus allocation for ${domainMeta.label}`
+              : "What's happening across your workspace today"}
           </p>
         </div>
 

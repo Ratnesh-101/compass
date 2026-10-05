@@ -312,12 +312,24 @@ export default function ChatPanel({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', minWidth: 0, background: 'var(--bg-app)', position: 'relative' }}>
       {/* Sleek Context & Control Sub-bar */}
-      <div style={{
-        padding: '10px 20px', borderBottom: '1px solid var(--border)', background: 'var(--bg-card)',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, gap: '12px'
-      }}>
+      <div
+        className="chat-control-bar"
+        style={{
+          padding: '8px 16px',
+          borderBottom: '1px solid var(--border)',
+          background: 'var(--bg-card)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexShrink: 0,
+          gap: '10px',
+          overflowX: 'auto',
+          maxWidth: '100%',
+          boxSizing: 'border-box',
+        }}
+      >
         {/* Left: History drawer toggle & Live connection indicator */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
           <button
             id="btn-toggle-history-drawer"
             onClick={() => setShowHistoryDrawer(v => !v)}
