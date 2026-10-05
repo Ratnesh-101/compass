@@ -32,7 +32,7 @@ async def get_profile_facts(
         )
         return {r["key"]: r["value"] for r in rows}
     except Exception as e:
-        logger.debug("Could not fetch profile facts for %s: %s", user_id, e)
+        logger.warning("Could not fetch profile facts for %s (continuing gracefully): %s", user_id, e)
         return {}
 
 

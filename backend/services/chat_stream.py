@@ -196,7 +196,8 @@ async def generate_chat_events(
                     async with pool.acquire() as conn:
                         from backend.memory.profile import get_profile_facts
                         return await get_profile_facts(conn, user_id=user_id or "default_user")
-                except Exception:
+                except Exception as e:
+                    logger.warning("Could not pre-fetch profile facts (continuing gracefully): %s", e)
                     return {}
 
             rows_h, prior, tasks_rows, profile_facts = await asyncio.gather(

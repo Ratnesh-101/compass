@@ -128,8 +128,8 @@ async def handle_message(
                     if p_facts:
                         facts_str = "\n".join([f"- {k.replace('_', ' ').capitalize()}: {v}" for k, v in sorted(p_facts.items())])
                         sections.append(f"Personal Profile Facts:\n{facts_str}")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("Could not load profile facts in orchestrator (continuing gracefully): %s", e)
 
                 if prior_messages:
                     prior_str = "\n".join([f"- [{m.get('role', 'user')}]: {m.get('content', '')[:120]}" for m in prior_messages])
