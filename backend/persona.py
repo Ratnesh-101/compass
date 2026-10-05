@@ -65,7 +65,7 @@ VOICE:
 BEHAVIOR:
 - Say "I don't know" when true. Never bluff.
 - Disagree kindly: if a plan has a hole (e.g. colliding deadlines), say so gently and suggest a fix.
-- On heavy topics, offer a mode: "Do you want advice, a sounding board, or a plan?"
+- On heavy or open-ended topics, offer a mode: "Do you want advice, a sounding board, or a plan?" and append the marker [[modes]] at the end of your response.
 - Never guilt the user for being away, indecisive, or changing their mind.
 - If the user seems stressed, slow down and acknowledge it before any productivity advice.
 - Only reference what the user actually told you. Never guess or invent details."""
@@ -100,12 +100,46 @@ def validate_tone(tone: Optional[str]) -> Optional[str]:
     return normalized if normalized in VALID_TONES else None
 
 
+# ============================================================================
+# Conversational Mode Validation & Instructions (Advice / Sounding Board / Plan)
+# ============================================================================
+
+VALID_CONV_MODES = {"advice", "sounding_board", "plan"}
+
+CONV_MODE_INSTRUCTIONS: Dict[str, str] = {
+    "advice": (
+        "[MODE: ADVICE]: Give a clear, decisive recommendation with reasoning. "
+        "Don't equivocate or dump pros and cons without a stance."
+    ),
+    "sounding_board": (
+        "[MODE: SOUNDING BOARD]: Listen and reflect back what you heard. "
+        "Help the user think through their thoughts. Ask clarifying questions and minimize unsolicited advice."
+    ),
+    "plan": (
+        "[MODE: PLAN]: Break the problem into concrete, sequential steps with clear next actions. "
+        "Keep it actionable, realistic, and unhurried."
+    ),
+}
+
+
+def validate_conv_mode(mode: Optional[str]) -> Optional[str]:
+    """Validate conversational mode against allowed values (advice, sounding_board, plan).
+
+    Returns lowercase valid mode or None if invalid/unspecified.
+    """
+    if not mode or not isinstance(mode, str):
+        return None
+    normalized = mode.strip().lower()
+    return normalized if normalized in VALID_CONV_MODES else None
+
+
 def build_persona_system_prompt(
     profile_facts: Optional[Dict[str, str]] = None,
     extra_context: Optional[str] = None,
     mode: str = "chat",
     tone: Optional[str] = None,
     parked_thoughts: Optional[List[str]] = None,
+    conv_mode: Optional[str] = None,
 ) -> str:
     """Build a persona prompt for user-facing completions.
 
@@ -148,6 +182,11 @@ def build_persona_system_prompt(
     clean_tone = validate_tone(tone)
     if clean_tone and clean_tone in TONE_INSTRUCTIONS:
         parts.append(f"\n\n{TONE_INSTRUCTIONS[clean_tone]}")
+
+    # Validate conversational mode and append specific instruction
+    clean_conv_mode = validate_conv_mode(conv_mode)
+    if clean_conv_mode and clean_conv_mode in CONV_MODE_INSTRUCTIONS:
+        parts.append(f"\n\n{CONV_MODE_INSTRUCTIONS[clean_conv_mode]}")
 
     if mode == "synthesis":
         parts.append(

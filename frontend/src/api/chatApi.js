@@ -7,7 +7,7 @@ import { API_BASE, getAuthHeaders } from './baseClient'
  * Passes conversation_id for multi-turn memory.
  * Returns { response, conversation_id } on success.
  */
-export async function sendQueryToAssistant(prompt, conversationId, tone = null) {
+export async function sendQueryToAssistant(prompt, conversationId, tone = null, mode = null) {
   try {
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 45000)
@@ -18,6 +18,9 @@ export async function sendQueryToAssistant(prompt, conversationId, tone = null) 
     }
     if (tone) {
       body.tone = tone
+    }
+    if (mode) {
+      body.mode = mode
     }
 
     const res = await fetch(`${API_BASE}/api/chat`, {
@@ -50,11 +53,24 @@ export async function sendQueryToAssistant(prompt, conversationId, tone = null) 
 }
 
 /**
+ * Strips completed [[modes]] marker and suppresses incomplete trailing marker prefixes
+ * (e.g. '[', '[[', '[[m', '[[modes', etc.) from flashing in the streaming UI.
+ */
+export function sanitizeModesMarker(text) {
+  if (!text) return ''
+  // Remove all complete occurrences of [[modes]]
+  let clean = text.replace(/\[\[modes\]\]/gi, '')
+  // Strip trailing partial prefix of [[modes]]
+  clean = clean.replace(/\[(?:\[(?:m(?:o(?:d(?:e(?:s\]?)?)?)?)?)?)?$/i, '')
+  return clean
+}
+
+/**
  * Stream chat tokens via Server-Sent Events (SSE) from /api/chat/stream.
  * Dispatches incremental tokens via onToken, completion metadata via onComplete,
  * and errors via onError.
  */
-export async function streamQueryFromAssistant(prompt, conversationId, { onToken, onComplete, onError, tone = null } = {}) {
+export async function streamQueryFromAssistant(prompt, conversationId, { onToken, onComplete, onError, tone = null, mode = null } = {}) {
   try {
     const body = { message: prompt }
     if (conversationId) {
@@ -62,6 +78,9 @@ export async function streamQueryFromAssistant(prompt, conversationId, { onToken
     }
     if (tone) {
       body.tone = tone
+    }
+    if (mode) {
+      body.mode = mode
     }
 
     const res = await fetch(`${API_BASE}/api/chat/stream`, {
@@ -112,12 +131,12 @@ export async function streamQueryFromAssistant(prompt, conversationId, { onToken
 
         if (evt.type === 'token') {
           fullResponse += evt.value
-          if (onToken) onToken(evt.value, fullResponse)
+          if (onToken) onToken(evt.value, sanitizeModesMarker(fullResponse))
         } else if (evt.type === 'replace') {
           // Server detected a tool call after partial streaming —
           // discard any leaked markup and replace with the clean response.
           fullResponse = evt.value || ''
-          if (onToken) onToken(fullResponse, fullResponse)
+          if (onToken) onToken(fullResponse, sanitizeModesMarker(fullResponse))
         } else if (evt.type === 'done') {
           if (evt.conversation_id) lastConvId = evt.conversation_id
           if (evt.skill_used) lastSkill = evt.skill_used

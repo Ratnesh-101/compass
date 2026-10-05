@@ -61,6 +61,7 @@ async def handle_message(
     memory_context: Optional[str] = None,
     persist: bool = True,
     tone: Optional[str] = None,
+    conv_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Process an incoming user message through router and skill handlers."""
     start_time = time.perf_counter()
@@ -169,6 +170,8 @@ async def handle_message(
         args["user_id"] = user_id
     if tone and isinstance(args, dict):
         args["tone"] = tone
+    if conv_mode and isinstance(args, dict):
+        args["conv_mode"] = conv_mode
 
     # 2. Skill Execution: add_task
     if skill_name == "add_task" and args:

@@ -13,6 +13,7 @@ class ChatRequest(BaseModel):
     message: str
     conversation_id: Optional[str] = None
     tone: Optional[str] = None
+    mode: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
@@ -234,6 +235,7 @@ class StreamChatRequest(BaseModel):
     conversation_id: Optional[str] = None
     domain: Optional[str] = None
     tone: Optional[str] = None
+    mode: Optional[str] = None
 
 
 class AgentRequest(BaseModel):

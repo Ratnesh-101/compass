@@ -629,3 +629,57 @@ async def test_chat_recap_endpoint(client: AsyncClient, auth_headers: dict):
         assert "That's a solid next step. Want me to write it down?" in data_recap["recap"]
 
 
+def test_conv_mode_validation():
+    """Verify validation of conversation modes (advice, sounding_board, plan)."""
+    from backend.persona import validate_conv_mode, VALID_CONV_MODES
+
+    assert VALID_CONV_MODES == {"advice", "sounding_board", "plan"}
+    assert validate_conv_mode("advice") == "advice"
+    assert validate_conv_mode("ADVICE") == "advice"
+    assert validate_conv_mode("  sounding_board  ") == "sounding_board"
+    assert validate_conv_mode("Plan") == "plan"
+    assert validate_conv_mode("unknown") is None
+    assert validate_conv_mode("") is None
+    assert validate_conv_mode(None) is None
+
+
+def test_build_persona_system_prompt_with_conv_mode():
+    """Verify conversational mode instruction injection into system prompt."""
+    from backend.persona import build_persona_system_prompt
+
+    prompt_advice = build_persona_system_prompt(conv_mode="advice")
+    assert "[MODE: ADVICE]: Give a clear, decisive recommendation with reasoning." in prompt_advice
+
+    prompt_sb = build_persona_system_prompt(conv_mode="sounding_board")
+    assert "[MODE: SOUNDING BOARD]: Listen and reflect back what you heard." in prompt_sb
+
+    prompt_plan = build_persona_system_prompt(conv_mode="plan")
+    assert "[MODE: PLAN]: Break the problem into concrete, sequential steps" in prompt_plan
+
+    prompt_none = build_persona_system_prompt(conv_mode=None)
+    assert "[MODE:" not in prompt_none
+
+    prompt_invalid = build_persona_system_prompt(conv_mode="random_mode")
+    assert "[MODE:" not in prompt_invalid
+
+
+def test_persona_core_instructions_includes_modes_marker():
+    """Verify persona core instructions contain the [[modes]] marker instruction."""
+    from backend.persona import PERSONA_CORE_INSTRUCTIONS
+
+    assert '[[modes]]' in PERSONA_CORE_INSTRUCTIONS
+    assert 'Do you want advice, a sounding board, or a plan?' in PERSONA_CORE_INSTRUCTIONS
+
+
+def test_chat_models_accept_mode():
+    """Verify ChatRequest and StreamChatRequest accept mode field."""
+    from backend.models import ChatRequest, StreamChatRequest
+
+    req = ChatRequest(message="help me decide", mode="advice")
+    assert req.mode == "advice"
+
+    s_req = StreamChatRequest(message="let's make a timeline", mode="plan")
+    assert s_req.mode == "plan"
+
+
+

@@ -81,7 +81,8 @@ function getEmptyStateGreeting(isReturning, userName, startingPool = DEFAULT_STA
  */
 function renderFormattedMessage(text) {
   if (!text) return null
-  const lines = text.split('\n')
+  const cleaned = text.replace(/\[\[modes\]\]/gi, '').trim()
+  const lines = cleaned.split('\n')
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
@@ -167,6 +168,7 @@ export default function ChatMessageList({
   profileFacts = {},
   pastConversations = [],
   onSendMessage,
+  onSelectMode,
 }) {
   const [startingPhrases, setStartingPhrases] = useState(DEFAULT_STARTING_PHRASES)
   const [returningPhrases, setReturningPhrases] = useState(DEFAULT_RETURNING_PHRASES)
@@ -279,34 +281,73 @@ export default function ChatMessageList({
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            {messages.map((msg, idx) => (
-              <div key={idx} style={{ display: 'flex', gap: '10px', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
-                {msg.role === 'assistant' && (
-                  <div style={{
-                    width: '30px', height: '30px', borderRadius: '8px', background: 'var(--bg-sidebar)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', flexShrink: 0
-                  }}>
-                    🧭
+            {messages.map((msg, idx) => {
+              const hasModes = msg.role === 'assistant' && typeof msg.text === 'string' && msg.text.includes('[[modes]]')
+              const isLatest = idx === messages.length - 1
+              const showModes = hasModes && isLatest && !isStreaming
+
+              return (
+                <div key={idx} style={{ display: 'flex', flexDirection: 'column', alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start', gap: '8px' }}>
+                  <div style={{ display: 'flex', gap: '10px', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start', width: '100%' }}>
+                    {msg.role === 'assistant' && (
+                      <div style={{
+                        width: '30px', height: '30px', borderRadius: '8px', background: 'var(--bg-sidebar)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', flexShrink: 0
+                      }}>
+                        🧭
+                      </div>
+                    )}
+                    <div style={{
+                      maxWidth: '75%',
+                      padding: '13px 17px',
+                      borderRadius: '14px',
+                      background: msg.role === 'user' ? 'var(--bg-sidebar)' : 'var(--bg-card)',
+                      color: msg.role === 'user' ? 'var(--text-on-dark)' : 'var(--text-primary)',
+                      fontSize: '13.5px',
+                      lineHeight: '1.5',
+                      border: msg.role === 'user' ? 'none' : '1px solid var(--border)',
+                      boxShadow: 'var(--shadow-sm)'
+                    }}>
+                      {msg.role === 'user' ? msg.text : renderFormattedMessage(msg.text)}
+                      {msg.role === 'assistant' && msg.evidence && (
+                        <EvidenceCard evidence={msg.evidence} />
+                      )}
+                    </div>
                   </div>
-                )}
-                <div style={{
-                  maxWidth: '75%',
-                  padding: '13px 17px',
-                  borderRadius: '14px',
-                  background: msg.role === 'user' ? 'var(--bg-sidebar)' : 'var(--bg-card)',
-                  color: msg.role === 'user' ? 'var(--text-on-dark)' : 'var(--text-primary)',
-                  fontSize: '13.5px',
-                  lineHeight: '1.5',
-                  border: msg.role === 'user' ? 'none' : '1px solid var(--border)',
-                  boxShadow: 'var(--shadow-sm)'
-                }}>
-                  {msg.role === 'user' ? msg.text : renderFormattedMessage(msg.text)}
-                  {msg.role === 'assistant' && msg.evidence && (
-                    <EvidenceCard evidence={msg.evidence} />
+
+                  {showModes && (
+                    <div style={{
+                      display: 'flex',
+                      gap: '8px',
+                      marginLeft: '40px',
+                      flexWrap: 'wrap',
+                    }}>
+                      <button
+                        type="button"
+                        className="mode-quick-btn"
+                        onClick={() => onSelectMode ? onSelectMode('advice', 'Advice') : onSendMessage && onSendMessage('Advice')}
+                      >
+                        💡 Advice
+                      </button>
+                      <button
+                        type="button"
+                        className="mode-quick-btn"
+                        onClick={() => onSelectMode ? onSelectMode('sounding_board', 'Sounding board') : onSendMessage && onSendMessage('Sounding board')}
+                      >
+                        👂 Sounding board
+                      </button>
+                      <button
+                        type="button"
+                        className="mode-quick-btn"
+                        onClick={() => onSelectMode ? onSelectMode('plan', 'Plan') : onSendMessage && onSendMessage('Plan')}
+                      >
+                        📋 Plan
+                      </button>
+                    </div>
                   )}
                 </div>
-              </div>
-            ))}
+              )
+            })}
 
             {/* Active Progressive Token Streaming Bubble */}
             {isStreaming && (

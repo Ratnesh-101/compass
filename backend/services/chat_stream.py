@@ -263,6 +263,7 @@ async def generate_chat_events(
             extra_context=extra,
             tone=getattr(req, "tone", None),
             parked_thoughts=parked_items if isinstance(parked_items, list) and parked_items else None,
+            conv_mode=getattr(req, "mode", None),
         )
 
         messages: List[ChatCompletionMessageParam] = [

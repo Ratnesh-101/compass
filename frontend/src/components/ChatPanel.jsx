@@ -41,6 +41,7 @@ export default function ChatPanel({
       return 'balanced'
     }
   })
+  const [convMode, setConvMode] = useState(null)
 
   const handleToneChange = (newTone) => {
     setTone(newTone)
@@ -208,13 +209,20 @@ export default function ChatPanel({
     }
   }
 
-  const handleSend = async (textToSend) => {
+  const handleSelectMode = (selectedMode, label) => {
+    setConvMode(selectedMode)
+    handleSend(label, selectedMode)
+  }
+
+  const handleSend = async (textToSend, overrideMode = null) => {
     const text = (textToSend || input).trim()
     if (!text || isStreaming || isTyping || isSendingRef.current) return
 
     if (text.toLowerCase() === 'recap where i left off') {
       return handleRecap()
     }
+
+    const activeMode = overrideMode !== null ? overrideMode : convMode
 
     isSendingRef.current = true
     setInput('')
@@ -228,6 +236,7 @@ export default function ChatPanel({
     try {
       await streamQueryFromAssistant(text, conversationId, {
         tone,
+        mode: activeMode,
         onToken: (token, full) => {
           receivedTokens = full
           setStreamingText(full)
@@ -237,8 +246,9 @@ export default function ChatPanel({
           setIsStreaming(false)
           setStreamingText('')
           isSendingRef.current = false
-          if (receivedTokens && receivedTokens.trim()) {
-            setMessages(prev => [...prev, { role: 'assistant', text: receivedTokens }])
+          const finalText = doneData?.response || receivedTokens
+          if (finalText && finalText.trim()) {
+            setMessages(prev => [...prev, { role: 'assistant', text: finalText }])
           } else if (onSendMessage) {
             const reply = await onSendMessage(text, tone)
             if (reply) {
@@ -339,6 +349,7 @@ export default function ChatPanel({
 
   const handleNewChat = () => {
     if (isStreaming || isTyping) return
+    setConvMode(null)
     setMessages([
       {
         role: 'assistant',
@@ -351,6 +362,7 @@ export default function ChatPanel({
 
   const handleSelectPastChat = async (pastConvId) => {
     if (isStreaming || isTyping) return
+    setConvMode(null)
     try {
       if (setConversationId) setConversationId(pastConvId)
       const msgs = await fetchConversationMessages(pastConvId)
@@ -724,6 +736,7 @@ export default function ChatPanel({
             profileFacts={profileFacts}
             pastConversations={pastConversations}
             onSendMessage={handleSend}
+            onSelectMode={handleSelectMode}
           />
 
           <ChatInputBar
