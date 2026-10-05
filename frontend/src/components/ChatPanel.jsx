@@ -14,6 +14,8 @@ import {
 import ChatHistoryDrawer from './chat/ChatHistoryDrawer'
 import ChatChatMessageList from './chat/ChatMessageList'
 import ChatInputBar from './chat/ChatInputBar'
+import ChatContextBar from './chat/ChatContextBar'
+import ParkedThoughtsShelf from './chat/ParkedThoughtsShelf'
 
 export default function ChatPanel({
   messages, setMessages, conversationId, setConversationId, onSendMessage, isTyping, onChatComplete,
@@ -611,120 +613,20 @@ export default function ChatPanel({
         {/* Main Chat Feed & Input */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, height: '100%', overflow: 'hidden' }}>
           {showContext && (
-            <div style={{
-              display: 'flex', gap: '10px', padding: '12px 24px', borderBottom: '1px solid var(--border)',
-              background: 'var(--bg-card)', flexShrink: 0, flexWrap: 'wrap'
-            }}>
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 12px', borderRadius: '10px',
-                background: overdueCount > 0 ? 'var(--danger-bg)' : 'var(--code-bg)', minWidth: '170px'
-              }}>
-                <span style={{ fontSize: '16px' }}>{overdueCount > 0 ? '⚠️' : '✅'}</span>
-                <div>
-                  <div style={{ fontSize: '12px', fontWeight: '700', color: overdueCount > 0 ? '#b23b3b' : 'var(--code-text)' }}>
-                    {overdueCount > 0 ? `${overdueCount} overdue` : 'On schedule'}
-                  </div>
-                  <div style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>Across all domains</div>
-                </div>
-              </div>
-
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 12px', borderRadius: '10px',
-                background: 'var(--coursework-bg)', minWidth: '170px'
-              }}>
-                <span style={{ fontSize: '16px' }}>📋</span>
-                <div>
-                  <div style={{ fontSize: '12px', fontWeight: '700', color: 'var(--coursework-text)' }}>
-                    {tasks.length} task{tasks.length === 1 ? '' : 's'} tracked
-                  </div>
-                  <div style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>Live in Neon</div>
-                </div>
-              </div>
-
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 12px', borderRadius: '10px',
-                background: isOnline ? 'var(--code-bg)' : 'var(--hackathon-bg)', minWidth: '170px'
-              }}>
-                <span style={{ fontSize: '16px' }}>{isOnline ? '🟢' : '🟡'}</span>
-                <div>
-                  <div style={{ fontSize: '12px', fontWeight: '700', color: isOnline ? 'var(--code-text)' : 'var(--hackathon-text)' }}>
-                    {isOnline ? 'Backend live' : 'Backend offline'}
-                  </div>
-                  <div style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>{backendStatus}</div>
-                </div>
-              </div>
-            </div>
+            <ChatContextBar
+              overdueCount={overdueCount}
+              taskCount={tasks.length}
+              isOnline={isOnline}
+              backendStatus={backendStatus}
+            />
           )}
 
           {/* Collapsible Parked Thoughts Shelf */}
           {showParkedShelf && (
-            <div
-              id="parked-thoughts-shelf"
-              style={{
-                padding: '10px 20px',
-                borderBottom: '1px solid var(--border)',
-                background: 'var(--bg-card-soft)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '8px',
-                flexShrink: 0,
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', color: 'var(--text-secondary)', letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                  <span>📌</span>
-                  <span>Parked Thoughts Shelf</span>
-                  <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 'normal' }}>({parkedThoughts.length} open)</span>
-                </span>
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                  Tangents to revisit when you have breathing room
-                </span>
-              </div>
-              {parkedThoughts.length === 0 ? (
-                <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic', padding: '4px 0' }}>
-                  No thoughts parked right now. Tell Compass "park that" anytime in chat to defer a topic.
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                  {parkedThoughts.map((item) => (
-                    <div
-                      key={item.id}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        padding: '5px 11px',
-                        borderRadius: '8px',
-                        background: 'var(--bg-card)',
-                        border: '1px solid var(--border)',
-                        fontSize: '12px',
-                        maxWidth: '100%',
-                      }}
-                    >
-                      <span style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>{item.text}</span>
-                      <button
-                        type="button"
-                        onClick={() => handleResolveParked(item.id)}
-                        style={{
-                          padding: '2px 7px',
-                          borderRadius: '5px',
-                          border: 'none',
-                          background: 'var(--coursework-bg)',
-                          color: 'var(--coursework)',
-                          fontSize: '10.5px',
-                          fontWeight: '700',
-                          cursor: 'pointer',
-                          flexShrink: 0,
-                        }}
-                        title="Mark done"
-                      >
-                        ✓ Done
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            <ParkedThoughtsShelf
+              parkedThoughts={parkedThoughts}
+              onResolveParked={handleResolveParked}
+            />
           )}
 
           <ChatChatMessageList

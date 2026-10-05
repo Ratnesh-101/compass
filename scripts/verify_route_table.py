@@ -163,6 +163,8 @@ def verify_all_routes():
     seen = set()
     for route in sorted(app.routes, key=lambda r: getattr(r, "path", "")):
         path = getattr(route, "path", "")
+        if path in ("/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"):
+            continue
         methods = getattr(route, "methods", set())
         for m in sorted(methods):
             if m in ("OPTIONS", "HEAD"):
