@@ -111,8 +111,8 @@ def test_format_tool_response():
     assert res_plain == "Action completed."
 
 
-def test_router_prompt_remains_lean():
-    """Verify Nano router prompt remains fast (<400ms) without persona text bloat."""
+def test_router_prompt_size_and_contents():
+    """Verify Nano router prompt remains free of persona text bloat and keeps minimal size."""
     import inspect
     import backend.router as router_mod
 
