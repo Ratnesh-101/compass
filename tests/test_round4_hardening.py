@@ -290,10 +290,11 @@ async def test_sse_tool_call_emits_no_duplicate_text():
         async for ev in resp.body_iterator:
             events.append(_to_text(ev))
 
-        # Ensure tool was executed and zero duplicate partial token events emitted
+        # Ensure tool was executed and full text is emitted incrementally without duplicate partial buffered text
         token_events = [e for e in events if '"type": "token"' in e]
-        assert len(token_events) == 1
-        assert "Tool completed" in token_events[0]
+        assert len(token_events) >= 1
+        full_text = "".join(json.loads(e.replace("data: ", "").strip())["value"] for e in token_events)
+        assert full_text == "Tool completed"
 
 
 @pytest.mark.asyncio

@@ -31,8 +31,10 @@ def test_production_fail_closed_with_dev_auth_token():
         ENVIRONMENT="production",
         AUTH_TOKEN="dev-token",
         TOKEN_ENCRYPTION_KEY="custom-secure-key-for-prod-32bytes!",
+        GUEST_SIGNING_SECRET="custom-secure-guest-signing-secret-32bytes!",
+        EDGE_HMAC_SECRET="custom-secure-edge-hmac-secret-32bytes!",
     )
-    with pytest.raises(ValueError, match="CRITICAL SECURITY CONFIGURATION ERROR: AUTH_TOKEN"):
+    with pytest.raises(ValueError, match=r"CRITICAL SECURITY CONFIGURATION ERROR:.*AUTH_TOKEN"):
         prod_settings.validate_production_secrets()
 
 
@@ -42,8 +44,10 @@ def test_production_fail_closed_with_empty_auth_token():
         ENVIRONMENT="production",
         AUTH_TOKEN="",
         TOKEN_ENCRYPTION_KEY="custom-secure-key-for-prod-32bytes!",
+        GUEST_SIGNING_SECRET="custom-secure-guest-signing-secret-32bytes!",
+        EDGE_HMAC_SECRET="custom-secure-edge-hmac-secret-32bytes!",
     )
-    with pytest.raises(ValueError, match="CRITICAL SECURITY CONFIGURATION ERROR: AUTH_TOKEN"):
+    with pytest.raises(ValueError, match=r"CRITICAL SECURITY CONFIGURATION ERROR:.*AUTH_TOKEN"):
         prod_settings.validate_production_secrets()
 
 
@@ -53,8 +57,10 @@ def test_production_fail_closed_with_default_encryption_key():
         ENVIRONMENT="production",
         AUTH_TOKEN="real-production-secret-token-12345",
         TOKEN_ENCRYPTION_KEY="compass_secure_local_dev_token_encryption_key_32bytes!",
+        GUEST_SIGNING_SECRET="custom-secure-guest-signing-secret-32bytes!",
+        EDGE_HMAC_SECRET="custom-secure-edge-hmac-secret-32bytes!",
     )
-    with pytest.raises(ValueError, match="CRITICAL SECURITY CONFIGURATION ERROR: TOKEN_ENCRYPTION_KEY"):
+    with pytest.raises(ValueError, match=r"CRITICAL SECURITY CONFIGURATION ERROR:.*TOKEN_ENCRYPTION_KEY"):
         prod_settings.validate_production_secrets()
 
 
