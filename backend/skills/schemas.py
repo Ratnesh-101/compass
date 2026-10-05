@@ -501,6 +501,46 @@ APPLY_TRIAGE_PLAN_TOOL: Dict[str, Any] = {
     },
 }
 
+REMEMBER_FACT_TOOL: Dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "remember_fact",
+        "description": "Store or update an explicit personal fact or preference shared by the user (name, goals, preferences, worries).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string",
+                    "description": "The category or attribute key (e.g. 'name', 'goal', 'preference', 'study_topic')",
+                },
+                "value": {
+                    "type": "string",
+                    "description": "The specific detail or preference to remember",
+                },
+            },
+            "required": ["key", "value"],
+        },
+    },
+}
+
+FORGET_FACT_TOOL: Dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "forget_fact",
+        "description": "Delete a previously remembered personal fact or preference when the user asks to forget it.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string",
+                    "description": "The key or attribute to remove (e.g. 'name', 'goal', 'preference')",
+                },
+            },
+            "required": ["key"],
+        },
+    },
+}
+
 # Registered tools exposed to the Nemotron router
 BASE_TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     ADD_TASK_TOOL,
@@ -525,6 +565,8 @@ BASE_TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     DETECT_SCHEDULE_CONFLICTS_TOOL,
     ASSESS_FEASIBILITY_TOOL,
     APPLY_TRIAGE_PLAN_TOOL,
+    REMEMBER_FACT_TOOL,
+    FORGET_FACT_TOOL,
 ]
 
 

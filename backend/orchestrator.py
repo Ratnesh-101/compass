@@ -122,6 +122,15 @@ async def handle_message(
                 )
 
                 sections = []
+                try:
+                    from backend.memory.profile import get_profile_facts
+                    p_facts = await get_profile_facts(conn, user_id=user_id or "default_user")
+                    if p_facts:
+                        facts_str = "\n".join([f"- {k.replace('_', ' ').capitalize()}: {v}" for k, v in sorted(p_facts.items())])
+                        sections.append(f"Personal Profile Facts:\n{facts_str}")
+                except Exception:
+                    pass
+
                 if prior_messages:
                     prior_str = "\n".join([f"- [{m.get('role', 'user')}]: {m.get('content', '')[:120]}" for m in prior_messages])
                     sections.append(f"Past Chats Recall:\n{prior_str}")

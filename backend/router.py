@@ -149,9 +149,10 @@ def message_needs_tools(message: str) -> bool:
         "feasible", "feasibility", "finish in time", "can i finish", "what to drop",
         "what should i drop", "what i drop", "triage", "overload", "overloaded",
         "overcommit", "capacity",
-        # Memory & Notes
+        # Memory & Personal Profile Facts
         "memory", "remember", "recall", "stored", "save", "log", "note", "notes",
-        "remind", "reminder",
+        "remind", "reminder", "call me", "my name is", "my name's", "prefer",
+        "preference", "forget", "my goal",
         # Agent & Planner
         "planner", "agent", "plan", "execute",
     )
@@ -161,6 +162,24 @@ def message_needs_tools(message: str) -> bool:
 
 def _fallback_route(message: str, history: Optional[list[dict[str, str]]] = None) -> Tuple[Optional[str], Optional[dict[str, Any]], str]:
     msg_lower = message.lower()
+    if any(k in msg_lower for k in ("call me", "my name is", "my name's")):
+        for prefix in ("call me", "my name is", "my name's"):
+            if prefix in msg_lower:
+                name_val = message[msg_lower.find(prefix) + len(prefix):].strip(" .!?")
+                if name_val:
+                    return "remember_fact", {"key": "name", "value": name_val}, ""
+    if "forget" in msg_lower:
+        for prefix in ("forget my", "forget that", "forget"):
+            if prefix in msg_lower:
+                target = msg_lower.split(prefix, 1)[-1].strip(".!? ")
+                if target:
+                    return "forget_fact", {"key": target.replace(" ", "_")}, ""
+    if any(prefix in msg_lower for prefix in ("my goal is", "my goal:")):
+        for prefix in ("my goal is", "my goal:"):
+            if prefix in msg_lower:
+                goal_val = message[msg_lower.find(prefix) + len(prefix):].strip(" .!?")
+                if goal_val:
+                    return "remember_fact", {"key": "goal", "value": goal_val}, ""
     if any(term in msg_lower for term in ("feasibility", "can i finish", "what to drop", "what should i drop", "what i drop", "triage", "overloaded", "overcommit", "adversarial")):
         import re
         days_match = re.search(r"\b([0-9]{1,4})\s*days?\b", msg_lower)

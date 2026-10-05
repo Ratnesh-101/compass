@@ -76,6 +76,7 @@ from backend.routers import (
     calendar_router,
     auth_router,
     migration_router,
+    profile_router,
 )
 
 # ---------------------------------------------------------------------------
@@ -223,4 +224,5 @@ app.include_router(agent_router)
 app.include_router(calendar_router)
 app.include_router(auth_router)
 app.include_router(migration_router)
+app.include_router(profile_router)
 

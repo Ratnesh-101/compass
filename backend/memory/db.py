@@ -221,6 +221,19 @@ async def _ensure_tables(pool: asyncpg.Pool) -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         );
         CREATE INDEX IF NOT EXISTS idx_guest_mint_created ON guest_mint_log(created_at);
+
+        -- Persistent Profile Facts Memory
+        CREATE TABLE IF NOT EXISTS user_profile_facts (
+            id                 SERIAL        PRIMARY KEY,
+            user_id            TEXT          NOT NULL DEFAULT 'default_user',
+            key                TEXT          NOT NULL,
+            value              TEXT          NOT NULL,
+            source_message_id  INTEGER       REFERENCES messages(id) ON DELETE SET NULL,
+            created_at         TIMESTAMPTZ   NOT NULL DEFAULT now(),
+            updated_at         TIMESTAMPTZ   NOT NULL DEFAULT now(),
+            UNIQUE(user_id, key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_user_profile_facts_user ON user_profile_facts(user_id);
         """)
 
 

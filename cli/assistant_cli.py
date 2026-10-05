@@ -591,6 +591,34 @@ def triage(
     )
 
 
+@app.command("memory")
+def view_memory():
+    """🧠 View personal profile facts and preferences remembered by Compass."""
+    try:
+        resp = httpx.get(f"{API_BASE}/api/profile/facts", headers=_headers(), timeout=10.0)
+        resp.raise_for_status()
+        data = resp.json()
+        facts = data.get("facts", {})
+        if not facts:
+            console.print("[compass.dim]No personal profile facts stored yet. Tell Compass your name, goals, or preferences in chat.[/]")
+            return
+
+        table = Table(
+            title="🧠 What Compass Remembers About You",
+            box=box.ROUNDED,
+            header_style="bold magenta",
+        )
+        table.add_column("Category", style="cyan", width=18)
+        table.add_column("Detail / Preference", style="green")
+
+        for k, v in sorted(facts.items()):
+            table.add_row(k.replace("_", " ").capitalize(), str(v))
+
+        console.print(table)
+    except Exception as e:
+        console.print(f"[compass.error]❌ Failed to fetch memory facts: {e}[/]")
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------

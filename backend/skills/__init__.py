@@ -33,6 +33,8 @@ from backend.skills.schemas import (
     DETECT_SCHEDULE_CONFLICTS_TOOL,
     ASSESS_FEASIBILITY_TOOL,
     APPLY_TRIAGE_PLAN_TOOL,
+    REMEMBER_FACT_TOOL,
+    FORGET_FACT_TOOL,
     BASE_TOOL_DEFINITIONS,
     get_tool_definitions,
     TOOL_DEFINITIONS,
@@ -75,6 +77,8 @@ from backend.skills.handlers import (
     handle_detect_schedule_conflicts,
     handle_assess_feasibility,
     handle_apply_triage_plan,
+    handle_remember_fact,
+    handle_forget_fact,
 )
 
 __all__ = [
@@ -142,4 +146,8 @@ __all__ = [
     "handle_detect_schedule_conflicts",
     "handle_assess_feasibility",
     "handle_apply_triage_plan",
+    "handle_remember_fact",
+    "handle_forget_fact",
+    "REMEMBER_FACT_TOOL",
+    "FORGET_FACT_TOOL",
 ]

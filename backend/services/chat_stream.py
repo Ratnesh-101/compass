@@ -191,9 +191,19 @@ async def generate_chat_events(
                             "SELECT title, domain, due_date, status, priority FROM tasks WHERE status != 'completed' ORDER BY due_date ASC NULLS LAST LIMIT 8"
                         )
 
-            rows_h, prior, tasks_rows = await asyncio.gather(
-                _load_history(), _load_prior(), _load_tasks(), return_exceptions=True
+            async def _load_facts():
+                try:
+                    async with pool.acquire() as conn:
+                        from backend.memory.profile import get_profile_facts
+                        return await get_profile_facts(conn, user_id=user_id or "default_user")
+                except Exception:
+                    return {}
+
+            rows_h, prior, tasks_rows, profile_facts = await asyncio.gather(
+                _load_history(), _load_prior(), _load_tasks(), _load_facts(), return_exceptions=True
             )
+            if not isinstance(profile_facts, dict):
+                profile_facts = {}
             if isinstance(rows_h, list):
                 for r in rows_h:
                     role = r.get("role", "user")
@@ -213,6 +223,7 @@ async def generate_chat_events(
                 memory_context = "\n\n".join(mem_parts)
     except Exception as e:
         logger.debug("Pre-fetch failed: %s", e)
+        profile_facts = {}
 
     stream = None
     try:
@@ -233,7 +244,7 @@ async def generate_chat_events(
             extra += f"\n\n[WORKSPACE MEMORY & PAST CONTEXT]:\n{memory_context}"
 
         from backend.persona import build_persona_system_prompt
-        sys_prompt = build_persona_system_prompt(extra_context=extra)
+        sys_prompt = build_persona_system_prompt(profile_facts=profile_facts if isinstance(profile_facts, dict) else None, extra_context=extra)
 
         messages: List[ChatCompletionMessageParam] = [
             {"role": "system", "content": sys_prompt},

@@ -236,4 +236,20 @@ CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_revoked_at ON sessions(revoked_at);
 
+-- ============================================================
+-- Profile Facts — persistent personal facts (name, goals, preferences)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS user_profile_facts (
+    id                 SERIAL        PRIMARY KEY,
+    user_id            TEXT          NOT NULL DEFAULT 'default_user',
+    key                TEXT          NOT NULL,
+    value              TEXT          NOT NULL,
+    source_message_id  INTEGER       REFERENCES messages(id) ON DELETE SET NULL,
+    created_at         TIMESTAMPTZ   NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ   NOT NULL DEFAULT now(),
+    UNIQUE(user_id, key)
+);
+CREATE INDEX IF NOT EXISTS idx_user_profile_facts_user ON user_profile_facts(user_id);
+
+
 

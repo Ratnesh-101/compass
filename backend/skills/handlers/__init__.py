@@ -41,6 +41,10 @@ from backend.skills.handlers.feasibility import (
     handle_assess_feasibility,
     handle_apply_triage_plan,
 )
+from backend.skills.handlers.profile import (
+    handle_remember_fact,
+    handle_forget_fact,
+)
 
 __all__ = [
     "handle_search_web",
@@ -70,4 +74,6 @@ __all__ = [
     "handle_detect_schedule_conflicts",
     "handle_assess_feasibility",
     "handle_apply_triage_plan",
+    "handle_remember_fact",
+    "handle_forget_fact",
 ]
