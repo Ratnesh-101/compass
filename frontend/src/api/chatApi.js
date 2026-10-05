@@ -289,3 +289,18 @@ export async function deleteProfileFact(key) {
   }
 }
 
+/**
+ * Fetch canonical persona signature phrase pools from backend.
+ */
+export async function fetchPersonaPhrases() {
+  try {
+    const res = await fetch(`${API_BASE}/api/persona/phrases`, {
+      headers: getAuthHeaders(),
+    })
+    if (!res.ok) return null
+    return await res.json()
+  } catch {
+    return null
+  }
+}
+

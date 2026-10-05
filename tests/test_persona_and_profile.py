@@ -305,3 +305,31 @@ async def test_profile_facts_api_endpoints(client: AsyncClient, auth_headers: di
         resp_del_404 = await client.delete("/api/profile/facts/nonexistent", headers=auth_headers)
         assert resp_del_404.status_code == 404
 
+
+@pytest.mark.asyncio
+async def test_persona_phrases_api_endpoint(client: AsyncClient, auth_headers: dict):
+    """Verify GET /api/persona/phrases requires auth and returns all phrase pools."""
+    # 1. No token -> 401/403
+    resp_no_token = await client.get("/api/persona/phrases")
+    assert resp_no_token.status_code in (401, 403)
+
+    # 2. Wrong token -> 401/403
+    wrong_headers = {"Authorization": "Bearer bad_token_999"}
+    resp_wrong = await client.get("/api/persona/phrases", headers=wrong_headers)
+    assert resp_wrong.status_code in (401, 403)
+
+    # 3. Valid token -> 200 with all phrase pools
+    resp_valid = await client.get("/api/persona/phrases", headers=auth_headers)
+    assert resp_valid.status_code == 200
+    data = resp_valid.json()
+    for pool in [
+        "starting_phrases",
+        "exploring_phrases",
+        "returning_phrases",
+        "mid_chat_phrases",
+        "closing_phrases",
+    ]:
+        assert pool in data
+        assert isinstance(data[pool], list)
+        assert len(data[pool]) > 0
+

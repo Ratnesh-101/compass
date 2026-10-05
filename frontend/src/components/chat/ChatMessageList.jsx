@@ -1,7 +1,8 @@
-import React, { useMemo } from 'react'
+import React, { useMemo, useState, useEffect } from 'react'
 import EvidenceCard from './EvidenceCard'
+import { fetchPersonaPhrases } from '../../api/chatApi'
 
-const STARTING_PHRASES = [
+const DEFAULT_STARTING_PHRASES = [
   "Where should we begin?",
   "Ready when you are.",
   "Pick a direction, or just start talking and we'll find one.",
@@ -10,7 +11,7 @@ const STARTING_PHRASES = [
   "Take your time. I'm not going anywhere.",
 ]
 
-const RETURNING_PHRASES = [
+const DEFAULT_RETURNING_PHRASES = [
   "You returned! Want to pick up where we left off, or start somewhere new?",
   "Welcome back. What changed since last time?",
   "Good to see you again. Where shall we dive in?",
@@ -30,8 +31,8 @@ function getTimeGreeting() {
   return 'Good evening'
 }
 
-function getEmptyStateGreeting(isReturning, userName) {
-  const pool = isReturning ? RETURNING_PHRASES : STARTING_PHRASES
+function getEmptyStateGreeting(isReturning, userName, startingPool = DEFAULT_STARTING_PHRASES, returningPool = DEFAULT_RETURNING_PHRASES) {
+  const pool = (isReturning ? returningPool : startingPool) || DEFAULT_STARTING_PHRASES
   const storageKey = isReturning ? 'compass_last_returning_phrase_idx' : 'compass_last_starting_phrase_idx'
   let lastIdx = -1
   try {
@@ -47,7 +48,7 @@ function getEmptyStateGreeting(isReturning, userName) {
     localStorage.setItem(storageKey, String(chosenIdx))
   } catch {}
 
-  let phrase = pool[chosenIdx]
+  let phrase = pool[chosenIdx] || pool[0] || "Where should we begin?"
 
   if (userName && isReturning) {
     if (phrase.includes("Welcome back.")) {
@@ -167,6 +168,25 @@ export default function ChatMessageList({
   pastConversations = [],
   onSendMessage,
 }) {
+  const [startingPhrases, setStartingPhrases] = useState(DEFAULT_STARTING_PHRASES)
+  const [returningPhrases, setReturningPhrases] = useState(DEFAULT_RETURNING_PHRASES)
+
+  useEffect(() => {
+    let isMounted = true
+    fetchPersonaPhrases().then((data) => {
+      if (!isMounted || !data) return
+      if (Array.isArray(data.starting_phrases) && data.starting_phrases.length > 0) {
+        setStartingPhrases(data.starting_phrases)
+      }
+      if (Array.isArray(data.returning_phrases) && data.returning_phrases.length > 0) {
+        setReturningPhrases(data.returning_phrases)
+      }
+    }).catch(() => {})
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
   const isReturning = Boolean(
     (pastConversations && pastConversations.length > 0) ||
     (profileFacts && (profileFacts.name || Object.keys(profileFacts).length > 0))
@@ -174,8 +194,8 @@ export default function ChatMessageList({
   const userName = profileFacts?.name || null
 
   const greeting = useMemo(() => {
-    return getEmptyStateGreeting(isReturning, userName)
-  }, [isReturning, userName])
+    return getEmptyStateGreeting(isReturning, userName, startingPhrases, returningPhrases)
+  }, [isReturning, userName, startingPhrases, returningPhrases])
 
   const showEmptyState = messages.length === 0 && !isStreaming
 
