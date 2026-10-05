@@ -22,6 +22,15 @@ class ChatResponse(BaseModel):
     data: Optional[Any] = None
 
 
+class ChatRecapRequest(BaseModel):
+    conversation_id: Optional[str] = None
+
+
+class ChatRecapResponse(BaseModel):
+    conversation_id: Optional[str] = None
+    recap: str
+
+
 class MessageOut(BaseModel):
     id: int
     role: str

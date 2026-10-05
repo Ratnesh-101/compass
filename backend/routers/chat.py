@@ -32,6 +32,8 @@ import backend.orchestrator as orchestrator
 from backend.models import (
     ChatRequest,
     ChatResponse,
+    ChatRecapRequest,
+    ChatRecapResponse,
     MessagesResponse,
     MessageOut,
     ConversationUpdate,
@@ -61,6 +63,116 @@ async def chat(request: ChatRequest, req: Request, _token: str = Depends(verify_
         tone=request.tone,
     )
     return ChatResponse(**result)
+
+
+# ---- POST /api/chat/recap -------------------------------------------------
+@router.post("/api/chat/recap", response_model=ChatRecapResponse)
+async def chat_recap(
+    request: ChatRecapRequest,
+    req: Request,
+    _token: str = Depends(verify_token),
+):
+    """Summarize decisions made, open questions, and concrete next steps for a conversation."""
+    conv_id = request.conversation_id
+    if not conv_id:
+        return ChatRecapResponse(
+            conversation_id=None,
+            recap="No conversation was selected to recap.",
+        )
+
+    pool = await get_pool()
+    if not pool:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    async with pool.acquire() as conn:
+        ident = _get_current_identity(req)
+        user_id = ident.user_id if ident else None
+        guest_id = ident.guest_id if ident else None
+        is_admin = bool(ident and ident.is_admin)
+
+        has_access, err = await conversations.check_conversation_access(
+            conn, conv_id, user_id=user_id, guest_id=guest_id, is_admin=is_admin, allow_shared=False
+        )
+        if not has_access and err != "Conversation not found":
+            raise HTTPException(status_code=403, detail="Forbidden: conversation belongs to another user")
+
+        # Cap messages sent to last 40 to bound cost
+        rows = await conversations.get_recent_messages(conn, conv_id, limit=40)
+
+    if not rows:
+        return ChatRecapResponse(
+            conversation_id=conv_id,
+            recap="This conversation is empty right now — there are no messages to recap.",
+        )
+
+    transcript_lines = []
+    for r in rows:
+        role = r.get("role", "user")
+        content = (r.get("content") or "").strip()
+        if content:
+            transcript_lines.append(f"{role.capitalize()}: {content}")
+
+    transcript = "\n".join(transcript_lines)
+
+    from backend.config import get_settings
+    from backend.services.usage import record_usage
+    from backend.persona import build_persona_system_prompt
+    import openai
+
+    settings = get_settings()
+    system_instruction = (
+        f"{build_persona_system_prompt(mode='chat')}\n\n"
+        "TASK: Provide a short, scannable recap of this conversation summarizing:\n"
+        "- Key decisions made\n"
+        "- Open questions or unresolved thoughts\n"
+        "- Concrete next steps (if any)\n\n"
+        "Format with concise bullet points. "
+        "If and only if there is a concrete next step identified, end with: 'That's a solid next step. Want me to write it down?'"
+    )
+
+    recap_text = ""
+    is_placeholder_key = (
+        not settings.NEBIUS_API_KEY
+        or settings.NEBIUS_API_KEY.startswith("your_nebius")
+        or settings.NEBIUS_API_KEY in ("mock", "mock-key-not-used-in-tests")
+    )
+
+    if not is_placeholder_key:
+        try:
+            client = openai.AsyncOpenAI(
+                api_key=settings.NEBIUS_API_KEY,
+                base_url=settings.NEBIUS_BASE_URL,
+                timeout=20.0,
+            )
+            resp: Any = await client.chat.completions.create(
+                model=settings.ROUTER_MODEL,
+                messages=[
+                    {"role": "system", "content": system_instruction},
+                    {"role": "user", "content": f"Here is the conversation transcript:\n\n{transcript}\n\nPlease recap it."},
+                ],
+                max_tokens=350,
+                stream=False,
+            )
+            p_tok = getattr(getattr(resp, "usage", None), "prompt_tokens", 0) or 50
+            c_tok = getattr(getattr(resp, "usage", None), "completion_tokens", 0) or 50
+            record_usage(settings.ROUTER_MODEL, p_tok, c_tok)
+
+            if resp.choices and resp.choices[0].message.content:
+                recap_text = resp.choices[0].message.content.strip()
+        except Exception as e:
+            logger.warning("Recap generation failed: %s", e)
+
+    if not recap_text:
+        recap_text = (
+            f"Here is a quick recap of our discussion ({len(rows)} messages):\n"
+            f"- We explored key topics including: {rows[-1].get('content', '')[:60]}...\n"
+            "- That's a solid next step. Want me to write it down?"
+        )
+
+    return ChatRecapResponse(
+        conversation_id=conv_id,
+        recap=recap_text,
+    )
 
 
 # ---- GET /api/conversations/{conversation_id}/messages --------------------

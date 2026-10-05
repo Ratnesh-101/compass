@@ -8,6 +8,7 @@ import {
   fetchProfileFacts,
   fetchParkedThoughts,
   resolveParkedThought,
+  fetchChatRecap,
   getCurrentUserId,
 } from '../api/client'
 import ChatHistoryDrawer from './chat/ChatHistoryDrawer'
@@ -174,9 +175,46 @@ export default function ChatPanel({
     }, 18)
   }
 
+  const handleRecap = async () => {
+    if (isStreaming || isTyping || isSendingRef.current) return
+    if (!conversationId || messages.length === 0) {
+      setMessages(prev => [
+        ...prev,
+        { role: 'assistant', text: "This conversation is empty right now — there are no messages to recap." }
+      ])
+      return
+    }
+
+    setMessages(prev => [...prev, { role: 'user', text: "Recap where I left off" }])
+    setIsStreaming(true)
+    setStreamingText('Generating recap of decisions, open questions, and next steps…')
+
+    try {
+      const data = await fetchChatRecap(conversationId)
+      setIsStreaming(false)
+      setStreamingText('')
+      setMessages(prev => [
+        ...prev,
+        { role: 'assistant', text: data.recap || "Unable to generate recap right now." }
+      ])
+    } catch (err) {
+      console.warn('Recap error:', err)
+      setIsStreaming(false)
+      setStreamingText('')
+      setMessages(prev => [
+        ...prev,
+        { role: 'assistant', text: "Unable to generate recap right now." }
+      ])
+    }
+  }
+
   const handleSend = async (textToSend) => {
     const text = (textToSend || input).trim()
     if (!text || isStreaming || isTyping || isSendingRef.current) return
+
+    if (text.toLowerCase() === 'recap where i left off') {
+      return handleRecap()
+    }
 
     isSendingRef.current = true
     setInput('')
@@ -501,6 +539,27 @@ export default function ChatPanel({
               color: 'var(--text-secondary)', fontSize: '11.5px', fontWeight: '600', cursor: 'pointer'
             }}>
             {showContext ? 'Hide Context' : 'Show Context'}
+          </button>
+
+          <button
+            id="btn-chat-recap"
+            type="button"
+            onClick={handleRecap}
+            disabled={isInputDisabled}
+            style={{
+              padding: '5px 11px',
+              borderRadius: '6px',
+              border: '1px solid var(--border)',
+              background: 'transparent',
+              color: 'var(--text-secondary)',
+              fontSize: '11.5px',
+              fontWeight: '600',
+              cursor: isInputDisabled ? 'not-allowed' : 'pointer',
+              opacity: isInputDisabled ? 0.5 : 1,
+            }}
+            title="Summarize decisions made, open questions, and next steps"
+          >
+            📝 Recap
           </button>
 
           <button

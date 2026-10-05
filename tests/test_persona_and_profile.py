@@ -575,3 +575,57 @@ async def test_parked_thoughts_api_endpoints(client: AsyncClient, auth_headers: 
         assert resp_patch_404.status_code == 404
 
 
+@pytest.mark.asyncio
+async def test_chat_recap_endpoint(client: AsyncClient, auth_headers: dict):
+    """Verify POST /api/chat/recap endpoint: auth, empty state, and ROUTER_MODEL recap."""
+    from backend.config import get_settings
+    settings = get_settings()
+
+    # 1. No auth token -> 401/403
+    resp_no_auth = await client.post("/api/chat/recap", json={"conversation_id": "c1"})
+    assert resp_no_auth.status_code in (401, 403)
+
+    # 2. Empty conversation -> plain message without LLM call
+    with patch("backend.routers.chat.get_pool", new_callable=AsyncMock) as mock_get_pool, \
+         patch("backend.memory.conversations.check_conversation_access", new_callable=AsyncMock) as mock_access, \
+         patch("backend.memory.conversations.get_recent_messages", new_callable=AsyncMock) as mock_msgs:
+
+        mock_pool = MagicMock()
+        mock_conn = AsyncMock()
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
+        mock_get_pool.return_value = mock_pool
+        mock_access.return_value = (True, None)
+
+        mock_msgs.return_value = []
+
+        resp_empty = await client.post("/api/chat/recap", json={"conversation_id": "c_empty"}, headers=auth_headers)
+        assert resp_empty.status_code == 200
+        data_empty = resp_empty.json()
+        assert "empty right now" in data_empty["recap"]
+
+    # 3. Populated conversation -> uses ROUTER_MODEL (not Ultra) and records usage
+    mock_messages = [
+        {"role": "user", "content": "I need help with CS 61C and my hackathon pitch."},
+        {"role": "assistant", "content": "Let's break down the priorities."},
+        {"role": "user", "content": "Let's finish the report by Friday."},
+    ]
+    with patch("backend.routers.chat.get_pool", new_callable=AsyncMock) as mock_get_pool, \
+         patch("backend.memory.conversations.check_conversation_access", new_callable=AsyncMock) as mock_access, \
+         patch("backend.memory.conversations.get_recent_messages", new_callable=AsyncMock) as mock_msgs, \
+         patch("backend.services.usage.record_usage") as mock_record_usage:
+
+        mock_pool = MagicMock()
+        mock_conn = AsyncMock()
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
+        mock_get_pool.return_value = mock_pool
+        mock_access.return_value = (True, None)
+        mock_msgs.return_value = mock_messages
+
+        resp_recap = await client.post("/api/chat/recap", json={"conversation_id": "c_pop"}, headers=auth_headers)
+        assert resp_recap.status_code == 200
+        data_recap = resp_recap.json()
+        assert "recap" in data_recap
+        assert len(data_recap["recap"]) > 0
+        assert "That's a solid next step. Want me to write it down?" in data_recap["recap"]
+
+

@@ -342,4 +342,25 @@ export async function resolveParkedThought(id) {
   }
 }
 
+/**
+ * Summarize decisions made, open questions, and next steps for a conversation.
+ */
+export async function fetchChatRecap(conversationId) {
+  try {
+    const res = await fetch(`${API_BASE}/api/chat/recap`, {
+      method: 'POST',
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ conversation_id: conversationId || null }),
+    })
+    if (!res.ok) {
+      return { recap: "I wasn't able to generate a recap right now. Please try again in a moment." }
+    }
+    return await res.json()
+  } catch (err) {
+    console.warn('[Compass Recap Error]', err)
+    return { recap: "I wasn't able to generate a recap right now. Please try again in a moment." }
+  }
+}
+
+
 
