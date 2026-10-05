@@ -130,15 +130,15 @@ export default function ActivityFeed({
             gap: '5px',
             fontSize: '12px',
             fontWeight: '600',
-            background: '#ffffff',
-            border: '1px solid #e2e8f0',
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border)',
             borderRadius: '6px',
             padding: '4px 10px',
-            color: '#475569',
+            color: 'var(--text-secondary)',
             cursor: 'pointer',
           }}
-          onMouseEnter={e => (e.currentTarget.style.background = '#f8fafc')}
-          onMouseLeave={e => (e.currentTarget.style.background = '#ffffff')}
+          onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-card-soft)')}
+          onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-card)')}
         >
           <RefreshCw size={12} />
           <span>Refresh</span>
@@ -153,9 +153,9 @@ export default function ActivityFeed({
             fontStyle: 'italic',
             padding: '12px 0',
             textAlign: 'center',
-            background: '#f8fafc',
+            background: 'var(--bg-card-soft)',
             borderRadius: '8px',
-            border: '1px dashed #e2e8f0',
+            border: '1px dashed var(--border)',
           }}
         >
           No automated state changes made by the assistant yet.
@@ -183,8 +183,8 @@ export default function ActivityFeed({
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   padding: '10px 14px',
-                  background: item.is_reverted ? '#f8fafc' : '#ffffff',
-                  border: `1px solid ${item.is_reverted ? '#e2e8f0' : '#cbd5e1'}`,
+                  background: item.is_reverted ? 'var(--bg-card-soft)' : 'var(--bg-card)',
+                  border: `1px solid ${item.is_reverted ? 'var(--border-soft, var(--border))' : 'var(--border)'}`,
                   borderRadius: '10px',
                   fontSize: '12.5px',
                   opacity: item.is_reverted ? 0.6 : 1,
@@ -208,7 +208,7 @@ export default function ActivityFeed({
                   >
                     <Icon size={14} />
                   </div>
-                  <span style={{ color: '#0f172a', fontWeight: '600' }}>
+                  <span style={{ color: 'var(--text-primary)', fontWeight: '600' }}>
                     {formatActivityItem(item)}
                   </span>
                   <span style={{ fontSize: '11px', color: '#94a3b8' }}>
@@ -240,10 +240,10 @@ export default function ActivityFeed({
                       alignItems: 'center',
                       gap: '5px',
                       padding: '5px 12px',
-                      background: '#ffffff',
-                      border: '1px solid #cbd5e1',
+                      background: 'var(--bg-card)',
+                      border: '1px solid var(--border)',
                       borderRadius: '6px',
-                      color: '#475569',
+                      color: 'var(--text-secondary)',
                       fontSize: '11.5px',
                       fontWeight: '600',
                       cursor: 'pointer',
@@ -254,12 +254,12 @@ export default function ActivityFeed({
                     onMouseEnter={e => {
                       e.currentTarget.style.borderColor = '#ef4444'
                       e.currentTarget.style.color = '#ef4444'
-                      e.currentTarget.style.background = '#fef2f2'
+                      e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)'
                     }}
                     onMouseLeave={e => {
-                      e.currentTarget.style.borderColor = '#cbd5e1'
-                      e.currentTarget.style.color = '#475569'
-                      e.currentTarget.style.background = '#ffffff'
+                      e.currentTarget.style.borderColor = 'var(--border)'
+                      e.currentTarget.style.color = 'var(--text-secondary)'
+                      e.currentTarget.style.background = 'var(--bg-card)'
                     }}
                   >
                     <RotateCcw size={12} />

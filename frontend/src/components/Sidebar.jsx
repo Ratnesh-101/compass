@@ -3,7 +3,7 @@ import CreateDomainModal from './timeline/CreateDomainModal'
 
 const NAV_ITEMS = [
   { key: 'timeline', icon: '▦', label: 'Timeline', sub: 'Tasks & deadlines' },
-  { key: 'northstar', icon: '🧭', label: 'Northstar AI', sub: 'Copilot, planner & agents' },
+  { key: 'compass', icon: '🧭', label: 'Compass', sub: 'Assistant & planner' },
   { key: 'calendar', icon: '🗓️', label: 'Schedule', sub: 'Calendar & Google sync' },
 ]
 
@@ -20,10 +20,12 @@ export default function Sidebar({
   onOpenTelemetry,
   customDomains = [],
   onDomainCreated,
+  onDomainDeleted,
   theme = 'light',
   onToggleTheme,
 }) {
   const [showCreateDomainModal, setShowCreateDomainModal] = React.useState(false)
+  const [confirmDeleteKey, setConfirmDeleteKey] = React.useState(null)
   const [isCollapsed, setIsCollapsed] = React.useState(() => {
     try {
       return localStorage.getItem('compass.sidebar.collapsed') === 'true'
@@ -94,119 +96,40 @@ export default function Sidebar({
     >
       {/* Brand Header */}
       {isCollapsed ? (
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: '8px',
-            marginBottom: '20px',
-            userSelect: 'none',
-          }}
-        >
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', marginBottom: '20px', userSelect: 'none' }}>
           <div
             id="sidebar-brand-header"
-            onClick={() => {
-              onSelectTab('timeline')
-              if (onSelectDomain) onSelectDomain('all')
-            }}
+            onClick={() => { onSelectTab('timeline'); if (onSelectDomain) onSelectDomain('all') }}
             title="Compass Workspace — Click to return to default Timeline Feed"
-            style={{
-              width: '38px',
-              height: '38px',
-              borderRadius: '10px',
-              background: 'var(--brand)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '18px',
-              cursor: 'pointer',
-              boxShadow: '0 4px 12px rgba(245, 166, 35, 0.25)',
-              flexShrink: 0,
-              transition: 'opacity 0.15s ease',
-            }}
-            onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
-            onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+            style={{ width: '38px', height: '38px', borderRadius: '10px', background: 'var(--brand)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', cursor: 'pointer', boxShadow: '0 4px 12px rgba(245, 166, 35, 0.25)', flexShrink: 0, transition: 'opacity 0.15s ease' }}
+            onMouseEnter={e => (e.currentTarget.style.opacity = '0.85')}
+            onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
           >
             🧭
           </div>
-
           <button
             id="sidebar-collapse-toggle"
             onClick={toggleCollapsed}
             title="Expand sidebar"
             aria-label="Expand sidebar"
-            style={{
-              background: 'rgba(255, 255, 255, 0.04)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
-              borderRadius: '6px',
-              color: 'var(--text-muted)',
-              cursor: 'pointer',
-              width: '28px',
-              height: '24px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '15px',
-              lineHeight: 1,
-              padding: 0,
-              transition: 'all 0.15s ease',
-            }}
-            onMouseEnter={e => {
-              e.currentTarget.style.color = 'var(--text-on-dark)'
-              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'
-              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)'
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.color = 'var(--text-muted)'
-              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.04)'
-              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)'
-            }}
+            style={{ background: 'rgba(255, 255, 255, 0.04)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '6px', color: 'var(--text-muted)', cursor: 'pointer', width: '28px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', lineHeight: 1, padding: 0, transition: 'all 0.15s ease' }}
+            onMouseEnter={e => { e.currentTarget.style.color = 'var(--text-on-dark)'; e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'; e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)' }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.background = 'rgba(255, 255, 255, 0.04)'; e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)' }}
           >
             ›
           </button>
         </div>
       ) : (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            marginBottom: '24px',
-            padding: '0 4px',
-            userSelect: 'none',
-          }}
-        >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px', padding: '0 4px', userSelect: 'none' }}>
           <div
             id="sidebar-brand-header"
-            onClick={() => {
-              onSelectTab('timeline')
-              if (onSelectDomain) onSelectDomain('all')
-            }}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px',
-              cursor: 'pointer',
-              transition: 'opacity 0.15s ease',
-              minWidth: 0,
-            }}
-            onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
-            onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+            onClick={() => { onSelectTab('timeline'); if (onSelectDomain) onSelectDomain('all') }}
+            style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', transition: 'opacity 0.15s ease', minWidth: 0 }}
+            onMouseEnter={e => (e.currentTarget.style.opacity = '0.85')}
+            onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
             title="Compass Workspace — Click to return to default Timeline Feed"
           >
-            <div style={{
-              width: '38px',
-              height: '38px',
-              borderRadius: '10px',
-              background: 'var(--brand)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '18px',
-              flexShrink: 0,
-              boxShadow: '0 4px 12px rgba(245, 166, 35, 0.25)'
-            }}>
+            <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: 'var(--brand)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', flexShrink: 0, boxShadow: '0 4px 12px rgba(245, 166, 35, 0.25)' }}>
               🧭
             </div>
             <div>
@@ -214,39 +137,14 @@ export default function Sidebar({
               <p style={{ fontSize: '10.5px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: '600', margin: 0 }}>Workspace</p>
             </div>
           </div>
-
           <button
             id="sidebar-collapse-toggle"
             onClick={toggleCollapsed}
             title="Collapse sidebar"
             aria-label="Collapse sidebar"
-            style={{
-              background: 'transparent',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
-              borderRadius: '6px',
-              color: 'var(--text-muted)',
-              cursor: 'pointer',
-              width: '26px',
-              height: '26px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '15px',
-              lineHeight: 1,
-              padding: 0,
-              transition: 'all 0.15s ease',
-              flexShrink: 0,
-            }}
-            onMouseEnter={e => {
-              e.currentTarget.style.color = 'var(--text-on-dark)'
-              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'
-              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)'
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.color = 'var(--text-muted)'
-              e.currentTarget.style.background = 'transparent'
-              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)'
-            }}
+            style={{ background: 'transparent', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '6px', color: 'var(--text-muted)', cursor: 'pointer', width: '26px', height: '26px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', lineHeight: 1, padding: 0, transition: 'all 0.15s ease', flexShrink: 0 }}
+            onMouseEnter={e => { e.currentTarget.style.color = 'var(--text-on-dark)'; e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'; e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)' }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)' }}
           >
             ‹
           </button>
@@ -260,31 +158,29 @@ export default function Sidebar({
             Navigation
           </p>
         )}
-        {NAV_ITEMS.map(item => (
-          <button
-            key={item.key}
-            id={`sidebar-tab-${item.key}`}
-            onClick={() => onSelectTab(item.key)}
-            className={`nav-item ${activeTab === item.key ? 'active' : ''}`}
-            title={item.label}
-            style={isCollapsed ? {
-              justifyContent: 'center',
-              padding: '8px 0',
-              width: '100%',
-              gap: 0,
-            } : undefined}
-          >
-            <span className="nav-icon">{item.icon}</span>
-            {!isCollapsed && (
-              <span>
-                <div style={{ fontSize: '13.5px', fontWeight: '700', color: activeTab === item.key ? 'var(--text-on-dark)' : 'inherit' }}>
-                  {item.label}
-                </div>
-                <div style={{ fontSize: '11px', opacity: 0.75 }}>{item.sub}</div>
-              </span>
-            )}
-          </button>
-        ))}
+        {NAV_ITEMS.map(item => {
+          const isActive = activeTab === item.key || (item.key === 'compass' && (activeTab === 'northstar' || activeTab === 'assistant' || activeTab === 'planner' || activeTab === 'agent'))
+          return (
+            <button
+              key={item.key}
+              id={`sidebar-tab-${item.key}`}
+              onClick={() => onSelectTab(item.key)}
+              className={`nav-item ${isActive ? 'active' : ''}`}
+              title={item.label}
+              style={isCollapsed ? { justifyContent: 'center', padding: '8px 0', width: '100%', gap: 0 } : undefined}
+            >
+              <span className="nav-icon">{item.icon}</span>
+              {!isCollapsed && (
+                <span>
+                  <div style={{ fontSize: '13.5px', fontWeight: '700', color: isActive ? 'var(--text-on-dark)' : 'inherit' }}>
+                    {item.label}
+                  </div>
+                  <div style={{ fontSize: '11px', opacity: 0.75 }}>{item.sub}</div>
+                </span>
+              )}
+            </button>
+          )
+        })}
       </div>
 
       {/* Domain Isolation Metrics */}
@@ -293,7 +189,7 @@ export default function Sidebar({
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', padding: '0 4px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <p style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', fontWeight: '700', margin: 0 }}>
-                Domains
+                Context Domains
               </p>
               <button
                 id="btn-add-domain"
@@ -334,64 +230,105 @@ export default function Sidebar({
           </div>
         )}
 
-        {displayDomains.map(dom => (
-          <div
-            key={dom.key}
-            id={`sidebar-domain-${dom.key}`}
-            onClick={() => onSelectDomain(dom.key)}
-            title={isCollapsed ? `${dom.label} (${domainCounts[dom.key] ?? 0})` : dom.label}
-            style={{
-              padding: isCollapsed ? '6px 0' : '9px 12px',
-              borderRadius: '10px',
-              marginBottom: '4px',
-              cursor: 'pointer',
-              display: 'flex',
-              justifyContent: isCollapsed ? 'center' : 'space-between',
-              alignItems: 'center',
-              background: activeDomain === dom.key ? 'var(--bg-sidebar-active)' : 'transparent',
-              transition: 'background 0.15s ease',
-              width: '100%',
-              boxSizing: 'border-box',
-            }}
-            onMouseEnter={e => {
-              if (activeDomain !== dom.key) e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)'
-            }}
-            onMouseLeave={e => {
-              if (activeDomain !== dom.key) e.currentTarget.style.background = 'transparent'
-            }}
-          >
-            {isCollapsed ? (
-              <span style={{
-                fontSize: '16px',
-                width: '32px',
-                height: '32px',
+        {displayDomains.map(dom => {
+          const isCustom = !baseDomains.some(b => b.key === dom.key)
+          const isSelected = activeDomain === dom.key
+          return (
+            <div
+              key={dom.key}
+              id={`sidebar-domain-${dom.key}`}
+              onClick={() => onSelectDomain(dom.key)}
+              title={isCollapsed ? `${dom.label} (${domainCounts[dom.key] ?? 0})` : dom.label}
+              style={{
+                padding: isCollapsed ? '6px 0' : '8px 10px',
+                borderRadius: '10px',
+                marginBottom: '4px',
+                cursor: 'pointer',
                 display: 'flex',
+                justifyContent: isCollapsed ? 'center' : 'space-between',
                 alignItems: 'center',
-                justifyContent: 'center',
-                borderRadius: '8px',
-                background: activeDomain === dom.key ? 'rgba(255, 255, 255, 0.08)' : 'transparent',
-              }}>
-                {dom.icon}
-              </span>
-            ) : (
-              <>
-                <span style={{ fontSize: '13px', color: activeDomain === dom.key ? 'var(--text-on-dark)' : 'var(--text-secondary)', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span>{dom.icon}</span> {dom.label}
+                background: isSelected ? 'var(--bg-sidebar-active)' : 'transparent',
+                transition: 'background 0.15s ease',
+                width: '100%',
+                boxSizing: 'border-box',
+              }}
+              onMouseEnter={e => {
+                if (!isSelected) e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)'
+              }}
+              onMouseLeave={e => {
+                if (!isSelected) e.currentTarget.style.background = 'transparent'
+              }}
+            >
+              {isCollapsed ? (
+                <span style={{ fontSize: '16px', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', background: isSelected ? 'rgba(255, 255, 255, 0.08)' : 'transparent' }}>
+                  {dom.icon}
                 </span>
-                <span style={{
-                  padding: '2px 8px',
-                  borderRadius: '20px',
-                  fontSize: '10.5px',
-                  fontWeight: '700',
-                  background: 'rgba(255, 255, 255, 0.08)',
-                  color: dom.color
-                }}>
-                  {domainCounts[dom.key] ?? 0}
-                </span>
-              </>
-            )}
-          </div>
-        ))}
+              ) : (
+                <>
+                  <span style={{ fontSize: '13px', color: isSelected ? 'var(--text-on-dark)' : 'var(--text-secondary)', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <span>{dom.icon}</span>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{dom.label}</span>
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+                    {isCustom && confirmDeleteKey === dom.key ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }} onClick={e => e.stopPropagation()}>
+                        <span style={{ fontSize: '10px', color: '#f87171', fontWeight: '700' }}>Del?</span>
+                        <button
+                          id={`btn-confirm-delete-domain-${dom.key}`}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            if (onDomainDeleted) onDomainDeleted(dom.key)
+                            setConfirmDeleteKey(null)
+                          }}
+                          style={{ background: '#ef4444', border: 'none', color: '#fff', borderRadius: '4px', padding: '2px 5px', fontSize: '10px', cursor: 'pointer', fontWeight: '700' }}
+                        >
+                          Yes
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setConfirmDeleteKey(null)
+                          }}
+                          style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.2)', color: 'var(--text-muted)', borderRadius: '4px', padding: '2px 4px', fontSize: '10px', cursor: 'pointer' }}
+                        >
+                          No
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <span style={{ padding: '2px 7px', borderRadius: '20px', fontSize: '10.5px', fontWeight: '700', background: 'rgba(255, 255, 255, 0.08)', color: dom.color }}>
+                          {domainCounts[dom.key] ?? 0}
+                        </span>
+                        {isCustom && (
+                          <button
+                            id={`btn-remove-domain-${dom.key}`}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setConfirmDeleteKey(dom.key)
+                            }}
+                            title={`Remove ${dom.label} domain`}
+                            aria-label={`Remove ${dom.label} domain`}
+                            style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '12px', lineHeight: 1, padding: '2px 4px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', opacity: 0.6, transition: 'all 0.15s ease' }}
+                            onMouseEnter={e => {
+                              e.currentTarget.style.color = '#f87171'
+                              e.currentTarget.style.opacity = '1'
+                            }}
+                            onMouseLeave={e => {
+                              e.currentTarget.style.color = 'var(--text-muted)'
+                              e.currentTarget.style.opacity = '0.6'
+                            }}
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )
+        })}
 
         {isCollapsed && (
           <div style={{ display: 'flex', justifyContent: 'center', margin: '4px 0 6px' }}>
@@ -683,6 +620,8 @@ export default function Sidebar({
           if (onDomainCreated) onDomainCreated(newDomain)
           if (onSelectDomain) onSelectDomain(newDomain.key)
         }}
+        onDeleted={onDomainDeleted}
+        customDomains={customDomains}
         existingDomains={displayDomains}
       />
     </aside>

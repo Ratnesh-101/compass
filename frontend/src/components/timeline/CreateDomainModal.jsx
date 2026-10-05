@@ -15,12 +15,15 @@ export default function CreateDomainModal({
   isOpen,
   onClose,
   onCreated,
+  onDeleted,
+  customDomains = [],
   existingDomains = [],
 }) {
   const [name, setName] = useState('')
   const [selectedIcon, setSelectedIcon] = useState('🎯')
   const [selectedColor, setSelectedColor] = useState('#f472b6')
   const [error, setError] = useState(null)
+  const [confirmDeleteKey, setConfirmDeleteKey] = useState(null)
   const inputRef = useRef(null)
 
   useEffect(() => {
@@ -333,6 +336,81 @@ export default function CreateDomainModal({
               })}
             </div>
           </div>
+
+          {/* Manage existing custom domains */}
+          {customDomains && customDomains.length > 0 && (
+            <div style={{ marginTop: '14px', paddingTop: '10px', borderTop: '1px solid var(--border)' }}>
+              <label style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', fontWeight: '700', marginBottom: '8px' }}>
+                Your Custom Domains ({customDomains.length})
+              </label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '110px', overflowY: 'auto', paddingRight: '2px' }}>
+                {customDomains.map(cd => (
+                  <div
+                    key={cd.key}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '6px 10px',
+                      borderRadius: '8px',
+                      background: 'var(--bg-card-soft)',
+                      border: '1px solid var(--border)',
+                      fontSize: '12.5px',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>{cd.icon || '🎯'}</span>
+                      <span style={{ fontWeight: '600', color: 'var(--text-primary)' }}>{cd.label}</span>
+                    </div>
+                    {confirmDeleteKey === cd.key ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <span style={{ fontSize: '10.5px', color: '#f87171', fontWeight: '700' }}>Delete?</span>
+                        <button
+                          type="button"
+                          id={`modal-confirm-delete-${cd.key}`}
+                          onClick={() => {
+                            if (onDeleted) onDeleted(cd.key)
+                            setConfirmDeleteKey(null)
+                          }}
+                          style={{ background: '#ef4444', border: 'none', color: '#fff', borderRadius: '4px', padding: '2px 6px', fontSize: '10.5px', cursor: 'pointer', fontWeight: '700' }}
+                        >
+                          Yes
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteKey(null)}
+                          style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: '4px', padding: '2px 5px', fontSize: '10.5px', cursor: 'pointer' }}
+                        >
+                          No
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        id={`modal-remove-domain-${cd.key}`}
+                        onClick={() => setConfirmDeleteKey(cd.key)}
+                        title={`Delete ${cd.label}`}
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          color: 'var(--text-muted)',
+                          cursor: 'pointer',
+                          fontSize: '12px',
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          transition: 'all 0.15s ease',
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.color = '#f87171'; e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)' }}
+                        onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.background = 'transparent' }}
+                      >
+                        ✕ Remove
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Action buttons */}
           <div

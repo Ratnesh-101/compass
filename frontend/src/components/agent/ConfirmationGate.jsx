@@ -72,7 +72,7 @@ export default function ConfirmationGate({
   return (
     <div
       style={{
-        background: '#ffffff',
+        background: 'var(--bg-card)',
         border: '1.5px solid #818cf8',
         borderRadius: '12px',
         padding: '20px',
@@ -159,10 +159,10 @@ export default function ConfirmationGate({
           style={{
             width: '100%',
             padding: '10px 14px',
-            background: '#ffffff',
-            border: '1px solid #cbd5e1',
+            background: 'var(--bg-card-soft)',
+            border: '1px solid var(--border)',
             borderRadius: '8px',
-            color: '#0f172a',
+            color: 'var(--text-primary)',
             fontSize: '13px',
             outline: 'none',
             boxSizing: 'border-box',
@@ -207,7 +207,7 @@ export default function ConfirmationGate({
             alignItems: 'center',
             gap: '7px',
             padding: '9px 18px',
-            background: '#ffffff',
+            background: 'var(--bg-card)',
             border: '1px solid #ef4444',
             borderRadius: '8px',
             color: '#dc2626',
@@ -216,8 +216,8 @@ export default function ConfirmationGate({
             cursor: 'pointer',
             transition: 'all 0.15s ease',
           }}
-          onMouseEnter={e => (e.currentTarget.style.background = '#fef2f2')}
-          onMouseLeave={e => (e.currentTarget.style.background = '#ffffff')}
+          onMouseEnter={e => (e.currentTarget.style.background = 'rgba(239, 68, 68, 0.12)')}
+          onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-card)')}
         >
           <XCircle size={16} />
           <span>Reject / Re-plan</span>

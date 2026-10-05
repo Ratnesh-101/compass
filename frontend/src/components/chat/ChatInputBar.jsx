@@ -22,7 +22,7 @@ export default function ChatInputBar({
   return (
     <div style={{ padding: '16px 28px 22px', background: 'var(--bg-app)', flexShrink: 0 }}>
       {/* Quick prompt suggestions */}
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', overflowX: 'auto', paddingBottom: '4px', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+      <div className="quick-prompts-scroll" style={{ display: 'flex', gap: '8px', marginBottom: '12px', overflowX: 'auto', overflowY: 'hidden', paddingBottom: '6px' }}>
         {QUICK_PROMPTS.map((item, idx) => (
           <button
             key={idx}

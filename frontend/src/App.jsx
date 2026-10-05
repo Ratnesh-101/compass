@@ -6,7 +6,7 @@ import CompassPanel from './components/CompassPanel'
 import AuthModal from './components/AuthModal'
 import MigrationModal from './components/MigrationModal'
 import NebiusTelemetryModal from './components/NebiusTelemetryModal'
-import { getCustomDomains } from './components/timeline/domainMeta'
+import { getCustomDomains, removeCustomDomain } from './components/timeline/domainMeta'
 import {
   checkBackendHealth,
   fetchTasks,
@@ -277,6 +277,14 @@ export default function App() {
     setSelectedDomain(newDomain.key)
   }, [])
 
+  const handleDomainDeleted = useCallback((domainKey) => {
+    removeCustomDomain(domainKey)
+    setCustomDomains(prev => prev.filter(d => d.key !== domainKey))
+    if (selectedDomain === domainKey) {
+      setSelectedDomain('all')
+    }
+  }, [selectedDomain])
+
   const handleSendMessage = async (userText) => {
     setIsTyping(true)
 
@@ -302,7 +310,7 @@ export default function App() {
     : 'Nebius • Nemotron-3'
 
   return (
-    <div style={{ display: 'flex', height: '100vh', width: '100vw', background: 'var(--bg-app)', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', height: '100vh', width: '100%', background: 'var(--bg-app)', overflow: 'hidden' }}>
       <Sidebar
         activeDomain={selectedDomain}
         onSelectDomain={setSelectedDomain}
@@ -316,6 +324,7 @@ export default function App() {
         onOpenTelemetry={() => setShowTelemetryModal(true)}
         customDomains={customDomains}
         onDomainCreated={handleDomainCreated}
+        onDomainDeleted={handleDomainDeleted}
         theme={theme}
         onToggleTheme={toggleTheme}
       />

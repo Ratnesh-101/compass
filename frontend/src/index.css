@@ -115,6 +115,12 @@ html, body {
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
+#root {
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+}
+
 @media (prefers-reduced-motion: reduce) {
   html, body, *, *::before, *::after {
     transition-duration: 0.01ms !important;
@@ -324,6 +330,7 @@ code, pre, .mono {
 .timeline-container {
   padding: 28px 32px;
   overflow-y: auto;
+  overflow-x: hidden;
   overscroll-behavior: contain;
   flex: 1;
   min-width: 0;
@@ -453,20 +460,47 @@ code, pre, .mono {
   }
 }
 
-/* Custom Clean Scrollbars */
+/* Custom Clean Scrollbars - Standard + WebKit Cross-Browser */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: var(--scrollbar-track, #f1ede3);
+  background: var(--scrollbar-track);
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--scrollbar-thumb, #d8d2c2);
-  border-radius: 3px;
+  background: var(--scrollbar-thumb);
+  border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--scrollbar-thumb-hover, #bfb8a3);
+  background: var(--scrollbar-thumb-hover);
+}
+::-webkit-scrollbar-corner {
+  background: var(--scrollbar-track);
+}
+
+/* Quick prompt chips horizontal scrollbar styling */
+.quick-prompts-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+.quick-prompts-scroll::-webkit-scrollbar {
+  height: 4px;
+}
+.quick-prompts-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.quick-prompts-scroll::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 3px;
+}
+.quick-prompts-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
 }
 
 /* Sidebar Collapse & Expand Transitions */

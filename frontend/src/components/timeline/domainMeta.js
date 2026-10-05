@@ -47,6 +47,18 @@ export function saveCustomDomain(domain) {
   }
 }
 
+export function removeCustomDomain(domainKey) {
+  try {
+    const existing = getCustomDomains()
+    const filtered = existing.filter(d => d.key !== domainKey)
+    localStorage.setItem('compass.custom_domains', JSON.stringify(filtered))
+    return filtered
+  } catch (err) {
+    console.warn('Failed to remove custom domain from localStorage:', err)
+    return []
+  }
+}
+
 export function getDomainMeta(dom) {
   if (!dom) return DOMAIN_META.general
   const key = String(dom).toLowerCase().trim()
