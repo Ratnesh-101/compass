@@ -45,6 +45,11 @@ from backend.skills.handlers.profile import (
     handle_remember_fact,
     handle_forget_fact,
 )
+from backend.skills.handlers.parked import (
+    handle_park_thought,
+    handle_list_parked,
+    handle_resolve_parked,
+)
 
 __all__ = [
     "handle_search_web",
@@ -76,4 +81,7 @@ __all__ = [
     "handle_apply_triage_plan",
     "handle_remember_fact",
     "handle_forget_fact",
+    "handle_park_thought",
+    "handle_list_parked",
+    "handle_resolve_parked",
 ]

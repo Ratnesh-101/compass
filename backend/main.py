@@ -78,6 +78,7 @@ from backend.routers import (
     migration_router,
     profile_router,
     persona_router,
+    parked_router,
 )
 
 # ---------------------------------------------------------------------------
@@ -227,4 +228,5 @@ app.include_router(auth_router)
 app.include_router(migration_router)
 app.include_router(profile_router)
 app.include_router(persona_router)
+app.include_router(parked_router)
 

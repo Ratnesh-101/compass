@@ -200,11 +200,23 @@ async def generate_chat_events(
                     logger.warning("Could not pre-fetch profile facts (continuing gracefully): %s", e)
                     return {}
 
-            rows_h, prior, tasks_rows, profile_facts = await asyncio.gather(
-                _load_history(), _load_prior(), _load_tasks(), _load_facts(), return_exceptions=True
+            async def _load_parked():
+                try:
+                    async with pool.acquire() as conn:
+                        from backend.memory.parked import list_parked_thoughts
+                        rows = await list_parked_thoughts(conn, user_id=user_id or "default_user", status="parked", limit=5)
+                        return [r["text"] for r in rows if r.get("text")]
+                except Exception as e:
+                    logger.warning("Could not pre-fetch parked thoughts (continuing gracefully): %s", e)
+                    return []
+
+            rows_h, prior, tasks_rows, profile_facts, parked_items = await asyncio.gather(
+                _load_history(), _load_prior(), _load_tasks(), _load_facts(), _load_parked(), return_exceptions=True
             )
             if not isinstance(profile_facts, dict):
                 profile_facts = {}
+            if not isinstance(parked_items, list):
+                parked_items = []
             if isinstance(rows_h, list):
                 for r in rows_h:
                     role = r.get("role", "user")
@@ -225,6 +237,7 @@ async def generate_chat_events(
     except Exception as e:
         logger.debug("Pre-fetch failed: %s", e)
         profile_facts = {}
+        parked_items = []
 
     stream = None
     try:
@@ -249,6 +262,7 @@ async def generate_chat_events(
             profile_facts=profile_facts if isinstance(profile_facts, dict) else None,
             extra_context=extra,
             tone=getattr(req, "tone", None),
+            parked_thoughts=parked_items if isinstance(parked_items, list) and parked_items else None,
         )
 
         messages: List[ChatCompletionMessageParam] = [

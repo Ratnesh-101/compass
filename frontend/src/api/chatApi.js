@@ -310,3 +310,36 @@ export async function fetchPersonaPhrases() {
   }
 }
 
+/**
+ * Fetch open parked thoughts on the shelf.
+ */
+export async function fetchParkedThoughts() {
+  try {
+    const res = await fetch(`${API_BASE}/api/parked`, {
+      headers: getAuthHeaders(),
+    })
+    if (!res.ok) return []
+    const data = await res.json()
+    return data.parked || []
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Mark a parked thought as done.
+ */
+export async function resolveParkedThought(id) {
+  if (!id) return false
+  try {
+    const res = await fetch(`${API_BASE}/api/parked/${id}`, {
+      method: 'PATCH',
+      headers: getAuthHeaders(),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+

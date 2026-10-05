@@ -132,6 +132,15 @@ async def handle_message(
                 except Exception as e:
                     logger.warning("Could not load profile facts in orchestrator (continuing gracefully): %s", e)
 
+                try:
+                    from backend.memory.parked import list_parked_thoughts
+                    p_thoughts = await list_parked_thoughts(conn, user_id=user_id or "default_user", status="parked", limit=5)
+                    if p_thoughts:
+                        parked_str = "\n".join([f"- {t['text']}" for t in p_thoughts])
+                        sections.append(f"Parked Thoughts on Shelf:\n{parked_str}")
+                except Exception as e:
+                    logger.warning("Could not load parked thoughts in orchestrator (continuing gracefully): %s", e)
+
                 if prior_messages:
                     prior_str = "\n".join([f"- [{m.get('role', 'user')}]: {m.get('content', '')[:120]}" for m in prior_messages])
                     sections.append(f"Past Chats Recall:\n{prior_str}")

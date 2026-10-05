@@ -619,6 +619,37 @@ def view_memory():
         console.print(f"[compass.error]❌ Failed to fetch memory facts: {e}[/]")
 
 
+@app.command("parked")
+def view_parked():
+    """📌 View ideas and tangents saved on the 'Park it' shelf."""
+    try:
+        resp = httpx.get(f"{API_BASE}/api/parked", headers=_headers(), timeout=10.0)
+        resp.raise_for_status()
+        data = resp.json()
+        parked = data.get("parked", [])
+        if not parked:
+            console.print("[compass.dim]Your 'Park it' shelf is currently empty.[/]")
+            return
+
+        table = Table(
+            title="📌 Parked Thoughts Shelf",
+            box=box.ROUNDED,
+            header_style="bold yellow",
+        )
+        table.add_column("ID", style="dim", width=6)
+        table.add_column("Thought / Tangent", style="cyan")
+        table.add_column("Status", style="green", width=10)
+        table.add_column("Parked At", style="dim", width=20)
+
+        for p in parked:
+            created = str(p.get("created_at", ""))[:19].replace("T", " ")
+            table.add_row(str(p.get("id", "")), str(p.get("text", "")), str(p.get("status", "parked")), created)
+
+        console.print(table)
+    except Exception as e:
+        console.print(f"[compass.error]❌ Failed to fetch parked thoughts: {e}[/]")
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------

@@ -35,6 +35,9 @@ from backend.skills.schemas import (
     APPLY_TRIAGE_PLAN_TOOL,
     REMEMBER_FACT_TOOL,
     FORGET_FACT_TOOL,
+    PARK_THOUGHT_TOOL,
+    LIST_PARKED_TOOL,
+    RESOLVE_PARKED_TOOL,
     BASE_TOOL_DEFINITIONS,
     get_tool_definitions,
     TOOL_DEFINITIONS,
@@ -79,6 +82,9 @@ from backend.skills.handlers import (
     handle_apply_triage_plan,
     handle_remember_fact,
     handle_forget_fact,
+    handle_park_thought,
+    handle_list_parked,
+    handle_resolve_parked,
 )
 
 __all__ = [
@@ -150,4 +156,10 @@ __all__ = [
     "handle_forget_fact",
     "REMEMBER_FACT_TOOL",
     "FORGET_FACT_TOOL",
+    "handle_park_thought",
+    "handle_list_parked",
+    "handle_resolve_parked",
+    "PARK_THOUGHT_TOOL",
+    "LIST_PARKED_TOOL",
+    "RESOLVE_PARKED_TOOL",
 ]

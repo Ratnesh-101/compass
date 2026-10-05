@@ -6,6 +6,8 @@ import {
   fetchMemoryOverview,
   fetchMigrationStatus,
   fetchProfileFacts,
+  fetchParkedThoughts,
+  resolveParkedThought,
   getCurrentUserId,
 } from '../api/client'
 import ChatHistoryDrawer from './chat/ChatHistoryDrawer'
@@ -26,6 +28,8 @@ export default function ChatPanel({
   const [pastPlans, setPastPlans] = useState([])
   const [memoryOverview, setMemoryOverview] = useState(null)
   const [profileFacts, setProfileFacts] = useState({})
+  const [parkedThoughts, setParkedThoughts] = useState([])
+  const [showParkedShelf, setShowParkedShelf] = useState(false)
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [guestMigrationCount, setGuestMigrationCount] = useState(0)
   const [toast, setToast] = useState(null)
@@ -44,6 +48,18 @@ export default function ChatPanel({
     } catch {}
   }
 
+  const handleResolveParked = async (thoughtId) => {
+    try {
+      const ok = await resolveParkedThought(thoughtId)
+      if (ok) {
+        setParkedThoughts((prev) => prev.filter((p) => p.id !== thoughtId))
+        if (showToast) showToast('Parked thought resolved!')
+      }
+    } catch (e) {
+      console.warn('Failed to resolve parked thought:', e)
+    }
+  }
+
   const messagesEndRef = useRef(null)
   const streamTimerRef = useRef(null)
   const isSendingRef = useRef(false)
@@ -52,10 +68,11 @@ export default function ChatPanel({
   const loadHistoryData = async () => {
     setLoadingHistory(true)
     try {
-      const [convs, mem, facts] = await Promise.all([
+      const [convs, mem, facts, parked] = await Promise.all([
         fetchConversations(50, true),
         fetchMemoryOverview(),
         fetchProfileFacts(),
+        fetchParkedThoughts(),
       ])
       if (convs) {
         const sorted = [...convs].sort((a, b) => {
@@ -70,6 +87,9 @@ export default function ChatPanel({
       }
       if (facts && typeof facts === 'object') {
         setProfileFacts(facts)
+      }
+      if (Array.isArray(parked)) {
+        setParkedThoughts(parked)
       }
       const uid = getCurrentUserId()
       if (uid && uid.includes('@')) {
@@ -449,6 +469,30 @@ export default function ChatPanel({
             ))}
           </div>
 
+          {/* Parked Thoughts Shelf Toggle */}
+          <button
+            id="btn-toggle-parked"
+            type="button"
+            onClick={() => setShowParkedShelf((v) => !v)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              padding: '4px 9px',
+              borderRadius: '7px',
+              border: '1px solid var(--border)',
+              background: showParkedShelf ? 'var(--coursework-bg)' : 'transparent',
+              color: showParkedShelf ? 'var(--coursework)' : 'var(--text-secondary)',
+              fontSize: '11px',
+              fontWeight: '600',
+              cursor: 'pointer',
+            }}
+            title="Toggle Parked Thoughts Shelf"
+          >
+            <span>📌</span>
+            <span>Parked ({parkedThoughts.length})</span>
+          </button>
+
           <button
             onClick={() => setShowContext((v) => !v)}
             style={{
@@ -538,6 +582,77 @@ export default function ChatPanel({
                   <div style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>{backendStatus}</div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Collapsible Parked Thoughts Shelf */}
+          {showParkedShelf && (
+            <div
+              id="parked-thoughts-shelf"
+              style={{
+                padding: '10px 20px',
+                borderBottom: '1px solid var(--border)',
+                background: 'var(--bg-card-soft)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+                flexShrink: 0,
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', color: 'var(--text-secondary)', letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  <span>📌</span>
+                  <span>Parked Thoughts Shelf</span>
+                  <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 'normal' }}>({parkedThoughts.length} open)</span>
+                </span>
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                  Tangents to revisit when you have breathing room
+                </span>
+              </div>
+              {parkedThoughts.length === 0 ? (
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic', padding: '4px 0' }}>
+                  No thoughts parked right now. Tell Compass "park that" anytime in chat to defer a topic.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  {parkedThoughts.map((item) => (
+                    <div
+                      key={item.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        padding: '5px 11px',
+                        borderRadius: '8px',
+                        background: 'var(--bg-card)',
+                        border: '1px solid var(--border)',
+                        fontSize: '12px',
+                        maxWidth: '100%',
+                      }}
+                    >
+                      <span style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>{item.text}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleResolveParked(item.id)}
+                        style={{
+                          padding: '2px 7px',
+                          borderRadius: '5px',
+                          border: 'none',
+                          background: 'var(--coursework-bg)',
+                          color: 'var(--coursework)',
+                          fontSize: '10.5px',
+                          fontWeight: '700',
+                          cursor: 'pointer',
+                          flexShrink: 0,
+                        }}
+                        title="Mark done"
+                      >
+                        ✓ Done
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

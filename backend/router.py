@@ -149,10 +149,11 @@ def message_needs_tools(message: str) -> bool:
         "feasible", "feasibility", "finish in time", "can i finish", "what to drop",
         "what should i drop", "what i drop", "triage", "overload", "overloaded",
         "overcommit", "capacity",
-        # Memory & Personal Profile Facts
+        # Memory & Personal Profile Facts & Parked Thoughts
         "memory", "remember that", "remember my", "remember to", "recall", "stored", "save", "log", "note", "notes",
         "remind", "reminder", "call me", "my name is", "my name's", "prefer",
         "preference", "forget my", "forget that", "forget what i", "my goal",
+        "park that", "park it", "park this", "come back to that", "parked shelf", "list parked",
         # Agent & Planner
         "planner", "agent", "plan", "execute",
     )
@@ -208,6 +209,54 @@ def _fallback_route(message: str, history: Optional[list[dict[str, str]]] = None
                 if fact_val:
                     key = "preference" if "prefer" in prefix or "like" in prefix else "user_fact"
                     return "remember_fact", {"key": key, "value": fact_val[:200]}, ""
+
+    # 4. Park it shelf detection (strictly deferred thoughts/tangents, not car/nature park)
+    if any(lp in msg_lower for lp in ("list parked", "show parked", "what is parked", "what's parked", "what did i park", "view parked", "parked shelf")):
+        return "list_parked", {}, ""
+
+    import re
+    res_match = re.search(r"(?:resolve parked|mark parked|done with parked|finish parked)\s*#?(\d+)", msg_lower)
+    if res_match:
+        return "resolve_parked", {"thought_id": int(res_match.group(1))}, ""
+
+    park_triggers = (
+        "park that",
+        "park it",
+        "park this for later",
+        "park this",
+        "let's come back to that",
+        "lets come back to that",
+        "come back to that later",
+    )
+    is_park_action = any(trigger in msg_lower for trigger in park_triggers)
+    is_ordinary_park = any(
+        term in msg_lower for term in (
+            "car", "vehicle", "parking", "garage", "lot", "national park", "amusement park",
+            "in the park", "to the park", "at the park", "walk in the park", "dog park"
+        )
+    )
+    if is_park_action and not is_ordinary_park:
+        park_text = message
+        for trig in (
+            "park that:", "park that -", "park that ",
+            "park this for later:", "park this for later ",
+            "park this:", "park this ",
+            "let's come back to that:", "let's come back to that ",
+            "lets come back to that:", "lets come back to that ",
+        ):
+            if trig in msg_lower:
+                idx = msg_lower.find(trig) + len(trig)
+                extracted = message[idx:].strip(" .!?")
+                if extracted:
+                    park_text = extracted
+                    break
+        if park_text.lower().strip(" .!?") in ("park that", "park it", "park this", "let's come back to that", "lets come back to that"):
+            if history:
+                for h in reversed(history):
+                    if h.get("content"):
+                        park_text = h.get("content")[:200]
+                        break
+        return "park_thought", {"text": park_text[:200]}, ""
 
     if any(term in msg_lower for term in ("feasibility", "can i finish", "what to drop", "what should i drop", "what i drop", "triage", "overloaded", "overcommit", "adversarial")):
         import re

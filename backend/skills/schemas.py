@@ -541,6 +541,61 @@ FORGET_FACT_TOOL: Dict[str, Any] = {
     },
 }
 
+PARK_THOUGHT_TOOL: Dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "park_thought",
+        "description": "Park a tangent, idea, or thought to come back to later.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "description": "The thought, idea, or topic to park on the shelf for later.",
+                },
+            },
+            "required": ["text"],
+        },
+    },
+}
+
+LIST_PARKED_TOOL: Dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "list_parked",
+        "description": "List thoughts and tangents parked on the shelf for later discussion.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "description": "Status filter ('parked' or 'done')",
+                    "default": "parked",
+                },
+            },
+            "required": [],
+        },
+    },
+}
+
+RESOLVE_PARKED_TOOL: Dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "resolve_parked",
+        "description": "Mark a parked thought or tangent as done / resolved.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "thought_id": {
+                    "type": "integer",
+                    "description": "ID of the parked thought to mark as resolved.",
+                },
+            },
+            "required": ["thought_id"],
+        },
+    },
+}
+
 # Registered tools exposed to the Nemotron router
 BASE_TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     ADD_TASK_TOOL,
@@ -567,6 +622,9 @@ BASE_TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     APPLY_TRIAGE_PLAN_TOOL,
     REMEMBER_FACT_TOOL,
     FORGET_FACT_TOOL,
+    PARK_THOUGHT_TOOL,
+    LIST_PARKED_TOOL,
+    RESOLVE_PARKED_TOOL,
 ]
 
 
