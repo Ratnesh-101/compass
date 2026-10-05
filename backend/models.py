@@ -12,6 +12,7 @@ from pydantic import BaseModel
 class ChatRequest(BaseModel):
     message: str
     conversation_id: Optional[str] = None
+    tone: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
@@ -223,6 +224,7 @@ class StreamChatRequest(BaseModel):
     message: str
     conversation_id: Optional[str] = None
     domain: Optional[str] = None
+    tone: Optional[str] = None
 
 
 class AgentRequest(BaseModel):

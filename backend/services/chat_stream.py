@@ -245,7 +245,11 @@ async def generate_chat_events(
             extra += f"\n\n[WORKSPACE MEMORY & PAST CONTEXT]:\n{memory_context}"
 
         from backend.persona import build_persona_system_prompt
-        sys_prompt = build_persona_system_prompt(profile_facts=profile_facts if isinstance(profile_facts, dict) else None, extra_context=extra)
+        sys_prompt = build_persona_system_prompt(
+            profile_facts=profile_facts if isinstance(profile_facts, dict) else None,
+            extra_context=extra,
+            tone=getattr(req, "tone", None),
+        )
 
         messages: List[ChatCompletionMessageParam] = [
             {"role": "system", "content": sys_prompt},

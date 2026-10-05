@@ -339,10 +339,10 @@ export default function App() {
     return getDomainMeta(selectedDomain)
   }, [selectedDomain])
 
-  const handleSendMessage = async (userText) => {
+  const handleSendMessage = async (userText, tone = null) => {
     setIsTyping(true)
 
-    const result = await sendQueryToAssistant(userText, conversationId)
+    const result = await sendQueryToAssistant(userText, conversationId, tone)
 
     setIsTyping(false)
 

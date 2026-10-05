@@ -7,7 +7,7 @@ import { API_BASE, getAuthHeaders } from './baseClient'
  * Passes conversation_id for multi-turn memory.
  * Returns { response, conversation_id } on success.
  */
-export async function sendQueryToAssistant(prompt, conversationId) {
+export async function sendQueryToAssistant(prompt, conversationId, tone = null) {
   try {
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 45000)
@@ -15,6 +15,9 @@ export async function sendQueryToAssistant(prompt, conversationId) {
     const body = { message: prompt }
     if (conversationId) {
       body.conversation_id = conversationId
+    }
+    if (tone) {
+      body.tone = tone
     }
 
     const res = await fetch(`${API_BASE}/api/chat`, {
@@ -51,11 +54,14 @@ export async function sendQueryToAssistant(prompt, conversationId) {
  * Dispatches incremental tokens via onToken, completion metadata via onComplete,
  * and errors via onError.
  */
-export async function streamQueryFromAssistant(prompt, conversationId, { onToken, onComplete, onError } = {}) {
+export async function streamQueryFromAssistant(prompt, conversationId, { onToken, onComplete, onError, tone = null } = {}) {
   try {
     const body = { message: prompt }
     if (conversationId) {
       body.conversation_id = conversationId
+    }
+    if (tone) {
+      body.tone = tone
     }
 
     const res = await fetch(`${API_BASE}/api/chat/stream`, {

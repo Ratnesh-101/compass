@@ -29,6 +29,20 @@ export default function ChatPanel({
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [guestMigrationCount, setGuestMigrationCount] = useState(0)
   const [toast, setToast] = useState(null)
+  const [tone, setTone] = useState(() => {
+    try {
+      return localStorage.getItem('compass_chat_tone') || 'balanced'
+    } catch {
+      return 'balanced'
+    }
+  })
+
+  const handleToneChange = (newTone) => {
+    setTone(newTone)
+    try {
+      localStorage.setItem('compass_chat_tone', newTone)
+    } catch {}
+  }
 
   const messagesEndRef = useRef(null)
   const streamTimerRef = useRef(null)
@@ -155,6 +169,7 @@ export default function ChatPanel({
 
     try {
       await streamQueryFromAssistant(text, conversationId, {
+        tone,
         onToken: (token, full) => {
           receivedTokens = full
           setStreamingText(full)
@@ -167,7 +182,7 @@ export default function ChatPanel({
           if (receivedTokens && receivedTokens.trim()) {
             setMessages(prev => [...prev, { role: 'assistant', text: receivedTokens }])
           } else if (onSendMessage) {
-            const reply = await onSendMessage(text)
+            const reply = await onSendMessage(text, tone)
             if (reply) {
               streamAssistantResponse(reply)
             }
@@ -186,7 +201,7 @@ export default function ChatPanel({
           setStreamingText('')
           try {
             if (onSendMessage) {
-              const reply = await onSendMessage(text)
+              const reply = await onSendMessage(text, tone)
               if (reply) {
                 streamAssistantResponse(reply)
                 return
@@ -393,8 +408,49 @@ export default function ChatPanel({
             <span>Memory Active</span>
           </div>
 
+          {/* Tone Dial: Brief / Balanced / Exploratory */}
+          <div
+            id="chat-tone-dial"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              background: 'var(--bg-card)',
+              border: '1px solid var(--border)',
+              borderRadius: '7px',
+              padding: '2px',
+              gap: '2px',
+            }}
+            title="Adjust assistant response style (Brief, Balanced, Exploratory)"
+          >
+            {[
+              { id: 'brief', label: 'Brief' },
+              { id: 'balanced', label: 'Balanced' },
+              { id: 'exploratory', label: 'Exploratory' },
+            ].map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                id={`btn-tone-${t.id}`}
+                onClick={() => handleToneChange(t.id)}
+                style={{
+                  padding: '3px 8px',
+                  borderRadius: '5px',
+                  border: 'none',
+                  background: tone === t.id ? 'var(--coursework)' : 'transparent',
+                  color: tone === t.id ? '#ffffff' : 'var(--text-secondary)',
+                  fontSize: '11px',
+                  fontWeight: tone === t.id ? '700' : '500',
+                  cursor: 'pointer',
+                  transition: 'background 0.15s ease, color 0.15s ease',
+                }}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
           <button
-            onClick={() => setShowContext(v => !v)}
+            onClick={() => setShowContext((v) => !v)}
             style={{
               padding: '5px 11px', borderRadius: '6px', border: '1px solid var(--border)',
               background: showContext ? 'var(--bg-card-soft)' : 'transparent',

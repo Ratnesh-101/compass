@@ -276,10 +276,11 @@ async def handle_summarize_across_domains(args: Dict[str, Any], pool: Any) -> Di
                 "Provide a clear, structured markdown roadmap without meta-commentary or thinking preamble.\n\n"
                 f"{combined_context}"
             )
+            from backend.persona import build_persona_system_prompt
             resp: Any = await client.chat.completions.create(
                 model=settings.SYNTHESIS_MODEL,
                 messages=[
-                    {"role": "system", "content": "You are Compass, a warm, unhurried thinking partner providing comprehensive, multi-domain executive roadmap briefings. Highlight dependencies and tight spots kindly."},
+                    {"role": "system", "content": build_persona_system_prompt(mode="synthesis", tone=args.get("tone"))},
                     {"role": "user", "content": prompt}
                 ],
                 max_tokens=2048,
@@ -344,7 +345,7 @@ async def handle_chat_skill(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
             resp: Any = await client.chat.completions.create(
                 model=settings.ROUTER_MODEL,
                 messages=[
-                    {"role": "system", "content": build_persona_system_prompt(mode="chat")},
+                    {"role": "system", "content": build_persona_system_prompt(mode="chat", tone=args.get("tone"))},
                     {"role": "user", "content": str(msg)}
                 ],
                 max_tokens=150,

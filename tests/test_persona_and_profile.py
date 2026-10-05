@@ -333,3 +333,48 @@ async def test_persona_phrases_api_endpoint(client: AsyncClient, auth_headers: d
         assert isinstance(data[pool], list)
         assert len(data[pool]) > 0
 
+
+def test_persona_tone_validation_and_prompt_injection():
+    """Verify tone dial validation, prompt constraint injection, and invalid value handling."""
+    from backend.persona import validate_tone, build_persona_system_prompt
+
+    # 1. Validation logic
+    assert validate_tone("brief") == "brief"
+    assert validate_tone("balanced") == "balanced"
+    assert validate_tone("exploratory") == "exploratory"
+    assert validate_tone("  BRIEF  ") == "brief"
+    assert validate_tone("EXPLORATORY") == "exploratory"
+    assert validate_tone("aggressive") is None
+    assert validate_tone("random_junk") is None
+    assert validate_tone("") is None
+    assert validate_tone(None) is None
+    assert validate_tone(123) is None
+
+    # 2. Prompt injection for 'brief'
+    prompt_brief = build_persona_system_prompt(tone="brief")
+    assert "[TONE CONSTRAINT]: Keep response very brief (1 to 3 sentences max)." in prompt_brief
+
+    # 3. Prompt injection for 'exploratory'
+    prompt_exploratory = build_persona_system_prompt(tone="exploratory")
+    assert "[TONE CONSTRAINT]: You have more room to think out loud" in prompt_exploratory
+
+    # 4. 'balanced' retains standard voice without extra tone constraint
+    prompt_balanced = build_persona_system_prompt(tone="balanced")
+    assert "[TONE CONSTRAINT]" not in prompt_balanced
+
+    # 5. Invalid values are ignored gracefully
+    prompt_invalid = build_persona_system_prompt(tone="shout_at_me")
+    assert "[TONE CONSTRAINT]" not in prompt_invalid
+
+
+def test_router_unaffected_by_tone():
+    """Verify Nemotron router remains lean and unaffected by tone constraints."""
+    import inspect
+    import backend.router as router_mod
+
+    src = inspect.getsource(router_mod.route_message)
+    assert "TONE CONSTRAINT" not in src
+    assert "validate_tone" not in src
+    assert "VALID_TONES" not in src
+
+

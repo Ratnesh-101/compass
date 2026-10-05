@@ -71,14 +71,45 @@ BEHAVIOR:
 - Only reference what the user actually told you. Never guess or invent details."""
 
 
+# ============================================================================
+# Tone Validation & System Instructions (Brief / Balanced / Exploratory)
+# ============================================================================
+
+VALID_TONES = {"brief", "balanced", "exploratory"}
+
+TONE_INSTRUCTIONS: Dict[str, str] = {
+    "brief": (
+        "[TONE CONSTRAINT]: Keep response very brief (1 to 3 sentences max). "
+        "Do not ask a follow-up question unless strictly necessary."
+    ),
+    "exploratory": (
+        "[TONE CONSTRAINT]: You have more room to think out loud and explore nuances, "
+        "but still ask at most one question."
+    ),
+}
+
+
+def validate_tone(tone: Optional[str]) -> Optional[str]:
+    """Validate tone against allowed values (brief, balanced, exploratory).
+
+    Returns lowercase valid tone or None if invalid/unspecified.
+    """
+    if not tone or not isinstance(tone, str):
+        return None
+    normalized = tone.strip().lower()
+    return normalized if normalized in VALID_TONES else None
+
+
 def build_persona_system_prompt(
     profile_facts: Optional[Dict[str, str]] = None,
     extra_context: Optional[str] = None,
     mode: str = "chat",
+    tone: Optional[str] = None,
 ) -> str:
     """Build a persona prompt for user-facing completions.
 
-    Injects the compact user profile block only if profile facts exist.
+    Injects the compact user profile block only if profile facts exist,
+    and appends tone constraints (brief / exploratory) if requested.
     """
     parts = [PERSONA_CORE_INSTRUCTIONS]
 
@@ -99,6 +130,11 @@ def build_persona_system_prompt(
     if extra_context:
         parts.append(f"\n\n[CONTEXT]:\n{extra_context}")
 
+    # Validate tone and append specific instruction
+    clean_tone = validate_tone(tone)
+    if clean_tone and clean_tone in TONE_INSTRUCTIONS:
+        parts.append(f"\n\n{TONE_INSTRUCTIONS[clean_tone]}")
+
     if mode == "synthesis":
         parts.append(
             "\n\nTASK: Synthesize the multi-domain context into a coherent, realistic roadmap. "
@@ -106,6 +142,7 @@ def build_persona_system_prompt(
         )
 
     return "".join(parts)
+
 
 
 def format_tool_response(action: str, details: Dict[str, str]) -> str:
