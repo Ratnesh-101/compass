@@ -150,9 +150,9 @@ def message_needs_tools(message: str) -> bool:
         "what should i drop", "what i drop", "triage", "overload", "overloaded",
         "overcommit", "capacity",
         # Memory & Personal Profile Facts
-        "memory", "remember", "recall", "stored", "save", "log", "note", "notes",
+        "memory", "remember that", "remember my", "remember to", "recall", "stored", "save", "log", "note", "notes",
         "remind", "reminder", "call me", "my name is", "my name's", "prefer",
-        "preference", "forget", "my goal",
+        "preference", "forget my", "forget that", "forget what i", "my goal",
         # Agent & Planner
         "planner", "agent", "plan", "execute",
     )
@@ -162,24 +162,53 @@ def message_needs_tools(message: str) -> bool:
 
 def _fallback_route(message: str, history: Optional[list[dict[str, str]]] = None) -> Tuple[Optional[str], Optional[dict[str, Any]], str]:
     msg_lower = message.lower()
-    if any(k in msg_lower for k in ("call me", "my name is", "my name's")):
-        for prefix in ("call me", "my name is", "my name's"):
-            if prefix in msg_lower:
-                name_val = message[msg_lower.find(prefix) + len(prefix):].strip(" .!?")
-                if name_val:
-                    return "remember_fact", {"key": "name", "value": name_val}, ""
-    if "forget" in msg_lower:
-        for prefix in ("forget my", "forget that", "forget"):
+
+    # 1. Personal fact forget: strictly match personal-memory phrases, rejecting negations/idioms
+    is_negative_or_idiomatic_forget = any(
+        neg in msg_lower for neg in (
+            "don't forget", "dont forget", "do not forget", "never forget",
+            "forget about it", "forget it", "i forgot", "forgot to"
+        )
+    )
+    if not is_negative_or_idiomatic_forget:
+        for prefix in ("forget my ", "forget that i ", "forget what i said about ", "forget what i said regarding "):
             if prefix in msg_lower:
                 target = msg_lower.split(prefix, 1)[-1].strip(".!? ")
                 if target:
-                    return "forget_fact", {"key": target.replace(" ", "_")}, ""
-    if any(prefix in msg_lower for prefix in ("my goal is", "my goal:")):
-        for prefix in ("my goal is", "my goal:"):
+                    return "forget_fact", {"key": target.replace(" ", "_")[:40]}, ""
+
+    # 2. Check personal name and/or goal
+    if any(k in msg_lower for k in ("call me ", "my name is ", "my name's ")):
+        for prefix in ("call me ", "my name is ", "my name's "):
+            if prefix in msg_lower:
+                rest = message[msg_lower.find(prefix) + len(prefix):]
+                if " and my goal" in rest.lower():
+                    name_val = rest[:rest.lower().find(" and my goal")].strip(" .!?,;")
+                else:
+                    name_val = rest.strip(" .!?")
+                if name_val:
+                    return "remember_fact", {"key": "name", "value": name_val[:200]}, ""
+
+    if any(prefix in msg_lower for prefix in ("my goal is ", "my goal: ")):
+        for prefix in ("my goal is ", "my goal: "):
             if prefix in msg_lower:
                 goal_val = message[msg_lower.find(prefix) + len(prefix):].strip(" .!?")
                 if goal_val:
-                    return "remember_fact", {"key": "goal", "value": goal_val}, ""
+                    return "remember_fact", {"key": "goal", "value": goal_val[:200]}, ""
+
+    # 3. Remember personal preference/fact (only when NOT task/deadline oriented)
+    has_task_terms = any(term in msg_lower for term in (
+        "due", "deadline", "task", "deliverable", "submit", "submission",
+        "demo", "presentation", "meeting", "exam", "assignment", "homework", "milestone"
+    ))
+    if ("remember that " in msg_lower or "remember my " in msg_lower) and not has_task_terms:
+        for prefix in ("remember that i prefer ", "remember that i like ", "remember that my goal is ", "remember that i ", "remember that "):
+            if prefix in msg_lower:
+                fact_val = message[msg_lower.find(prefix) + len(prefix):].strip(" .!?")
+                if fact_val:
+                    key = "preference" if "prefer" in prefix or "like" in prefix else "user_fact"
+                    return "remember_fact", {"key": key, "value": fact_val[:200]}, ""
+
     if any(term in msg_lower for term in ("feasibility", "can i finish", "what to drop", "what should i drop", "what i drop", "triage", "overloaded", "overcommit", "adversarial")):
         import re
         days_match = re.search(r"\b([0-9]{1,4})\s*days?\b", msg_lower)

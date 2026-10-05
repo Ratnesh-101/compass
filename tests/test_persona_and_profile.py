@@ -137,6 +137,40 @@ def test_fallback_route_extracts_facts():
     assert args.get("key") == "goal"
 
 
+def test_router_false_positives_regression():
+    """Verify router false positive prevention as required by A1."""
+    # 1. "don't forget to add a task for Friday" -> NOT forget_fact (routes to add_task)
+    skill_neg_forget, _, _ = _fallback_route("don't forget to add a task for Friday")
+    assert skill_neg_forget != "forget_fact"
+    assert skill_neg_forget == "add_task"
+
+    # 2. "remember that the demo is due Friday" -> NOT remember_fact (routes to task query/add)
+    skill_deadline, _, _ = _fallback_route("remember that the demo is due Friday")
+    assert skill_deadline != "remember_fact"
+
+    # 3. "forget my goal" -> forget_fact
+    skill_forget, args_forget, _ = _fallback_route("forget my goal")
+    assert skill_forget == "forget_fact"
+    assert args_forget.get("key") == "goal"
+
+    # 4. "call me Sam" -> remember_fact (name)
+    skill_name, args_name, _ = _fallback_route("call me Sam")
+    assert skill_name == "remember_fact"
+    assert args_name.get("key") == "name"
+    assert args_name.get("value") == "Sam"
+
+    # 5. "my name is Alex and my goal is to win the hackathon" -> remember_fact
+    skill_compound, args_compound, _ = _fallback_route("my name is Alex and my goal is to win the hackathon")
+    assert skill_compound == "remember_fact"
+    assert args_compound.get("key") == "name"
+    assert args_compound.get("value") == "Alex"
+
+    # 6. "forget about it" -> NOT forget_fact
+    skill_idiom, _, _ = _fallback_route("forget about it")
+    assert skill_idiom != "forget_fact"
+
+
+
 @pytest.mark.asyncio
 async def test_profile_handlers_execution():
     """Verify handle_remember_fact and handle_forget_fact skills."""
