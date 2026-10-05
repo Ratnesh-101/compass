@@ -20,7 +20,7 @@ export default function Timeline({
   activeDomain,
   onSelectDomain,
   onTasksUpdated,
-  onOpenNorthstar,
+  onOpenCompass,
   onOpenTelemetry,
   customDomains = [],
   theme = 'light',
@@ -394,7 +394,7 @@ export default function Timeline({
       <OnboardingTour
         onVerifyDeadlines={handleVerifyAll}
         onOpenTelemetry={onOpenTelemetry}
-        onOpenNorthstar={onOpenNorthstar}
+        onOpenCompass={onOpenCompass}
         onOpenSeed={handleSeedJudgePersona}
       />
 
@@ -514,7 +514,7 @@ export default function Timeline({
         defaultDomain={activeDomain}
         tasks={tasks}
         customDomains={customDomains}
-        onOpenNorthstar={onOpenNorthstar}
+        onOpenCompass={onOpenCompass}
       />
     </div>
   )

@@ -197,7 +197,7 @@ export default function Sidebar({
             item.key === 'timeline'
               ? activeTab === 'timeline' && activeDomain === 'all'
               : item.key === 'compass'
-              ? activeTab === 'compass' || activeTab === 'northstar' || activeTab === 'assistant' || activeTab === 'planner' || activeTab === 'agent'
+              ? activeTab === 'compass' || activeTab === 'assistant' || activeTab === 'planner' || activeTab === 'agent'
               : activeTab === item.key
           return (
             <button

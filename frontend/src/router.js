@@ -3,7 +3,7 @@
  * Reuses browser History API for clean, bookmarkable, and shareable routes:
  * - /timeline or / => Timeline view (all domains)
  * - /domain/:domainKey or /:domainKey => Timeline filtered to specific Context Domain
- * - /compass or /northstar => Compass Assistant & Planner
+ * - /compass => Compass Assistant & Planner
  * - /schedule or /calendar => Calendar Schedule view
  */
 
@@ -17,7 +17,7 @@ export function parseLocation(pathname = window.location.pathname, search = wind
   const queryTab = searchParams.get('tab')
   const queryDomain = searchParams.get('domain')
 
-  if (queryTab === 'compass' || queryTab === 'northstar' || queryTab === 'assistant' || queryTab === 'planner') {
+  if (queryTab === 'compass' || queryTab === 'assistant' || queryTab === 'planner') {
     return { tab: 'compass', domain: 'all' }
   }
   if (queryTab === 'schedule' || queryTab === 'calendar') {
@@ -27,7 +27,7 @@ export function parseLocation(pathname = window.location.pathname, search = wind
   // Pathname routing: Compass
   if (
     cleanPath === '/compass' ||
-    cleanPath === '/northstar' ||
+    cleanPath === '/northstar' || // legacy redirect — resolve to compass
     cleanPath === '/assistant' ||
     cleanPath === '/planner'
   ) {
