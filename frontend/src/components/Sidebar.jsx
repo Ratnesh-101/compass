@@ -662,14 +662,7 @@ export default function Sidebar({
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
             <span style={{ fontSize: '13px' }}>👤</span>
             <div style={{ minWidth: 0 }}>
-              <div style={{
-                fontSize: '12px',
-                color: 'var(--text-on-dark)',
-                fontWeight: '600',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap'
-              }}>
+              <div style={{ fontSize: '12px', color: 'var(--text-on-dark)', fontWeight: '600', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {currentUser?.authenticated ? currentUser.email : 'Sign in / Account'}
               </div>
               <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
@@ -687,12 +680,8 @@ export default function Sidebar({
         isOpen={showCreateDomainModal}
         onClose={() => setShowCreateDomainModal(false)}
         onCreated={(newDomain) => {
-          if (onDomainCreated) {
-            onDomainCreated(newDomain)
-          }
-          if (onSelectDomain) {
-            onSelectDomain(newDomain.key)
-          }
+          if (onDomainCreated) onDomainCreated(newDomain)
+          if (onSelectDomain) onSelectDomain(newDomain.key)
         }}
         existingDomains={displayDomains}
       />
