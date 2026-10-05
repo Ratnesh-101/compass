@@ -223,15 +223,17 @@ async def generate_chat_events(
         )
 
         today_iso = date.today().isoformat()
-        sys_prompt = (
-            f"You are Compass, an intelligent personal assistant with long-term memory across sessions. "
+        date_context = (
             f"Today's date is {today_iso}. When resolving dates without years (e.g. '30th oct'), use {today_iso[:4]}. "
-            f"You maintain context across conversation history AND prior chats/plans. "
             f"When the user asks follow-up questions, recalls earlier conversations, or asks to plan or schedule without clashing, "
-            f"use the provided memory and active schedule context. Be concise, friendly, and helpful."
+            f"use the provided memory and active schedule context."
         )
+        extra = date_context
         if memory_context:
-            sys_prompt += f"\n\n[WORKSPACE MEMORY & PAST CONTEXT]:\n{memory_context}"
+            extra += f"\n\n[WORKSPACE MEMORY & PAST CONTEXT]:\n{memory_context}"
+
+        from backend.persona import build_persona_system_prompt
+        sys_prompt = build_persona_system_prompt(extra_context=extra)
 
         messages: List[ChatCompletionMessageParam] = [
             {"role": "system", "content": sys_prompt},

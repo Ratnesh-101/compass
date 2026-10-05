@@ -308,9 +308,13 @@ async def handle_message(
                 "routing_latency_ms": latency_ms,
             }
 
-        # Build skill summary
-        due_info = f" with due date {due_str}" if due_str else ""
-        summary = f"Added task '{title}' under {domain.upper()} domain{due_info}."
+        # Build skill summary using persona formatter
+        from backend.persona import format_tool_response
+        summary = format_tool_response("add_task", {
+            "title": title,
+            "due_date": due_str or "",
+            "domain": domain,
+        })
 
         # Persist conversation & messages
         if persist:
