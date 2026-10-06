@@ -114,13 +114,19 @@ async def test_db_lifecycle():
     """Clean up test state after each test only if a database pool is already active."""
     yield
     try:
+        from backend.dependencies import _rate_store, _agent_rate_store
+        _rate_store.clear()
+        _agent_rate_store.clear()
+    except Exception:
+        pass
+    try:
         from backend.memory import db
         if db._pool is not None:
             async with db._pool.acquire(timeout=5.0) as conn:
                 await conn.execute("""
                     DELETE FROM user_profile_facts WHERE user_id LIKE 'alice_%' OR user_id LIKE 'bob_%' OR user_id LIKE 'carol_%' OR user_id LIKE 'david_%' OR user_id LIKE 'test_%' OR user_id LIKE '%@example.com';
                     DELETE FROM parked_thoughts WHERE user_id LIKE 'alice_%' OR user_id LIKE 'bob_%' OR user_id LIKE 'carol_%' OR user_id LIKE 'david_%' OR user_id LIKE 'test_%' OR user_id LIKE '%@example.com';
-                    DELETE FROM rate_limit_buckets WHERE key LIKE '%127.0.0.1%' OR key LIKE '%recap%';
+                    DELETE FROM rate_limit_buckets;
                     DELETE FROM agent_runs WHERE id LIKE 'test_%' OR id LIKE 'run_%';
                     DELETE FROM pending_actions WHERE run_id LIKE 'test_%' OR run_id LIKE 'run_%';
                 """)
