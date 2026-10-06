@@ -143,13 +143,15 @@ async def add_message(
 ) -> dict:
     """Insert a message into the conversation history and update title if first user message."""
     cid = uuid.UUID(conversation_id)
+    # Strip [[modes]] token before persisting to ensure stored history, recap, and shared links never contain it
+    clean_content = (content or "").replace("[[modes]]", "").strip()
     row = await conn.fetchrow(
         """
         INSERT INTO messages (conversation_id, role, content, skill_called)
         VALUES ($1, $2, $3, $4)
         RETURNING id, conversation_id, role, content, skill_called, created_at
         """,
-        cid, role, content, skill_called
+        cid, role, clean_content, skill_called
     )
     await conn.execute(
         "UPDATE conversations SET last_active_at = now() WHERE id = $1",

@@ -6,12 +6,13 @@ Endpoints for inspecting and resolving thoughts and tangents parked on the shelf
 
 from typing import Any, Dict, Optional
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from backend.dependencies import _get_current_identity, _get_or_create_user_id, verify_token
+from backend.dependencies import _get_current_identity
 from backend.memory.db import get_pool
 from backend.memory.parked import (
+    MAX_PARKED_TEXT_LENGTH,
     list_parked_thoughts,
     park_thought,
     resolve_parked_thought,
@@ -31,7 +32,6 @@ class ParkThoughtRequest(BaseModel):
 @router.get("")
 async def get_parked_thoughts(
     request: Request,
-    _token: str = Depends(verify_token),
 ) -> Dict[str, Any]:
     """Retrieve all open thoughts on the parked shelf for the authenticated user."""
     pool = await get_pool()
@@ -39,21 +39,25 @@ async def get_parked_thoughts(
         raise HTTPException(status_code=503, detail="Database unavailable")
 
     ident = _get_current_identity(request)
-    user_id = (ident.user_id or ident.id) if ident else _get_or_create_user_id(request)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    owner_id = ident.id
 
     async with pool.acquire() as conn:
-        thoughts = await list_parked_thoughts(conn, user_id=user_id, status="parked")
+        thoughts = await list_parked_thoughts(conn, user_id=owner_id, status="parked")
 
-    return {"user_id": user_id, "parked": thoughts}
+    return {"user_id": owner_id, "parked": thoughts}
 
 
 @router.post("")
 async def create_parked_thought(
     body: ParkThoughtRequest,
     request: Request,
-    _token: str = Depends(verify_token),
 ) -> Dict[str, Any]:
     """Add a thought or tangent to the parked shelf."""
+    if len(body.text) > 500:
+        raise HTTPException(status_code=400, detail="Thought text exceeds maximum length (500 characters)")
+
     clean_text = sanitize_parked_text(body.text)
     if not clean_text:
         raise HTTPException(status_code=400, detail="Thought text cannot be empty")
@@ -63,13 +67,15 @@ async def create_parked_thought(
         raise HTTPException(status_code=503, detail="Database unavailable")
 
     ident = _get_current_identity(request)
-    user_id = (ident.user_id or ident.id) if ident else _get_or_create_user_id(request)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    owner_id = ident.id
 
     async with pool.acquire() as conn:
         record = await park_thought(
             conn,
             text=clean_text,
-            user_id=user_id,
+            user_id=owner_id,
             conversation_id=body.conversation_id,
         )
 
@@ -77,10 +83,10 @@ async def create_parked_thought(
 
 
 @router.patch("/{thought_id}")
+@router.patch("/{thought_id}/resolve")
 async def mark_parked_done(
     thought_id: int,
     request: Request,
-    _token: str = Depends(verify_token),
 ) -> Dict[str, Any]:
     """Mark a parked thought as done / resolved."""
     pool = await get_pool()
@@ -88,12 +94,15 @@ async def mark_parked_done(
         raise HTTPException(status_code=503, detail="Database unavailable")
 
     ident = _get_current_identity(request)
-    user_id = (ident.user_id or ident.id) if ident else _get_or_create_user_id(request)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    owner_id = ident.id
 
     async with pool.acquire() as conn:
-        resolved = await resolve_parked_thought(conn, thought_id=thought_id, user_id=user_id)
+        resolved = await resolve_parked_thought(conn, thought_id=thought_id, user_id=owner_id)
 
     if not resolved:
         raise HTTPException(status_code=404, detail=f"Parked thought #{thought_id} not found")
 
     return {"success": True, "thought_id": thought_id, "status": "done"}
+

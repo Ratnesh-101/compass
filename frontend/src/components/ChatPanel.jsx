@@ -6,6 +6,8 @@ import {
   fetchMemoryOverview,
   fetchMigrationStatus,
   fetchProfileFacts,
+  deleteProfileFact,
+  deleteAllProfileFacts,
   fetchParkedThoughts,
   resolveParkedThought,
   fetchChatRecap,
@@ -16,6 +18,7 @@ import ChatChatMessageList from './chat/ChatMessageList'
 import ChatInputBar from './chat/ChatInputBar'
 import ChatContextBar from './chat/ChatContextBar'
 import ParkedThoughtsShelf from './chat/ParkedThoughtsShelf'
+import ProfileFactsShelf from './chat/ProfileFactsShelf'
 
 export default function ChatPanel({
   messages, setMessages, conversationId, setConversationId, onSendMessage, isTyping, onChatComplete,
@@ -312,13 +315,6 @@ export default function ChatPanel({
             return
           }
         }
-        setMessages(prev => [
-          ...prev,
-          {
-            role: 'assistant',
-            text: "I encountered an issue connecting to Compass. Please verify the service is running and try again.",
-          },
-        ])
       } catch (fallbackErr) {
         console.error('[Chat Fallback Error]', fallbackErr)
         setMessages(prev => [
@@ -381,11 +377,16 @@ export default function ChatPanel({
     }
   }
 
-  const showToast = (msg) => {
-    setToast(msg)
-    setTimeout(() => setToast(null), 2500)
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2500) }
+  const handleDeleteFact = async (k) => {
+    if (await deleteProfileFact(k)) {
+      setProfileFacts(prev => { const n = { ...prev }; delete n[k]; return n })
+      showToast(`Forgotten: ${k}`)
+    }
   }
-
+  const handleForgetAllFacts = async () => {
+    if (await deleteAllProfileFacts()) { setProfileFacts({}); showToast('All personal facts forgotten') }
+  }
 
   const handleSelectPastPlan = (plan) => {
     setMessages(prev => [
@@ -397,6 +398,7 @@ export default function ChatPanel({
     ])
     setShowHistoryDrawer(false)
   }
+
 
   const isInputDisabled = isStreaming || isTyping
   const isOnline = backendStatus.toLowerCase().includes('neon') || backendStatus.toLowerCase().includes('live')
@@ -628,6 +630,16 @@ export default function ChatPanel({
               onResolveParked={handleResolveParked}
             />
           )}
+
+          {/* Collapsible Profile Facts Shelf */}
+          {showContext && (
+            <ProfileFactsShelf
+              facts={profileFacts}
+              onDeleteFact={handleDeleteFact}
+              onForgetAll={handleForgetAllFacts}
+            />
+          )}
+
 
           <ChatChatMessageList
             messages={messages}

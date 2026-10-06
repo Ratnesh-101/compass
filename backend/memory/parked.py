@@ -134,3 +134,47 @@ async def resolve_parked_thought(
     except Exception as e:
         logger.warning("Failed to resolve parked thought (continuing gracefully): %s", e)
         return False
+
+
+async def migrate_guest_parked_thoughts(
+    conn: asyncpg.Connection,
+    guest_id: str,
+    user_id: str,
+) -> int:
+    """Migrate guest parked thoughts to registered user account (concurrent-safe, idempotent)."""
+    try:
+        res = await conn.execute(
+            """
+            UPDATE parked_thoughts
+            SET user_id = $2
+            WHERE user_id = $1
+            """,
+            guest_id,
+            user_id,
+        )
+        parts = res.split()
+        return int(parts[1]) if len(parts) == 2 else 0
+    except Exception as e:
+        logger.warning("Could not migrate parked thoughts from %s to %s: %s", guest_id, user_id, e)
+        return 0
+
+
+async def delete_guest_parked_thoughts(
+    conn: asyncpg.Connection,
+    guest_id: str,
+) -> int:
+    """Delete all parked thoughts belonging to a guest."""
+    try:
+        res = await conn.execute(
+            """
+            DELETE FROM parked_thoughts
+            WHERE user_id = $1
+            """,
+            guest_id,
+        )
+        parts = res.split()
+        return int(parts[1]) if len(parts) == 2 else 0
+    except Exception as e:
+        logger.warning("Could not delete parked thoughts for guest %s: %s", guest_id, e)
+        return 0
+

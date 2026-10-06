@@ -458,7 +458,7 @@ async def test_audit_log_entry_created_for_mutation():
         assert audit_row["affected_table"] == "tasks"
         assert audit_row["approved_by"] == "test_user"
 
-        new_state = json.loads(audit_row["new_state"])
+        new_state = json.loads(audit_row["new_state"]) if isinstance(audit_row["new_state"], str) else audit_row["new_state"]
         assert new_state["title"] == title
 
         # Clean up

@@ -315,6 +315,22 @@ export async function deleteProfileFact(key) {
 }
 
 /**
+ * Delete all persistent profile facts ('forget all').
+ */
+export async function deleteAllProfileFacts() {
+  try {
+    const res = await fetch(`${API_BASE}/api/profile/facts`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+
+/**
  * Fetch canonical persona signature phrase pools from backend.
  */
 export async function fetchPersonaPhrases() {

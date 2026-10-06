@@ -61,9 +61,38 @@ def check_run_limits(model_calls: int, tool_calls: int, tavily_credits: int) -> 
         )
 
 
-def check_daily_budget(identity_id: str, cost_increment_usd: float = 0.0) -> None:
-    """Synchronous identity budget validation helper."""
-    pass
+_daily_recap_calls: Dict[str, Dict[str, int]] = {}  # date_str -> {identity_id -> count}
+MAX_DAILY_IDENTITY_RECAP_CALLS = 10  # Cap recap calls per identity per day
+
+
+def check_daily_budget(identity_id: str, cost_increment_usd: float = 0.0, limit: int = MAX_DAILY_IDENTITY_RECAP_CALLS) -> None:
+    """Validate identity's daily model/recap call budget by counting calls (not word estimates).
+    Raises HTTPException(429) if daily call limit is exceeded.
+    """
+    from datetime import date
+    today_str = date.today().isoformat()
+    if today_str not in _daily_recap_calls:
+        _daily_recap_calls.clear()
+        _daily_recap_calls[today_str] = {}
+
+    calls_today = _daily_recap_calls[today_str].get(identity_id, 0)
+    if calls_today >= limit:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Daily recap call budget of {limit} calls reached for this identity. Please try again tomorrow.",
+        )
+    _daily_recap_calls[today_str][identity_id] = calls_today + 1
+
+
+def reset_daily_budget(identity_id: Optional[str] = None) -> None:
+    """Reset daily budget counts for tests."""
+    from datetime import date
+    today_str = date.today().isoformat()
+    if identity_id and today_str in _daily_recap_calls:
+        _daily_recap_calls[today_str].pop(identity_id, None)
+    else:
+        _daily_recap_calls.clear()
+
 
 
 async def check_daily_identity_budget(

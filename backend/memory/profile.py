@@ -133,3 +133,52 @@ async def delete_profile_fact(
     except Exception as e:
         logger.debug("Could not delete profile fact %s for %s: %s", clean_key, user_id, e)
         return False
+
+
+async def clear_all_profile_facts(
+    conn: DbConn,
+    user_id: str = "default_user",
+) -> int:
+    """Delete all profile facts for a user identity. Returns number of facts deleted."""
+    try:
+        res = await conn.execute(
+            """
+            DELETE FROM user_profile_facts
+            WHERE user_id = $1
+            """,
+            user_id,
+        )
+        parts = res.split()
+        return int(parts[1]) if len(parts) == 2 else 0
+    except Exception as e:
+        logger.debug("Could not clear profile facts for %s: %s", user_id, e)
+        return 0
+
+
+async def migrate_guest_profile_facts(
+    conn: DbConn,
+    guest_id: str,
+    user_id: str,
+) -> int:
+    """Migrate guest profile facts to registered user account (idempotent, concurrent-safe, ON CONFLICT)."""
+    try:
+        res = await conn.execute(
+            """
+            INSERT INTO user_profile_facts (user_id, key, value, source_message_id, created_at, updated_at)
+            SELECT $2, key, value, source_message_id, created_at, updated_at
+            FROM user_profile_facts
+            WHERE user_id = $1
+            ON CONFLICT (user_id, key)
+            DO UPDATE SET
+                value = EXCLUDED.value,
+                updated_at = EXCLUDED.updated_at
+            """,
+            guest_id,
+            user_id,
+        )
+        parts = res.split()
+        return int(parts[-1]) if parts and parts[-1].isdigit() else 0
+    except Exception as e:
+        logger.warning("Could not migrate profile facts from %s to %s: %s", guest_id, user_id, e)
+        return 0
+

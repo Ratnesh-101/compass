@@ -281,15 +281,32 @@ async def init_pool(dsn: str | None = None) -> asyncpg.Pool:
         dsn,
         min_size=2,
         max_size=10,
-        timeout=5.0,
-        command_timeout=10.0,
+        timeout=15.0,
+        command_timeout=15.0,
         init=_init_connection,  # register pgvector on every connection
     )
     try:
-        await asyncio.wait_for(_ensure_tables(_pool), timeout=10.0)
+        await asyncio.wait_for(_ensure_tables(_pool), timeout=15.0)
     except Exception as e:
         import logging
         logging.getLogger("compass.db").warning(f"Could not auto-create tables: {e}")
+
+    # Verify critical tables exist; never silently degrade
+    try:
+        async with _pool.acquire(timeout=10.0) as check_conn:
+            existing_tables = await check_conn.fetch(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('user_profile_facts', 'parked_thoughts')"
+            )
+            found = {r["table_name"] for r in existing_tables}
+            import logging
+            db_logger = logging.getLogger("compass.db")
+            for req_table in ("user_profile_facts", "parked_thoughts"):
+                if req_table not in found:
+                    db_logger.error(f"ERROR: Required database table '{req_table}' is missing! Feature will degrade.")
+    except Exception as e:
+        import logging
+        logging.getLogger("compass.db").warning(f"Could not verify table existence at startup: {e}")
+
     return _pool  # type: ignore[return-value]
 
 

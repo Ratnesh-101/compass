@@ -21,7 +21,7 @@ Per official Devpost Hackathon rules regarding pre-existing work, the following 
    - Added full transaction rollback and audit trails via PostgreSQL `agent_audit_log`.
 
 3. **Tavily Web Intelligence Suite & Evidence Ledger**:
-   - Built the **Abstain-First Principle**: internal memories are queried first; web search is dispatched only when internal recall confidence is insufficient.
+   - Built the **Abstain-First Principle**: internal memories are queried first; web search is dispatched only when internal recall is insufficient.
    - Developed strict domain authority classification (Tier 1 Pinned/Official, Tier 2 Technical/Docs, Tier 3 General Web) with exact host and path matching to prevent subdomain spoofing.
    - Implemented verbatim quote verification and explicit calendar-year provenance checking to eliminate date hallucinations.
 
@@ -84,7 +84,7 @@ Compass routes requests dynamically across specialized NVIDIA open-source models
 
 ## 4. Tavily Web Intelligence & Evidence Ledger
 
-Compass integrates the Tavily Web Intelligence Suite following the **Abstain-First Principle**: internal memories and tasks are queried first; web search is dispatched only when internal knowledge lacks confidence.
+Compass integrates the Tavily Web Intelligence Suite following the **Abstain-First Principle**: internal memories and tasks are queried first; web search is dispatched only when internal knowledge lacks coverage.
 
 ### Three-Run Proof Demonstration (`scripts/demo_two_runs.py`)
 
@@ -159,3 +159,19 @@ cd frontend
 npm install
 npm run build
 ```
+
+---
+
+## 7. Project Provenance & Hackathon Eligibility
+
+- **First Commit Date**: `Fri Sep 4 11:47:32 2026 +0530` (`commit d55b21e16b436d83b516e47ed8ffc5034759d494`)
+- **Git Log Origin Verification (`git log --reverse | head -n 6`)**:
+  ```text
+  commit d55b21e16b436d83b516e47ed8ffc5034759d494
+  Author: Ratnesh Singh <himynameisratnesh12@gmail.com>
+  Date:   Fri Sep 4 11:47:32 2026 +0530
+
+      Initial commit
+  ```
+- **Eligibility Statement**: The repository was initialized on September 4, 2026 (postdating August 26, 2026). The project was built entirely from scratch during the official hackathon window; it does not claim "significantly updated" because no pre-hackathon codebase existed.
+

@@ -77,7 +77,7 @@ def test_domain_authority_classification():
 
 
 def test_composite_scoring_and_ranking():
-    """Verify source sorting prioritizes authoritative official docs over low-confidence blogs."""
+    """Verify source sorting prioritizes authoritative official docs over unverified blogs."""
     raw_results = [
         {
             "title": "Random Blog Post on Nebius",

@@ -71,9 +71,16 @@ async def chat(request: ChatRequest, req: Request, _token: str = Depends(verify_
 async def chat_recap(
     request: ChatRecapRequest,
     req: Request,
-    _token: str = Depends(verify_token),
+    _rate: None = Depends(rate_limit),
 ):
     """Summarize decisions made, open questions, and concrete next steps for a conversation."""
+    ident = _get_current_identity(req)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    from backend.services.budgets import check_daily_budget
+    check_daily_budget(ident.id)
+
     conv_id = request.conversation_id
     if not conv_id:
         return ChatRecapResponse(
@@ -86,19 +93,21 @@ async def chat_recap(
         raise HTTPException(status_code=503, detail="Database unavailable")
 
     async with pool.acquire() as conn:
-        ident = _get_current_identity(req)
-        user_id = ident.user_id if ident else None
-        guest_id = ident.guest_id if ident else None
-        is_admin = bool(ident and ident.is_admin)
+        user_id = ident.user_id
+        guest_id = ident.guest_id
+        is_admin = bool(ident.is_admin)
 
         has_access, err = await conversations.check_conversation_access(
             conn, conv_id, user_id=user_id, guest_id=guest_id, is_admin=is_admin, allow_shared=False
         )
-        if not has_access and err != "Conversation not found":
+        if not has_access:
+            if err == "Conversation not found":
+                raise HTTPException(status_code=404, detail="Conversation not found")
             raise HTTPException(status_code=403, detail="Forbidden: conversation belongs to another user")
 
         # Cap messages sent to last 40 to bound cost
         rows = await conversations.get_recent_messages(conn, conv_id, limit=40)
+
 
     if not rows:
         return ChatRecapResponse(
