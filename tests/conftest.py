@@ -122,6 +122,8 @@ async def test_db_lifecycle():
                     DELETE FROM user_profile_facts WHERE user_id LIKE 'alice_%' OR user_id LIKE 'bob_%' OR user_id LIKE 'carol_%' OR user_id LIKE 'david_%' OR user_id LIKE 'test_%' OR user_id LIKE '%@example.com';
                     DELETE FROM parked_thoughts WHERE user_id LIKE 'alice_%' OR user_id LIKE 'bob_%' OR user_id LIKE 'carol_%' OR user_id LIKE 'david_%' OR user_id LIKE 'test_%' OR user_id LIKE '%@example.com';
                     DELETE FROM rate_limit_buckets WHERE key LIKE '%127.0.0.1%' OR key LIKE '%recap%';
+                    DELETE FROM agent_runs WHERE id LIKE 'test_%' OR id LIKE 'run_%';
+                    DELETE FROM pending_actions WHERE run_id LIKE 'test_%' OR run_id LIKE 'run_%';
                 """)
         await close_pool()
     except Exception:

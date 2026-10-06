@@ -116,10 +116,12 @@ async def chat_recap(
             recap="This conversation is empty right now — there are no messages to recap.",
         )
 
+    from backend.memory.conversations import strip_modes_marker
+
     transcript_lines = []
     for r in rows:
         role = r.get("role", "user")
-        content = (r.get("content") or "").strip()
+        content = strip_modes_marker(r.get("content") or "").strip()
         if content:
             transcript_lines.append(f"{role.capitalize()}: {content}")
 
@@ -174,15 +176,16 @@ async def chat_recap(
             logger.warning("Recap generation failed: %s", e)
 
     if not recap_text:
+        last_preview = strip_modes_marker(rows[-1].get('content', ''))[:60] if rows else ""
         recap_text = (
             f"Here is a quick recap of our discussion ({len(rows)} messages):\n"
-            f"- We explored key topics including: {rows[-1].get('content', '')[:60]}...\n"
+            f"- We explored key topics including: {last_preview}...\n"
             "- That's a solid next step. Want me to write it down?"
         )
 
     return ChatRecapResponse(
         conversation_id=conv_id,
-        recap=recap_text,
+        recap=strip_modes_marker(recap_text),
     )
 
 

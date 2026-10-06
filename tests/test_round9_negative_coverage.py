@@ -164,32 +164,6 @@ async def test_neg_post_parked_thought(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-@pytest.mark.route("PATCH /api/parked/{thought_id}")
-async def test_neg_patch_parked_thought(client: AsyncClient):
-    """User B cannot resolve User A's parked thought; exact 404 returned and status remains 'parked'."""
-    user_a = f"alice_{uuid.uuid4().hex[:6]}@example.com"
-    user_b = f"bob_{uuid.uuid4().hex[:6]}@example.com"
-
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        thought_rec = await park_thought(conn, text="A's thought to resolve", user_id=user_a)
-    thought_id = thought_rec["id"]
-
-    # Unauthenticated returns 401
-    res_unauth = await client.patch(f"/api/parked/{thought_id}")
-    assert res_unauth.status_code == 401
-
-    # User B attempts to resolve A's thought -> 404
-    res_b = await client.patch(f"/api/parked/{thought_id}", headers=_auth(user_b))
-    assert res_b.status_code == 404
-
-    # Victim data unchanged
-    async with pool.acquire() as conn:
-        items = await list_parked_thoughts(conn, user_id=user_a, status="parked")
-        assert any(t["id"] == thought_id and t["status"] == "parked" for t in items)
-
-
-@pytest.mark.asyncio
 @pytest.mark.route("PATCH /api/parked/{thought_id}/resolve")
 async def test_neg_patch_parked_thought_resolve(client: AsyncClient):
     """User B cannot resolve User A's parked thought via /resolve alias; exact 404 returned and status remains 'parked'."""

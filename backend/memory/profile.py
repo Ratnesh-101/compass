@@ -160,8 +160,22 @@ async def migrate_guest_profile_facts(
     guest_id: str,
     user_id: str,
 ) -> int:
-    """Migrate guest profile facts to registered user account (idempotent, concurrent-safe, ON CONFLICT)."""
+    """Migrate guest profile facts to registered user account (non-destructive clone, idempotent, concurrent-safe, ON CONFLICT)."""
     try:
+        # 1. Fetch guest facts to migrate
+        guest_facts = await conn.fetch(
+            """
+            SELECT key, value, source_message_id, created_at, updated_at
+            FROM user_profile_facts
+            WHERE user_id = $1
+            ORDER BY key ASC
+            """,
+            guest_id,
+        )
+        if not guest_facts:
+            return 0
+
+        # 2. Insert into user_profile_facts (cloning non-destructively; only update if guest fact has newer timestamp)
         res = await conn.execute(
             """
             INSERT INTO user_profile_facts (user_id, key, value, source_message_id, created_at, updated_at)
@@ -172,13 +186,33 @@ async def migrate_guest_profile_facts(
             DO UPDATE SET
                 value = EXCLUDED.value,
                 updated_at = EXCLUDED.updated_at
+            WHERE EXCLUDED.updated_at >= user_profile_facts.updated_at
             """,
             guest_id,
             user_id,
         )
+
+        # 3. Record each migrated fact in guest_migration_log for audit and idempotency tracking
+        for gf in guest_facts:
+            try:
+                await conn.execute(
+                    """
+                    INSERT INTO guest_migration_log (guest_id, user_id, entity_type, entity_key, detail)
+                    VALUES ($1, $2, 'profile_fact', $3, json_build_object('key', $3::text, 'value', $4::text))
+                    ON CONFLICT DO NOTHING
+                    """,
+                    guest_id,
+                    user_id,
+                    str(gf["key"]),
+                    str(gf["value"]),
+                )
+            except Exception:
+                pass
+
         parts = res.split()
-        return int(parts[-1]) if parts and parts[-1].isdigit() else 0
+        return int(parts[-1]) if parts and parts[-1].isdigit() else len(guest_facts)
     except Exception as e:
         logger.warning("Could not migrate profile facts from %s to %s: %s", guest_id, user_id, e)
         return 0
+
 

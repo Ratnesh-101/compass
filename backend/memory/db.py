@@ -57,13 +57,23 @@ async def _ensure_tables(pool: asyncpg.Pool) -> None:
             id                      SERIAL        PRIMARY KEY,
             guest_id                TEXT          NOT NULL,
             user_id                 TEXT          NOT NULL,
-            guest_conversation_id   UUID          NOT NULL,
-            user_conversation_id    UUID          NOT NULL,
-            imported_at             TIMESTAMPTZ   NOT NULL DEFAULT now(),
-            UNIQUE(guest_conversation_id, user_id)
+            guest_conversation_id   UUID,
+            user_conversation_id    UUID,
+            entity_type             TEXT          NOT NULL DEFAULT 'conversation',
+            entity_key              TEXT,
+            detail                  JSONB         DEFAULT '{}'::jsonb,
+            imported_at             TIMESTAMPTZ   NOT NULL DEFAULT now()
         );
+        ALTER TABLE guest_migration_log ALTER COLUMN guest_conversation_id DROP NOT NULL;
+        ALTER TABLE guest_migration_log ALTER COLUMN user_conversation_id DROP NOT NULL;
+        ALTER TABLE guest_migration_log ADD COLUMN IF NOT EXISTS entity_type TEXT NOT NULL DEFAULT 'conversation';
+        ALTER TABLE guest_migration_log ADD COLUMN IF NOT EXISTS entity_key TEXT;
+        ALTER TABLE guest_migration_log ADD COLUMN IF NOT EXISTS detail JSONB DEFAULT '{}'::jsonb;
         CREATE INDEX IF NOT EXISTS idx_guest_mig_guest ON guest_migration_log(guest_id);
         CREATE INDEX IF NOT EXISTS idx_guest_mig_user ON guest_migration_log(user_id);
+        CREATE INDEX IF NOT EXISTS idx_guest_mig_entity ON guest_migration_log(guest_id, user_id, entity_type);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_guest_mig_conv_uniq ON guest_migration_log(guest_conversation_id, user_id) WHERE guest_conversation_id IS NOT NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_guest_mig_entity_uniq ON guest_migration_log(guest_id, user_id, entity_type, entity_key) WHERE entity_key IS NOT NULL;
 
         CREATE TABLE IF NOT EXISTS agent_audit_log (
             id                 SERIAL        PRIMARY KEY,

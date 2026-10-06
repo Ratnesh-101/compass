@@ -50,6 +50,7 @@ async def _consume_token(
         if pool:
             async with pool.acquire() as conn:
                 async with conn.transaction():
+                    await conn.execute("SET LOCAL lock_timeout = '2000ms';")
                     row = await conn.fetchrow(
                         """
                         SELECT tokens, EXTRACT(EPOCH FROM (now() - last_updated)) AS elapsed

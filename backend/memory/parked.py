@@ -141,19 +141,61 @@ async def migrate_guest_parked_thoughts(
     guest_id: str,
     user_id: str,
 ) -> int:
-    """Migrate guest parked thoughts to registered user account (concurrent-safe, idempotent)."""
+    """Migrate guest parked thoughts to registered user account (non-destructive clone, idempotent, concurrent-safe)."""
     try:
-        res = await conn.execute(
+        # 1. Fetch guest thoughts that have not yet been migrated for this user
+        thoughts = await conn.fetch(
             """
-            UPDATE parked_thoughts
-            SET user_id = $2
-            WHERE user_id = $1
+            SELECT pt.id, pt.conversation_id, pt.text, pt.status, pt.created_at
+            FROM parked_thoughts pt
+            WHERE pt.user_id = $1
+              AND NOT EXISTS (
+                  SELECT 1 FROM guest_migration_log gml
+                  WHERE gml.guest_id = $1 AND gml.user_id = $2
+                    AND gml.entity_type = 'parked_thought'
+                    AND gml.entity_key = pt.id::text
+              )
+            ORDER BY pt.id ASC
             """,
             guest_id,
             user_id,
         )
-        parts = res.split()
-        return int(parts[1]) if len(parts) == 2 else 0
+        if not thoughts:
+            return 0
+
+        migrated_count = 0
+        for t in thoughts:
+            # 2. Try recording in guest_migration_log first with ON CONFLICT DO NOTHING
+            # Only if the log entry was successfully claimed by this execution, clone the parked thought!
+            res = await conn.execute(
+                """
+                INSERT INTO guest_migration_log (guest_id, user_id, entity_type, entity_key, detail)
+                VALUES ($1, $2, 'parked_thought', $3, json_build_object('text', $4::text, 'status', $5::text))
+                ON CONFLICT (guest_id, user_id, entity_type, entity_key) WHERE entity_key IS NOT NULL DO NOTHING
+                """,
+                guest_id,
+                user_id,
+                str(t["id"]),
+                str(t["text"]),
+                str(t["status"]),
+            )
+
+            if "INSERT 0 1" in res:
+                # 3. We won the concurrency race for this thought: insert cloned row for user account
+                await conn.execute(
+                    """
+                    INSERT INTO parked_thoughts (user_id, conversation_id, text, status, created_at)
+                    VALUES ($1, $2, $3, $4, $5)
+                    """,
+                    user_id,
+                    t["conversation_id"],
+                    t["text"],
+                    t["status"],
+                    t["created_at"],
+                )
+                migrated_count += 1
+
+        return migrated_count
     except Exception as e:
         logger.warning("Could not migrate parked thoughts from %s to %s: %s", guest_id, user_id, e)
         return 0

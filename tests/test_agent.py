@@ -84,6 +84,15 @@ def _create_mock_completion(tool_name: str | None = None, tool_args: dict | None
     return resp
 
 
+@pytest.fixture(autouse=True)
+def mock_default_agent_llm(monkeypatch):
+    """Ensure baseline agent tests don't make real network calls when unmocked."""
+    mock_comp = _create_mock_completion(content="Done. All tasks retrieved.")
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = AsyncMock(return_value=mock_comp)
+    monkeypatch.setattr("backend.agent.AsyncOpenAI", lambda **kwargs: mock_client)
+
+
 # ---------------------------------------------------------------------------
 # Baseline Agent Tests
 # ---------------------------------------------------------------------------

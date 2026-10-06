@@ -132,6 +132,7 @@ class HealthResponse(BaseModel):
     database: str
     db_connected: bool = False
     commit: str = "unknown"
+    config_ok: bool = True
 
 
 class ConversationUpdate(BaseModel):

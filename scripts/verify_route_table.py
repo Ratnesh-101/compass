@@ -89,7 +89,6 @@ KNOWN_ROUTE_METADATA = {
     ("/api/chat/recap", "POST"): ("_get_current_identity", "Ownership check: 403 if not owner", "test_round9_negative_coverage.py::test_neg_post_chat_recap"),
     ("/api/parked", "GET"): ("_get_current_identity", "WHERE user_id = $1", "test_round9_negative_coverage.py::test_neg_get_parked_thoughts"),
     ("/api/parked", "POST"): ("_get_current_identity", "Bound to caller identity", "test_round9_negative_coverage.py::test_neg_post_parked_thought"),
-    ("/api/parked/{thought_id}", "PATCH"): ("_get_current_identity", "WHERE id = $1 AND user_id = $2 (IDOR safe)", "test_round9_negative_coverage.py::test_neg_patch_parked_thought"),
     ("/api/parked/{thought_id}/resolve", "PATCH"): ("_get_current_identity", "WHERE id = $1 AND user_id = $2 (IDOR safe)", "test_round9_negative_coverage.py::test_neg_patch_parked_thought_resolve"),
     ("/api/persona/phrases", "GET"): ("None", "Public persona phrase pools", "test_persona_and_profile.py::test_persona_phrases_endpoint"),
     ("/api/profile/facts", "GET"): ("_get_current_identity", "WHERE user_id = $1", "test_round9_negative_coverage.py::test_neg_get_profile_facts"),

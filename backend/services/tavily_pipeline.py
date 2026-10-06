@@ -170,12 +170,19 @@ def _parse_explicit_year_date(date_str: Optional[str]) -> Tuple[Optional[datetim
         raw_m = m.group(0)
         parsed = parse_date_candidate(raw_m)
         if parsed:
-            candidates.append(parsed)
+            # Check proximity for time right after or right before the date span
+            start_idx, end_idx = m.span()
+            # Look at a window around the date match: up to 40 chars before and 50 chars after
+            window_start = max(0, start_idx - 40)
+            window_end = min(len(date_str), end_idx + 50)
+            window_text = date_str[window_start:window_end]
+            hour, minute, tz = _parse_time_and_tz(window_text)
+            candidates.append((parsed, hour, minute, tz))
 
     if candidates:
-        chosen = max(candidates)
-        hour, minute, tz = _parse_time_and_tz(date_str)
-        return datetime(chosen.year, chosen.month, chosen.day, hour, minute, 0, tzinfo=tz), year_provenance
+        # Choose the latest date candidate (e.g. deadline over start date in a range)
+        chosen_date, hour, minute, tz = max(candidates, key=lambda x: x[0])
+        return datetime(chosen_date.year, chosen_date.month, chosen_date.day, hour, minute, 0, tzinfo=tz), year_provenance
 
     # Direct format attempts
     for fmt in (
