@@ -58,7 +58,11 @@ class Settings(BaseSettings):
         "studio.nebius.ai",
         "api.tokenfactory.nebius.com",
     ]
-    PINNED_EVENT_PREFIXES: list[str] = []
+    PINNED_EVENT_PREFIXES: list[str] = [
+        "https://nebiusglobalaihackathon.devpost.com",
+        "http://nebiusglobalaihackathon.devpost.com",
+        "nebiusglobalaihackathon.devpost.com",
+    ]
 
     # --- Auth ---
     AUTH_TOKEN: str = ""  # Required — set in .env
@@ -139,8 +143,8 @@ class Settings(BaseSettings):
 
         if errors:
             raise ValueError(
-                "CRITICAL SECURITY CONFIGURATION ERROR:\n- "
-                + "\n- ".join(errors)
+                "CRITICAL SECURITY CONFIGURATION ERROR: "
+                + "; ".join(errors)
                 + "\nAll 4 secrets (AUTH_TOKEN, GUEST_SIGNING_SECRET, EDGE_HMAC_SECRET, TOKEN_ENCRYPTION_KEY) "
                 "must be independently generated with strong random values (e.g. `openssl rand -hex 32`)."
             )

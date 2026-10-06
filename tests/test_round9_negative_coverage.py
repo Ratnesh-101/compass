@@ -190,6 +190,32 @@ async def test_neg_patch_parked_thought_resolve(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+@pytest.mark.route("PATCH /api/parked/{thought_id}")
+async def test_neg_patch_parked_thought(client: AsyncClient):
+    """User B cannot resolve User A's parked thought via direct /{thought_id} route; exact 404 returned and status remains 'parked'."""
+    user_a = f"alice_{uuid.uuid4().hex[:6]}@example.com"
+    user_b = f"bob_{uuid.uuid4().hex[:6]}@example.com"
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        thought_rec = await park_thought(conn, text="A's third thought", user_id=user_a)
+    thought_id = thought_rec["id"]
+
+    # Unauthenticated returns 401
+    res_unauth = await client.patch(f"/api/parked/{thought_id}")
+    assert res_unauth.status_code == 401
+
+    # User B attempts to resolve -> 404
+    res_b = await client.patch(f"/api/parked/{thought_id}", headers=_auth(user_b))
+    assert res_b.status_code == 404
+
+    # Victim data unchanged
+    async with pool.acquire() as conn:
+        items = await list_parked_thoughts(conn, user_id=user_a, status="parked")
+        assert any(t["id"] == thought_id and t["status"] == "parked" for t in items)
+
+
+@pytest.mark.asyncio
 @pytest.mark.route("POST /api/chat/recap")
 async def test_neg_post_chat_recap(client: AsyncClient):
     """User B cannot recap User A's private conversation; exact 403 returned, 404 for missing, 429 when over daily budget."""

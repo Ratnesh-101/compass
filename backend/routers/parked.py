@@ -82,6 +82,7 @@ async def create_parked_thought(
     return {"success": True, "thought": record}
 
 
+@router.patch("/{thought_id}")
 @router.patch("/{thought_id}/resolve")
 async def mark_parked_done(
     thought_id: int,

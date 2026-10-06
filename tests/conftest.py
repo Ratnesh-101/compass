@@ -111,13 +111,12 @@ def auth_headers():
 
 @pytest_asyncio.fixture(autouse=True)
 async def test_db_lifecycle():
-    """Manage test cleanup and pool teardown safely in a single pass."""
+    """Clean up test state after each test only if a database pool is already active."""
     yield
     try:
-        from backend.memory.db import get_pool, close_pool
-        pool = await get_pool()
-        if pool:
-            async with pool.acquire(timeout=5.0) as conn:
+        from backend.memory import db
+        if db._pool is not None:
+            async with db._pool.acquire(timeout=5.0) as conn:
                 await conn.execute("""
                     DELETE FROM user_profile_facts WHERE user_id LIKE 'alice_%' OR user_id LIKE 'bob_%' OR user_id LIKE 'carol_%' OR user_id LIKE 'david_%' OR user_id LIKE 'test_%' OR user_id LIKE '%@example.com';
                     DELETE FROM parked_thoughts WHERE user_id LIKE 'alice_%' OR user_id LIKE 'bob_%' OR user_id LIKE 'carol_%' OR user_id LIKE 'david_%' OR user_id LIKE 'test_%' OR user_id LIKE '%@example.com';
@@ -125,13 +124,20 @@ async def test_db_lifecycle():
                     DELETE FROM agent_runs WHERE id LIKE 'test_%' OR id LIKE 'run_%';
                     DELETE FROM pending_actions WHERE run_id LIKE 'test_%' OR run_id LIKE 'run_%';
                 """)
-        await close_pool()
     except Exception:
-        try:
-            from backend.memory.db import close_pool
-            await close_pool()
-        except Exception:
-            pass
+        pass
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Safely terminate asyncpg connection pool once when the entire test session finishes."""
+    import asyncio
+    try:
+        from backend.memory.db import close_pool
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(close_pool())
+        loop.close()
+    except Exception:
+        pass
 
 
 

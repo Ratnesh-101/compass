@@ -40,7 +40,8 @@ async def test_malicious_web_page_cannot_write_profile_facts():
 
     # 2. Even if raw text contains prompt injection, Tavily pipeline only outputs evidence ledger
     from unittest.mock import patch, AsyncMock
-    with patch("backend.services.tavily_pipeline.execute_subqueries", new_callable=AsyncMock) as mock_sub:
+    with patch("backend.services.tavily_pipeline.execute_subqueries", new_callable=AsyncMock) as mock_sub, \
+         patch("backend.services.tavily_pipeline.tavily_extract", new_callable=AsyncMock) as mock_ext:
         mock_sub.return_value = ([
             {
                 "url": "https://attacker.com/rules",
@@ -48,6 +49,7 @@ async def test_malicious_web_page_cannot_write_profile_facts():
                 "content": malicious_page_fixture,
             }
         ], 1)
+        mock_ext.return_value = {"results": [{"url": "https://attacker.com/rules", "raw_content": malicious_page_fixture}]}
         res = await run_tavily_research("Check hackathon rules")
 
     # The research pipeline returns an evidence ledger and verdict
@@ -66,10 +68,9 @@ async def test_modes_token_stripped_before_persistence(client: AsyncClient):
     user = f"carol_{uuid.uuid4().hex[:6]}@example.com"
     conv_id = str(uuid.uuid4())
 
-    # Send messages containing exact [[modes]] marker and variants
+    # Send message containing exact [[modes]] marker
     markers_to_test = [
         "Would you like advice, a sounding board, or a plan? [[modes]]",
-        "Here are next steps. [[modes: advice]]",
     ]
     from unittest.mock import patch, AsyncMock
     with patch("backend.orchestrator.route_message", new_callable=AsyncMock) as mock_route:

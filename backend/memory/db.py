@@ -72,8 +72,19 @@ async def _ensure_tables(pool: asyncpg.Pool) -> None:
         CREATE INDEX IF NOT EXISTS idx_guest_mig_guest ON guest_migration_log(guest_id);
         CREATE INDEX IF NOT EXISTS idx_guest_mig_user ON guest_migration_log(user_id);
         CREATE INDEX IF NOT EXISTS idx_guest_mig_entity ON guest_migration_log(guest_id, user_id, entity_type);
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_guest_mig_conv_uniq ON guest_migration_log(guest_conversation_id, user_id) WHERE guest_conversation_id IS NOT NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_guest_mig_conv_uniq ON guest_migration_log(guest_conversation_id, user_id);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_guest_mig_entity_uniq ON guest_migration_log(guest_id, user_id, entity_type, entity_key) WHERE entity_key IS NOT NULL;
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM pg_indexes 
+                WHERE indexname = 'idx_guest_mig_conv_uniq' 
+                AND indexdef LIKE '%WHERE%'
+            ) THEN
+                DROP INDEX idx_guest_mig_conv_uniq;
+                CREATE UNIQUE INDEX idx_guest_mig_conv_uniq ON guest_migration_log(guest_conversation_id, user_id);
+            END IF;
+        END $$;
 
         CREATE TABLE IF NOT EXISTS agent_audit_log (
             id                 SERIAL        PRIMARY KEY,
