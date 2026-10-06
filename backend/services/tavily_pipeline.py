@@ -233,8 +233,8 @@ def evaluate_deterministic_verdict(
             if w.lower() not in ("hackathon", "submission", "deadline", "rules", "schedule", "guide", "overview")
         ]
 
-    evidence_items = []
-    verdicts = []
+    evidence_items: List[Dict[str, Any]] = []
+    verdicts: List[str] = []
 
     url_tier_map = {
         s.get("url"): s.get("authority_tier", AuthorityTier.TIER_3_GENERAL.value)
@@ -332,16 +332,18 @@ def evaluate_deterministic_verdict(
     # Check for conflicting dates across distinct sources
     dates_by_source = {}
     for item in evidence_items:
-        if item.get("parsed_date") and item.get("source_url"):
-            d = item["parsed_date"][:10]  # compare YYYY-MM-DD
-            dates_by_source[item["source_url"]] = d
+        parsed_date = item.get("parsed_date")
+        source_url = item.get("source_url")
+        if isinstance(parsed_date, str) and source_url:
+            d = parsed_date[:10]  # compare YYYY-MM-DD
+            dates_by_source[source_url] = d
 
     unique_dates = set(dates_by_source.values())
     has_conflict = len(dates_by_source) >= 2 and len(unique_dates) > 1
 
     if has_conflict:
         for idx, item in enumerate(evidence_items):
-            if item.get("parsed_date"):
+            if isinstance(item.get("parsed_date"), str):
                 item["verdict"] = "CONFLICTING"
                 verdicts[idx] = "CONFLICTING"
 
