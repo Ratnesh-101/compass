@@ -110,16 +110,28 @@ def auth_headers():
 
 
 @pytest_asyncio.fixture(autouse=True)
-async def cleanup_db_pool():
-    """Ensure database connection pool is closed within the test's event loop."""
+async def test_db_lifecycle():
+    """Manage test cleanup and pool teardown safely in a single pass."""
     yield
     try:
-        from backend.memory.db import close_pool
+        from backend.memory.db import get_pool, close_pool
+        pool = await get_pool()
+        if pool:
+            async with pool.acquire(timeout=5.0) as conn:
+                await conn.execute("""
+                    DELETE FROM user_profile_facts WHERE user_id LIKE 'alice_%' OR user_id LIKE 'bob_%' OR user_id LIKE 'carol_%' OR user_id LIKE 'david_%' OR user_id LIKE 'test_%' OR user_id LIKE '%@example.com';
+                    DELETE FROM parked_thoughts WHERE user_id LIKE 'alice_%' OR user_id LIKE 'bob_%' OR user_id LIKE 'carol_%' OR user_id LIKE 'david_%' OR user_id LIKE 'test_%' OR user_id LIKE '%@example.com';
+                    DELETE FROM rate_limit_buckets WHERE key LIKE '%127.0.0.1%' OR key LIKE '%recap%';
+                """)
         await close_pool()
-        import asyncio
-        await asyncio.sleep(0.05)
     except Exception:
-        pass
+        try:
+            from backend.memory.db import close_pool
+            await close_pool()
+        except Exception:
+            pass
+
+
 
 
 

@@ -12,6 +12,7 @@ from pgvector.asyncpg import register_vector
 
 
 _pool: asyncpg.Pool | None = None
+_tables_ensured: bool = False
 
 
 async def _init_connection(conn: asyncpg.Connection) -> None:
@@ -255,7 +256,7 @@ async def init_pool(dsn: str | None = None) -> asyncpg.Pool:
     Args:
         dsn: PostgreSQL connection string. If None, reads from settings.
     """
-    global _pool
+    global _pool, _tables_ensured
     import asyncio
 
     try:
@@ -285,27 +286,29 @@ async def init_pool(dsn: str | None = None) -> asyncpg.Pool:
         command_timeout=15.0,
         init=_init_connection,  # register pgvector on every connection
     )
-    try:
-        await asyncio.wait_for(_ensure_tables(_pool), timeout=15.0)
-    except Exception as e:
-        import logging
-        logging.getLogger("compass.db").warning(f"Could not auto-create tables: {e}")
-
-    # Verify critical tables exist; never silently degrade
-    try:
-        async with _pool.acquire(timeout=10.0) as check_conn:
-            existing_tables = await check_conn.fetch(
-                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('user_profile_facts', 'parked_thoughts')"
-            )
-            found = {r["table_name"] for r in existing_tables}
+    if not _tables_ensured:
+        try:
+            await asyncio.wait_for(_ensure_tables(_pool), timeout=15.0)
+        except Exception as e:
             import logging
-            db_logger = logging.getLogger("compass.db")
-            for req_table in ("user_profile_facts", "parked_thoughts"):
-                if req_table not in found:
-                    db_logger.error(f"ERROR: Required database table '{req_table}' is missing! Feature will degrade.")
-    except Exception as e:
-        import logging
-        logging.getLogger("compass.db").warning(f"Could not verify table existence at startup: {e}")
+            logging.getLogger("compass.db").warning(f"Could not auto-create tables: {e}")
+
+        # Verify critical tables exist; never silently degrade
+        try:
+            async with _pool.acquire(timeout=10.0) as check_conn:
+                existing_tables = await check_conn.fetch(
+                    "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('user_profile_facts', 'parked_thoughts')"
+                )
+                found = {r["table_name"] for r in existing_tables}
+                import logging
+                db_logger = logging.getLogger("compass.db")
+                for req_table in ("user_profile_facts", "parked_thoughts"):
+                    if req_table not in found:
+                        db_logger.error(f"ERROR: Required database table '{req_table}' is missing! Feature will degrade.")
+        except Exception as e:
+            import logging
+            logging.getLogger("compass.db").warning(f"Could not verify table existence at startup: {e}")
+        _tables_ensured = True
 
     return _pool  # type: ignore[return-value]
 

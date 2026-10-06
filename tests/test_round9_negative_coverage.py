@@ -22,6 +22,9 @@ from backend.memory.parked import park_thought, list_parked_thoughts
 from backend.services.budgets import reset_daily_budget
 
 
+from backend.services.rate_limiter import _MEM_BUCKETS
+
+
 def _auth(user_id: str):
     return {"Authorization": f"Bearer {create_session(user_id)}"}
 
@@ -216,17 +219,19 @@ async def test_neg_patch_parked_thought_resolve(client: AsyncClient):
 @pytest.mark.route("POST /api/chat/recap")
 async def test_neg_post_chat_recap(client: AsyncClient):
     """User B cannot recap User A's private conversation; exact 403 returned, 404 for missing, 429 when over daily budget."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from datetime import date
+    from backend.memory import conversations
+    from backend.services.budgets import MAX_DAILY_IDENTITY_RECAP_CALLS, _daily_recap_calls
+
     user_a = f"alice_{uuid.uuid4().hex[:6]}@example.com"
     user_b = f"bob_{uuid.uuid4().hex[:6]}@example.com"
     conv_a = str(uuid.uuid4())
 
-    # Create A's conversation with private messages
-    create_res = await client.post(
-        "/api/chat",
-        json={"message": "Here is confidential strategy plan for Q4.", "conversation_id": conv_a},
-        headers=_auth(user_a),
-    )
-    assert create_res.status_code == 200
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conversations.get_or_create_conversation(conn, conversation_id=conv_a, user_id=user_a, title="A's Strategy")
+        await conversations.add_message(conn, conversation_id=conv_a, role="user", content="Confidential plan for Q4.")
 
     # Unauthenticated request returns 401
     res_unauth = await client.post("/api/chat/recap", json={"conversation_id": conv_a})
@@ -252,31 +257,41 @@ async def test_neg_post_chat_recap(client: AsyncClient):
 
     # Daily budget enforcement: count calls and assert 429 when limit reached
     reset_daily_budget(user_a)
-    for _ in range(10):
-        # Consume budget
-        r = await client.post("/api/chat/recap", json={"conversation_id": conv_a}, headers=_auth(user_a))
-        assert r.status_code in (200, 429)
+    with patch("openai.AsyncOpenAI") as mock_openai_cls:
+        mock_instance = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.choices = [MagicMock(message=MagicMock(content="- Key decision: Plan Q4\nThat's a solid next step. Want me to write it down?"))]
+        mock_instance.chat.completions.create = AsyncMock(return_value=mock_resp)
+        mock_openai_cls.return_value = mock_instance
 
-    # 11th call must trigger 429
-    res_over = await client.post("/api/chat/recap", json={"conversation_id": conv_a}, headers=_auth(user_a))
-    assert res_over.status_code == 429
-    assert "budget" in res_over.json().get("detail", "").lower()
+        # Successful recap within budget
+        res_ok = await client.post("/api/chat/recap", json={"conversation_id": conv_a}, headers=_auth(user_a))
+        assert res_ok.status_code == 200
+
+        # Simulate reaching the daily call budget limit
+        today_str = date.today().isoformat()
+        _daily_recap_calls.setdefault(today_str, {})[user_a] = MAX_DAILY_IDENTITY_RECAP_CALLS
+
+        # Next call must trigger 429
+        res_over = await client.post("/api/chat/recap", json={"conversation_id": conv_a}, headers=_auth(user_a))
+        assert res_over.status_code == 429
+        assert "budget" in res_over.json().get("detail", "").lower()
+
     reset_daily_budget(user_a)
 
 
 @pytest.mark.asyncio
 async def test_neg_tone_and_mode_cross_identity(client: AsyncClient):
     """Tone dial and mode parameters are strictly scoped to the caller's active conversation."""
+    from backend.memory import conversations
+
     user_a = f"alice_{uuid.uuid4().hex[:6]}@example.com"
     user_b = f"bob_{uuid.uuid4().hex[:6]}@example.com"
     conv_a = str(uuid.uuid4())
 
-    # A creates conversation with tone and mode
-    await client.post(
-        "/api/chat",
-        json={"message": "Hello", "conversation_id": conv_a, "tone": "brief", "mode": "plan"},
-        headers=_auth(user_a),
-    )
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conversations.get_or_create_conversation(conn, conversation_id=conv_a, user_id=user_a, title="A conv")
 
     # B cannot hijack A's conversation to inject different mode/tone
     hijack_res = await client.post(

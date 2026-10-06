@@ -71,12 +71,13 @@ async def chat(request: ChatRequest, req: Request, _token: str = Depends(verify_
 async def chat_recap(
     request: ChatRecapRequest,
     req: Request,
-    _rate: None = Depends(rate_limit),
 ):
     """Summarize decisions made, open questions, and concrete next steps for a conversation."""
     ident = _get_current_identity(req)
     if not ident:
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+    await rate_limit(req)
 
     from backend.services.budgets import check_daily_budget
     check_daily_budget(ident.id)

@@ -231,7 +231,7 @@ async def prune_expired_guests(retention_days: int = 30, pool: Any = None) -> in
                     """
                     DELETE FROM conversations
                     WHERE (user_id LIKE 'guest_%' OR user_id IS NULL)
-                      AND updated_at < now() - ($1 || ' days')::interval
+                      AND last_active_at < now() - ($1 || ' days')::interval
                     """,
                     str(retention_days),
                 )

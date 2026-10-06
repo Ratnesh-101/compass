@@ -1,0 +1,22 @@
+version: "3.8"
+
+services:
+  test-postgres:
+    image: pgvector/pgvector:pg16
+    container_name: compass-test-postgres
+    environment:
+      POSTGRES_USER: compass
+      POSTGRES_PASSWORD: compass
+      POSTGRES_DB: compass_test
+    ports:
+      - "5432:5432"
+    volumes:
+      - test-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U compass -d compass_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  test-pgdata:

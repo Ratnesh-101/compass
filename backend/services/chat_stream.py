@@ -162,6 +162,8 @@ async def generate_chat_events(
 
     history_items: List[dict[str, str]] = []
     memory_context = ""
+    profile_facts: dict = {}
+    parked_items: list = []
     try:
         pool = await _resolve_pool()
         if pool:
