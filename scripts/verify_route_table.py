@@ -95,6 +95,7 @@ KNOWN_ROUTE_METADATA = {
     ("/api/profile/facts", "GET"): ("_get_current_identity", "WHERE user_id = $1", "test_round9_negative_coverage.py::test_neg_get_profile_facts"),
     ("/api/profile/facts", "DELETE"): ("_get_current_identity", "WHERE user_id = $1 (forget all)", "test_round9_negative_coverage.py::test_neg_delete_all_profile_facts"),
     ("/api/profile/facts/{key}", "DELETE"): ("_get_current_identity", "WHERE user_id = $1 AND key = $2", "test_round9_negative_coverage.py::test_neg_delete_single_profile_fact"),
+    ("/api/specialist/dispatch", "POST"): ("_get_current_identity", "Read-only specialist multi-agent analysis", "test_specialist_confirm_gate.py::test_direct_specialist_endpoint_is_strictly_read_only"),
 }
 
 # ---------------------------------------------------------------------------

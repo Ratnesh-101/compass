@@ -50,6 +50,9 @@ from backend.skills.handlers.parked import (
     handle_list_parked,
     handle_resolve_parked,
 )
+from backend.skills.handlers.specialist import (
+    handle_delegate_to_specialist,
+)
 
 __all__ = [
     "handle_search_web",

@@ -596,6 +596,29 @@ RESOLVE_PARKED_TOOL: Dict[str, Any] = {
     },
 }
 
+DELEGATE_TO_SPECIALIST_TOOL: Dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "delegate_to_specialist",
+        "description": "Delegate a sub-task to a specialized agent (coursework, research, calendar, memory).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "capability": {
+                    "type": "string",
+                    "enum": ["coursework", "research", "calendar", "memory"],
+                    "description": "Specialist capability domain",
+                },
+                "task_description": {
+                    "type": "string",
+                    "description": "Goal or sub-task description for the specialist",
+                },
+            },
+            "required": ["capability", "task_description"],
+        },
+    },
+}
+
 # Registered tools exposed to the Nemotron router
 BASE_TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     ADD_TASK_TOOL,
@@ -625,6 +648,7 @@ BASE_TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     PARK_THOUGHT_TOOL,
     LIST_PARKED_TOOL,
     RESOLVE_PARKED_TOOL,
+    DELEGATE_TO_SPECIALIST_TOOL,
 ]
 
 

@@ -38,6 +38,7 @@ from backend.skills.schemas import (
     PARK_THOUGHT_TOOL,
     LIST_PARKED_TOOL,
     RESOLVE_PARKED_TOOL,
+    DELEGATE_TO_SPECIALIST_TOOL,
     BASE_TOOL_DEFINITIONS,
     get_tool_definitions,
     TOOL_DEFINITIONS,
@@ -85,6 +86,7 @@ from backend.skills.handlers import (
     handle_park_thought,
     handle_list_parked,
     handle_resolve_parked,
+    handle_delegate_to_specialist,
 )
 
 __all__ = [
@@ -116,6 +118,7 @@ __all__ = [
     "DETECT_SCHEDULE_CONFLICTS_TOOL",
     "ASSESS_FEASIBILITY_TOOL",
     "APPLY_TRIAGE_PLAN_TOOL",
+    "DELEGATE_TO_SPECIALIST_TOOL",
     "BASE_TOOL_DEFINITIONS",
     "get_tool_definitions",
     "TOOL_DEFINITIONS",

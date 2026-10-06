@@ -17,8 +17,8 @@ async def dispatch_specialist_endpoint(request_data: dict, request: Request):
     ident = _get_current_identity(request)
     if not ident:
         raise HTTPException(
-            status_code=401,
-            detail="Unauthorized: valid bearer token or authenticated user session required.",
+            status_code=404,
+            detail="Specialist endpoint not found",
         )
 
     # Enforce user/guest daily budget

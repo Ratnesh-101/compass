@@ -190,13 +190,24 @@ def classify_domain_authority(
                     matches_pinned_prefix = True
                     break
 
-        if matches_pinned_prefix:
+        matches_entity_binding = False
+        if is_entity_bound:
+            if target_entity:
+                te = target_entity.strip().lower()
+                sub = domain.split(".")[0] if "." in domain else domain
+                if sub.startswith(te + "-") or sub.startswith(te + ".") or sub == te or te in sub:
+                    matches_entity_binding = True
+            elif page_title_matches_entity:
+                matches_entity_binding = True
+
+        if matches_pinned_prefix or matches_entity_binding:
+            badge_suffix = "(Pinned Platform)" if matches_pinned_prefix else "(Entity Bound)"
             return {
                 "tier": AuthorityTier.TIER_1_OFFICIAL.value,
-                "badge": "Official Event Page (Pinned Platform)",
+                "badge": f"Official Event Page {badge_suffix}",
                 "weight": 0.95,
                 "domain": domain,
-                "reason": f"Platform-hosted event exactly matches pinned official prefix ({domain})",
+                "reason": f"Platform-hosted event matches official criteria ({domain})",
             }
         else:
             return {
