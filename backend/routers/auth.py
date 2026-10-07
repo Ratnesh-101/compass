@@ -308,6 +308,25 @@ def _resolve_oauth_redirect_uri(request: Request) -> str:
     return f"{scheme}://{host}/api/calendar/callback"
 
 
+def _resolve_frontend_origin(request: Request) -> str:
+    """Resolve active frontend base URL for OAuth redirects and error returns."""
+    origin = request.headers.get("origin") or request.headers.get("referer")
+    if origin:
+        parsed = urllib.parse.urlparse(origin)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}"
+
+    if settings.is_development():
+        return "http://localhost:5173"
+
+    cors_origins = getattr(settings, "CORS_ORIGINS", [])
+    if cors_origins and isinstance(cors_origins, list) and cors_origins[0]:
+        return cors_origins[0].rstrip("/")
+
+    return "https://compass-kappa-nine.vercel.app"
+
+
+
 @router.get("/api/auth/me")
 async def auth_me(request: Request):
     """Retrieve logged-in user profile and calendar connection status."""
@@ -423,7 +442,8 @@ async def calendar_connect(
     configured = is_google_oauth_configured()
     if not configured:
         if redirect:
-            return RedirectResponse(url="/?oauth_error=not_configured")
+            frontend_origin = _resolve_frontend_origin(request)
+            return RedirectResponse(url=f"{frontend_origin}/?oauth_error=not_configured")
         return {
             "status": "not_configured",
             "configured": False,
@@ -451,6 +471,7 @@ async def calendar_callback(
     error: Optional[str] = Query(None),
 ):
     """Handle OAuth redirect: exchange authorization code for tokens and save connection."""
+    frontend_origin = _resolve_frontend_origin(request)
     if state:
         from backend.services.oauth import verify_oauth_state
         ident = _get_current_identity(request)
@@ -461,7 +482,7 @@ async def calendar_callback(
                 "<html><body style='font-family:sans-serif;padding:40px;background:#0f172a;color:#f87171;'>"
                 "<h3>OAuth State Verification Failed</h3>"
                 "<p style='color:#fca5a5;'>Invalid or cross-user OAuth state token rejected (CSRF protection).</p>"
-                "<p><a style='color:#38bdf8;' href='/'>Return to Compass</a></p>"
+                f"<p><a style='color:#38bdf8;' href='{frontend_origin}/'>Return to Compass</a></p>"
                 "</body></html>",
                 status_code=403,
             )
@@ -471,7 +492,7 @@ async def calendar_callback(
         return HTMLResponse(
             f"<html><body style='font-family:sans-serif;padding:40px;background:#0f172a;color:#f87171;'>"
             f"<h3>Google Calendar Authorization Error: {safe_error}</h3>"
-            f"<p><a style='color:#38bdf8;' href='/'>Return to Compass</a></p>"
+            f"<p><a style='color:#38bdf8;' href='{frontend_origin}/'>Return to Compass</a></p>"
             f"</body></html>",
             status_code=400,
         )
@@ -479,7 +500,7 @@ async def calendar_callback(
         return HTMLResponse(
             "<html><body style='font-family:sans-serif;padding:40px;background:#0f172a;color:#f87171;'>"
             "<h3>Missing OAuth authorization code</h3>"
-            "<p><a style='color:#38bdf8;' href='/'>Return to Compass</a></p>"
+            f"<p><a style='color:#38bdf8;' href='{frontend_origin}/'>Return to Compass</a></p>"
             "</body></html>",
             status_code=400,
         )
@@ -496,7 +517,7 @@ async def calendar_callback(
             f"<h3>Google Calendar Authorization Error</h3>"
             f"<p style='color:#fca5a5;'>{tokens['error']}</p>"
             f"<p style='color:#94a3b8;font-size:13px;'>Redirect URI sent to Google: <code style='color:#38bdf8;'>{redirect_uri}</code></p>"
-            f"<p><a style='color:#38bdf8;' href='/'>Return to Compass</a></p>"
+            f"<p><a style='color:#38bdf8;' href='{frontend_origin}/'>Return to Compass</a></p>"
             f"</body></html>",
             status_code=400,
         )
@@ -523,14 +544,14 @@ async def calendar_callback(
         <div style="font-size:48px;margin-bottom:12px;">🎉</div>
         <h2 style="margin:0 0 8px;color:#38bdf8;">Google Calendar Connected!</h2>
         <p style="color:#94a3b8;font-size:14px;margin-bottom:20px;">Logged in as <b style="color:#f8fafc;">{safe_email}</b>.<br>Your tasks will now synchronize to your Google Calendar.</p>
-        <a style="display:inline-block;background:#2563eb;color:#ffffff;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;" href="/?calendar_connected=true&email={safe_email}">Open Compass Dashboard</a>
+        <a style="display:inline-block;background:#2563eb;color:#ffffff;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;" href="{frontend_origin}/?calendar_connected=true&email={safe_email}">Open Compass Dashboard</a>
     </div>
     <script>
         if (window.opener) {{
             window.opener.postMessage({{type: 'compass_calendar_connected', email: '{safe_email}'}}, '*');
             setTimeout(() => window.close(), 1000);
         }} else {{
-            setTimeout(() => {{ window.location.href = '/?calendar_connected=true&email={safe_email}'; }}, 1500);
+            setTimeout(() => {{ window.location.href = '{frontend_origin}/?calendar_connected=true&email={safe_email}'; }}, 1500);
         }}
     </script>
 </body>

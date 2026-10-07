@@ -6,6 +6,9 @@ import {
   syncCalendarNow,
   getCalendarExportUrl,
   checkGoogleOAuthStatus,
+  quickConnectUser,
+  setCurrentUserId,
+  getKnownAccounts,
 } from '../api/client'
 
 export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged }) {
@@ -14,6 +17,7 @@ export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged 
   const [successMsg, setSuccessMsg] = useState(null)
   const [copiedIcs, setCopiedIcs] = useState(false)
   const [oauthStatus, setOauthStatus] = useState(null) // null = loading, object = result
+  const [emailInput, setEmailInput] = useState('')
 
   // Check OAuth configuration every time the modal opens
   useEffect(() => {
@@ -24,7 +28,33 @@ export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged 
 
   if (!isOpen) return null
 
+  const handleQuickLogin = async (emailToUse) => {
+    const cleanEmail = (emailToUse || emailInput || '').trim().toLowerCase()
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      setError('Please enter a valid email address (e.g. student@vit.ac.in)')
+      return
+    }
+    setLoading(true)
+    setError(null)
+    setSuccessMsg(null)
+    try {
+      await quickConnectUser(cleanEmail)
+      setCurrentUserId(cleanEmail)
+      if (onUserChanged) onUserChanged(cleanEmail)
+      setSuccessMsg(`Signed in as ${cleanEmail}`)
+      setEmailInput('')
+    } catch {
+      setCurrentUserId(cleanEmail)
+      if (onUserChanged) onUserChanged(cleanEmail)
+      setSuccessMsg(`Switched local identity to ${cleanEmail}`)
+      setEmailInput('')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const handleLogout = async () => {
+
     setLoading(true)
     setError(null)
     try {
@@ -236,32 +266,139 @@ export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged 
             </div>
           ) : (
             <div style={{
-              padding: '16px',
-              borderRadius: '10px',
+              padding: '18px',
+              borderRadius: '12px',
               background: 'var(--bg-card-soft)',
               border: '1px solid var(--border)',
-              textAlign: 'center'
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px'
             }}>
-              <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '14px' }}>
-                You are currently in Guest Mode. Sign in with Google to sync your calendar and persist memory across devices.
+              {/* Instant Email Sign-In */}
+              <div>
+                <div style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '4px' }}>
+                  Instant Sign-In (Select or Enter Email)
+                </div>
+                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '10px' }}>
+                  Enter your email to sign in instantly with isolated memory.
+                </div>
+
+                <form
+                  onSubmit={e => {
+                    e.preventDefault()
+                    handleQuickLogin(emailInput)
+                  }}
+                  style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}
+                >
+                  <input
+                    type="email"
+                    placeholder="student@vit.ac.in"
+                    value={emailInput}
+                    onChange={e => setEmailInput(e.target.value)}
+                    style={{
+                      flex: 1,
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border)',
+                      background: 'var(--bg-card)',
+                      color: 'var(--text-primary)',
+                      fontSize: '13px',
+                      outline: 'none'
+                    }}
+                  />
+                  <button
+                    type="submit"
+                    disabled={loading || !emailInput.trim()}
+                    style={{
+                      padding: '8px 16px',
+                      borderRadius: '8px',
+                      background: 'var(--primary)',
+                      color: '#ffffff',
+                      border: 'none',
+                      fontSize: '13px',
+                      fontWeight: '700',
+                      cursor: 'pointer',
+                      opacity: (loading || !emailInput.trim()) ? 0.6 : 1
+                    }}
+                  >
+                    Sign In →
+                  </button>
+                </form>
+
+                {/* Quick Presets */}
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Quick Presets:</span>
+                  {['student@vit.ac.in', 'demo@compass.app', 'researcher@compass.app'].map(preset => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => handleQuickLogin(preset)}
+                      style={{
+                        padding: '3px 8px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border)',
+                        background: 'var(--bg-card)',
+                        color: 'var(--text-secondary)',
+                        fontSize: '11px',
+                        fontWeight: '500',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <a
-                href={getGoogleOAuthConnectUrl(true)}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  padding: '10px 20px',
-                  borderRadius: '8px',
-                  background: 'var(--primary)',
-                  color: '#fff',
-                  fontSize: '13px',
-                  fontWeight: '700',
-                  textDecoration: 'none'
-                }}
-              >
-                <span>🔑</span> Sign in with Google
-              </a>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: '2px 0' }}>
+                <div style={{ flex: 1, height: '1px', background: 'var(--border)' }} />
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>OR</span>
+                <div style={{ flex: 1, height: '1px', background: 'var(--border)' }} />
+              </div>
+
+              {/* Google OAuth Button */}
+              <div style={{ textAlign: 'center' }}>
+                {oauthStatus?.configured ? (
+                  <a
+                    href={getGoogleOAuthConnectUrl(true)}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      padding: '10px 20px',
+                      borderRadius: '8px',
+                      background: 'var(--bg-card)',
+                      border: '1px solid var(--border)',
+                      color: 'var(--text-primary)',
+                      fontSize: '13px',
+                      fontWeight: '700',
+                      textDecoration: 'none'
+                    }}
+                  >
+                    <span>🔑</span> Sign in with Google OAuth
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setError('Google OAuth is not configured in .env (GOOGLE_CLIENT_ID missing). Use Instant Sign-In above or see setup instructions below.')}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      padding: '10px 20px',
+                      borderRadius: '8px',
+                      background: 'var(--bg-card)',
+                      border: '1px solid var(--border)',
+                      color: 'var(--text-muted)',
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <span>🔑</span> Sign in with Google (Setup Required)
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </div>
