@@ -54,7 +54,12 @@ async def get_embedding(text: str) -> List[float]:
     base_url = _get_base_url()
     model_name = getattr(settings, "EMBEDDING_MODEL", TARGET_MODEL) or TARGET_MODEL
 
-    if api_key:
+    if (
+        api_key
+        and not api_key.startswith("your_nebius")
+        and api_key not in ("mock", "mock-key-not-used-in-tests")
+        and getattr(settings, "ENVIRONMENT", "") != "test"
+    ):
         try:
             # Using AsyncOpenAI with 8.0s timeout safeguard
             client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=8.0)
