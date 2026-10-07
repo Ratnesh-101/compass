@@ -329,6 +329,37 @@ async def public_chat(req: PublicChatRequest, request: Request, _rl: None = Depe
                     raise HTTPException(status_code=403, detail="Forbidden: conversation belongs to another user")
 
     msg = req.message.strip()
+    specialist_id = req.get_specialist_id()
+    if specialist_id:
+        from backend.agents.specialist_registry import validate_specialist_id
+        valid_id = validate_specialist_id(specialist_id)
+        if not valid_id:
+            raise HTTPException(status_code=400, detail=f"Invalid specialist ID '{specialist_id}'")
+
+        from backend.agents.specialist import run_specialist_task
+        pool = await get_pool()
+        spec_result = await run_specialist_task(capability=valid_id, user_goal=msg, pool=pool)
+        resp_text = spec_result.get("summary", f"Specialist analysis completed for '{msg}'.")
+
+        conv_id = req.conversation_id or str(uuid.uuid4())
+        try:
+            if pool:
+                async with pool.acquire() as conn:
+                    real_cid = await conversations.get_or_create_conversation(conn, conv_id, user_id=user_id, guest_id=guest_id)
+                    await conversations.add_message(conn, real_cid, role="user", content=f"[{valid_id}] {msg}")
+                    await conversations.add_message(conn, real_cid, role="assistant", content=resp_text, skill_called=f"specialist_{valid_id}")
+                    conv_id = real_cid
+        except Exception as e:
+            logger.debug(f"Could not persist specialist message history: {e}")
+
+        return PublicChatResponse(
+            response=resp_text,
+            routing_latency_ms=120,
+            message=resp_text,
+            conversation_id=conv_id,
+            skill_used=f"specialist_{valid_id}",
+        )
+
     result = await orchestrator.handle_message(
         conversation_id=req.conversation_id, message=msg, user_id=user_id, guest_id=guest_id
     )
@@ -440,6 +471,33 @@ async def stream_chat(req: StreamChatRequest, request: Request, _rl: None = Depe
         conv_id = req.conversation_id or str(uuid.uuid4())
         message = req.message.strip()
         yield ": ping\n\n"
+
+        specialist_id = req.get_specialist_id()
+        if specialist_id:
+            from backend.agents.specialist_registry import validate_specialist_id
+            valid_id = validate_specialist_id(specialist_id)
+            if not valid_id:
+                yield f"data: {json.dumps({'type': 'error', 'detail': f'Invalid specialist ID: {specialist_id}', 'terminal': True})}\n\n"
+                return
+
+            from backend.agents.specialist import run_specialist_task
+            pool = await get_pool()
+            spec_result = await run_specialist_task(capability=valid_id, user_goal=message, pool=pool)
+            response_text = spec_result.get("summary", f"Specialist analysis completed for '{message}'.")
+
+            try:
+                if pool:
+                    async with pool.acquire() as conn:
+                        real_cid = await conversations.get_or_create_conversation(conn, conv_id, user_id=user_id, guest_id=guest_id)
+                        await conversations.add_message(conn, real_cid, role="user", content=f"[{valid_id}] {message}")
+                        await conversations.add_message(conn, real_cid, role="assistant", content=response_text, skill_called=f"specialist_{valid_id}")
+                        conv_id = real_cid
+            except Exception as e:
+                logger.debug(f"Could not persist specialist message history in stream: {e}")
+
+            yield f"data: {json.dumps({'type': 'token', 'value': response_text})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'conversation_id': conv_id, 'skill_used': f'specialist_{valid_id}'})}\n\n"
+            return
 
         stream = None
         try:

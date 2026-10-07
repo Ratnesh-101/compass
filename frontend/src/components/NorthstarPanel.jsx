@@ -75,11 +75,11 @@ export default function NorthstarPanel({
               padding: '5px 14px',
               borderRadius: '6px',
               border: 'none',
-              background: activeSubTab === 'assistant' ? 'var(--bg-card)' : 'transparent',
-              color: activeSubTab === 'assistant' ? 'var(--text-primary)' : 'var(--text-secondary)',
-              boxShadow: activeSubTab === 'assistant' ? 'var(--shadow-sm)' : 'none',
+              background: (activeSubTab === 'assistant' || activeSubTab === 'specialist') ? 'var(--bg-card)' : 'transparent',
+              color: (activeSubTab === 'assistant' || activeSubTab === 'specialist') ? 'var(--text-primary)' : 'var(--text-secondary)',
+              boxShadow: (activeSubTab === 'assistant' || activeSubTab === 'specialist') ? 'var(--shadow-sm)' : 'none',
               fontSize: '12.5px',
-              fontWeight: activeSubTab === 'assistant' ? '700' : '500',
+              fontWeight: (activeSubTab === 'assistant' || activeSubTab === 'specialist') ? '700' : '500',
               cursor: 'pointer',
               transition: 'all 0.15s ease',
             }}>
@@ -102,29 +102,17 @@ export default function NorthstarPanel({
             }}>
             📋 Goal Planner
           </button>
-          <button
-            id="northstar-subtab-specialist"
-            onClick={() => setActiveSubTab('specialist')}
-            style={{
-              padding: '5px 14px',
-              borderRadius: '6px',
-              border: 'none',
-              background: activeSubTab === 'specialist' ? 'var(--bg-card)' : 'transparent',
-              color: activeSubTab === 'specialist' ? 'var(--text-primary)' : 'var(--text-secondary)',
-              boxShadow: activeSubTab === 'specialist' ? 'var(--shadow-sm)' : 'none',
-              fontSize: '12.5px',
-              fontWeight: activeSubTab === 'specialist' ? '700' : '500',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-            }}>
-            🧠 Specialist Agents
-          </button>
         </div>
       </div>
 
       {/* Main Unified View Area */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
-        {activeSubTab === 'assistant' ? (
+        {activeSubTab === 'planner' ? (
+          <AgentPanel
+            onTaskMutated={onTaskMutated}
+            conversationId={conversationId}
+          />
+        ) : (
           <ChatPanel
             messages={messages}
             setMessages={setMessages}
@@ -138,16 +126,6 @@ export default function NorthstarPanel({
             initialPrompt={pendingPrompt}
             onClearInitialPrompt={onClearPendingPrompt}
             onOpenMigration={onOpenMigration}
-          />
-        ) : activeSubTab === 'planner' ? (
-          <AgentPanel
-            onTaskMutated={onTaskMutated}
-            conversationId={conversationId}
-          />
-        ) : (
-          <SpecialistPanel
-            onTaskMutated={onTaskMutated}
-            onSelectTab={onSelectTab}
           />
         )}
       </div>

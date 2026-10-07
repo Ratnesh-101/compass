@@ -12,6 +12,49 @@ from pydantic import BaseModel
 class ChatRequest(BaseModel):
     message: str
     conversation_id: Optional[str] = None
+    specialist_id: Optional[str] = None
+    specialistId: Optional[str] = None
+
+    def get_specialist_id(self) -> Optional[str]:
+        return self.specialist_id or self.specialistId
+
+
+class PublicChatRequest(BaseModel):
+    message: str
+    domain: Optional[str] = None
+    project: Optional[str] = None
+    conversation_id: Optional[str] = None
+    specialist_id: Optional[str] = None
+    specialistId: Optional[str] = None
+
+    def get_specialist_id(self) -> Optional[str]:
+        return self.specialist_id or self.specialistId
+
+
+class PublicChatResponse(BaseModel):
+    response: str
+    skill_used: Optional[str] = None
+    agent_reasoning: Optional[str] = None
+    data: Optional[Any] = None
+    conversation_id: Optional[str] = None
+
+
+class LogMemoryRequest(BaseModel):
+    content: str
+    domain: Optional[str] = "general"
+    project: Optional[str] = None
+    tags: Optional[List[str]] = []
+
+
+class StreamChatRequest(BaseModel):
+    message: str
+    conversation_id: Optional[str] = None
+    domain: Optional[str] = None
+    specialist_id: Optional[str] = None
+    specialistId: Optional[str] = None
+
+    def get_specialist_id(self) -> Optional[str]:
+        return self.specialist_id or self.specialistId
 
 
 class ChatResponse(BaseModel):
@@ -202,6 +245,11 @@ class PublicChatRequest(BaseModel):
     domain: Optional[str] = None
     project: Optional[str] = None
     conversation_id: Optional[str] = None
+    specialist_id: Optional[str] = None
+    specialistId: Optional[str] = None
+
+    def get_specialist_id(self) -> Optional[str]:
+        return self.specialist_id or self.specialistId
 
 
 class PublicChatResponse(BaseModel):
@@ -223,6 +271,11 @@ class StreamChatRequest(BaseModel):
     message: str
     conversation_id: Optional[str] = None
     domain: Optional[str] = None
+    specialist_id: Optional[str] = None
+    specialistId: Optional[str] = None
+
+    def get_specialist_id(self) -> Optional[str]:
+        return self.specialist_id or self.specialistId
 
 
 class AgentRequest(BaseModel):

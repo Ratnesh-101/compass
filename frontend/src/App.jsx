@@ -143,8 +143,19 @@ export default function App() {
 
   const handleUserChanged = useCallback(async (newEmail) => {
     if (newEmail) {
+      const clean = newEmail.trim().toLowerCase()
       const u = await fetchCurrentUser()
-      setCurrentUser(u)
+      if (u && (u.authenticated || u.email)) {
+        setCurrentUser(u)
+      } else {
+        setCurrentUser({
+          authenticated: true,
+          user_id: clean,
+          email: clean,
+          name: clean.split('@')[0].replace('.', ' ').replace(/\b\w/g, c => c.toUpperCase()),
+          calendar: { connected: false, mode: 'demo', is_simulated: true },
+        })
+      }
       checkMigration()
     } else {
       setCurrentUser({ authenticated: false, email: '' })
@@ -178,9 +189,23 @@ export default function App() {
     pollHealth()
     refreshUsage()
     fetchCurrentUser().then(u => {
-      if (isMounted && u && (u.authenticated || (u.email && u.email.includes('@')))) {
+      if (!isMounted) return
+      if (u && (u.authenticated || (u.email && u.email.includes('@')))) {
         setCurrentUser(u)
         checkMigration()
+      } else {
+        const savedEmail = localStorage.getItem('compass_user_email') || localStorage.getItem('compass_user_id')
+        if (savedEmail && savedEmail.includes('@')) {
+          const clean = savedEmail.trim().toLowerCase()
+          setCurrentUser({
+            authenticated: true,
+            user_id: clean,
+            email: clean,
+            name: clean.split('@')[0].replace('.', ' ').replace(/\b\w/g, c => c.toUpperCase()),
+            calendar: { connected: false, mode: 'demo', is_simulated: true },
+          })
+          checkMigration()
+        }
       }
     })
 
