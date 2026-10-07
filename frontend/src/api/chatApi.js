@@ -58,8 +58,8 @@ export async function sendQueryToAssistant(prompt, conversationId, tone = null, 
  */
 export function sanitizeModesMarker(text) {
   if (!text) return ''
-  // Remove all complete occurrences of [[modes]]
-  let clean = text.replace(/\[\[modes\]\]/gi, '')
+  // Remove all complete occurrences of [[modes]], [modes], [[mode]], [[modes: ...]] etc.
+  let clean = text.replace(/\[{1,2}\s*modes?(?::[^\]]*)?\s*\]{1,2}/gi, '')
   // Strip trailing partial prefix of [[modes]]
   clean = clean.replace(/\[(?:\[(?:m(?:o(?:d(?:e(?:s\]?)?)?)?)?)?)?$/i, '')
   return clean

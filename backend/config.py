@@ -58,11 +58,7 @@ class Settings(BaseSettings):
         "studio.nebius.ai",
         "api.tokenfactory.nebius.com",
     ]
-    PINNED_EVENT_PREFIXES: list[str] = [
-        "https://nebiusglobalaihackathon.devpost.com",
-        "http://nebiusglobalaihackathon.devpost.com",
-        "nebiusglobalaihackathon.devpost.com",
-    ]
+    PINNED_EVENT_PREFIXES: list[str] = []
 
     # --- Auth ---
     AUTH_TOKEN: str = ""  # Required — set in .env

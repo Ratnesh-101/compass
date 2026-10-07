@@ -485,13 +485,38 @@ async def run_tavily_research(
             if len(sent.strip()) > 20 and not sent.strip().startswith(("#", "|", "*", "-")) and "|" not in sent[:15]
         ]
 
+        # Filter out maintenance, banner, changelog, cookie, and platform alert sentences
+        filtered_sentences = []
+        for sent in sentences:
+            sent_lower = sent.lower()
+            if any(ign in sent_lower for ign in (
+                "scheduled maintenance", "routine maintenance", "downtime", "changelog",
+                "cookie policy", "terms of service", "privacy notice", "all rights reserved"
+            )):
+                continue
+            filtered_sentences.append(sent)
+
         # Prioritize sentences with deadline / submission / date keywords
         deadline_sentences = [
-            st for st in sentences
-            if re.search(r"\b(deadline|due|ends|closes|submission|period|schedule)\b", st, re.IGNORECASE)
-            and re.search(r"\b(202[4-9]|October|November|December|August|September)\b", st, re.IGNORECASE)
+            st for st in filtered_sentences
+            if re.search(r"\b(deadline|due|ends|closes|submission\s+(?:period|deadline)|submission)\b", st, re.IGNORECASE)
+            and re.search(r"\b(202[4-9]|January|February|March|April|May|June|July|August|September|October|November|December)\b", st, re.IGNORECASE)
         ]
-        chosen_sentence = deadline_sentences[0] if deadline_sentences else (sentences[0] if sentences else None)
+
+        def _deadline_priority(s: str) -> int:
+            s_low = s.lower()
+            if "deadline:" in s_low or "submission deadline" in s_low:
+                return 4
+            if "deadline" in s_low:
+                return 3
+            if "submission period" in s_low:
+                return 2
+            if "closes" in s_low or "ends" in s_low:
+                return 1
+            return 0
+
+        deadline_sentences.sort(key=_deadline_priority, reverse=True)
+        chosen_sentence = deadline_sentences[0] if deadline_sentences else (filtered_sentences[0] if filtered_sentences else None)
 
         if chosen_sentence:
             dt_match = re.search(r"\b(202[4-9])\b", chosen_sentence)

@@ -303,8 +303,8 @@ async def init_pool(dsn: str | None = None) -> asyncpg.Pool:
         dsn,
         min_size=2,
         max_size=10,
-        timeout=15.0,
-        command_timeout=15.0,
+        timeout=30.0,
+        command_timeout=30.0,
         init=_init_connection,  # register pgvector on every connection
     )
     if not _tables_ensured:

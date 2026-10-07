@@ -69,9 +69,7 @@ async def test_modes_token_stripped_before_persistence(client: AsyncClient):
     conv_id = str(uuid.uuid4())
 
     # Send message containing exact [[modes]] marker
-    markers_to_test = [
-        "Would you like advice, a sounding board, or a plan? [[modes]]",
-    ]
+    real_marker_msg = "Would you like advice, a sounding board, or a plan? [[modes]]"
     from unittest.mock import patch, AsyncMock
     with patch("backend.orchestrator.route_message", new_callable=AsyncMock) as mock_route:
         mock_route.return_value = (
@@ -79,13 +77,12 @@ async def test_modes_token_stripped_before_persistence(client: AsyncClient):
             {},
             "I can help with that [[modes]]",
         )
-        for msg in markers_to_test:
-            res = await client.post(
-                "/api/chat",
-                json={"message": msg, "conversation_id": conv_id},
-                headers=_auth(user),
-            )
-            assert res.status_code == 200
+        res = await client.post(
+            "/api/chat",
+            json={"message": real_marker_msg, "conversation_id": conv_id},
+            headers=_auth(user),
+        )
+        assert res.status_code == 200
 
     # 1. Check database directly
     pool = await get_pool()
@@ -118,11 +115,22 @@ async def test_modes_token_stripped_before_persistence(client: AsyncClient):
         assert recap_res.status_code == 200
         assert "[[modes" not in recap_res.json().get("recap", "").lower()
 
-    # 4. Check that stripping is consistently applied to share/recap payloads
+    # 4. Check that stripping is consistently applied to share/recap payloads and all emitted variants
     from backend.memory.conversations import strip_modes_marker
-    for msg in markers_to_test:
-        assert "[[modes" not in strip_modes_marker(msg).lower()
-        assert "[[modes]]" not in strip_modes_marker(msg)
+    variants = [
+        "Would you like advice, a sounding board, or a plan? [[modes]]",
+        "Would you like advice, a sounding board, or a plan? [[ modes ]]",
+        "Would you like advice, a sounding board, or a plan? [[modes: advice]]",
+        "Would you like advice, a sounding board, or a plan? [[modes:plan]]",
+        "Would you like advice, a sounding board, or a plan? [[mode]]",
+        "Would you like advice, a sounding board, or a plan? [modes]",
+    ]
+    for v in variants:
+        cleaned = strip_modes_marker(v)
+        assert "[[modes" not in cleaned.lower()
+        assert "[modes" not in cleaned.lower()
+        assert "[[mode" not in cleaned.lower()
+        assert cleaned == "Would you like advice, a sounding board, or a plan?"
 
 
 @pytest.mark.asyncio
