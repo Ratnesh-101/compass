@@ -281,6 +281,9 @@ def _extract_task_creation_args(message: str) -> dict:
             r"\b(?:on|at|due|by|for|in)?\s*(?:today|tomorrow|yesterday)\b",
             r"\b(?:next|this)?\s*(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
             r"\b\d{4}-\d{2}-\d{2}\b",
+            r"\b(?:at\s+)?(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?\s*(?:am|pm)?\b",
+            r"\b(?:at\s+)?(?:1[0-2]|0?[1-9])\s*(?:am|pm)\b",
+            r"\b(?:at\s+)?(?:midnight|noon)\b",
             r"^\s*(?:on|at|due|by|in)\s+",
             r"\s+\b(?:on|at|due|by|in)\s*$",
         ]
@@ -321,10 +324,10 @@ def _extract_task_creation_args(message: str) -> dict:
         if len(cand) >= 1 and not any(kw == cand.lower() for kw in date_words):
             title = cand
 
-    # Final guard: if title after stripping dates is empty or was purely date words, clear it
+    # Final guard: if title after stripping dates is empty or was purely date words/digits/time, clear it
     if title:
         residual = _strip_dates_and_times(title)
-        if not residual:
+        if not residual or re.fullmatch(r"[\d:\sAPMapm\.,\-]+", residual):
             title = ""
         else:
             title = residual
