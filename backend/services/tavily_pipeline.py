@@ -46,8 +46,8 @@ _RESEARCH_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 _CACHE_TTL_SECONDS = 3600  # 1 hour
 
 
-def _cache_key(query: str, domains: Optional[List[str]]) -> str:
-    norm = f"{query.strip().lower()}:{sorted(domains or [])}"
+def _cache_key(query: str, domains: Optional[List[str]], trusted_event_url: Optional[str] = None) -> str:
+    norm = f"{query.strip().lower()}:{sorted(domains or [])}:{str(trusted_event_url or '').strip().lower()}"
     return hashlib.sha256(norm.encode("utf-8")).hexdigest()
 
 
@@ -109,18 +109,24 @@ async def execute_subqueries(
 
 
 def _parse_time_and_tz(text: str) -> Tuple[int, int, timezone]:
-    """Parse time and timezone from text, defaulting to 0, 0, UTC if absent."""
+    """Parse time and timezone from text, supporting optional minutes, midnight, and IST."""
     from datetime import timedelta
+    if not text or not isinstance(text, str):
+        return 0, 0, timezone.utc
+    text_clean = text.lower()
+    if "midnight" in text_clean:
+        return 23, 59, timezone.utc
+
     m = re.search(
-        r"\b(\d{1,2}):(\d{2})\s*(am|pm)?\s*(pdt|pst|pt|pacific(?:\s+time)?|edt|est|cdt|cst|mdt|mst|utc|gmt)?\b",
+        r"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(pdt|pst|pt|pacific(?:\s+time)?|edt|est|cdt|cst|mdt|mst|ist|utc|gmt)?\b",
         text,
         re.IGNORECASE,
     )
-    if not m:
+    if not m or (not m.group(2) and not m.group(3)):
         return 0, 0, timezone.utc
 
     hour = int(m.group(1))
-    minute = int(m.group(2))
+    minute = int(m.group(2) or 0)
     ampm = (m.group(3) or "").lower()
     tz_str = (m.group(4) or "").lower().strip()
 
@@ -135,16 +141,14 @@ def _parse_time_and_tz(text: str) -> Tuple[int, int, timezone]:
         tz = timezone(timedelta(hours=-8))
     elif tz_str == "edt":
         tz = timezone(timedelta(hours=-4))
-    elif tz_str == "est":
+    elif tz_str in ("est", "cdt", "central"):
         tz = timezone(timedelta(hours=-5))
-    elif tz_str in ("cdt", "central"):
-        tz = timezone(timedelta(hours=-5))
-    elif tz_str == "cst":
-        tz = timezone(timedelta(hours=-6))
-    elif tz_str == "mdt":
+    elif tz_str in ("cst", "mdt"):
         tz = timezone(timedelta(hours=-6))
     elif tz_str == "mst":
         tz = timezone(timedelta(hours=-7))
+    elif tz_str == "ist":
+        tz = timezone(timedelta(hours=5, minutes=30))
     else:
         tz = timezone.utc
 
@@ -391,19 +395,31 @@ def evaluate_deterministic_verdict(
         else:
             verdict = "UNVERIFIED"
 
+        utc_iso = None
+        ist_str = None
+        if parsed_dt:
+            from datetime import timedelta
+            utc_iso = parsed_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            ist_dt = parsed_dt.astimezone(timezone(timedelta(hours=5, minutes=30)))
+            ist_str = ist_dt.strftime("%Y-%m-%d %I:%M %p IST")
+
         verdicts.append(verdict)
         evidence_items.append({
             "claim": claim_text,
             "source_url": source_url,
+            "exact_quote": quote,
             "verbatim_quote": quote,
             "published_date": raw_date,
             "parsed_date": parsed_dt.isoformat() if parsed_dt else None,
+            "normalized_utc": utc_iso,
+            "local_deadline_ist": ist_str,
             "year_provenance": year_provenance,
             "authority_tier": tier,
             "authority_badge": url_badge_map.get(source_url, "Official Organizer" if tier == "tier_1_official" else ""),
             "verdict": verdict,
             "verbatim_verified": is_verified_quote,
             "entity_matched": entity_matched,
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
             "retrieved_at": datetime.now(timezone.utc).isoformat(),
         })
 
@@ -486,7 +502,7 @@ async def run_tavily_research(
         }
 
     active_run_id = run_id or f"research_{uuid.uuid4().hex[:10]}"
-    ckey = _cache_key(query, include_domains)
+    ckey = _cache_key(query, include_domains, trusted_event_url=trusted_event_url)
 
     # 1. Check TTL cache
     now = time.monotonic()
@@ -539,7 +555,7 @@ async def run_tavily_research(
         for item in results_list:
             raw = item.get("raw_content") or item.get("content") or ""
             if raw:
-                extracted_text_blocks.append(sanitize_untrusted_text(raw[:3000]))
+                extracted_text_blocks.append(sanitize_untrusted_text(raw[:30000]))
     except Exception as e:
         logger.warning("Tavily extract failed: %s; falling back to snippets", e)
         for s in top_sources:
@@ -602,10 +618,10 @@ async def run_tavily_research(
 
         if chosen_sentence:
             dt_match = re.search(r"\b(202[4-9])\b", chosen_sentence)
-            # Find exact verbatim substring in full_extracted_corpus or content
-            exact_quote = chosen_sentence[:140].strip()
-            # If comma or paren at end, trim
-            if exact_quote and exact_quote[-1] in (",", ";", ":", "("):
+            exact_quote = chosen_sentence.strip()
+            if len(exact_quote) > 300:
+                exact_quote = exact_quote[:300].strip()
+            if exact_quote and exact_quote[-1] in (",", ";", ":"):
                 exact_quote = exact_quote[:-1].strip()
 
             claims.append({
@@ -616,8 +632,9 @@ async def run_tavily_research(
             })
 
     # 7. Evaluate deterministic verdicts with verbatim quote validation and entity binding
+    combined_corpus = (full_extracted_corpus + "\n\n" + " ".join(s.get("content", "") for s in top_sources)).strip()
     overall_verdict, evidence_ledger = evaluate_deterministic_verdict(
-        claims, full_extracted_corpus if full_extracted_corpus else " ".join(s.get("content", "") for s in top_sources), top_sources, target_entity=target_entity or query
+        claims, combined_corpus, top_sources, target_entity=target_entity or query
     )
 
     # Attach credits and run_id to each ledger item
