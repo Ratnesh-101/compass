@@ -32,6 +32,8 @@ import backend.orchestrator as orchestrator
 from backend.models import (
     ChatRequest,
     ChatResponse,
+    ChatRecapRequest,
+    ChatRecapResponse,
     MessagesResponse,
     MessageOut,
     ConversationUpdate,
@@ -53,13 +55,149 @@ async def chat(request: ChatRequest, req: Request, _token: str = Depends(verify_
     ident = _get_current_identity(req)
     user_id = ident.user_id if ident else None
     guest_id = ident.guest_id if ident else None
+
+    if request.conversation_id:
+        pool = await get_pool()
+        if pool:
+            async with pool.acquire() as conn:
+                has_access, err = await conversations.check_conversation_access(
+                    conn, request.conversation_id, user_id=user_id, guest_id=guest_id, is_admin=bool(ident and ident.is_admin), allow_shared=False
+                )
+                if not has_access and err != "Conversation not found":
+                    raise HTTPException(status_code=403, detail="Forbidden: conversation belongs to another user")
+
     result = await orchestrator.handle_message(
         conversation_id=request.conversation_id,
         message=request.message,
         user_id=user_id,
         guest_id=guest_id,
+        tone=request.tone,
+        conv_mode=request.mode,
     )
     return ChatResponse(**result)
+
+
+# ---- POST /api/chat/recap -------------------------------------------------
+@router.post("/api/chat/recap", response_model=ChatRecapResponse)
+async def chat_recap(
+    request: ChatRecapRequest,
+    req: Request,
+):
+    """Summarize decisions made, open questions, and concrete next steps for a conversation."""
+    ident = _get_current_identity(req)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    await rate_limit(req)
+
+    from backend.services.budgets import check_daily_budget
+    check_daily_budget(ident.id)
+
+    conv_id = request.conversation_id
+    if not conv_id:
+        return ChatRecapResponse(
+            conversation_id=None,
+            recap="No conversation was selected to recap.",
+        )
+
+    pool = await get_pool()
+    if not pool:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    async with pool.acquire() as conn:
+        user_id = ident.user_id
+        guest_id = ident.guest_id
+        is_admin = bool(ident.is_admin)
+
+        has_access, err = await conversations.check_conversation_access(
+            conn, conv_id, user_id=user_id, guest_id=guest_id, is_admin=is_admin, allow_shared=False
+        )
+        if not has_access:
+            if err == "Conversation not found":
+                raise HTTPException(status_code=404, detail="Conversation not found")
+            raise HTTPException(status_code=403, detail="Forbidden: conversation belongs to another user")
+
+        # Cap messages sent to last 40 to bound cost
+        rows = await conversations.get_recent_messages(conn, conv_id, limit=40)
+
+
+    if not rows:
+        return ChatRecapResponse(
+            conversation_id=conv_id,
+            recap="This conversation is empty right now — there are no messages to recap.",
+        )
+
+    from backend.memory.conversations import strip_modes_marker
+
+    transcript_lines = []
+    for r in rows:
+        role = r.get("role", "user")
+        content = strip_modes_marker(r.get("content") or "").strip()
+        if content:
+            transcript_lines.append(f"{role.capitalize()}: {content}")
+
+    transcript = "\n".join(transcript_lines)
+
+    from backend.config import get_settings
+    from backend.services.usage import record_usage
+    from backend.persona import build_persona_system_prompt
+    import openai
+
+    settings = get_settings()
+    system_instruction = (
+        f"{build_persona_system_prompt(mode='chat')}\n\n"
+        "TASK: Provide a short, scannable recap of this conversation summarizing:\n"
+        "- Key decisions made\n"
+        "- Open questions or unresolved thoughts\n"
+        "- Concrete next steps (if any)\n\n"
+        "Format with concise bullet points. "
+        "If and only if there is a concrete next step identified, end with: 'That's a solid next step. Want me to write it down?'"
+    )
+
+    recap_text = ""
+    is_placeholder_key = (
+        not settings.NEBIUS_API_KEY
+        or settings.NEBIUS_API_KEY.startswith("your_nebius")
+        or settings.NEBIUS_API_KEY in ("mock", "mock-key-not-used-in-tests")
+    )
+
+    if not is_placeholder_key:
+        try:
+            client = openai.AsyncOpenAI(
+                api_key=settings.NEBIUS_API_KEY,
+                base_url=settings.NEBIUS_BASE_URL,
+                timeout=20.0,
+            )
+            resp: Any = await client.chat.completions.create(
+                model=settings.ROUTER_MODEL,
+                messages=[
+                    {"role": "system", "content": system_instruction},
+                    {"role": "user", "content": f"Here is the conversation transcript:\n\n{transcript}\n\nPlease recap it."},
+                ],
+                max_tokens=350,
+                stream=False,
+            )
+            p_tok = getattr(getattr(resp, "usage", None), "prompt_tokens", 0) or 50
+            c_tok = getattr(getattr(resp, "usage", None), "completion_tokens", 0) or 50
+            record_usage(settings.ROUTER_MODEL, p_tok, c_tok)
+
+            if resp.choices and resp.choices[0].message.content:
+                recap_text = resp.choices[0].message.content.strip()
+        except Exception as e:
+            logger.warning("Recap generation failed: %s", e)
+
+    if not recap_text:
+        last_preview = strip_modes_marker(rows[-1].get('content', ''))[:60] if rows else ""
+        recap_text = (
+            f"Here is a quick recap of our discussion ({len(rows)} messages):\n"
+            f"- We explored key topics including: {last_preview}...\n"
+            "- That's a solid next step. Want me to write it down?"
+        )
+
+    return ChatRecapResponse(
+        conversation_id=conv_id,
+        recap=strip_modes_marker(recap_text),
+    )
 
 
 # ---- GET /api/conversations/{conversation_id}/messages --------------------
@@ -276,6 +414,37 @@ async def public_chat(req: PublicChatRequest, request: Request, _rl: None = Depe
                     raise HTTPException(status_code=403, detail="Forbidden: conversation belongs to another user")
 
     msg = req.message.strip()
+    specialist_id = req.get_specialist_id()
+    if specialist_id:
+        from backend.agents.specialist_registry import validate_specialist_id
+        valid_id = validate_specialist_id(specialist_id)
+        if not valid_id:
+            raise HTTPException(status_code=400, detail=f"Invalid specialist ID '{specialist_id}'")
+
+        from backend.agents.specialist import run_specialist_task
+        pool = await get_pool()
+        spec_result = await run_specialist_task(capability=valid_id, user_goal=msg, pool=pool)
+        resp_text = spec_result.get("summary", f"Specialist analysis completed for '{msg}'.")
+
+        conv_id = req.conversation_id or str(uuid.uuid4())
+        try:
+            if pool:
+                async with pool.acquire() as conn:
+                    real_cid = await conversations.get_or_create_conversation(conn, conv_id, user_id=user_id, guest_id=guest_id)
+                    await conversations.add_message(conn, real_cid, role="user", content=f"[{valid_id}] {msg}")
+                    await conversations.add_message(conn, real_cid, role="assistant", content=resp_text, skill_called=f"specialist_{valid_id}")
+                    conv_id = real_cid
+        except Exception as e:
+            logger.debug(f"Could not persist specialist message history: {e}")
+
+        return PublicChatResponse(
+            response=resp_text,
+            routing_latency_ms=120,
+            message=resp_text,
+            conversation_id=conv_id,
+            skill_used=f"specialist_{valid_id}",
+        )
+
     result = await orchestrator.handle_message(
         conversation_id=req.conversation_id, message=msg, user_id=user_id, guest_id=guest_id
     )

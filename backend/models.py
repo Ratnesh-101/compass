@@ -12,6 +12,49 @@ from pydantic import BaseModel
 class ChatRequest(BaseModel):
     message: str
     conversation_id: Optional[str] = None
+    specialist_id: Optional[str] = None
+    specialistId: Optional[str] = None
+
+    def get_specialist_id(self) -> Optional[str]:
+        return self.specialist_id or self.specialistId
+
+
+class PublicChatRequest(BaseModel):
+    message: str
+    domain: Optional[str] = None
+    project: Optional[str] = None
+    conversation_id: Optional[str] = None
+    specialist_id: Optional[str] = None
+    specialistId: Optional[str] = None
+
+    def get_specialist_id(self) -> Optional[str]:
+        return self.specialist_id or self.specialistId
+
+
+class PublicChatResponse(BaseModel):
+    response: str
+    skill_used: Optional[str] = None
+    agent_reasoning: Optional[str] = None
+    data: Optional[Any] = None
+    conversation_id: Optional[str] = None
+
+
+class LogMemoryRequest(BaseModel):
+    content: str
+    domain: Optional[str] = "general"
+    project: Optional[str] = None
+    tags: Optional[List[str]] = []
+
+
+class StreamChatRequest(BaseModel):
+    message: str
+    conversation_id: Optional[str] = None
+    domain: Optional[str] = None
+    specialist_id: Optional[str] = None
+    specialistId: Optional[str] = None
+
+    def get_specialist_id(self) -> Optional[str]:
+        return self.specialist_id or self.specialistId
 
 
 class ChatResponse(BaseModel):
@@ -19,6 +62,15 @@ class ChatResponse(BaseModel):
     response: str
     skill_used: Optional[str] = None
     data: Optional[Any] = None
+
+
+class ChatRecapRequest(BaseModel):
+    conversation_id: Optional[str] = None
+
+
+class ChatRecapResponse(BaseModel):
+    conversation_id: Optional[str] = None
+    recap: str
 
 
 class MessageOut(BaseModel):
@@ -195,34 +247,6 @@ class UpdateTaskRequest(BaseModel):
     scheduled_start: Optional[str] = None
     scheduled_end: Optional[str] = None
     is_fixed: Optional[bool] = None
-
-
-class PublicChatRequest(BaseModel):
-    message: str
-    domain: Optional[str] = None
-    project: Optional[str] = None
-    conversation_id: Optional[str] = None
-
-
-class PublicChatResponse(BaseModel):
-    response: str
-    skill_used: Optional[str] = None
-    agent_reasoning: Optional[str] = None
-    data: Optional[Any] = None
-    conversation_id: Optional[str] = None
-
-
-class LogMemoryRequest(BaseModel):
-    content: str
-    domain: Optional[str] = "general"
-    project: Optional[str] = None
-    tags: Optional[List[str]] = []
-
-
-class StreamChatRequest(BaseModel):
-    message: str
-    conversation_id: Optional[str] = None
-    domain: Optional[str] = None
 
 
 class AgentRequest(BaseModel):
