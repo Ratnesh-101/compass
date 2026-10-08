@@ -22,6 +22,7 @@ import re
 import time
 import uuid
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import Any, Dict, List, Optional, Tuple
 
 from backend.config import get_settings
@@ -41,14 +42,23 @@ from backend.services.tavily_authority import (
 
 logger = logging.getLogger("compass.tavily_pipeline")
 
-# TTL Cache for research queries: query_key -> (timestamp, result)
-_RESEARCH_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+_COUNTDOWN_PATTERN = re.compile(
+    r"\b(\d+\s*(?:days?|hours?|mins?|minutes?|secs?|seconds?)\s*(?:left|remaining)|countdown|time\s+remaining)\b",
+    re.IGNORECASE,
+)
+
+# Raw search & extraction cache: query_key -> (timestamp, raw_results, extracted_blocks, credits)
+_RAW_SEARCH_CACHE: Dict[str, Tuple[float, List[Dict[str, Any]], List[str], int]] = {}
 _CACHE_TTL_SECONDS = 3600  # 1 hour
 
 
-def _cache_key(query: str, domains: Optional[List[str]], trusted_event_url: Optional[str] = None) -> str:
-    norm = f"{query.strip().lower()}:{sorted(domains or [])}:{str(trusted_event_url or '').strip().lower()}"
+def _raw_cache_key(query: str, domains: Optional[List[str]] = None) -> str:
+    norm = f"{query.strip().lower()}:{sorted(domains or [])}"
     return hashlib.sha256(norm.encode("utf-8")).hexdigest()
+
+
+def _cache_key(query: str, domains: Optional[List[str]], trusted_event_url: Optional[str] = None) -> str:
+    return _raw_cache_key(query, domains)
 
 
 async def decompose_query(query: str) -> List[str]:
@@ -108,49 +118,47 @@ async def execute_subqueries(
     return list(deduped.values()), credits_used
 
 
-def _parse_time_and_tz(text: str) -> Tuple[int, int, timezone]:
-    """Parse time and timezone from text, supporting optional minutes, midnight, and IST."""
-    from datetime import timedelta
+def _parse_time_and_tz(text: str) -> Tuple[int, int, Any]:
+    """Parse time and timezone from text using zoneinfo (America/Los_Angeles, America/New_York, Asia/Kolkata)."""
     if not text or not isinstance(text, str):
-        return 0, 0, timezone.utc
-    text_clean = text.lower()
+        return 0, 0, ZoneInfo("UTC")
+    text_clean = text.lower().strip()
     if "midnight" in text_clean:
-        return 23, 59, timezone.utc
+        return 23, 59, ZoneInfo("UTC")
 
     m = re.search(
-        r"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(pdt|pst|pt|pacific(?:\s+time)?|edt|est|cdt|cst|mdt|mst|ist|utc|gmt)?\b",
+        r"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(pdt|pst|pt|pacific(?:\s+time)?|edt|est|et|eastern(?:\s+time)?|cdt|cst|ct|central(?:\s+time)?|mdt|mst|mt|mountain(?:\s+time)?|ist|utc|gmt)?\b",
         text,
         re.IGNORECASE,
     )
-    if not m or (not m.group(2) and not m.group(3)):
-        return 0, 0, timezone.utc
+    if not m:
+        return 0, 0, ZoneInfo("UTC")
 
     hour = int(m.group(1))
     minute = int(m.group(2) or 0)
     ampm = (m.group(3) or "").lower()
     tz_str = (m.group(4) or "").lower().strip()
 
+    if not m.group(2) and not m.group(3) and hour not in (23, 0):
+        return 0, 0, ZoneInfo("UTC")
+
     if ampm == "pm" and hour < 12:
         hour += 12
     elif ampm == "am" and hour == 12:
         hour = 0
 
-    if tz_str in ("pdt", "pt", "pacific", "pacific time"):
-        tz = timezone(timedelta(hours=-7))
-    elif tz_str == "pst":
-        tz = timezone(timedelta(hours=-8))
-    elif tz_str == "edt":
-        tz = timezone(timedelta(hours=-4))
-    elif tz_str in ("est", "cdt", "central"):
-        tz = timezone(timedelta(hours=-5))
-    elif tz_str in ("cst", "mdt"):
-        tz = timezone(timedelta(hours=-6))
-    elif tz_str == "mst":
-        tz = timezone(timedelta(hours=-7))
-    elif tz_str == "ist":
-        tz = timezone(timedelta(hours=5, minutes=30))
+    if tz_str in ("pdt", "pst", "pt", "pacific", "pacific time"):
+        tz = ZoneInfo("America/Los_Angeles")
+    elif tz_str in ("edt", "est", "et", "eastern", "eastern time"):
+        tz = ZoneInfo("America/New_York")
+    elif tz_str in ("cdt", "cst", "ct", "central", "central time"):
+        tz = ZoneInfo("America/Chicago")
+    elif tz_str in ("mdt", "mst", "mt", "mountain", "mountain time"):
+        tz = ZoneInfo("America/Denver")
+    elif tz_str in ("ist", "india", "indian standard time"):
+        tz = ZoneInfo("Asia/Kolkata")
     else:
-        tz = timezone.utc
+        tz = ZoneInfo("UTC")
 
     return hour, minute, tz
 
@@ -377,17 +385,27 @@ def evaluate_deterministic_verdict(
             verdict = "CONFLICTING"
         elif year_provenance == "inferred":
             verdict = "UNVERIFIED"
+        elif _COUNTDOWN_PATTERN.search(claim_text) or _COUNTDOWN_PATTERN.search(quote):
+            # Countdown widget text must never be verified evidence on its own
+            verdict = "UNVERIFIED"
         elif parsed_dt and parsed_dt < datetime.now(timezone.utc):
             verdict = "STALE"
         elif tier == AuthorityTier.TIER_1_OFFICIAL.value:
             verdict = "VERIFIED"
         elif tier == AuthorityTier.TIER_2_TECHNICAL.value:
-            # Tier 2 requires >= 2 independent agreeing sources for this specific date
-            agreeing_sources = {
-                cl.get("source_url")
-                for cl in claims
-                if cl.get("source_url") and _parse_explicit_year_date(cl.get("extracted_date") or cl.get("claim"))[0] == parsed_dt
-            }
+            # Tier 2 requires >= 2 independent agreeing sources for this specific UTC instant
+            agreeing_sources = set()
+            for cl in claims:
+                cl_url = cl.get("source_url")
+                if not cl_url:
+                    continue
+                cl_tier = url_tier_map.get(cl_url, AuthorityTier.TIER_3_GENERAL.value)
+                if cl_tier not in (AuthorityTier.TIER_1_OFFICIAL.value, AuthorityTier.TIER_2_TECHNICAL.value):
+                    continue
+                cl_dt, _ = _parse_explicit_year_date(cl.get("extracted_date") or cl.get("claim"))
+                if cl_dt and parsed_dt and cl_dt.astimezone(timezone.utc) == parsed_dt.astimezone(timezone.utc):
+                    if not _COUNTDOWN_PATTERN.search(cl.get("claim", "")) and not _COUNTDOWN_PATTERN.search(cl.get("exact_quote", "")):
+                        agreeing_sources.add(cl_url)
             if len(agreeing_sources) >= 2:
                 verdict = "VERIFIED"
             else:
@@ -398,9 +416,8 @@ def evaluate_deterministic_verdict(
         utc_iso = None
         ist_str = None
         if parsed_dt:
-            from datetime import timedelta
             utc_iso = parsed_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            ist_dt = parsed_dt.astimezone(timezone(timedelta(hours=5, minutes=30)))
+            ist_dt = parsed_dt.astimezone(ZoneInfo("Asia/Kolkata"))
             ist_str = ist_dt.strftime("%Y-%m-%d %I:%M %p IST")
 
         verdicts.append(verdict)
@@ -466,18 +483,10 @@ async def persist_evidence_ledger(run_id: str, evidence: List[Dict[str, Any]]) -
             async with pool.acquire() as conn:
                 for ev in evidence:
                     await conn.execute(
-                        """
-                        INSERT INTO evidence_ledger 
-                            (run_id, claim, source_url, verbatim_quote, published_date, authority_tier, verdict)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7)
-                        """,
-                        run_id,
-                        ev["claim"][:500],
-                        ev["source_url"][:500],
-                        ev["verbatim_quote"][:1000],
-                        str(ev.get("published_date") or ""),
-                        ev["authority_tier"],
-                        ev["verdict"],
+                        "INSERT INTO evidence_ledger (run_id, claim, source_url, verbatim_quote, published_date, authority_tier, verdict) "
+                        "VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                        run_id, ev["claim"][:500], ev["source_url"][:500], ev["verbatim_quote"][:1000],
+                        str(ev.get("published_date") or ""), ev["authority_tier"], ev["verdict"],
                     )
     except Exception as e:
         logger.warning("Could not persist evidence ledger to DB: %s", e)
@@ -492,6 +501,7 @@ async def run_tavily_research(
     trusted_event_url: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Execute complete Tavily research pipeline with deterministic evidence ledger."""
+    settings = get_settings()
     if not tavily_available():
         return {
             "status": "unavailable",
@@ -502,74 +512,99 @@ async def run_tavily_research(
         }
 
     active_run_id = run_id or f"research_{uuid.uuid4().hex[:10]}"
-    ckey = _cache_key(query, include_domains, trusted_event_url=trusted_event_url)
-
-    # 1. Check TTL cache
     now = time.monotonic()
-    if ckey in _RESEARCH_CACHE:
-        cached_time, cached_val = _RESEARCH_CACHE[ckey]
-        if (now - cached_time) < _CACHE_TTL_SECONDS:
-            logger.info("Serving Tavily research from TTL cache for '%s'", query)
-            return dict(cached_val)
+    t_start = time.perf_counter()
+    stage_timings: Dict[str, float] = {}
 
-    # 2. Decompose query into sub-queries
-    sub_queries = await decompose_query(query)
-
-    # 3. Concurrent search
+    # 1. Check RAW TTL Cache (query + domains only; trusted_event_url applied after cache)
+    ckey = _raw_cache_key(query, include_domains)
+    raw_results: List[Dict[str, Any]] = []
+    extracted_text_blocks: List[str] = []
     total_credits = 0
-    try:
-        raw_results, search_credits = await execute_subqueries(sub_queries, include_domains=include_domains, max_credits=max_credits)
-        total_credits += search_credits
-    except Exception as e:
-        logger.warning("execute_subqueries failed: %s", e)
-        return {
-            "status": "unavailable",
-            "verdict": "NOT_FOUND",
-            "summary": f"Search execution failed: {e}",
-            "evidence_ledger": [],
-            "sources": [],
-            "credits": 0,
-        }
+    from_cache = False
 
-    if not raw_results:
-        return {
-            "status": "ok",
-            "verdict": "NOT_FOUND",
-            "summary": f"No web sources found for '{query}'.",
-            "evidence_ledger": [],
-            "sources": [],
-            "credits": total_credits,
-        }
+    if ckey in _RAW_SEARCH_CACHE:
+        cached_time, c_results, c_blocks, c_credits = _RAW_SEARCH_CACHE[ckey]
+        if (now - cached_time) < _CACHE_TTL_SECONDS:
+            raw_results = [dict(r) for r in c_results]
+            extracted_text_blocks = list(c_blocks)
+            total_credits = c_credits
+            from_cache = True
+            logger.info("Serving raw search/extraction from cache for query '%s'", query)
 
-    # 4. Enrich and rank sources by domain authority
+    if not from_cache:
+        t0 = time.perf_counter()
+        sub_queries = await decompose_query(query)
+        stage_timings["decomposition_ms"] = round((time.perf_counter() - t0) * 1000, 2)
+
+        t0 = time.perf_counter()
+        try:
+            raw_results, search_credits = await execute_subqueries(
+                sub_queries, include_domains=include_domains, max_credits=max_credits
+            )
+            total_credits += search_credits
+        except Exception as e:
+            logger.warning("execute_subqueries failed: %s", e)
+            return {
+                "status": "unavailable",
+                "verdict": "NOT_FOUND",
+                "summary": f"Search execution failed: {e}",
+                "evidence_ledger": [],
+                "sources": [],
+                "credits": 0,
+                "stage_timings": stage_timings,
+            }
+        stage_timings["search_ms"] = round((time.perf_counter() - t0) * 1000, 2)
+
+        if not raw_results:
+            stage_timings["total_ms"] = round((time.perf_counter() - t_start) * 1000, 2)
+            return {
+                "status": "ok",
+                "verdict": "NOT_FOUND",
+                "summary": f"No web sources found for '{query}'.",
+                "evidence_ledger": [],
+                "sources": [],
+                "credits": total_credits,
+                "stage_timings": stage_timings,
+            }
+
+        # Extract top candidate URLs (full fetched text without truncation for quote verification)
+        t0 = time.perf_counter()
+        extract_urls = [r["url"] for r in raw_results if r.get("url")][:2]
+        if extract_urls:
+            try:
+                extract_resp = await asyncio.wait_for(
+                    tavily_extract(extract_urls, extract_depth="basic"),
+                    timeout=getattr(settings, "TAVILY_EXTRACT_TIMEOUT_S", 8.0),
+                )
+                res_list = extract_resp.get("results", []) or []
+                total_credits += len(res_list)
+                for item in res_list:
+                    raw = item.get("raw_content") or item.get("content") or ""
+                    if raw:
+                        extracted_text_blocks.append(raw)
+            except Exception as e:
+                logger.warning("Tavily extraction timed out or failed: %s; falling back to snippets", e)
+        stage_timings["extraction_ms"] = round((time.perf_counter() - t0) * 1000, 2)
+
+        # Cache raw search and extraction results
+        _RAW_SEARCH_CACHE[ckey] = (now, raw_results, extracted_text_blocks, total_credits)
+
+    # 4. Apply authority tier and badges per request from caller's own trusted URLs (AFTER cache)
+    t0 = time.perf_counter()
     enriched_sources = sort_and_enrich_sources(raw_results, trusted_event_url=trusted_event_url)
     top_sources = enriched_sources[:3]
+    stage_timings["ranking_ms"] = round((time.perf_counter() - t0) * 1000, 2)
 
-    # 5. Extract top official URLs
-    extract_urls = [s["url"] for s in top_sources if s.get("url")]
-    extracted_text_blocks = []
-    try:
-        extract_resp = await tavily_extract(extract_urls[:2], extract_depth="basic")
-        results_list = extract_resp.get("results", []) or []
-        total_credits += len(results_list)
-        for item in results_list:
-            raw = item.get("raw_content") or item.get("content") or ""
-            if raw:
-                extracted_text_blocks.append(sanitize_untrusted_text(raw[:30000]))
-    except Exception as e:
-        logger.warning("Tavily extract failed: %s; falling back to snippets", e)
-        for s in top_sources:
-            extracted_text_blocks.append(s.get("content", ""))
-
+    # 5. Build full raw text corpus for verbatim quote verification
     full_extracted_corpus = "\n\n".join(extracted_text_blocks)
+    combined_corpus = (full_extracted_corpus + "\n\n" + " ".join(s.get("content", "") for s in top_sources)).strip()
 
-    # 6. Extract structured claims from web text (Hardened prompt injection defense)
-    # Model gets NO tools and web text is strictly fenced in user prompt
+    # 6. Extract structured claims from web text
+    t0 = time.perf_counter()
     claims: List[Dict[str, Any]] = []
     for s in top_sources:
-        content = s.get("content", "")
-        # Check both full extracted corpus and snippet for this source
-        candidate_pool = [content]
+        candidate_pool = [s.get("content", "")]
         for blk in extracted_text_blocks:
             if s.get("domain", "") in blk.lower() or s["url"] in blk:
                 candidate_pool.append(blk)
@@ -580,18 +615,14 @@ async def run_tavily_research(
             if len(sent.strip()) > 20 and not sent.strip().startswith(("#", "|", "*", "-")) and "|" not in sent[:15]
         ]
 
-        # Filter out maintenance, banner, changelog, cookie, and platform alert sentences
-        filtered_sentences = []
-        for sent in sentences:
-            sent_lower = sent.lower()
-            if any(ign in sent_lower for ign in (
+        filtered_sentences = [
+            sent for sent in sentences
+            if not any(ign in sent.lower() for ign in (
                 "scheduled maintenance", "routine maintenance", "downtime", "changelog",
                 "cookie policy", "terms of service", "privacy notice", "all rights reserved"
-            )):
-                continue
-            filtered_sentences.append(sent)
+            ))
+        ]
 
-        # Prioritize sentences with deadline / submission / date keywords
         deadline_sentences = [
             st for st in filtered_sentences
             if re.search(r"\b(deadline|due|ends|closes|submission\s+(?:period|deadline)|submission)\b", st, re.IGNORECASE)
@@ -599,19 +630,11 @@ async def run_tavily_research(
             and not re.search(r"\b(judging|winner|announcement|banner|changelog|maintenance)\b", st, re.IGNORECASE)
         ]
 
-        def _deadline_priority(s: str) -> int:
-            s_low = s.lower()
-            if any(ign in s_low for ign in ("judging", "winner", "announcement", "banner", "changelog", "maintenance")):
+        def _deadline_priority(st: str) -> int:
+            s = st.lower()
+            if any(ign in s for ign in ("judging", "winner", "announcement", "banner", "changelog", "maintenance")):
                 return -1
-            if "submission deadline" in s_low or "deadline:" in s_low or "submissions close" in s_low:
-                return 5
-            if "submission period" in s_low:
-                return 4
-            if "deadline" in s_low or "due date" in s_low:
-                return 3
-            if "closes" in s_low or "ends" in s_low:
-                return 2
-            return 0
+            return next((sc for kw, sc in (("submission deadline", 5), ("deadline:", 5), ("submissions close", 5), ("submission period", 4), ("deadline", 3), ("due date", 3), ("closes", 2), ("ends", 2)) if kw in s), 0)
 
         deadline_sentences.sort(key=_deadline_priority, reverse=True)
         chosen_sentence = deadline_sentences[0] if deadline_sentences else (filtered_sentences[0] if filtered_sentences else None)
@@ -631,26 +654,28 @@ async def run_tavily_research(
                 "extracted_date": chosen_sentence if dt_match else None,
             })
 
-    # 7. Evaluate deterministic verdicts with verbatim quote validation and entity binding
-    combined_corpus = (full_extracted_corpus + "\n\n" + " ".join(s.get("content", "") for s in top_sources)).strip()
+    # 7. Evaluate deterministic verdicts with full-corpus verbatim quote validation
     overall_verdict, evidence_ledger = evaluate_deterministic_verdict(
         claims, combined_corpus, top_sources, target_entity=target_entity or query
     )
+    stage_timings["verdict_eval_ms"] = round((time.perf_counter() - t0) * 1000, 2)
+    stage_timings["total_ms"] = round((time.perf_counter() - t_start) * 1000, 2)
 
-    # Attach credits and run_id to each ledger item
     for item in evidence_ledger:
         item["run_id"] = active_run_id
         item["credits"] = total_credits
 
-    # 8. Persist to DB evidence_ledger table
     await persist_evidence_ledger(active_run_id, evidence_ledger)
 
     result = {
         "status": "ok",
         "verdict": overall_verdict,
         "run_id": active_run_id,
-        "summary": f"Research complete. Evaluated {len(top_sources)} sources across {len(sub_queries)} decomposed queries. Overall verdict: {overall_verdict}.",
+        "cached": from_cache,
+        "summary": f"Research complete. Evaluated {len(top_sources)} sources. Overall verdict: {overall_verdict}.",
         "evidence_ledger": evidence_ledger,
+        "stage_timings": stage_timings,
+        "progress": {"stage": "complete", "total_ms": stage_timings["total_ms"]},
         "sources": [
             {
                 "url": s["url"],
@@ -663,7 +688,4 @@ async def run_tavily_research(
             for s in top_sources
         ],
     }
-
-    # Store in TTL cache
-    _RESEARCH_CACHE[ckey] = (now, result)
     return result
