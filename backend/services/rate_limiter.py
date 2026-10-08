@@ -17,7 +17,7 @@ from typing import Optional, Tuple
 from fastapi import HTTPException, Request
 
 from backend.memory.db import get_pool
-from backend.services.security import get_client_ip
+from backend.services.security import get_client_ip, is_valid_ip
 
 logger = logging.getLogger("compass.rate_limiter")
 
@@ -206,15 +206,22 @@ async def enforce_mint_rate_limit(request: Request) -> None:
     capacity = float(hourly_limit)
     refill_rate = capacity / 3600.0
 
-    from backend.services.security import is_edge_ip_trusted
-    is_trusted = is_edge_ip_trusted(request)
-    client_ip = get_client_ip(request)
-    # Ensure guest minting uses verified edge IP or physical TCP peer to prevent header-spoofing bypass
-    if is_trusted:
-        mint_key = f"mint:ip:{client_ip}"
-    else:
-        peer_host = (request.client.host if request.client else None) or "direct"
-        mint_key = f"mint:untrusted:{peer_host}"
+    # Extract client IP using the rightmost X-Forwarded-For entry appended by the trusted reverse proxy
+    # (Render/Cloudflare). This prevents spoofed leftmost headers from bypassing the bucket while
+    # ensuring legitimate distinct users behind Render don't share the internal proxy container IP.
+    xff = request.headers.get("x-forwarded-for")
+    client_ip = None
+    if xff and xff.strip():
+        parts = [p.strip() for p in xff.split(",") if p.strip()]
+        if parts:
+            rightmost = parts[-1]
+            if is_valid_ip(rightmost):
+                client_ip = rightmost
+
+    if not client_ip:
+        client_ip = (request.client.host if request.client else None) or "unknown"
+
+    mint_key = f"mint:ip:{client_ip}"
     allowed, retry_after = await _consume_token(mint_key, capacity=capacity, refill_rate_per_sec=refill_rate)
     if not allowed:
         raise HTTPException(

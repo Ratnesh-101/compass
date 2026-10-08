@@ -151,9 +151,10 @@ def _get_guest_signing_secret() -> bytes:
     secret = getattr(settings, "GUEST_SIGNING_SECRET", "")
     if not secret:
         if settings.is_production():
-            raise RuntimeError(
-                "CRITICAL: GUEST_SIGNING_SECRET must be configured in production. "
-                "No fallback to other secrets is permitted."
+            logger.error("Configuration error: missing required environment variable GUEST_SIGNING_SECRET")
+            raise HTTPException(
+                status_code=503,
+                detail="config_error: missing required environment variable GUEST_SIGNING_SECRET",
             )
         secret = "compass-guest-token-dev-secret-2026"
     return secret.encode("utf-8")
