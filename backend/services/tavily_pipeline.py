@@ -299,6 +299,10 @@ def evaluate_deterministic_verdict(
         s.get("url"): s.get("authority_tier", AuthorityTier.TIER_3_GENERAL.value)
         for s in sources
     }
+    url_badge_map = {
+        s.get("url"): s.get("authority_badge", "")
+        for s in sources
+    }
 
     normalized_raw = " ".join(raw_extracted_text.lower().split())
 
@@ -396,6 +400,7 @@ def evaluate_deterministic_verdict(
             "parsed_date": parsed_dt.isoformat() if parsed_dt else None,
             "year_provenance": year_provenance,
             "authority_tier": tier,
+            "authority_badge": url_badge_map.get(source_url, "Official Organizer" if tier == "tier_1_official" else ""),
             "verdict": verdict,
             "verbatim_verified": is_verified_quote,
             "entity_matched": entity_matched,

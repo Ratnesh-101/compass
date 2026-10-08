@@ -197,13 +197,20 @@ async def enforce_mint_rate_limit(request: Request) -> None:
     except Exception:
         pass
 
-    # 2. Configurable per-IP hourly capacity
+    # 2. Enforce global daily mint cap
+    from backend.services.budgets import check_global_mint_cap
+    await check_global_mint_cap()
+
+    # 3. Configurable hourly capacity per IP/key
     hourly_limit = int(getattr(settings, "GUEST_MINT_HOURLY_IP_LIMIT", 5))
     capacity = float(hourly_limit)
     refill_rate = capacity / 3600.0
 
+    from backend.services.security import is_edge_ip_trusted
+    is_trusted = is_edge_ip_trusted(request)
     client_ip = get_client_ip(request)
-    mint_key = f"mint:ip:{client_ip}"
+    # Ensure guest minting has a dedicated key even when the edge IP is untrusted
+    mint_key = f"mint:ip:{client_ip}" if is_trusted else f"mint:untrusted:{client_ip}"
     allowed, retry_after = await _consume_token(mint_key, capacity=capacity, refill_rate_per_sec=refill_rate)
     if not allowed:
         raise HTTPException(

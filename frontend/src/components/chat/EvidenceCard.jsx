@@ -24,8 +24,11 @@ export default function EvidenceCard({ evidence }) {
     }
   }
 
-  const getTierBadge = (tier) => {
-    switch (tier) {
+  const getTierBadge = (item) => {
+    if (item.authority_badge === 'User-trusted source' || item.is_user_trusted) {
+      return { label: 'User-trusted source', color: '#0f9d58' }
+    }
+    switch (item.authority_tier) {
       case 'tier_1_official':
         return { label: 'Official Organizer', color: '#1a73e8' }
       case 'tier_2_technical':
@@ -42,7 +45,7 @@ export default function EvidenceCard({ evidence }) {
       </div>
       {items.map((item, idx) => {
         const vStyle = getVerdictStyle(item.verdict)
-        const tierBadge = getTierBadge(item.authority_tier)
+        const tierBadge = getTierBadge(item)
 
         return (
           <div

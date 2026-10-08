@@ -131,8 +131,8 @@ def _parse_time(text: str) -> Tuple[Optional[str], Optional[str]]:
     return None, None
 
 
-def _parse_natural_date(text: str, today: Optional[date] = None) -> Tuple[Optional[date], Optional[str], Optional[str]]:
-    """Extract (target_date, time_24, time_12) from text."""
+def _parse_natural_date(text: str, today: Optional[date] = None) -> Tuple[Optional[date], Optional[str], Optional[str], bool]:
+    """Extract (target_date, time_24, time_12, is_past_no_year) from text."""
     if today is None:
         today = date.today()
 
@@ -141,21 +141,21 @@ def _parse_natural_date(text: str, today: Optional[date] = None) -> Tuple[Option
 
     # Relative days
     if "day after tomorrow" in msg:
-        return today + timedelta(days=2), time_24, time_12
+        return today + timedelta(days=2), time_24, time_12, False
     if "tomorrow" in msg:
-        return today + timedelta(days=1), time_24, time_12
+        return today + timedelta(days=1), time_24, time_12, False
     if "today" in msg or "tonight" in msg:
-        return today, time_24, time_12
+        return today, time_24, time_12, False
 
     # "in N days"
     m_in_days = re.search(r"\bin\s+(\d+)\s+days?\b", msg)
     if m_in_days:
-        return today + timedelta(days=int(m_in_days.group(1))), time_24, time_12
+        return today + timedelta(days=int(m_in_days.group(1))), time_24, time_12, False
 
     # "in N weeks"
     m_in_weeks = re.search(r"\bin\s+(\d+)\s+weeks?\b", msg)
     if m_in_weeks:
-        return today + timedelta(days=7 * int(m_in_weeks.group(1))), time_24, time_12
+        return today + timedelta(days=7 * int(m_in_weeks.group(1))), time_24, time_12, False
 
     # Day of week (e.g. "next monday", "this friday", "friday")
     for day_name, target_weekday in DAYS_OF_WEEK.items():
@@ -164,7 +164,7 @@ def _parse_natural_date(text: str, today: Optional[date] = None) -> Tuple[Option
             days_ahead = (target_weekday - today.weekday()) % 7
             if days_ahead == 0:
                 days_ahead = 7
-            return today + timedelta(days=days_ahead), time_24, time_12
+            return today + timedelta(days=days_ahead), time_24, time_12, False
 
     # ISO date (YYYY-MM-DD)
     m_iso = re.search(r"\b(20\d{2})-(\d{1,2})-(\d{1,2})\b", msg)
@@ -173,7 +173,7 @@ def _parse_natural_date(text: str, today: Optional[date] = None) -> Tuple[Option
         if y < today.year:
             y = today.year
         try:
-            return date(y, m, d), time_24, time_12
+            return date(y, m, d), time_24, time_12, False
         except ValueError:
             pass
 
@@ -193,9 +193,8 @@ def _parse_natural_date(text: str, today: Optional[date] = None) -> Tuple[Option
             y = today.year
         try:
             cand = date(y, m, d)
-            if not y_str and cand < today:
-                cand = date(y + 1, m, d)
-            return cand, time_24, time_12
+            is_past_no_year = bool(not y_str and cand < today)
+            return cand, time_24, time_12, is_past_no_year
         except ValueError:
             pass
 
@@ -213,13 +212,12 @@ def _parse_natural_date(text: str, today: Optional[date] = None) -> Tuple[Option
             y = today.year
         try:
             cand = date(y, m, d)
-            if not y_str and cand < today:
-                cand = date(y + 1, m, d)
-            return cand, time_24, time_12
+            is_past_no_year = bool(not y_str and cand < today)
+            return cand, time_24, time_12, is_past_no_year
         except ValueError:
             pass
 
-    return None, time_24, time_12
+    return None, time_24, time_12, False
 
 
 def _extract_task_creation_args(message: str) -> dict:
@@ -243,7 +241,7 @@ def _extract_task_creation_args(message: str) -> dict:
             domain = d_val
 
     # 2. Date & Time
-    parsed_date, time_24, time_12 = _parse_natural_date(msg)
+    parsed_date, time_24, time_12, is_past_no_year = _parse_natural_date(msg)
     due_str = None
     if parsed_date:
         if time_24:
@@ -343,9 +341,8 @@ def _extract_task_creation_args(message: str) -> dict:
         res["time_str"] = time_12
     elif time_24:
         res["time_str"] = time_24
-    has_explicit_year = bool(re.search(r"\b20\d{2}\b", msg))
-    if parsed_date and not has_explicit_year and parsed_date.year > date.today().year:
-        res["roll_forward_note"] = f"(Note: {parsed_date.strftime('%B %-d')} has passed this year; scheduled for {parsed_date.year})"
+    if is_past_no_year and parsed_date:
+        res["past_date_prompt"] = f"{parsed_date.strftime('%b %-d')} has passed; did you mean {date.today().year + 1}?"
 
     return res
 
@@ -357,8 +354,8 @@ def is_task_mutation_request(msg: str) -> bool:
 
 def parse_natural_due_date(text: str) -> Tuple[Optional[str], str]:
     """Parse natural dates like '12th october', '12 oct', '2026-10-12', 'october 12th' from text."""
-    iso_val, clean = _parse_natural_date(text)
-    return iso_val, clean
+    pdate, _, _, _ = _parse_natural_date(text)
+    return pdate.isoformat() if pdate else None, text
 
 
 def message_needs_tools(message: str) -> bool:
@@ -528,6 +525,8 @@ def _fallback_route(message: str, history: Optional[list[dict[str, str]]] = None
         return "undo", {"message": message}, ""
     if is_explicit_task_creation(message):
         extracted = _extract_task_creation_args(message)
+        if extracted.get("past_date_prompt"):
+            return None, None, extracted["past_date_prompt"]
         if not extracted.get("title"):
             return None, None, "What would you like to name this task? Please provide a title or description."
         return "add_task", extracted, ""
@@ -563,6 +562,8 @@ async def route_message(
         return "undo", {"message": message}, ""
     if is_explicit_task_creation(message):
         extracted = _extract_task_creation_args(message)
+        if extracted.get("past_date_prompt"):
+            return None, None, extracted["past_date_prompt"]
         if not extracted.get("title"):
             return None, None, "What would you like to name this task? Please provide a title or description."
         return "add_task", extracted, ""

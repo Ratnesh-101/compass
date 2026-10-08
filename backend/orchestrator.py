@@ -186,7 +186,7 @@ async def handle_message(
                         """
                         SELECT id, tool, affected_id, new_state, previous_state 
                         FROM agent_audit_log 
-                        WHERE (approved_by = $1 OR approved_by = 'user' OR approved_by = 'default_user') 
+                        WHERE approved_by = $1
                           AND is_reverted = FALSE 
                         ORDER BY id DESC LIMIT 1
                         """,
@@ -207,7 +207,11 @@ async def handle_message(
                         reverted_title = new_st.get("title") or "task"
 
                         if t_name == "add_task" and aff_id:
-                            await conn.execute("DELETE FROM tasks WHERE id = $1", int(aff_id))
+                            await conn.execute(
+                                "DELETE FROM tasks WHERE id = $1 AND user_id = $2",
+                                int(aff_id),
+                                user_id or "default_user",
+                            )
                         elif t_name in ("edit_task", "update_task_status") and aff_id and row["previous_state"]:
                             prev_st = row["previous_state"]
                             if isinstance(prev_st, str):

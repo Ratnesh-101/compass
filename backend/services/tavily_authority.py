@@ -108,7 +108,7 @@ def classify_domain_authority(
         if u_clean == t_clean or u_clean.startswith(t_clean.rstrip("/") + "/") or (t_clean in u_clean and len(t_clean) > 8):
             return {
                 "tier": AuthorityTier.TIER_1_OFFICIAL.value,
-                "badge": "User Trusted Official",
+                "badge": "User-trusted source",
                 "weight": 1.0,
                 "domain": domain,
                 "reason": f"Matched per-user trusted event URL ({trusted_event_url})",
