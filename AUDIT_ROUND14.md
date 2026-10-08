@@ -68,19 +68,28 @@
 - **Planned Fix:** Include `trusted_event_url` in `_cache_key`: `f"{query}:{domains}:{trusted_event_url}"`.
 
 ### Finding R14-G1 (P0): Rate Limiter Header Spoofing Vulnerability
-- **Evidence:** `get_client_ip()` trusts `X-Forwarded-For` without edge HMAC verification when `is_edge_ip_trusted()` is False. `enforce_mint_rate_limit()` used `mint:untrusted:{client_ip}`. An attacker cycling spoofed `X-Forwarded-For` headers received separate buckets, bypassing the rate limiter.
-- **Root Cause:** Untrusted edge requests used client-supplied IP header rather than physical TCP peer address (`request.client.host`).
-- **Planned Fix:** When `is_edge_ip_trusted(request)` is False, fallback client IP extraction to `request.client.host` or clamp untrusted guest minting to a shared untrusted peer/global rate limit.
+- **Evidence:** If `get_client_ip()` trusts client-supplied leftmost `X-Forwarded-For` without proxy verification, an attacker cycling spoofed leftmost IPs receives fresh buckets. Conversely, using `request.client.host` causes all users behind Render to share one internal proxy container IP bucket.
+- **Root Cause:** Untrusted edge requests must extract the rightmost entry of `X-Forwarded-For` appended by the trusted reverse proxy (Render/Cloudflare), rather than leftmost client-controlled headers or the raw TCP peer host.
+- **Fix:** In `enforce_mint_rate_limit`, extract the rightmost `X-Forwarded-For` entry appended by the trusted ingress reverse proxy. Spoofed leftmost entries are ignored and map to the exact same bucket.
 
 ### Finding R14-H1 (P1): Production Deployment Mismatch & Config Failure
 - **Evidence:** Render backend returns commit `66cf4dd` with `status: "config_error"`, `config_ok: false`. `POST /api/guest/session` throws HTTP 500 because `GUEST_SIGNING_SECRET` is unset in Render environment variables.
 - **Root Cause:** Production environment secrets on Render have not been configured by the admin with the required distinct 32-byte hex keys.
-- **Planned Fix:** Document precise secret configuration required in Render dashboard; add graceful fallback handling for health check diagnostics.
+- **Fix:** Fail closed without default fallback keys, returning a clear HTTP 503 `config_error: missing required environment variable GUEST_SIGNING_SECRET` with startup logs identifying the missing variable name only.
+
+### Finding R14-I1 (P2): Concurrent Guest Migration Deduplication & Ledger Integrity
+- **Evidence:** Under high-concurrency guest account consolidation, multiple simultaneous requests attempting to migrate the same guest session could race to create duplicate conversations or orphaned entries in `guest_migration_log`.
+- **Root Cause:** Missing atomic check-and-insert semantics with idempotency locks on `(guest_conversation_id, user_id)`.
+- **Fix:** Verified `migrate_single_conversation` uses transactional upsert and lock guarantees in `tests/test_verification_pass.py::test_migration_concurrency_zero_duplicates`, asserting exactly 1 migration log entry under concurrent execution.
+
+### Finding R14-J1 (P1): OAuth Raw Error Response Logging & State Machine Replay Defense
+- **Evidence:** `backend/services/oauth.py` logged raw `resp.text` from the Google OAuth token endpoint and token refresh endpoint. If upstream returns an error payload containing sensitive debug traces or authorization artifacts, these were emitted into application logs.
+- **Root Cause:** Direct interpolation of unparsed external HTTP response bodies into `logger.error` and `logger.warning`.
+- **Fix:** Sanitized OAuth logging in `backend/services/oauth.py` to extract and log HTTP status code and parsed `error_type` only (`resp.status_code` and `error_type`), eliminating raw response body leaks.
 
 ### Finding R14-K1 (P1): EvidenceCard Dark Mode & Local Time Presentation
 - **Evidence:** `frontend/src/components/chat/EvidenceCard.jsx` hardcoded `#e6f4ea`, `#fafafa` light-mode backgrounds, did not format `local_deadline_ist`, and lacked empty/loading indicators.
 - **Root Cause:** Incomplete CSS variable usage and missing local time rendering.
-- **Planned Fix:** Update `EvidenceCard.jsx` with CSS variables (`var(--bg-card)`, `var(--text-primary)`), add prominent local deadline badge (e.g. `🕒 Local Deadline: October 30, 2026, 10:30 PM IST`), and provide clear loading/empty state fallbacks.
+- **Fix:** Updated `EvidenceCard.jsx` with CSS variables (`var(--bg-card)`, `var(--text-primary)`), added prominent local deadline badge (`🕒 Local Deadline: October 30, 2026, 10:30 PM IST`), and provided clear loading/empty state fallbacks.
 
 ---
-EOF

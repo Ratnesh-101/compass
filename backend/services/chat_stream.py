@@ -34,6 +34,55 @@ logger = logging.getLogger("compass.services.chat_stream")
 get_pool = db_get_pool
 
 
+class StreamingThinkFilter:
+    """Filter out <think>...</think> reasoning blocks from streamed model tokens."""
+
+    def __init__(self):
+        self.in_think = False
+        self.buffer = ""
+
+    def process(self, token: str) -> str:
+        self.buffer += token
+        out = ""
+        while self.buffer:
+            if not self.in_think:
+                if "<think>" in self.buffer:
+                    idx = self.buffer.index("<think>")
+                    out += self.buffer[:idx]
+                    self.buffer = self.buffer[idx + len("<think>"):]
+                    self.in_think = True
+                else:
+                    match_pos = -1
+                    for i in range(len(self.buffer)):
+                        if "<think>".startswith(self.buffer[i:]):
+                            match_pos = i
+                            break
+                    if match_pos != -1:
+                        out += self.buffer[:match_pos]
+                        self.buffer = self.buffer[match_pos:]
+                        break
+                    else:
+                        out += self.buffer
+                        self.buffer = ""
+            else:
+                if "</think>" in self.buffer:
+                    idx = self.buffer.index("</think>")
+                    self.buffer = self.buffer[idx + len("</think>"):]
+                    self.in_think = False
+                else:
+                    match_pos = -1
+                    for i in range(len(self.buffer)):
+                        if "</think>".startswith(self.buffer[i:]):
+                            match_pos = i
+                            break
+                    if match_pos != -1:
+                        self.buffer = self.buffer[match_pos:]
+                    else:
+                        self.buffer = ""
+                    break
+        return out
+
+
 async def _resolve_pool():
     """Resolve database pool, honoring any monkeypatches on backend.services.chat_stream or backend.routers.chat in unit tests."""
     this_mod = sys.modules.get("backend.services.chat_stream")
@@ -391,6 +440,7 @@ async def generate_chat_events(
         emitted_text = ""
         tool_call_detected = False
         usage_data = None
+        think_filter = StreamingThinkFilter()
 
         try:
             async for chunk in stream:
@@ -414,11 +464,14 @@ async def generate_chat_events(
                             await stream.aclose()
                         break
 
+                    # Strip reasoning_content and <think> blocks from user SSE token output
                     token = (delta.content if delta else None) or ""
                     if token:
-                        full_text += token
-                        emitted_text += token
-                        yield f"data: {json.dumps({'type': 'token', 'value': token})}\n\n"
+                        filtered_token = think_filter.process(token)
+                        if filtered_token:
+                            full_text += filtered_token
+                            emitted_text += filtered_token
+                            yield f"data: {json.dumps({'type': 'token', 'value': filtered_token})}\n\n"
 
         except asyncio.CancelledError:
             logger.info("Chat SSE stream cancelled; closing upstream model stream.")
