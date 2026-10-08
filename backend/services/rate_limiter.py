@@ -209,8 +209,12 @@ async def enforce_mint_rate_limit(request: Request) -> None:
     from backend.services.security import is_edge_ip_trusted
     is_trusted = is_edge_ip_trusted(request)
     client_ip = get_client_ip(request)
-    # Ensure guest minting has a dedicated key even when the edge IP is untrusted
-    mint_key = f"mint:ip:{client_ip}" if is_trusted else f"mint:untrusted:{client_ip}"
+    # Ensure guest minting uses verified edge IP or physical TCP peer to prevent header-spoofing bypass
+    if is_trusted:
+        mint_key = f"mint:ip:{client_ip}"
+    else:
+        peer_host = (request.client.host if request.client else None) or "direct"
+        mint_key = f"mint:untrusted:{peer_host}"
     allowed, retry_after = await _consume_token(mint_key, capacity=capacity, refill_rate_per_sec=refill_rate)
     if not allowed:
         raise HTTPException(
