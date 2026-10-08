@@ -13,11 +13,19 @@ from typing import Any, List, Optional, cast
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
+from openai import AsyncOpenAI, AsyncStream
 try:
-    from openai.types.chat import ChatCompletionMessageParam, ChatCompletionToolParam
+    from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam, ChatCompletionToolParam
 except (ImportError, ModuleNotFoundError):
+    ChatCompletionChunk = Any  # type: ignore[misc,assignment]
     ChatCompletionMessageParam = Any  # type: ignore[misc,assignment]
     ChatCompletionToolParam = Any  # type: ignore[misc,assignment]
+
+from backend.config import get_settings
+from backend.router import TOOLS
+from backend.services.usage import record_usage
+
+_settings = get_settings()
 
 from backend.dependencies import (
     rate_limit,

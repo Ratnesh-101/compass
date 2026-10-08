@@ -48,16 +48,6 @@ class LogMemoryRequest(BaseModel):
     tags: Optional[List[str]] = []
 
 
-class StreamChatRequest(BaseModel):
-    message: str
-    conversation_id: Optional[str] = None
-    domain: Optional[str] = None
-    specialist_id: Optional[str] = None
-    specialistId: Optional[str] = None
-
-    def get_specialist_id(self) -> Optional[str]:
-        return self.specialist_id or self.specialistId
-
 
 class ChatResponse(BaseModel):
     conversation_id: str
