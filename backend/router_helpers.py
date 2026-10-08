@@ -132,8 +132,15 @@ def is_explicit_task_creation(message: str) -> bool:
         return True
 
     # Imperative verbs followed by task/deadline/todo/reminder
-    if re.search(r"\b(add|create|new|set|schedule|put|track)\b.*\b(deadline|task|todo|reminder)\b", msg):
-        return True
+    verbs = ("add", "create", "new", "set", "schedule", "put", "track")
+    nouns = ("deadline", "task", "todo", "reminder")
+    for v in verbs:
+        v_idx = msg.find(v)
+        if v_idx != -1:
+            for n in nouns:
+                n_idx = msg.find(n, v_idx + len(v))
+                if n_idx != -1:
+                    return True
 
     return False
 

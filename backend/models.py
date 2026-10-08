@@ -6,7 +6,7 @@ Shared request and response schemas matching docs/api_contract.md.
 
 from datetime import date
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ChatRequest(BaseModel):
@@ -45,7 +45,7 @@ class LogMemoryRequest(BaseModel):
     content: str
     domain: Optional[str] = "general"
     project: Optional[str] = None
-    tags: Optional[List[str]] = []
+    tags: Optional[List[str]] = Field(default_factory=list)
 
 
 
