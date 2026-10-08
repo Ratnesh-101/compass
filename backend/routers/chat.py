@@ -55,6 +55,17 @@ async def chat(request: ChatRequest, req: Request, _token: str = Depends(verify_
     ident = _get_current_identity(req)
     user_id = ident.user_id if ident else None
     guest_id = ident.guest_id if ident else None
+
+    if request.conversation_id:
+        pool = await get_pool()
+        if pool:
+            async with pool.acquire() as conn:
+                has_access, err = await conversations.check_conversation_access(
+                    conn, request.conversation_id, user_id=user_id, guest_id=guest_id, is_admin=bool(ident and ident.is_admin), allow_shared=False
+                )
+                if not has_access and err != "Conversation not found":
+                    raise HTTPException(status_code=403, detail="Forbidden: conversation belongs to another user")
+
     result = await orchestrator.handle_message(
         conversation_id=request.conversation_id,
         message=request.message,

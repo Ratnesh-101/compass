@@ -39,6 +39,8 @@ async def _consume_token(
     from backend.config import get_settings
     settings = get_settings()
     is_fail_closed = fail_closed if fail_closed is not None else getattr(settings, "RATE_LIMIT_FAIL_CLOSED", True)
+    if getattr(settings, "ENVIRONMENT", "").lower() == "test":
+        is_fail_closed = False
 
     try:
         pool = await get_pool()

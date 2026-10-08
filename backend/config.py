@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     TRUST_CF_CONNECTING_IP: bool = False
     TRUST_TRUE_CLIENT_IP: bool = False
     EDGE_HMAC_SECRET: str = "compass_vercel_edge_hmac_secret_2026"
+    VERCEL_EDGE_SECRET: str | None = None
 
     # --- Rate Limiter & Abuse Protection ---
     RATE_LIMIT_FAIL_CLOSED: bool = True
@@ -98,10 +99,10 @@ class Settings(BaseSettings):
         """Check if running in production mode."""
         return self.ENVIRONMENT.lower() in ("production", "prod")
 
-    def validate_production_secrets(self) -> None:
-        """Validate that required production secrets are set, secure, and not reused."""
+    def get_missing_production_secrets(self) -> tuple[list[str], list[str]]:
+        """Return (missing_secret_names, duplicate_secret_names) for production configuration without exposing secret values."""
         if not self.is_production():
-            return
+            return [], []
 
         missing = []
         if not self.AUTH_TOKEN or self.AUTH_TOKEN.strip() in (self.DEFAULT_DEV_TOKEN, "compass-token", "test-token"):
@@ -131,6 +132,14 @@ class Settings(BaseSettings):
             else:
                 seen[val] = name
 
+        return missing, duplicates
+
+    def validate_production_secrets(self) -> None:
+        """Validate that required production secrets are set, secure, and not reused."""
+        if not self.is_production():
+            return
+
+        missing, duplicates = self.get_missing_production_secrets()
         errors = []
         if missing:
             errors.append(f"Missing or default required secrets: {', '.join(missing)}")

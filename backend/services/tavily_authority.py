@@ -80,11 +80,12 @@ def classify_domain_authority(
     is_entity_bound: bool = False,
     page_title_matches_entity: bool = False,
     pinned_event_prefixes: Optional[List[str]] = None,
+    trusted_event_url: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Classify the source authority of a URL.
 
     Rules:
-      - Tier 1: Government/academic domains, pinned organizer domains from config, or platform event pages meeting the Event-Page Rule.
+      - Tier 1: User-pinned trusted event URL, Government/academic domains, pinned organizer domains from config, or platform event pages meeting the Event-Page Rule.
       - Event-Page Rule: Platform-hosted pages (Devpost, Lablab, etc.) count as official (Tier 1) for that event ONLY when
         the page title/organizer matches target_entity AND the URL is pinned or entity-bound; otherwise Tier 2.
       - Tier 2: General platform and user-generated content hosts (github, medium, unpinned devpost, etc.).
@@ -99,6 +100,19 @@ def classify_domain_authority(
             "domain": "unknown",
             "reason": "Missing or unparseable URL",
         }
+
+    # Check user-pinned trusted event URL (per-user / per-task input)
+    if trusted_event_url:
+        t_clean = trusted_event_url.strip().lower()
+        u_clean = url.strip().lower()
+        if u_clean == t_clean or u_clean.startswith(t_clean.rstrip("/") + "/") or (t_clean in u_clean and len(t_clean) > 8):
+            return {
+                "tier": AuthorityTier.TIER_1_OFFICIAL.value,
+                "badge": "User Trusted Official",
+                "weight": 1.0,
+                "domain": domain,
+                "reason": f"Matched per-user trusted event URL ({trusted_event_url})",
+            }
 
     # Check Gov / Edu top-level domains
     if domain.endswith(".gov") or domain.endswith(".gov.uk") or domain.endswith(".gov.in"):
@@ -260,7 +274,7 @@ def compute_composite_score(tavily_score: float, authority_weight: float) -> flo
     return round((safe_tavily * 0.60) + (safe_auth * 0.40), 4)
 
 
-def sort_and_enrich_sources(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def sort_and_enrich_sources(results: List[Dict[str, Any]], trusted_event_url: Optional[str] = None) -> List[Dict[str, Any]]:
     """Enrich each search result with domain authority tier, badge, and composite score.
 
     Sorts highest composite score first.
@@ -268,7 +282,7 @@ def sort_and_enrich_sources(results: List[Dict[str, Any]]) -> List[Dict[str, Any
     enriched = []
     for r in results:
         url = r.get("url") or ""
-        auth_meta = classify_domain_authority(url)
+        auth_meta = classify_domain_authority(url, trusted_event_url=trusted_event_url)
         tavily_score = float(r.get("score") or 0.5)
         composite = compute_composite_score(tavily_score, auth_meta["weight"])
 

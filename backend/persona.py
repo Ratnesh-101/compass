@@ -203,9 +203,11 @@ def format_tool_response(action: str, details: Dict[str, str]) -> str:
         title = details.get("title", "Task")
         due = details.get("due_date")
         domain = details.get("domain", "general")
+        time_str = details.get("time_str")
+        time_part = f" at {time_str}" if time_str and time_str not in str(due) else ""
         if due:
-            return f"Added task '{title}'. Due {due} ({domain})."
-        return f"Added task '{title}' ({domain})."
+            return f"Done! Added task '{title}'. Due {due}{time_part} ({domain})."
+        return f"Done! Added task '{title}' ({domain})."
 
     if action == "shift_task":
         title = details.get("title", "Task")

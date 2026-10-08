@@ -95,7 +95,13 @@ async def health_check():
     config_ok = True
     try:
         from backend.config import get_settings
-        get_settings().validate_production_secrets()
+        settings = get_settings()
+        if settings.is_production():
+            missing_names, duplicate_names = settings.get_missing_production_secrets()
+            if missing_names or duplicate_names:
+                config_ok = False
+        else:
+            settings.validate_production_secrets()
     except Exception:
         config_ok = False
 

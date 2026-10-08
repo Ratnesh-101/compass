@@ -83,7 +83,7 @@ def test_forged_xff_direct_call_trusts_only_last_hop():
 def test_xff_via_trusted_vercel_edge_trusts_signed_client_ip():
     """Vercel edge middleware signs client_ip|timestamp|sig; backend extracts signed client_ip."""
     settings = get_settings()
-    secret = settings.EDGE_HMAC_SECRET or settings.VERCEL_EDGE_SECRET
+    secret = settings.EDGE_HMAC_SECRET or getattr(settings, "VERCEL_EDGE_SECRET", None) or "compass_vercel_edge_hmac_secret_2026"
     now_ts = str(int(time.time()))
     client_ip = "203.0.113.195"
     payload = f"{client_ip}|{now_ts}"

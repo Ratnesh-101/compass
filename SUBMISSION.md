@@ -6,9 +6,9 @@ Built with **Nebius Token Factory**, **NVIDIA Nemotron LLMs**, **Neon Serverless
 
 ---
 
-## 1. Project Updates During the Hackathon Submission Period (Aug 26 – Oct 30, 2026)
+## 1. Project Created During the Hackathon Submission Period (Aug 26 – Oct 30, 2026)
 
-Per official Devpost Hackathon rules regarding pre-existing work, the following major systems and architecture components were newly researched, engineered, and deployed during the submission window:
+Compass was created entirely from scratch during the official hackathon submission window (first commit September 4, 2026). Per official Devpost Hackathon rules, the project does not claim "significantly updated" because no pre-existing codebase existed. The following major systems and architecture components were researched, engineered, and deployed during the submission window:
 
 1. **Nebius Token Factory & NVIDIA Nemotron Migration**:
    - Transitioned the entire LLM reasoning pipeline to Nebius Token Factory using genuine NVIDIA open-source models: `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`, `nvidia/Nemotron-3_5-Lightning`, `nvidia/nemotron-3-super-120b-a12b`, and `nvidia/Nemotron-3-Ultra-550b-a55b`.

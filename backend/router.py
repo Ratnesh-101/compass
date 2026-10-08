@@ -7,7 +7,8 @@ Probed and verified on Nebius Token Factory with nvidia/NVIDIA-Nemotron-3-Nano-3
 
 import json
 import logging
-from datetime import date
+import re
+from datetime import date, datetime, timedelta
 from typing import Any, Optional, Dict, Tuple
 from openai import OpenAI, AsyncOpenAI
 from backend.config import get_settings
@@ -17,6 +18,31 @@ logger = logging.getLogger("compass.router")
 settings = get_settings()
 
 TOOLS = TOOL_DEFINITIONS
+
+MONTH_MAP = {
+    "jan": 1, "january": 1,
+    "feb": 2, "february": 2,
+    "mar": 3, "march": 3,
+    "apr": 4, "april": 4,
+    "may": 5,
+    "jun": 6, "june": 6,
+    "jul": 7, "july": 7,
+    "aug": 8, "august": 8,
+    "sep": 9, "sept": 9, "september": 9,
+    "oct": 10, "october": 10,
+    "nov": 11, "november": 11,
+    "dec": 12, "december": 12,
+}
+
+DAYS_OF_WEEK = {
+    "monday": 0, "mon": 0,
+    "tuesday": 1, "tue": 1, "tues": 1,
+    "wednesday": 2, "wed": 2,
+    "thursday": 3, "thu": 3, "thur": 3, "thurs": 3,
+    "friday": 4, "fri": 4,
+    "saturday": 5, "sat": 5,
+    "sunday": 6, "sun": 6,
+}
 
 
 def get_openai_client() -> AsyncOpenAI:
@@ -28,64 +54,258 @@ def get_openai_client() -> AsyncOpenAI:
     )
 
 
+def is_explicit_task_creation(message: str) -> bool:
+    """Determine whether message represents an explicit command to add a task/deadline/reminder."""
+    msg = message.lower().strip()
+    if not msg:
+        return False
+
+    task_phrases = (
+        "add a task", "add task", "new task", "create task", "create a task",
+        "schedule a task", "schedule task",
+        "add a deadline", "add deadline", "new deadline", "create deadline",
+        "create a deadline", "set a deadline", "set deadline",
+        "schedule a deadline", "schedule deadline",
+        "remind me to", "remind me",
+        "add a reminder", "add reminder", "create a reminder", "set a reminder",
+    )
+    if any(p in msg for p in task_phrases):
+        return True
+
+    # Regex matches: "add ... deadline", "create ... task", etc.
+    if re.search(r"\b(add|create|new|set|schedule|put|track)\b.*\b(deadline|task|todo|reminder)\b", msg):
+        return True
+    if re.search(r"\b(deadline|task)\b.*\b(on|for|at|due|named|with the name)\b", msg):
+        return True
+    return False
+
+
+def _parse_time(text: str) -> Tuple[Optional[str], Optional[str]]:
+    """Extract (24h_time_str, 12h_formatted_str) e.g. ('23:59', '11:59 PM')."""
+    # 1. HH:MM (am/pm)?
+    m = re.search(r"\b([01]?[0-9]|2[0-3]):([0-5][0-9])\s*(am|pm)?\b", text, re.IGNORECASE)
+    if m:
+        hh = int(m.group(1))
+        mm = int(m.group(2))
+        ampm = m.group(3)
+        if ampm:
+            ampm_lower = ampm.lower()
+            if ampm_lower == "pm" and hh < 12:
+                hh += 12
+            elif ampm_lower == "am" and hh == 12:
+                hh = 0
+        time_24 = f"{hh:02d}:{mm:02d}"
+        dt = datetime.strptime(time_24, "%H:%M")
+        time_12 = dt.strftime("%-I:%M %p") if hasattr(dt, "strftime") else f"{hh}:{mm}"
+        return time_24, time_12
+
+    # 2. at 5pm / 5 pm
+    m2 = re.search(r"\b(?:at\s+)?([1-9]|1[0-2])\s*(am|pm)\b", text, re.IGNORECASE)
+    if m2:
+        hh = int(m2.group(1))
+        ampm = m2.group(2).lower()
+        if ampm == "pm" and hh < 12:
+            hh += 12
+        elif ampm == "am" and hh == 12:
+            hh = 0
+        time_24 = f"{hh:02d}:00"
+        time_12 = f"{m2.group(1)} {ampm.upper()}"
+        return time_24, time_12
+
+    return None, None
+
+
+def _parse_natural_date(text: str, today: Optional[date] = None) -> Tuple[Optional[date], Optional[str], Optional[str]]:
+    """Extract (target_date, time_24, time_12) from text."""
+    if today is None:
+        today = date.today()
+
+    msg = text.lower()
+    time_24, time_12 = _parse_time(msg)
+
+    # Relative days
+    if "day after tomorrow" in msg:
+        return today + timedelta(days=2), time_24, time_12
+    if "tomorrow" in msg:
+        return today + timedelta(days=1), time_24, time_12
+    if "today" in msg or "tonight" in msg:
+        return today, time_24, time_12
+
+    # "in N days"
+    m_in_days = re.search(r"\bin\s+(\d+)\s+days?\b", msg)
+    if m_in_days:
+        return today + timedelta(days=int(m_in_days.group(1))), time_24, time_12
+
+    # "in N weeks"
+    m_in_weeks = re.search(r"\bin\s+(\d+)\s+weeks?\b", msg)
+    if m_in_weeks:
+        return today + timedelta(days=7 * int(m_in_weeks.group(1))), time_24, time_12
+
+    # Day of week (e.g. "next monday", "this friday", "friday")
+    for day_name, target_weekday in DAYS_OF_WEEK.items():
+        pattern = rf"\b(?:next\s+|this\s+)?{day_name}\b"
+        if re.search(pattern, msg):
+            days_ahead = (target_weekday - today.weekday()) % 7
+            if days_ahead == 0:
+                days_ahead = 7
+            return today + timedelta(days=days_ahead), time_24, time_12
+
+    # ISO date (YYYY-MM-DD)
+    m_iso = re.search(r"\b(20\d{2})-(\d{1,2})-(\d{1,2})\b", msg)
+    if m_iso:
+        y, m, d = int(m_iso.group(1)), int(m_iso.group(2)), int(m_iso.group(3))
+        if y < today.year:
+            y = today.year
+        try:
+            return date(y, m, d), time_24, time_12
+        except ValueError:
+            pass
+
+    # Month and day patterns:
+    month_regex = "|".join(MONTH_MAP.keys())
+    m_day_month = re.search(
+        rf"\b(\d{{1,2}})(?:st|nd|rd|th)?\s+(?:of\s+)?({month_regex})\b(?:\s+(20\d{{2}}))?",
+        msg,
+    )
+    if m_day_month:
+        d = int(m_day_month.group(1))
+        m_str = m_day_month.group(2)
+        m = MONTH_MAP[m_str]
+        y_str = m_day_month.group(3)
+        y = int(y_str) if y_str else today.year
+        if y < today.year:
+            y = today.year
+        try:
+            cand = date(y, m, d)
+            if not y_str and cand < today:
+                cand = date(y + 1, m, d)
+            return cand, time_24, time_12
+        except ValueError:
+            pass
+
+    m_month_day = re.search(
+        rf"\b({month_regex})\s+(\d{{1,2}})(?:st|nd|rd|th)?\b(?:\s+(20\d{{2}}))?",
+        msg,
+    )
+    if m_month_day:
+        m_str = m_month_day.group(1)
+        m = MONTH_MAP[m_str]
+        d = int(m_month_day.group(2))
+        y_str = m_month_day.group(3)
+        y = int(y_str) if y_str else today.year
+        if y < today.year:
+            y = today.year
+        try:
+            cand = date(y, m, d)
+            if not y_str and cand < today:
+                cand = date(y + 1, m, d)
+            return cand, time_24, time_12
+        except ValueError:
+            pass
+
+    return None, time_24, time_12
+
+
 def _extract_task_creation_args(message: str) -> dict:
-    """Extract title, domain, and due_date from an explicit task creation prompt."""
-    msg_lower = message.lower()
-    title = message
+    """Extract title, domain, due_date, time_str, and priority from natural language."""
+    msg = message.strip()
+    msg_lower = msg.lower()
+
+    # 1. Domain detection
     domain = "general"
-    due_date = None
-    for prefix in ("add a task:", "add task:", "add a task", "add task", "create task:"):
-        if prefix in msg_lower:
-            idx = msg_lower.find(prefix) + len(prefix)
-            title = message[idx:].strip()
-            break
+    if any(k in msg_lower for k in ("hackathon", "devpost", "pitch", "demo")):
+        domain = "hackathon"
+    elif any(k in msg_lower for k in ("coursework", "assignment", "homework", "exam", "quiz", "lecture", "cs101")):
+        domain = "coursework"
+    elif any(k in msg_lower for k in ("code", "repo", "repository", "bug", "pr", "branch", "refactor")):
+        domain = "code"
 
-    # Extract due date if present (e.g. "due 2026-10-31" or "due: 2026-10-31")
-    if "due" in title.lower():
-        parts = title.split()
-        new_parts = []
-        skip_next = False
-        for idx, part in enumerate(parts):
-            if skip_next:
-                skip_next = False
-                continue
-            part_clean = part.lower().strip(",;:")
-            if part_clean.startswith("due=") or part_clean.startswith("due:"):
-                val = part.split("=", 1)[-1].split(":", 1)[-1].strip(",; ")
-                if val:
-                    due_date = val
-            elif part_clean == "due" and idx + 1 < len(parts):
-                due_date = parts[idx + 1].strip(",;:= ")
-                skip_next = True
-            else:
-                new_parts.append(part)
-        title = " ".join(new_parts).strip(" ,;")
+    m_dom = re.search(r"\bdomain[:= ]\s*([a-z0-9_-]+)", msg_lower)
+    if m_dom:
+        d_val = m_dom.group(1).lower()
+        if d_val in ("hackathon", "coursework", "code", "general"):
+            domain = d_val
 
-    if "domain" in title.lower():
-        parts = title.split()
-        new_parts = []
-        skip_next = False
-        for idx, part in enumerate(parts):
-            if skip_next:
-                skip_next = False
-                continue
-            part_clean = part.lower().strip(",;:")
-            if part_clean.startswith("domain=") or part_clean.startswith("domain:"):
-                val = part.split("=", 1)[-1].split(":", 1)[-1].strip(",; ")
-                if val:
-                    domain = val.lower()
-            elif part_clean == "domain" and idx + 1 < len(parts):
-                val = parts[idx + 1].strip(",;:= ")
-                if val:
-                    domain = val.lower()
-                    skip_next = True
-            else:
-                new_parts.append(part)
-        title = " ".join(new_parts).strip(" ,;")
+    # 2. Date & Time
+    parsed_date, time_24, time_12 = _parse_natural_date(msg)
+    due_str = None
+    if parsed_date:
+        if time_24:
+            due_str = f"{parsed_date.isoformat()} {time_24}"
+        else:
+            due_str = parsed_date.isoformat()
+
+    # 3. Title Extraction
+    title = ""
+
+    # Strategy A: Explicit name indicators: "with the name X", "named X", "called X", "titled X"
+    m_named = re.search(
+        r"(?:with the name|named|called|titled)\s+[:\"']?([^\"'\n,;]+?)[:\"']?(?:\s+(?:on|at|due|by|for|in)\b|$)",
+        msg,
+        re.IGNORECASE,
+    )
+    if m_named:
+        title = m_named.group(1).strip(" .!?:;'\"")
+
+    # Strategy B: Quotes: "add a deadline ... 'title'" or "task 'title'"
+    if not title:
+        m_quote = re.search(r"['\"]([^'\"]{3,})['\"]", msg)
+        if m_quote:
+            title = m_quote.group(1).strip(" .!?:;'\"")
+
+    # Strategy C: "remind me to X [by/on/at ...]"
+    if not title and "remind me to " in msg_lower:
+        idx = msg_lower.find("remind me to ") + len("remind me to ")
+        rest = msg[idx:]
+        m_split = re.split(r"\b(?:by|on|at|due|before|in)\b", rest, flags=re.IGNORECASE)
+        title = m_split[0].strip(" .!?:;'\"")
+
+    # Strategy D: Prefix removal for standard forms:
+    if not title:
+        prefixes = (
+            "add a deadline on", "add a deadline for", "add a deadline:", "add a deadline",
+            "add deadline on", "add deadline for", "add deadline:", "add deadline",
+            "set a deadline for", "set a deadline on", "set a deadline:", "set a deadline",
+            "create a deadline for", "create a deadline on", "create a deadline:", "create a deadline",
+            "add a task for", "add a task on", "add a task:", "add a task",
+            "create a task for", "create a task on", "create a task:", "create a task",
+            "new task:", "new task", "new deadline:", "new deadline",
+        )
+        for pref in prefixes:
+            if msg_lower.startswith(pref):
+                rest = msg[len(pref):].strip(" :,-")
+                cleaned = re.sub(r"\b(?:on|at|due|by|for|in)\s+(?:\d{1,2}(?:st|nd|rd|th)?|\d{4}-\d{2}-\d{2}|today|tomorrow|yesterday|next\s+[a-z]+|this\s+[a-z]+|[a-z]+day|\d+\s+days?|\d+\s+weeks?|[a-z]+\s+\d{1,2})[^\n]*", "", rest, flags=re.IGNORECASE)
+                cleaned = re.sub(r"\b(?:next\s+[a-z]+|this\s+[a-z]+|[a-z]+day|tomorrow|today|yesterday)\b", "", cleaned, flags=re.IGNORECASE)
+                cleaned = re.sub(r"\bdomain[:= ]\s*[a-z0-9_-]+", "", cleaned, flags=re.IGNORECASE)
+                cleaned = cleaned.strip(" .!?:;'\"")
+                if cleaned and cleaned.lower() not in ("tomorrow", "today", "yesterday"):
+                    title = cleaned
+                break
+
+    # Strategy E: Fallback clean-up if still empty
+    if not title:
+        cand = re.sub(r"\b(add|create|new|set|schedule|remind me to|a deadline|deadline|a task|task|todo)\b", "", msg, flags=re.IGNORECASE)
+        cand = re.sub(r"\b(?:on|at|due|by|for|in)\s+(?:\d{1,2}(?:st|nd|rd|th)?|\d{4}-\d{2}-\d{2}|today|tomorrow|yesterday|next\s+[a-z]+|this\s+[a-z]+|[a-z]+day|\d+\s+days?|\d+\s+weeks?|[a-z]+\s+\d{1,2})[^\n]*", "", cand, flags=re.IGNORECASE)
+        cand = re.sub(r"\b(?:next\s+[a-z]+|this\s+[a-z]+|[a-z]+day|tomorrow|today|yesterday)\b", "", cand, flags=re.IGNORECASE)
+        cand = cand.strip(" .!?:;'\"")
+        date_words = {"tomorrow", "today", "yesterday", "october", "deadline", "task", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"}
+        if len(cand) > 2 and not any(kw == cand.lower() for kw in date_words):
+            title = cand
+
+    if title:
+        if title.islower():
+            title = title[0].upper() + title[1:]
 
     res: dict[str, Any] = {"title": title, "domain": domain}
-    if due_date:
-        res["due_date"] = due_date
+    if due_str:
+        res["due_date"] = due_str
+    if time_12:
+        res["time_str"] = time_12
+    elif time_24:
+        res["time_str"] = time_24
+    elif parsed_date:
+        res["time_str"] = "11:59 PM"
+
     return res
 
 
@@ -265,8 +485,11 @@ def _fallback_route(message: str, history: Optional[list[dict[str, str]]] = None
         f_days = int(days_match.group(1)) if days_match else 5
         f_hours = float(hours_match.group(1)) if hours_match else 4.0
         return "assess_feasibility", {"days": f_days, "hours_per_day": f_hours}, ""
-    if any(term in msg_lower for term in ("add a task", "add task", "new task", "create task")):
-        return "add_task", _extract_task_creation_args(message), ""
+    if is_explicit_task_creation(message):
+        extracted = _extract_task_creation_args(message)
+        if not extracted.get("title"):
+            return None, None, "What would you like to name this task? Please provide a title or description."
+        return "add_task", extracted, ""
     if history:
         for h in reversed(history):
             content = h.get("content", "")
@@ -361,7 +584,7 @@ async def route_message(
 
         choice = response.choices[0]
         msg_lower = message.lower()
-        is_explicit_add_task = any(term in msg_lower for term in ("add a task", "add task", "new task", "create task"))
+        is_explicit_add_task = is_explicit_task_creation(message)
 
         if choice.message.tool_calls:
             tc: Any = choice.message.tool_calls[0]
@@ -374,18 +597,34 @@ async def route_message(
                 logger.warning(f"Failed to parse function arguments JSON ({e}): {raw_args}")
                 args = {"title": message}
 
-            # Guard against model misrouting an explicit task creation command to query_tasks
-            if func_name == "query_tasks" and is_explicit_add_task:
+            # Guard against model misrouting an explicit task creation command to query_tasks or another tool
+            if is_explicit_add_task and func_name != "add_task":
                 fallback_args = _extract_task_creation_args(message)
+                if not fallback_args.get("title"):
+                    return None, None, "What would you like to name this task? Please provide a title or description."
                 func_name = "add_task"
-                args = {**fallback_args, **{k: v for k, v in args.items() if k in ("domain", "due_date", "priority")}}
+                args = {**fallback_args, **{k: v for k, v in args.items() if k in ("domain", "due_date", "priority") and v}}
+
+            if func_name == "add_task":
+                extracted = _extract_task_creation_args(message)
+                if not args.get("title") and extracted.get("title"):
+                    args["title"] = extracted["title"]
+                if not args.get("due_date") and extracted.get("due_date"):
+                    args["due_date"] = extracted["due_date"]
+                if extracted.get("time_str"):
+                    args["time_str"] = extracted["time_str"]
+                if not args.get("title"):
+                    return None, None, "What would you like to name this task? Please provide a title or description."
 
             logger.info(f"Router invoked tool: {func_name} with args: {args}")
             return func_name, args, ""
         else:
             # Fallback if model responded with conversational text to an explicit task creation command
             if is_explicit_add_task:
-                return "add_task", _extract_task_creation_args(message), ""
+                extracted = _extract_task_creation_args(message)
+                if not extracted.get("title"):
+                    return None, None, "What would you like to name this task? Please provide a title or description."
+                return "add_task", extracted, ""
 
             reply = choice.message.content or "How can I help you today?"
             return None, None, reply

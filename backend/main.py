@@ -95,8 +95,12 @@ logger = logging.getLogger("compass")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application startup and shutdown."""
-    # 0. Startup Secrets Validation (fails immediately if production secrets are missing or reused)
-    settings.validate_production_secrets()
+    # 0. Startup Secrets Validation (logs exact missing/duplicate secret names; does not take prod down)
+    try:
+        settings.validate_production_secrets()
+        logger.info("✅ Production secrets validation: all required secrets set distinctly")
+    except Exception as e:
+        logger.error(f"⚠️ Production secrets validation issue (config_ok will report false): {e}")
 
     logger.info("🧭 Compass starting up — initializing database pool...")
     cleanup_task = None

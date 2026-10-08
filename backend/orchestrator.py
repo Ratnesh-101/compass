@@ -35,7 +35,8 @@ def _parse_iso_date(val: Optional[str]) -> Optional[date]:
     if not val:
         return None
     try:
-        parsed = datetime.strptime(val.strip(), "%Y-%m-%d").date()
+        clean = val.strip().split("T")[0].split(" ")[0]
+        parsed = datetime.strptime(clean, "%Y-%m-%d").date()
         today = date.today()
         # If the date was parsed with a past year (e.g. LLM defaulted to 2024/2025 instead of current year),
         # roll it forward to the current year or next occurrence.
@@ -338,6 +339,7 @@ async def handle_message(
             "title": title,
             "due_date": due_str or "",
             "domain": domain,
+            "time_str": args.get("time_str") or "",
         })
 
         # Persist conversation & messages

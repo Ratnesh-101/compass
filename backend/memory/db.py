@@ -299,14 +299,31 @@ async def init_pool(dsn: str | None = None) -> asyncpg.Pool:
         from backend.config import get_settings
         dsn = get_settings().DATABASE_URL
 
-    _pool = await asyncpg.create_pool(
-        dsn,
-        min_size=2,
-        max_size=10,
-        timeout=30.0,
-        command_timeout=30.0,
-        init=_init_connection,  # register pgvector on every connection
-    )
+    # Retry with exponential backoff for Neon scale-to-zero wakeups and Render cold starts
+    max_retries = 3
+    last_err = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            _pool = await asyncpg.create_pool(
+                dsn,
+                min_size=2,
+                max_size=10,
+                timeout=30.0,
+                command_timeout=30.0,
+                init=_init_connection,  # register pgvector on every connection
+            )
+            break
+        except Exception as e:
+            last_err = e
+            if attempt < max_retries:
+                backoff = attempt * 1.5
+                import logging
+                logging.getLogger("compass.db").warning(
+                    f"⚠️ Neon pool init attempt {attempt}/{max_retries} failed ({e}); retrying in {backoff}s..."
+                )
+                await asyncio.sleep(backoff)
+            else:
+                raise last_err
     if not _tables_ensured:
         try:
             await asyncio.wait_for(_ensure_tables(_pool), timeout=15.0)

@@ -55,6 +55,7 @@ async def test_per_ip_rate_limiting_exceeded(client: AsyncClient, monkeypatch):
         "backend.orchestrator.handle_message",
         AsyncMock(return_value={"response": "pong", "conversation_id": "mock-conv", "skill_used": "chat"}),
     )
+    monkeypatch.setattr("backend.services.rate_limiter.enforce_rate_limit", AsyncMock())
 
     from backend.dependencies import _rate_store
     _rate_store.clear()
@@ -108,6 +109,8 @@ async def test_search_web_skill_registered_and_dispatchable(monkeypatch):
     assert "Please provide a search query" in res["response"]
 
     # Dispatch with TAVILY_ENABLED=True to exercise execution path directly
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr("backend.services.tavily.search", AsyncMock(return_value={"results": [{"title": "News", "url": "https://example.com", "content": "AI news"}]}))
     res_enabled = await dispatch_skill("search_web", {"query": "latest AI news"}, None)
     assert "response" in res_enabled
     assert "data" in res_enabled

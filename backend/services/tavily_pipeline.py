@@ -152,8 +152,12 @@ def _parse_time_and_tz(text: str) -> Tuple[int, int, timezone]:
 
 
 def _parse_explicit_year_date(date_str: Optional[str]) -> Tuple[Optional[datetime], str]:
-    """Parse date string extracting date candidate and checking for explicit 4-digit year.
-    Returns (aware timezone datetime or None, 'explicit_in_quote' | 'inferred').
+    """Parse date string extracting date candidate using semantic selection attached to deadline labels.
+
+    Ignores dates attached to judging, winners announcement, changelog, or maintenance banners.
+    For ranges ('start – end'), selects the END date only when the phrase is a submission period.
+    If several deadline-labelled dates conflict, returns (None, 'conflicting').
+    Returns (aware timezone datetime or None, 'explicit_in_quote' | 'inferred' | 'conflicting').
     """
     if not date_str or not isinstance(date_str, str):
         return None, "inferred"
@@ -165,29 +169,84 @@ def _parse_explicit_year_date(date_str: Optional[str]) -> Tuple[Optional[datetim
 
     # Use DATE_PATTERN from tavily_deadline
     from backend.services.tavily_deadline import DATE_PATTERN, parse_date_candidate
+
+    # Check for direct full ISO format first
+    for fmt in (
+        "%Y-%m-%dT%H:%M:%SZ",
+        "%Y-%m-%dT%H:%M:%S%z",
+    ):
+        try:
+            dt = datetime.strptime(date_str.strip(), fmt)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt, year_provenance
+        except Exception:
+            pass
+
     candidates = []
     for m in DATE_PATTERN.finditer(date_str):
         raw_m = m.group(0)
         parsed = parse_date_candidate(raw_m)
         if parsed:
-            # Check proximity for time right after or right before the date span
             start_idx, end_idx = m.span()
-            # Look at a window around the date match: up to 40 chars before and 50 chars after
-            window_start = max(0, start_idx - 40)
-            window_end = min(len(date_str), end_idx + 50)
-            window_text = date_str[window_start:window_end]
-            hour, minute, tz = _parse_time_and_tz(window_text)
-            candidates.append((parsed, hour, minute, tz))
+            # Window for time and label inspection
+            ctx_start = max(0, start_idx - 75)
+            ctx_end = min(len(date_str), end_idx + 75)
+            before_text = date_str[ctx_start:start_idx].lower()
+            after_text = date_str[end_idx:ctx_end].lower()
+            window_text = date_str[ctx_start:ctx_end].lower()
+
+            # 1. Negative Filter: Ignore dates attached to judging, announcements, changelog, banner
+            if any(ign in window_text for ign in ("judging", "judge", "judges", "winner", "winners", "announc", "results", "changelog", "maintenance", "banner", "downtime")):
+                if any(ign in before_text for ign in ("judging", "judge", "winner", "winners", "announc", "changelog", "banner", "maintenance")):
+                    continue
+                if any(ign in after_text[:30] for ign in ("judging", "winner", "announc")):
+                    continue
+
+            # 2. Check for range: is this the start or end of a range?
+            # E.g. "August 26, 2026 ... – Friday, October 30, 2026"
+            is_range_start = bool(re.search(r"^[^\w]*(\([^\)]*\)\s*)?[–—\-]|to|until|through", after_text[:40]))
+            is_range_end = bool(re.search(r"[–—\-]|to|until|through", before_text[-40:]))
+
+            score = 0
+            if "submission deadline" in before_text or "submissions close" in before_text or "deadline:" in before_text:
+                score = 10
+            elif is_range_end and ("submission period" in before_text or "submission" in window_text):
+                score = 9
+            elif "submission period" in before_text:
+                score = 1 if is_range_start else 9
+            elif "deadline" in before_text or "due date" in before_text or "due by" in before_text:
+                score = 8
+            elif is_range_end:
+                score = 9
+            elif is_range_start:
+                score = 1
+            else:
+                score = 4
+
+            # Local neighborhood for time: check after_text first to avoid banner time bleed
+            h_after, m_after, tz_after = _parse_time_and_tz(date_str[end_idx:min(len(date_str), end_idx + 45)])
+            if h_after != 23 or m_after != 59 or tz_after != timezone.utc:
+                hour, minute, tz = h_after, m_after, tz_after
+            else:
+                hour, minute, tz = _parse_time_and_tz(date_str[ctx_start:ctx_end])
+
+            candidates.append((parsed, hour, minute, tz, score, raw_m))
 
     if candidates:
-        # Choose the latest date candidate (e.g. deadline over start date in a range)
-        chosen_date, hour, minute, tz = max(candidates, key=lambda x: x[0])
+        high_score = max(c[4] for c in candidates)
+        best_candidates = [c for c in candidates if c[4] == high_score]
+
+        # Check for conflict among best deadline candidates
+        distinct_dates = {c[0] for c in best_candidates}
+        if len(distinct_dates) > 1:
+            return None, "conflicting"
+
+        chosen_date, hour, minute, tz, _, _ = best_candidates[-1]
         return datetime(chosen_date.year, chosen_date.month, chosen_date.day, hour, minute, 0, tzinfo=tz), year_provenance
 
     # Direct format attempts
     for fmt in (
-        "%Y-%m-%dT%H:%M:%SZ",
-        "%Y-%m-%dT%H:%M:%S%z",
         "%Y-%m-%d",
         "%B %d, %Y",
         "%b %d, %Y",
@@ -302,15 +361,29 @@ def evaluate_deterministic_verdict(
         elif not verbatim_match or not quote:
             verdict = "UNVERIFIED"
         elif raw_date and not parsed_dt:
-            verdict = "UNVERIFIED"  # Missing explicit 4-digit year
+            if year_provenance == "conflicting":
+                verdict = "CONFLICTING"
+            else:
+                verdict = "UNVERIFIED"  # Missing explicit 4-digit year
+        elif year_provenance == "conflicting":
+            verdict = "CONFLICTING"
         elif year_provenance == "inferred":
             verdict = "UNVERIFIED"
         elif parsed_dt and parsed_dt < datetime.now(timezone.utc):
             verdict = "STALE"
         elif tier == AuthorityTier.TIER_1_OFFICIAL.value:
             verdict = "VERIFIED"
-        elif tier == AuthorityTier.TIER_2_TECHNICAL.value and len(sources) >= 2:
-            verdict = "VERIFIED"
+        elif tier == AuthorityTier.TIER_2_TECHNICAL.value:
+            # Tier 2 requires >= 2 independent agreeing sources for this specific date
+            agreeing_sources = {
+                cl.get("source_url")
+                for cl in claims
+                if cl.get("source_url") and _parse_explicit_year_date(cl.get("extracted_date") or cl.get("claim"))[0] == parsed_dt
+            }
+            if len(agreeing_sources) >= 2:
+                verdict = "VERIFIED"
+            else:
+                verdict = "UNVERIFIED"
         else:
             verdict = "UNVERIFIED"
 
@@ -395,6 +468,7 @@ async def run_tavily_research(
     include_domains: Optional[List[str]] = None,
     max_credits: int = 4,
     target_entity: Optional[str] = None,
+    trusted_event_url: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Execute complete Tavily research pipeline with deterministic evidence ledger."""
     if not tavily_available():
@@ -447,7 +521,7 @@ async def run_tavily_research(
         }
 
     # 4. Enrich and rank sources by domain authority
-    enriched_sources = sort_and_enrich_sources(raw_results)
+    enriched_sources = sort_and_enrich_sources(raw_results, trusted_event_url=trusted_event_url)
     top_sources = enriched_sources[:3]
 
     # 5. Extract top official URLs
@@ -501,18 +575,21 @@ async def run_tavily_research(
             st for st in filtered_sentences
             if re.search(r"\b(deadline|due|ends|closes|submission\s+(?:period|deadline)|submission)\b", st, re.IGNORECASE)
             and re.search(r"\b(202[4-9]|January|February|March|April|May|June|July|August|September|October|November|December)\b", st, re.IGNORECASE)
+            and not re.search(r"\b(judging|winner|announcement|banner|changelog|maintenance)\b", st, re.IGNORECASE)
         ]
 
         def _deadline_priority(s: str) -> int:
             s_low = s.lower()
-            if "deadline:" in s_low or "submission deadline" in s_low:
-                return 4
-            if "deadline" in s_low:
-                return 3
+            if any(ign in s_low for ign in ("judging", "winner", "announcement", "banner", "changelog", "maintenance")):
+                return -1
+            if "submission deadline" in s_low or "deadline:" in s_low or "submissions close" in s_low:
+                return 5
             if "submission period" in s_low:
-                return 2
+                return 4
+            if "deadline" in s_low or "due date" in s_low:
+                return 3
             if "closes" in s_low or "ends" in s_low:
-                return 1
+                return 2
             return 0
 
         deadline_sentences.sort(key=_deadline_priority, reverse=True)
