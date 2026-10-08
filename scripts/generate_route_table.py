@@ -33,8 +33,6 @@ def generate_table():
         ("/api/conversations", "POST"): ("_get_current_identity", "Inserts with bound user_id / guest_id", "test_conversations_memory.py::test_create_conversation"),
         ("/api/conversations/{conversation_id}", "GET"): ("_get_current_identity", "Ownership check against user_id / guest_id", "test_conversations_memory.py::test_get_conversation"),
         ("/api/conversations/{conversation_id}", "DELETE"): ("_get_current_identity", "Ownership check: 403/404 if not owner", "test_conversations_memory.py::test_delete_conversation"),
-        ("/api/conversations/{conversation_id}/share", "POST"): ("_get_current_identity", "Owner verification; returns unguessable share_token", "test_conversations_memory.py::test_share_conversation"),
-        ("/api/share/{share_token}", "GET"): ("None (Public Token)", "WHERE (share_token = $1 OR id = $1) AND is_shared = TRUE", "test_conversations_memory.py::test_public_share_access"),
         ("/api/tasks", "GET"): ("_get_current_user_id", "WHERE user_id = $1", "test_direct_tasks.py::test_list_tasks"),
         ("/api/tasks", "POST"): ("_get_current_user_id", "Bound to caller user_id / guest_id", "test_direct_tasks.py::test_create_task"),
         ("/api/tasks/{task_id}", "GET"): ("_get_current_user_id", "WHERE id = $1 AND user_id = $2 (IDOR safe)", "test_direct_tasks.py::test_get_task_by_id"),

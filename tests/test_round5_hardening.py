@@ -83,7 +83,7 @@ def test_forged_xff_direct_call_trusts_only_last_hop():
 def test_xff_via_trusted_vercel_edge_trusts_signed_client_ip():
     """Vercel edge middleware signs client_ip|timestamp|sig; backend extracts signed client_ip."""
     settings = get_settings()
-    secret = settings.EDGE_HMAC_SECRET or settings.VERCEL_EDGE_SECRET
+    secret = settings.EDGE_HMAC_SECRET or getattr(settings, "VERCEL_EDGE_SECRET", None) or "compass_vercel_edge_hmac_secret_2026"
     now_ts = str(int(time.time()))
     client_ip = "203.0.113.195"
     payload = f"{client_ip}|{now_ts}"
@@ -127,25 +127,26 @@ def test_proxy_hops_chain_shorter_falls_back_to_client_host():
 
 def test_strict_pinned_platform_matching():
     """Verify exact pinned event matching and rejection of lookalike subdomains / software paths."""
+    prefixes = ["https://nebiusglobalaihackathon.devpost.com"]
     # Official pinned event
-    r1 = classify_domain_authority("https://nebiusglobalaihackathon.devpost.com/rules")
+    r1 = classify_domain_authority("https://nebiusglobalaihackathon.devpost.com/rules", pinned_event_prefixes=prefixes)
     assert r1["tier"] == AuthorityTier.TIER_1_OFFICIAL.value
 
-    r2 = classify_domain_authority("https://nebiusglobalaihackathon.devpost.com/")
+    r2 = classify_domain_authority("https://nebiusglobalaihackathon.devpost.com/", pinned_event_prefixes=prefixes)
     assert r2["tier"] == AuthorityTier.TIER_1_OFFICIAL.value
 
     # Lookalike subdomains stay Tier 2
-    r_fake1 = classify_domain_authority("https://nebiusfake.devpost.com/")
+    r_fake1 = classify_domain_authority("https://nebiusfake.devpost.com/", pinned_event_prefixes=prefixes)
     assert r_fake1["tier"] == AuthorityTier.TIER_2_TECHNICAL.value
 
-    r_fake2 = classify_domain_authority("https://bi.devpost.com/")
+    r_fake2 = classify_domain_authority("https://bi.devpost.com/", pinned_event_prefixes=prefixes)
     assert r_fake2["tier"] == AuthorityTier.TIER_2_TECHNICAL.value
 
-    r_fake3 = classify_domain_authority("https://nebius-ai.devpost.com/")
+    r_fake3 = classify_domain_authority("https://nebius-ai.devpost.com/", pinned_event_prefixes=prefixes)
     assert r_fake3["tier"] == AuthorityTier.TIER_2_TECHNICAL.value
 
     # User project submission pages (/software/) strictly stay Tier 2
-    r_soft = classify_domain_authority("https://nebiusglobalaihackathon.devpost.com/software/my-project")
+    r_soft = classify_domain_authority("https://nebiusglobalaihackathon.devpost.com/software/my-project", pinned_event_prefixes=prefixes)
     assert r_soft["tier"] == AuthorityTier.TIER_2_TECHNICAL.value
 
 

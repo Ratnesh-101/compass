@@ -43,9 +43,9 @@ async def test_run_5_repeated_memory_tools_fallback_escalates_before_max_steps(m
     run_5_tools = [
         ("get_hackathon_deadlines", {}),
         ("get_hackathon_deadlines", {}),
-        ("delegate_to_specialist", {"capability": "research", "task_description": "Nebius hackathon deadline"}),
-        ("delegate_to_specialist", {"capability": "research", "task_description": "Nebius hackathon deadline"}),
-        ("delegate_to_specialist", {"capability": "research", "task_description": "Nebius hackathon deadline"}),
+        ("query_coursework_notes", {"query": "Nebius hackathon deadline"}),
+        ("query_coursework_notes", {"query": "Nebius hackathon deadline"}),
+        ("query_coursework_notes", {"query": "Nebius hackathon deadline"}),
         ("get_hackathon_deadlines", {}),
         ("get_hackathon_deadlines", {}),
         ("query_tasks", {"domain": "hackathon"}),
@@ -79,8 +79,8 @@ async def test_run_5_repeated_memory_tools_fallback_escalates_before_max_steps(m
     )
     monkeypatch.setitem(
         SKILL_REGISTRY,
-        "delegate_to_specialist",
-        AsyncMock(return_value={"response": "task_id is required", "data": {"error": "task_id is required"}}),
+        "query_coursework_notes",
+        AsyncMock(return_value={"response": "No coursework notes found.", "data": {"notes": []}}),
     )
     monkeypatch.setitem(
         SKILL_REGISTRY,
@@ -213,7 +213,7 @@ async def test_two_memory_tools_back_to_back_falls_back_to_silent_unlock(monkeyp
 
         # Turn 2: model calls second memory tool without emitting [ABSTAIN]
         if call_count == 2:
-            return _create_mock_completion(tool_name="delegate_to_specialist", tool_args={"capability": "research", "goal": "Find deadline"})
+            return _create_mock_completion(tool_name="list_projects", tool_args={})
 
         # Turn 3: search_web should now be silently unlocked in available tools
         current_tools = kwargs.get("tools", [])
@@ -237,8 +237,8 @@ async def test_two_memory_tools_back_to_back_falls_back_to_silent_unlock(monkeyp
     )
     monkeypatch.setitem(
         SKILL_REGISTRY,
-        "delegate_to_specialist",
-        AsyncMock(return_value={"response": "task_id is required", "data": {"error": "task_id is required"}}),
+        "list_projects",
+        AsyncMock(return_value={"response": "0 projects found.", "data": {"projects": []}}),
     )
     monkeypatch.setitem(
         SKILL_REGISTRY,

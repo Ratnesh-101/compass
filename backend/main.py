@@ -13,10 +13,12 @@ Run with:
 
 import asyncio
 import logging
+import urllib.parse
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 
 from backend.config import get_settings
 from backend.memory.db import init_pool, close_pool
@@ -75,8 +77,11 @@ from backend.routers import (
     agent_router,
     calendar_router,
     auth_router,
-    specialist_router,
     migration_router,
+    profile_router,
+    persona_router,
+    parked_router,
+    specialist_router,
 )
 
 # ---------------------------------------------------------------------------
@@ -92,6 +97,13 @@ logger = logging.getLogger("compass")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application startup and shutdown."""
+    # 0. Startup Secrets Validation (logs exact missing/duplicate secret names; does not take prod down)
+    try:
+        settings.validate_production_secrets()
+        logger.info("✅ Production secrets validation: all required secrets set distinctly")
+    except Exception as e:
+        logger.error(f"⚠️ Production secrets validation issue (config_ok will report false): {e}")
+
     logger.info("🧭 Compass starting up — initializing database pool...")
     cleanup_task = None
 
@@ -120,18 +132,19 @@ async def lifespan(app: FastAPI):
         # Startup check: verify configured models exist in Nebius catalog (fail loudly, never silently fall back)
         if settings.is_production() or (settings.NEBIUS_API_KEY and not settings.NEBIUS_API_KEY.startswith("mock-")):
             from backend.services.model_check import check_models_catalog
-            required_models = {
-                settings.ROUTER_MODEL,
-                settings.SKILL_MODEL,
-                settings.REASONING_MODEL,
-                settings.SYNTHESIS_MODEL,
-                settings.EMBEDDING_MODEL,
+            routed_roles = {
+                "router": settings.ROUTER_MODEL,
+                "skill": settings.SKILL_MODEL,
+                "reasoning": settings.REASONING_MODEL,
+                "synthesis": settings.SYNTHESIS_MODEL,
+                "embedding": settings.EMBEDDING_MODEL,
             }
             check_models_catalog(
                 base_url=settings.NEBIUS_BASE_URL,
                 api_key=settings.NEBIUS_API_KEY,
-                required_models=required_models,
+                required_models=set(routed_roles.values()),
                 fail_loudly=settings.is_production(),
+                routed_roles=routed_roles,
             )
     except Exception as e:
         logger.warning(f"⚠️  Database pool init failed (stubs will still work): {e}")
@@ -154,6 +167,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Enforce standard security headers on all HTTP responses (SEC-01)."""
 
     async def dispatch(self, request: Request, call_next):
+        if not get_settings().is_development() and request.url.path in ("/docs", "/redoc", "/openapi.json"):
+            return Response(status_code=404, content="Not Found")
         response: Response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
@@ -217,8 +232,28 @@ app.include_router(chat_router)
 app.include_router(agent_router)
 app.include_router(calendar_router)
 app.include_router(auth_router)
-app.include_router(specialist_router)
 app.include_router(migration_router)
+app.include_router(profile_router)
+app.include_router(persona_router)
+app.include_router(parked_router)
+app.include_router(specialist_router)
+
+
+@app.get("/")
+async def root_redirect(request: Request):
+    """Root redirect handler. Resolves active frontend origin or redirects to frontend dev server."""
+    query_str = request.url.query
+    query_suffix = f"?{query_str}" if query_str else ""
+    referer = request.headers.get("referer") or request.headers.get("origin")
+    if referer:
+        parsed = urllib.parse.urlparse(referer)
+        if parsed.scheme and parsed.netloc:
+            target = f"{parsed.scheme}://{parsed.netloc}/{query_suffix}"
+            return RedirectResponse(url=target)
+
+    frontend_url = "http://localhost:5173" if settings.is_development() else "https://compass-kappa-nine.vercel.app"
+    return RedirectResponse(url=f"{frontend_url}/{query_suffix}")
+
 
 
 @app.get("/")

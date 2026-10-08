@@ -15,7 +15,6 @@ export default function ChatConversationItem({
   onTogglePin,
   onToggleArchive,
   onOpenDeleteConfirm,
-  onShareChat,
 }) {
   return (
     <div
@@ -182,24 +181,6 @@ export default function ChatConversationItem({
             gap: '2px',
           }}
         >
-          <button
-            onClick={() => onShareChat(conv)}
-            style={{
-              display: 'flex', alignItems: 'center', gap: '10px', width: '100%',
-              padding: '8px 12px', borderRadius: '8px', border: 'none', background: 'transparent',
-              color: '#ececed', fontSize: '12.5px', fontWeight: '500', cursor: 'pointer', textAlign: 'left'
-            }}
-            onMouseEnter={e => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'}
-            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
-              <polyline points="16 6 12 2 8 6"/>
-              <line x1="12" y1="2" x2="12" y2="15"/>
-            </svg>
-            <span>Share</span>
-          </button>
-
           <button
             onClick={() => onStartRename(conv)}
             style={{

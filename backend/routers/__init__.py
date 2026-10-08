@@ -8,8 +8,11 @@ from backend.routers.chat import router as chat_router
 from backend.routers.agent import router as agent_router
 from backend.routers.calendar import router as calendar_router
 from backend.routers.auth import router as auth_router
-from backend.routers.specialist import router as specialist_router
 from backend.routers.migration import router as migration_router
+from backend.routers.profile import router as profile_router
+from backend.routers.persona import router as persona_router
+from backend.routers.parked import router as parked_router
+from backend.routers.specialist import router as specialist_router
 
 __all__ = [
     "admin_router",
@@ -18,7 +21,11 @@ __all__ = [
     "agent_router",
     "calendar_router",
     "auth_router",
-    "specialist_router",
     "migration_router",
+    "profile_router",
+    "persona_router",
+    "parked_router",
+    "specialist_router",
 ]
+
 

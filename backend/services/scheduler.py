@@ -12,6 +12,13 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 import logging
+import sys
+from pathlib import Path
+
+# Ensure project root is available when executed directly
+_root = Path(__file__).resolve().parent.parent.parent
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
 
 from backend.services.cognitive_conflicts import (
     _ensure_utc,

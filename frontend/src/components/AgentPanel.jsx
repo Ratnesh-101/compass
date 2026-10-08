@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
-import { getAuthHeaders } from '../api/client'
+import { getAuthHeaders, API_BASE } from '../api/client'
 import StepCard, { STEP_STYLES, friendlyTool } from './agent/StepCard'
 import ConfirmationGate from './agent/ConfirmationGate'
 import ActivityFeed from './agent/ActivityFeed'
@@ -24,11 +24,7 @@ export default function AgentPanel({ onTaskMutated, conversationId }) {
   const scrollContainerRef = useRef(null)
   const abortRef = useRef(null)
 
-  const getApiBase = () => {
-    return window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-      ? 'http://127.0.0.1:8000'
-      : ''
-  }
+  const getApiBase = () => API_BASE
 
   const fetchRunsHistory = useCallback(async () => {
     try {

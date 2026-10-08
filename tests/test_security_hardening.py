@@ -31,8 +31,10 @@ def test_production_fail_closed_with_dev_auth_token():
         ENVIRONMENT="production",
         AUTH_TOKEN="dev-token",
         TOKEN_ENCRYPTION_KEY="custom-secure-key-for-prod-32bytes!",
+        GUEST_SIGNING_SECRET="custom-secure-guest-signing-secret-32bytes!",
+        EDGE_HMAC_SECRET="custom-secure-edge-hmac-secret-32bytes!",
     )
-    with pytest.raises(ValueError, match="CRITICAL SECURITY CONFIGURATION ERROR: AUTH_TOKEN"):
+    with pytest.raises(ValueError, match=r"CRITICAL SECURITY CONFIGURATION ERROR:.*AUTH_TOKEN"):
         prod_settings.validate_production_secrets()
 
 
@@ -42,8 +44,10 @@ def test_production_fail_closed_with_empty_auth_token():
         ENVIRONMENT="production",
         AUTH_TOKEN="",
         TOKEN_ENCRYPTION_KEY="custom-secure-key-for-prod-32bytes!",
+        GUEST_SIGNING_SECRET="custom-secure-guest-signing-secret-32bytes!",
+        EDGE_HMAC_SECRET="custom-secure-edge-hmac-secret-32bytes!",
     )
-    with pytest.raises(ValueError, match="CRITICAL SECURITY CONFIGURATION ERROR: AUTH_TOKEN"):
+    with pytest.raises(ValueError, match=r"CRITICAL SECURITY CONFIGURATION ERROR:.*AUTH_TOKEN"):
         prod_settings.validate_production_secrets()
 
 
@@ -53,8 +57,10 @@ def test_production_fail_closed_with_default_encryption_key():
         ENVIRONMENT="production",
         AUTH_TOKEN="real-production-secret-token-12345",
         TOKEN_ENCRYPTION_KEY="compass_secure_local_dev_token_encryption_key_32bytes!",
+        GUEST_SIGNING_SECRET="custom-secure-guest-signing-secret-32bytes!",
+        EDGE_HMAC_SECRET="custom-secure-edge-hmac-secret-32bytes!",
     )
-    with pytest.raises(ValueError, match="CRITICAL SECURITY CONFIGURATION ERROR: TOKEN_ENCRYPTION_KEY"):
+    with pytest.raises(ValueError, match=r"CRITICAL SECURITY CONFIGURATION ERROR:.*TOKEN_ENCRYPTION_KEY"):
         prod_settings.validate_production_secrets()
 
 
@@ -138,12 +144,13 @@ def test_safe_client_ip_handles_forwarded_for(monkeypatch):
     ip = get_client_ip(mock_request)
     assert ip == "198.51.100.15"
 
-    # Cloudflare connecting IP is ignored by default unless explicitly enabled
+    # Cloudflare connecting IP is ignored when TRUST_CF_CONNECTING_IP is False
+    from backend.config import get_settings
+    monkeypatch.setattr(get_settings(), "TRUST_CF_CONNECTING_IP", False)
     mock_request.headers = {"cf-connecting-ip": "203.0.113.88", "x-forwarded-for": "spoofed-ip, 198.51.100.15"}
     assert get_client_ip(mock_request) == "198.51.100.15"
 
     # Cloudflare connecting IP is honored when TRUST_CF_CONNECTING_IP is True
-    from backend.config import get_settings
     monkeypatch.setattr(get_settings(), "TRUST_CF_CONNECTING_IP", True)
     assert get_client_ip(mock_request) == "203.0.113.88"
 

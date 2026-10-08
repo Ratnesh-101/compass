@@ -197,10 +197,14 @@ async def import_all_guest_data(request: Request, _rl: None = Depends(guest_rate
     async with pool.acquire() as conn:
         imported_convs = await conversations.migrate_all_guest_conversations(conn, guest_id, user_id)
         imported_mems = await conversations.migrate_guest_memories(conn, guest_id, user_id)
+        from backend.memory.profile import migrate_guest_profile_facts
+        from backend.memory.parked import migrate_guest_parked_thoughts
+        imported_facts = await migrate_guest_profile_facts(conn, guest_id, user_id)
+        imported_parked = await migrate_guest_parked_thoughts(conn, guest_id, user_id)
 
     logger.info(
-        "Migrated all guest data: guest=%s -> user=%s (convs=%d, mems=%d)",
-        guest_id, user_id, imported_convs, imported_mems
+        "Migrated all guest data: guest=%s -> user=%s (convs=%d, mems=%d, facts=%d, parked=%d)",
+        guest_id, user_id, imported_convs, imported_mems, imported_facts, imported_parked
     )
 
     return {
@@ -208,7 +212,9 @@ async def import_all_guest_data(request: Request, _rl: None = Depends(guest_rate
         "imported_count": imported_convs,
         "imported_conversations": imported_convs,
         "imported_memories": imported_mems,
-        "message": f"Successfully imported {imported_convs} conversation(s) and {imported_mems} memory item(s).",
+        "imported_facts": imported_facts,
+        "imported_parked": imported_parked,
+        "message": f"Successfully imported {imported_convs} conversation(s), {imported_mems} memory item(s), {imported_facts} fact(s), and {imported_parked} parked thought(s).",
     }
 
 
@@ -311,11 +317,17 @@ async def delete_guest_data_endpoint(request: Request, response: Response):
 
     async with pool.acquire() as conn:
         result = await conversations.delete_guest_data(conn, guest_id)
+        from backend.memory.profile import clear_all_profile_facts
+        from backend.memory.parked import delete_guest_parked_thoughts
+        deleted_facts = await clear_all_profile_facts(conn, user_id=guest_id)
+        deleted_parked = await delete_guest_parked_thoughts(conn, guest_id)
 
     response.delete_cookie("compass_guest_token")
     return {
         "status": "ok",
         "deleted_conversations": result["deleted_conversations"],
         "deleted_memories": result["deleted_memories"],
-        "message": "All guest conversations and memories have been permanently deleted.",
+        "deleted_facts": deleted_facts,
+        "deleted_parked": deleted_parked,
+        "message": "All guest conversations, memories, facts, and parked thoughts have been permanently deleted.",
     }

@@ -113,7 +113,7 @@ SAVE_VERIFIED_FINDING_TOOL: Dict[str, Any] = {
     "function": {
         "name": "save_verified_finding",
         "description": (
-            "Persist a high-confidence, verified research finding into long-term vector memory. "
+            "Persist a verified research finding into long-term vector memory. "
             "Stores structured knowledge with provenance citations instead of polluting memory with noisy raw page dumps."
         ),
         "parameters": {

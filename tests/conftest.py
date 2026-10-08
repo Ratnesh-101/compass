@@ -97,7 +97,7 @@ def pytest_configure(config):
 async def client():
     """Async HTTP client fixture configured against the FastAPI app instance."""
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+    async with AsyncClient(transport=transport, base_url="http://test", timeout=10.0) as ac:
         yield ac
     import asyncio
     await asyncio.sleep(0.05)
@@ -110,16 +110,42 @@ def auth_headers():
 
 
 @pytest_asyncio.fixture(autouse=True)
-async def cleanup_db_pool():
-    """Ensure database connection pool is closed within the test's event loop."""
+async def test_db_lifecycle():
+    """Clean up test state after each test only if a database pool is already active."""
     yield
     try:
-        from backend.memory.db import close_pool
-        await close_pool()
-        import asyncio
-        await asyncio.sleep(0.05)
+        from backend.dependencies import _rate_store, _agent_rate_store
+        _rate_store.clear()
+        _agent_rate_store.clear()
     except Exception:
         pass
+    try:
+        from backend.memory import db
+        if db._pool is not None:
+            async with db._pool.acquire(timeout=5.0) as conn:
+                await conn.execute("""
+                    DELETE FROM user_profile_facts WHERE user_id LIKE 'alice_%' OR user_id LIKE 'bob_%' OR user_id LIKE 'carol_%' OR user_id LIKE 'david_%' OR user_id LIKE 'test_%' OR user_id LIKE '%@example.com';
+                    DELETE FROM parked_thoughts WHERE user_id LIKE 'alice_%' OR user_id LIKE 'bob_%' OR user_id LIKE 'carol_%' OR user_id LIKE 'david_%' OR user_id LIKE 'test_%' OR user_id LIKE '%@example.com';
+                    DELETE FROM rate_limit_buckets;
+                    DELETE FROM agent_runs WHERE id LIKE 'test_%' OR id LIKE 'run_%';
+                    DELETE FROM pending_actions WHERE run_id LIKE 'test_%' OR run_id LIKE 'run_%';
+                """)
+    except Exception:
+        pass
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Safely terminate asyncpg connection pool once when the entire test session finishes."""
+    import asyncio
+    try:
+        from backend.memory.db import close_pool
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(close_pool())
+        loop.close()
+    except Exception:
+        pass
+
+
 
 
 

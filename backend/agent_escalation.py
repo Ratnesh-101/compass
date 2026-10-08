@@ -25,7 +25,6 @@ _MEMORY_TOOLS = frozenset({
     "summarize_across_domains",
     "list_projects",
     "detect_deadline_conflicts",
-    "delegate_to_specialist",
 })
 
 _IMPLICIT_SIGNALS = (

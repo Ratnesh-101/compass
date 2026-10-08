@@ -16,11 +16,15 @@ export { getDomainMeta } from './timeline/domainMeta'
 
 export default function Timeline({
   tasks = [],
+  allTasks = [],
   activeDomain,
   onSelectDomain,
   onTasksUpdated,
-  onOpenNorthstar,
+  onOpenCompass,
   onOpenTelemetry,
+  customDomains = [],
+  theme = 'light',
+  onToggleTheme,
 }) {
   const [selectedTask, setSelectedTask] = useState(null)
   const [showAddModal, setShowAddModal] = useState(false)
@@ -87,7 +91,10 @@ export default function Timeline({
     }
   }
 
-  const filtered = activeDomain === 'all' ? tasks : tasks.filter(t => t.domain === activeDomain)
+  const domainMeta = activeDomain !== 'all' ? getDomainMeta(activeDomain) : null
+  const filtered = activeDomain === 'all'
+    ? tasks
+    : tasks.filter(t => (t.domain || 'general').toLowerCase().trim() === activeDomain)
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })
   const hasFallbackTasks = Array.isArray(tasks) && tasks.some(t => t.is_fallback)
 
@@ -117,15 +124,88 @@ export default function Timeline({
       {/* Header with Direct Add Deadline Button */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '22px', gap: '16px', flexWrap: 'wrap' }}>
         <div>
-          <h2 style={{ fontSize: '24px', fontWeight: '800', color: 'var(--text-primary)', letterSpacing: '-0.4px', margin: 0 }}>
-            Timeline Feed <span className="serif-accent" style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>— {today}</span>
-          </h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <h2 style={{ fontSize: '24px', fontWeight: '800', color: 'var(--text-primary)', letterSpacing: '-0.4px', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {domainMeta ? (
+                <>
+                  <span style={{ fontSize: '22px' }}>{domainMeta.icon}</span>
+                  <span>{domainMeta.label} Domain</span>
+                </>
+              ) : (
+                <span>Timeline Feed</span>
+              )}
+              <span className="serif-accent" style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>— {today}</span>
+            </h2>
+            {domainMeta && (
+              <button
+                type="button"
+                id="btn-return-all-domains"
+                onClick={() => onSelectDomain('all')}
+                style={{
+                  background: 'var(--bg-card)',
+                  border: '1px solid var(--border)',
+                  color: 'var(--text-secondary)',
+                  padding: '3px 10px',
+                  borderRadius: '12px',
+                  fontSize: '11px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.color = 'var(--brand)'; e.currentTarget.style.borderColor = 'var(--brand)' }}
+                onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-secondary)'; e.currentTarget.style.borderColor = 'var(--border)' }}
+                title="View all domains"
+              >
+                ← View all
+              </button>
+            )}
+          </div>
           <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '4px', marginBottom: 0 }}>
-            What's happening across your workspace today
+            {domainMeta
+              ? `Deadlines, context, and focus allocation for ${domainMeta.label}`
+              : "What's happening across your workspace today"}
           </p>
         </div>
 
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+          {onToggleTheme && (
+            <button
+              id="header-theme-toggle"
+              type="button"
+              role="switch"
+              aria-checked={theme === 'dark'}
+              aria-label={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
+              title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
+              onClick={onToggleTheme}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: 'var(--bg-card)',
+                color: 'var(--text-primary)',
+                border: '1px solid var(--border)',
+                padding: '9px 13px',
+                borderRadius: '10px',
+                fontSize: '13px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                boxShadow: 'var(--shadow-sm)',
+                transition: 'all 0.15s ease',
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.borderColor = 'var(--brand)'
+                e.currentTarget.style.transform = 'translateY(-1px)'
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.borderColor = 'var(--border)'
+                e.currentTarget.style.transform = 'translateY(0)'
+              }}
+            >
+              <span>{theme === 'dark' ? '🌙' : '☀️'}</span>
+              <span>{theme === 'dark' ? 'Dark' : 'Light'}</span>
+            </button>
+          )}
+
           {onOpenTelemetry && (
             <button
               id="btn-open-telemetry"
@@ -254,7 +334,7 @@ export default function Timeline({
               e.currentTarget.style.boxShadow = '0 4px 14px rgba(37, 99, 235, 0.35)'
             }}
           >
-            <span style={{ fontSize: '16px', fontWeight: '700', lineHeight: 1 }}>+</span> Add Deadline
+            <span style={{ fontSize: '16px', fontWeight: '700', lineHeight: 1 }}>+</span> Add deadline
           </button>
         </div>
       </div>
@@ -280,17 +360,17 @@ export default function Timeline({
             <div>
               <span style={{ fontWeight: '700' }}>
                 {verificationSummary.error
-                  ? 'Tavily Verification Failed: '
-                  : 'Tavily Web Verification Complete: '
+                  ? 'Verification note: '
+                  : 'Schedules verified: '
                 }
               </span>
               <span>
                 {verificationSummary.error
                   ? verificationSummary.error
-                  : `Checked ${verificationSummary.total} active deadline(s). ${
+                  : `${verificationSummary.total} active deadline(s) checked. ${
                       verificationSummary.drift > 0
-                        ? `⚠️ ${verificationSummary.drift} schedule drift(s) detected via live web search!`
-                        : 'Stored deadlines confirmed matching official sources.'
+                        ? `⚠️ ${verificationSummary.drift} update(s) detected via live web search.`
+                        : 'All deadlines confirmed matching official dates.'
                     }`
                 }
               </span>
@@ -314,7 +394,7 @@ export default function Timeline({
       <OnboardingTour
         onVerifyDeadlines={handleVerifyAll}
         onOpenTelemetry={onOpenTelemetry}
-        onOpenNorthstar={onOpenNorthstar}
+        onOpenCompass={onOpenCompass}
         onOpenSeed={handleSeedJudgePersona}
       />
 
@@ -322,9 +402,11 @@ export default function Timeline({
       <div style={{ display: 'flex', gap: '8px', marginBottom: '22px', flexWrap: 'wrap' }}>
         {(() => {
           const basePills = ['all', 'hackathon', 'coursework', 'code', 'general', 'other']
-          const customPills = tasks
-            .map(t => (t.domain || '').toLowerCase().trim())
-            .filter(d => d && !basePills.includes(d))
+          const customPills = [
+            ...customDomains.map(d => d.key),
+            ...tasks.map(t => (t.domain || '').toLowerCase().trim()),
+            ...allTasks.map(t => (t.domain || '').toLowerCase().trim()),
+          ].filter(d => d && !basePills.includes(d))
           const uniquePills = Array.from(new Set([...basePills, ...customPills]))
 
           return uniquePills.map(dom => {
@@ -371,12 +453,12 @@ export default function Timeline({
               <>
                 <div style={{ fontSize: '32px', marginBottom: '12px' }}>📭</div>
                 <div style={{ fontSize: '16px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '6px' }}>
-                  No deadlines found
+                  {activeDomain === 'all' ? 'No deadlines yet' : 'Nothing here yet'}
                 </div>
                 <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '18px' }}>
                   {activeDomain === 'all'
-                    ? "Your memory stream is clear. You can add deadlines directly below without needing AI chat."
-                    : `No active deadlines found under ${activeDomain.toUpperCase()} domain.`}
+                    ? 'Add one when you have something coming up.'
+                    : `No deadlines in ${getDomainMeta(activeDomain).label} yet. Add a deadline and it'll show up here.`}
                 </div>
                 <button
                   id="btn-empty-add-deadline"
@@ -385,18 +467,21 @@ export default function Timeline({
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: '6px',
-                    background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+                    background: 'var(--brand)',
                     border: 'none',
-                    color: '#ffffff',
+                    color: '#2a1a00',
                     padding: '9px 18px',
                     borderRadius: '8px',
                     fontSize: '13px',
-                    fontWeight: '600',
+                    fontWeight: '700',
                     cursor: 'pointer',
-                    boxShadow: '0 4px 12px rgba(37, 99, 235, 0.3)'
+                    boxShadow: '0 4px 12px rgba(245, 166, 35, 0.25)',
+                    transition: 'opacity 0.15s ease'
                   }}
+                  onMouseEnter={e => e.currentTarget.style.opacity = '0.9'}
+                  onMouseLeave={e => e.currentTarget.style.opacity = '1'}
                 >
-                  + Add Your First Deadline
+                  + Add deadline
                 </button>
               </>
             )}
@@ -428,7 +513,8 @@ export default function Timeline({
         onCreated={onTasksUpdated}
         defaultDomain={activeDomain}
         tasks={tasks}
-        onOpenNorthstar={onOpenNorthstar}
+        customDomains={customDomains}
+        onOpenCompass={onOpenCompass}
       />
     </div>
   )

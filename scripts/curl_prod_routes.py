@@ -15,7 +15,6 @@ routes = [
     ("GET", "/conversations/00000000-0000-0000-0000-000000000000/messages"),
     ("GET", "/api/agent/critique-stats"),
     ("POST", "/api/agent/trigger-nightly", {}),
-    ("POST", "/api/specialist/dispatch", {"capability": "memory", "user_goal": "test"}),
     ("GET", "/api/telemetry"),
     ("GET", "/api/usage/summary"),
     ("POST", "/api/demo/seed", {}),

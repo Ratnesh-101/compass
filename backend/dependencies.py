@@ -144,17 +144,19 @@ _guest_rate_store: dict = defaultdict(deque)  # guest_id -> deque of timestamps
 
 
 def _get_guest_signing_secret() -> bytes:
-    """Derive secret for HMAC signing of guest session tokens."""
+    """Derive secret for HMAC signing of guest session tokens.
+    Reverted fallback chain: uses dedicated GUEST_SIGNING_SECRET only with no cross-purpose reuse.
+    """
     settings = get_settings()
-    candidate = (
-        getattr(settings, "GUEST_SIGNING_SECRET", "")
-        or (settings.AUTH_TOKEN if settings.AUTH_TOKEN and settings.AUTH_TOKEN.strip() not in (settings.DEFAULT_DEV_TOKEN, "compass-token", "test-token") else "")
-        or getattr(settings, "EDGE_HMAC_SECRET", "")
-        or getattr(settings, "TOKEN_ENCRYPTION_KEY", "")
-        or settings.DEFAULT_DEV_TOKEN
-        or "compass-guest-token-secret-2026"
-    )
-    return candidate.encode("utf-8")
+    secret = getattr(settings, "GUEST_SIGNING_SECRET", "")
+    if not secret:
+        if settings.is_production():
+            raise RuntimeError(
+                "CRITICAL: GUEST_SIGNING_SECRET must be configured in production. "
+                "No fallback to other secrets is permitted."
+            )
+        secret = "compass-guest-token-dev-secret-2026"
+    return secret.encode("utf-8")
 
 
 def generate_guest_token(guest_id: Optional[str] = None) -> tuple[str, str]:
@@ -276,6 +278,9 @@ def _get_current_identity(request: Request) -> Optional[Identity]:
     Returns Identity with explicit is_admin and is_guest flags.
     x-user-id impersonation is allowed ONLY when ENVIRONMENT is explicitly set to an allowed value ('development' or 'test'). Unset or production = forbidden.
     """
+    if hasattr(request, "state") and getattr(request.state, "identity", None):
+        return request.state.identity
+
     settings = get_settings()
     session_token = request.cookies.get("compass_session")
     auth_header = request.headers.get("authorization")
@@ -302,15 +307,16 @@ def _get_current_identity(request: Request) -> Optional[Identity]:
         except Exception as e:
             logger.debug("Session token lookup failed: %s", e)
 
-    # 2. User identity via session cookie, Bearer token, or x-user-id header
+    # 2. Server-to-server AUTH_TOKEN with impersonation gate
+    if bearer_token and settings.AUTH_TOKEN and isinstance(settings.AUTH_TOKEN, str) and hmac.compare_digest(str(bearer_token), str(settings.AUTH_TOKEN)):
+        return Identity(id="admin", is_admin=True, is_guest=False, user_id="admin", guest_id=verified_guest)
+
+    # 3. Development / testing quick identity header or cookie
     user_header = request.headers.get("x-user-id") or request.cookies.get("compass_user_id")
     if user_header and user_header.strip():
         target = user_header.strip().lower()
-        if "@" in target or target == "admin" or settings.is_development() or (bearer_token and settings.AUTH_TOKEN and hmac.compare_digest(str(bearer_token), str(settings.AUTH_TOKEN))):
+        if settings.is_development() or "@" in target:
             return Identity(id=target, is_admin=(target == "admin"), is_guest=False, user_id=target, guest_id=verified_guest)
-
-    if bearer_token and settings.AUTH_TOKEN and isinstance(settings.AUTH_TOKEN, str) and hmac.compare_digest(str(bearer_token), str(settings.AUTH_TOKEN)):
-        return Identity(id="admin", is_admin=True, is_guest=False, user_id="admin", guest_id=verified_guest)
 
     # 3. Verified guest token
     if verified_guest:

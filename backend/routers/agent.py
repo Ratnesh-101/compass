@@ -143,8 +143,8 @@ async def agent_confirm(req: AgentConfirmRequest, request: Request):
                             for a in actions:
                                 aid = await conn.fetchval(
                                     """
-                                    INSERT INTO agent_audit_log (run_id, tool, args, approved_by, new_state)
-                                    VALUES ($1, $2, $3::jsonb, 'admin_override', '{"status": "pending_execution"}'::jsonb)
+                                    INSERT INTO agent_audit_log (run_id, tool, args, approved_by, status, new_state)
+                                    VALUES ($1, $2, $3::jsonb, 'admin_override', 'pending_execution', '{"status": "pending_execution"}'::jsonb)
                                     RETURNING id
                                     """,
                                     run_id,
@@ -186,7 +186,7 @@ async def agent_confirm(req: AgentConfirmRequest, request: Request):
                         await conn.execute(
                             """
                             UPDATE agent_audit_log
-                            SET new_state = $1::jsonb
+                            SET status = 'executed', new_state = $1::jsonb
                             WHERE id = $2
                             """,
                             json.dumps({"status": "executed", "result": res}),

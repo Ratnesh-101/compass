@@ -215,3 +215,25 @@ async def test_concurrent_writes_to_one_conversation():
     finally:
         await pool.close()
 
+
+@pytest.mark.asyncio
+async def test_get_recent_messages_keeps_newest_subset_chronological(db_conn):
+    """Confirm get_recent_messages selects the newest messages when limit < total messages, ordered chronologically."""
+    cid = await get_or_create_conversation(db_conn, user_id="test_newest_subset_user")
+    for i in range(10):
+        await add_message(
+            db_conn,
+            conversation_id=cid,
+            role="user" if i % 2 == 0 else "assistant",
+            content=f"Turn {i}",
+        )
+
+    # Fetch with limit=4: should return Turns 6, 7, 8, 9 in chronological order
+    recent = await get_recent_messages(db_conn, conversation_id=cid, limit=4)
+    assert len(recent) == 4
+    contents = [m["content"] for m in recent]
+    assert contents == ["Turn 6", "Turn 7", "Turn 8", "Turn 9"]
+
+    await delete_conversation(db_conn, cid)
+
+

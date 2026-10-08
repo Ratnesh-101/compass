@@ -255,3 +255,153 @@ def test_adversarial_page_injection():
     )
     # Both fragments must be filtered out entirely
     assert len(evidence) == 0
+
+
+# ---------------------------------------------------------------------------
+# 8. Nebius Global AI Hackathon Recorded Rules Page Regression Test
+# ---------------------------------------------------------------------------
+def test_nebius_global_ai_hackathon_recorded_rules_page():
+    """Regression test: verify recorded rules page extracts Oct 30, 2026 @ 10:00am PDT with timezone and VERIFIED verdict."""
+    recorded_page_text = (
+        "Nebius x NVIDIA Global AI Hackathon: Build the next frontier of AI on open infrastructure\n"
+        "Deadline: Oct 30, 2026 @ 10:00am PDT\n"
+        "SUBMISSION OF ANY ENTRY CONSTITUTES AGREEMENT TO THESE OFFICIAL RULES AS A CONTRACT.\n"
+        "##### 1. Dates and Timing\n"
+        "Submission Period: Wednesday, August 26, 2026 (9:00 am Pacific Time) – Friday, October 30, 2026 (10:00 am Pacific Time) (\"Submission Period\").\n"
+        "Join Hackathon button. To complete registration, sign up to create a free Devpost account.\n"
+    )
+    quote = "Deadline: Oct 30, 2026 @ 10:00am PDT"
+    assert quote in recorded_page_text
+
+    claims = [
+        {
+            "claim": quote,
+            "source_url": "https://nebiusglobalaihackathon.devpost.com/rules",
+            "exact_quote": quote,
+            "extracted_date": quote,
+        }
+    ]
+    sources = [
+        {
+            "url": "https://nebiusglobalaihackathon.devpost.com/rules",
+            "authority_tier": AuthorityTier.TIER_1_OFFICIAL.value,
+        }
+    ]
+
+    verdict, evidence = evaluate_deterministic_verdict(
+        claims, recorded_page_text, sources, target_entity="nebius global ai hackathon"
+    )
+
+    assert verdict == "VERIFIED"
+    assert len(evidence) == 1
+    item = evidence[0]
+    assert item["verdict"] == "VERIFIED"
+    assert item["verbatim_quote"] == quote
+    assert item["verbatim_quote"] in recorded_page_text
+    assert item["parsed_date"] == "2026-10-30T10:00:00-07:00"
+    assert item["year_provenance"] == "explicit_in_quote"
+
+
+def test_nebius_recorded_rules_page_with_judging_and_winners_dates():
+    """Round 11 Regression test: verify semantic selection extracts Oct 30, 2026 @ 10:00am PDT,
+
+    never judging dates (Dec 1-15) or winners announcement (Jan 11, 2027), and does NOT use max().
+    """
+    from backend.services.tavily_pipeline import _parse_explicit_year_date
+
+    page_text = (
+        "Nebius x NVIDIA Global AI Hackathon Official Rules\n"
+        "Submission Period: Wednesday, August 26, 2026 (9:00 am Pacific Time) – Friday, October 30, 2026 (10:00 am Pacific Time) (\"Submission Period\").\n"
+        "Judging Period: December 1, 2026 (9:00 am PT) – December 15, 2026 (5:00 pm PT).\n"
+        "Winners Announced: on or around January 11, 2027 (12:00 pm PT).\n"
+    )
+
+    quote = "Submission Period: Wednesday, August 26, 2026 (9:00 am Pacific Time) – Friday, October 30, 2026 (10:00 am Pacific Time)"
+    parsed_dt, provenance = _parse_explicit_year_date(quote)
+    assert parsed_dt is not None
+    assert parsed_dt.isoformat() == "2026-10-30T10:00:00-07:00"
+    assert provenance == "explicit_in_quote"
+    assert parsed_dt.month == 10
+    assert parsed_dt.day == 30
+    assert parsed_dt.year == 2026
+    # Verify Dec and Jan dates were NEVER selected
+    assert parsed_dt.month != 12
+    assert parsed_dt.month != 1
+
+    claims = [
+        {
+            "claim": quote,
+            "source_url": "https://nebiusglobalaihackathon.devpost.com/rules",
+            "exact_quote": quote,
+            "extracted_date": quote,
+        }
+    ]
+    sources = [
+        {
+            "url": "https://nebiusglobalaihackathon.devpost.com/rules",
+            "authority_tier": AuthorityTier.TIER_1_OFFICIAL.value,
+        }
+    ]
+
+    verdict, evidence = evaluate_deterministic_verdict(
+        claims, page_text, sources, target_entity="nebius global ai hackathon"
+    )
+    assert verdict == "VERIFIED"
+    assert evidence[0]["parsed_date"] == "2026-10-30T10:00:00-07:00"
+
+
+def test_nebius_rules_page_with_changelog_banner():
+    """Round 11 Regression test: changelog banner date (Oct 4, 2026) is ignored in favor of submission deadline (Oct 30, 2026)."""
+    from backend.services.tavily_pipeline import _parse_explicit_year_date
+
+    page_text = (
+        "BANNER: Changelog update and routine maintenance performed on October 4, 2026 at 23:59 UTC.\n"
+        "Nebius x NVIDIA Global AI Hackathon\n"
+        "Submission Deadline: Oct 30, 2026 @ 10:00am PDT\n"
+    )
+
+    quote = "Submission Deadline: Oct 30, 2026 @ 10:00am PDT"
+    parsed_dt, provenance = _parse_explicit_year_date(page_text)
+    assert parsed_dt is not None
+    assert parsed_dt.isoformat() == "2026-10-30T10:00:00-07:00"
+    assert parsed_dt.day == 30
+    assert parsed_dt.day != 4  # Never Oct 4 banner
+
+
+def test_tier_2_requires_agreeing_sources_unless_trusted_event_url():
+    """Round 11 Regression test: Tier 2 with single source stays UNVERIFIED;
+
+    adding trusted_event_url elevates to Tier 1 Official and becomes VERIFIED.
+    """
+    from backend.services.tavily_authority import classify_domain_authority
+
+    devpost_url = "https://unpinned-contest.devpost.com/rules"
+    quote = "Submission Deadline: Oct 30, 2026 @ 10:00am PDT"
+    page_text = f"Unpinned Contest\n{quote}"
+
+    # 1. Standard classification without trusted_event_url -> Tier 2
+    auth_default = classify_domain_authority(devpost_url)
+    assert auth_default["tier"] == AuthorityTier.TIER_2_TECHNICAL.value
+
+    claims = [{
+        "claim": quote,
+        "source_url": devpost_url,
+        "exact_quote": quote,
+        "extracted_date": quote,
+    }]
+    sources_t2 = [{"url": devpost_url, "authority_tier": auth_default["tier"]}]
+
+    # Single Tier 2 source cannot earn VERIFIED
+    verdict, evidence = evaluate_deterministic_verdict(claims, page_text, sources_t2, target_entity="unpinned contest")
+    assert verdict == "UNVERIFIED"
+    assert evidence[0]["verdict"] == "UNVERIFIED"
+
+    # 2. Classification with per-user trusted_event_url -> Tier 1 Official
+    auth_trusted = classify_domain_authority(devpost_url, trusted_event_url="https://unpinned-contest.devpost.com/rules")
+    assert auth_trusted["tier"] == AuthorityTier.TIER_1_OFFICIAL.value
+
+    sources_t1 = [{"url": devpost_url, "authority_tier": auth_trusted["tier"]}]
+    verdict_trusted, evidence_trusted = evaluate_deterministic_verdict(claims, page_text, sources_t1, target_entity="unpinned contest")
+    assert verdict_trusted == "VERIFIED"
+    assert evidence_trusted[0]["verdict"] == "VERIFIED"
+

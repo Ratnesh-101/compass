@@ -52,9 +52,9 @@ Compass:
 
 ## See It In Action
 
-| Timeline Feed | Northstar AI Workspace |
+| Timeline Feed | Compass Workspace |
 |:---:|:---:|
-| ![Timeline](verification/browser_01_initial_timeline.png) | ![Northstar](verification/browser_04_agent_panel.png) |
+| ![Timeline](verification/browser_01_initial_timeline.png) | ![Compass](verification/browser_04_agent_panel.png) |
 
 | Chat Copilot with Memory | Specialist Agents |
 |:---:|:---:|
@@ -71,8 +71,8 @@ Compass:
 | | Feature | What it does |
 |--|---------|-------------|
 | 🧠 | **Persistent Cross-Domain Memory** | Tasks, conversations, code context, and web research stored in PostgreSQL + pgvector and recalled across sessions |
-| 🤖 | **Autonomous ReAct Agent** | Multi-step planning loop (Northstar) that reasons, calls tools, and synthesizes results — stopping at a confirmation gate before any database write |
-| 🧩 | **Specialist Delegation** | Four domain agents (Coursework, Research, Calendar, Memory) that Northstar delegates to for focused analysis |
+| 🤖 | **Autonomous ReAct Agent** | Multi-step planning loop that reasons, calls tools, and synthesizes results — stopping at a confirmation gate before any database write |
+| 🧩 | **Specialist Delegation** | Four domain agents (Coursework, Research, Calendar, Memory) that Compass delegates to for focused analysis |
 | 🌐 | **Live Web Intelligence** | Three Tavily-powered tools: `search_web` (grounded answers), `ingest_url` (confirm-gated web-to-memory ingestion), `verify_deadline` (staleness detection against live sources) |
 | 📊 | **Feasibility Engine** | Deterministic capacity arithmetic — computes demand vs. available hours and produces a triage plan without trusting the LLM to do the math |
 | 📅 | **Calendar Integration** | Google Calendar OAuth sync, deterministic slot allocation, ICS generation, conflict detection |
@@ -89,7 +89,7 @@ Compass:
 User (Web or CLI)
         │
         ▼
-Northstar AI (Chat Copilot / Goal Planner / Specialist Agents)
+Compass (Assistant / Goal Planner / Specialist Agents)
         │
         ▼
 Nemotron-3 Nano 30B — intent routing & tool selection
@@ -156,12 +156,11 @@ Three specialized Tavily tools, each with distinct behavior:
 Live at [compass-farmlytics.vercel.app](https://compass-farmlytics.vercel.app) — anonymous demo access, no login required.
 
 - **Timeline** — task and deadline feed across all domains, filterable by Hackathon / Coursework / Code / General
-- **Northstar AI** — primary workspace with Chat Copilot, Goal Planner, and Specialist Agents tabs
+- **Compass** — primary workspace with Assistant, Goal Planner, and Specialist Agents tabs
 - **Schedule** — calendar view with Google Calendar sync
 - Real-time SSE streaming for agent execution traces
 - Color-coded step cards: `THINK`, `TOOL CALL`, `RESULT`, `CONFIRMATION REQUIRED`, `SYNTHESIS`
 - One-click Approve / Reject on mutation proposals
-- Public share links for any conversation (`/?share=<id>`)
 
 ### Terminal CLI
 
@@ -282,6 +281,19 @@ See **[docs/testing.md](docs/testing.md)** for per-file breakdown and test infra
 ## Deployment
 
 Compass uses GitHub Actions for continuous integration and provider-native continuous delivery. Merges to the `main` branch target automated deployment via Vercel (frontend) and Render (backend), with post-deployment health verification performed via `scripts/verify_deployment.py`.
+
+### Deploy Checklist
+
+Before launching or triggering production deployments, ensure the following environment variables are securely configured with distinct values (e.g. generated via `openssl rand -hex 32`):
+
+1. **Render Dashboard (Backend Service Environment):**
+   - `AUTH_TOKEN`: Master administrative API token.
+   - `TOKEN_ENCRYPTION_KEY`: 32-byte key for encrypting user tokens and secrets in the database.
+   - `GUEST_SIGNING_SECRET`: Secret used to cryptographically sign anonymous guest JWTs.
+   - `EDGE_HMAC_SECRET`: Shared secret used to verify requests forwarded by the Vercel edge reverse proxy.
+2. **Vercel Dashboard (Frontend Project Environment Variables):**
+   - `EDGE_HMAC_SECRET`: Must match the exact value set on Render. Used by `frontend/middleware.js` to sign forwarded client IP and timestamp headers (`x-compass-edge-sig`).
+   - *Note on `VERCEL_EDGE_SECRET`:* Compass supports `VERCEL_EDGE_SECRET` as a documented backward-compatible alias for `EDGE_HMAC_SECRET`. If `EDGE_HMAC_SECRET` is not set, Compass automatically falls back to `VERCEL_EDGE_SECRET`.
 
 See **[docs/deployment.md](docs/deployment.md)** for full architecture, environment variables, verification, and rollback runbooks.
 

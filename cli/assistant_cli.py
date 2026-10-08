@@ -35,6 +35,7 @@ import typer
 from dotenv import load_dotenv
 from rich import box
 from rich.console import Console
+from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.table import Table
@@ -589,6 +590,101 @@ def triage(
         hours=hours,
         domain=domain,
     )
+
+
+@app.command("memory")
+def view_memory():
+    """🧠 View personal profile facts and preferences remembered by Compass."""
+    try:
+        resp = httpx.get(f"{API_BASE}/api/profile/facts", headers=_headers(), timeout=10.0)
+        resp.raise_for_status()
+        data = resp.json()
+        facts = data.get("facts", {})
+        if not facts:
+            console.print("[compass.dim]No personal profile facts stored yet. Tell Compass your name, goals, or preferences in chat.[/]")
+            return
+
+        table = Table(
+            title="🧠 What Compass Remembers About You",
+            box=box.ROUNDED,
+            header_style="bold magenta",
+        )
+        table.add_column("Category", style="cyan", width=18)
+        table.add_column("Detail / Preference", style="green")
+
+        for k, v in sorted(facts.items()):
+            table.add_row(k.replace("_", " ").capitalize(), str(v))
+
+        console.print(table)
+    except Exception as e:
+        console.print(f"[compass.error]❌ Failed to fetch memory facts: {e}[/]")
+
+
+@app.command("parked")
+def view_parked():
+    """📌 View ideas and tangents saved on the 'Park it' shelf."""
+    try:
+        resp = httpx.get(f"{API_BASE}/api/parked", headers=_headers(), timeout=10.0)
+        resp.raise_for_status()
+        data = resp.json()
+        parked = data.get("parked", [])
+        if not parked:
+            console.print("[compass.dim]Your 'Park it' shelf is currently empty.[/]")
+            return
+
+        table = Table(
+            title="📌 Parked Thoughts Shelf",
+            box=box.ROUNDED,
+            header_style="bold yellow",
+        )
+        table.add_column("ID", style="dim", width=6)
+        table.add_column("Thought / Tangent", style="cyan")
+        table.add_column("Status", style="green", width=10)
+        table.add_column("Parked At", style="dim", width=20)
+
+        for p in parked:
+            created = str(p.get("created_at", ""))[:19].replace("T", " ")
+            table.add_row(str(p.get("id", "")), str(p.get("text", "")), str(p.get("status", "parked")), created)
+
+        console.print(table)
+    except Exception as e:
+        console.print(f"[compass.error]❌ Failed to fetch parked thoughts: {e}[/]")
+
+
+@app.command("recap")
+def recap_conversation(
+    conversation_id: Optional[str] = typer.Option(None, "--id", "-i", help="Specific conversation ID to recap (defaults to most recent)"),
+):
+    """📝 Summarize decisions made, open questions, and next steps for a chat conversation."""
+    cid = conversation_id
+    if not cid:
+        try:
+            resp_list = httpx.get(f"{API_BASE}/api/conversations?limit=1", headers=_headers(), timeout=10.0)
+            if resp_list.status_code == 200:
+                convs = resp_list.json().get("conversations", [])
+                if convs:
+                    cid = convs[0].get("id")
+        except Exception:
+            pass
+
+    if not cid:
+        console.print("[compass.dim]No conversation found to recap. Start a chat first with `compass chat`.[/]")
+        return
+
+    try:
+        resp = httpx.post(f"{API_BASE}/api/chat/recap", json={"conversation_id": cid}, headers=_headers(), timeout=20.0)
+        resp.raise_for_status()
+        data = resp.json()
+        recap_text = data.get("recap", "")
+
+        console.print(Panel(
+            Markdown(recap_text),
+            title=f"📝 Conversation Recap: {cid[:8]}...",
+            border_style="magenta",
+            padding=(1, 2),
+        ))
+    except Exception as e:
+        console.print(f"[compass.error]❌ Failed to fetch conversation recap: {e}[/]")
 
 
 # ---------------------------------------------------------------------------

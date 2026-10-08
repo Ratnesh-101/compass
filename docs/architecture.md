@@ -51,15 +51,15 @@ flowchart TD
 5. **Nemotron-3 Ultra (550B)** synthesizes cross-domain roadmaps (invoked only for `summarize_across_domains`)
 6. **SSE stream** delivers token-by-token output to the web UI
 
-## Northstar + Specialist Architecture
+## Multi-Agent & Specialist Architecture
 
 ```
                     COMPASS
                        │
           ┌────────────┴────────────┐
           │                         │
-     🧭 NORTHSTAR             🧠 SPECIALIST TEAM
-     (Chat + Agent)           (Domain Experts)
+     🧭 ASSISTANT & PLANNER   🧠 SPECIALIST TEAM
+     (Chat + ReAct Agent)     (Domain Experts)
           │                         │
      ┌────┴────┐            ┌───────┼───────┐
      │         │            │       │       │
@@ -77,9 +77,9 @@ flowchart TD
     Confirmation → Execution → Audit → Undo
 ```
 
-**Northstar** is the primary user-facing AI workspace combining Chat Copilot and Goal Planner. It handles all conversational queries and can initiate multi-step autonomous planning.
+**Compass Assistant & Planner** is the primary user-facing AI workspace combining Conversational Chat and Autonomous ReAct Goal Planning. It handles all conversational queries and can initiate multi-step autonomous planning.
 
-**Specialist Team** consists of four domain-focused agents (`coursework`, `research`, `calendar`, `memory`) that are delegated to by Northstar when narrow domain expertise is needed. Specialists return **proposed actions** — they never mutate the database directly. All proposed mutations require Northstar's confirmation gate before execution.
+**Specialist Team** consists of four domain-focused agents (`coursework`, `research`, `calendar`, `memory`) that are delegated to by Compass when narrow domain expertise is needed. Specialists return **proposed actions** — they never mutate the database directly. All proposed mutations require Compass's confirmation gate before execution.
 
 ## Memory Architecture
 

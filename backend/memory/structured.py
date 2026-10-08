@@ -133,6 +133,7 @@ async def create_task(
     priority: str = "medium",
     notes: Optional[str] = None,
     user_id: Optional[str] = None,
+    trusted_event_url: Optional[str] = None,
 ) -> dict:
     """Insert a new task into the structured tasks table with normalized inputs and user identity."""
     # Normalize domain, status, and priority
@@ -146,11 +147,11 @@ async def create_task(
 
     row = await conn.fetchrow(
         """
-        INSERT INTO tasks (domain, project_id, title, due_date, status, priority, notes, user_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        RETURNING id, domain, project_id, title, due_date, status, priority, notes, user_id, created_at, updated_at
+        INSERT INTO tasks (domain, project_id, title, due_date, status, priority, notes, user_id, trusted_event_url)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING id, domain, project_id, title, due_date, status, priority, notes, user_id, trusted_event_url, created_at, updated_at
         """,
-        norm_domain, project_id, title.strip(), due_date, norm_status, norm_priority, notes, user_id
+        norm_domain, project_id, title.strip(), due_date, norm_status, norm_priority, notes, user_id, trusted_event_url
     )
     return dict(row) if row else {}
 
@@ -159,7 +160,7 @@ async def get_task(conn: DbConn, task_id: int) -> Optional[dict]:
     """Retrieve a task by ID including project details."""
     row = await conn.fetchrow(
         """
-        SELECT t.id, t.domain, t.title, t.due_date, t.status, t.priority, t.notes,
+        SELECT t.id, t.domain, t.title, t.due_date, t.status, t.priority, t.notes, t.trusted_event_url,
                t.duration_minutes, t.scheduled_start, t.scheduled_end, t.is_fixed, t.recurrence_rule,
                t.created_at, t.updated_at, t.user_id,
                p.id AS project_id, p.name AS project_name
@@ -192,7 +193,7 @@ async def list_tasks(
 ) -> list[dict]:
     """Query tasks with optional filters and per-account isolation."""
     query = """
-        SELECT t.id, t.domain, t.title, t.due_date, t.status, t.priority, t.notes,
+        SELECT t.id, t.domain, t.title, t.due_date, t.status, t.priority, t.notes, t.trusted_event_url,
                t.duration_minutes, t.scheduled_start, t.scheduled_end, t.is_fixed, t.recurrence_rule,
                t.created_at, t.updated_at, t.user_id,
                p.id AS project_id, p.name AS project_name
@@ -235,7 +236,7 @@ async def update_task(
 ) -> Optional[dict]:
     """Update task fields dynamically (e.g. status, priority, due_date, notes, scheduling) with normalization."""
     allowed_fields = {"domain", "project_id", "title", "due_date", "status", "priority", "notes",
-                      "duration_minutes", "scheduled_start", "scheduled_end", "is_fixed", "recurrence_rule"}
+                      "duration_minutes", "scheduled_start", "scheduled_end", "is_fixed", "recurrence_rule", "trusted_event_url"}
     updates = {k: v for k, v in kwargs.items() if k in allowed_fields}
 
     if not updates:
@@ -270,6 +271,7 @@ async def update_task(
             scheduled_end = CASE WHEN $20::boolean THEN $21::timestamptz ELSE scheduled_end END,
             is_fixed = CASE WHEN $22::boolean THEN $23::boolean ELSE is_fixed END,
             recurrence_rule = CASE WHEN $24::boolean THEN $25::text ELSE recurrence_rule END,
+            trusted_event_url = CASE WHEN $26::boolean THEN $27::text ELSE trusted_event_url END,
             updated_at = now()
         WHERE id = $1
         RETURNING id
@@ -301,6 +303,8 @@ async def update_task(
         updates.get("is_fixed"),
         "recurrence_rule" in updates,
         updates.get("recurrence_rule"),
+        "trusted_event_url" in updates,
+        updates.get("trusted_event_url"),
     )
     if not row:
         return None
@@ -511,3 +515,28 @@ async def get_all_dependencies_map(conn: DbConn) -> dict[int, list[int]]:
     for r in rows:
         dep_map.setdefault(r["task_id"], []).append(r["depends_on_task_id"])
     return dep_map
+
+
+async def set_user_trusted_url(conn: DbConn, user_id: str, url: str, title: Optional[str] = None) -> dict:
+    """Pin a trusted official event/docs URL for a user in the database."""
+    row = await conn.fetchrow(
+        """
+        INSERT INTO user_trusted_urls (user_id, url, title, created_at)
+        VALUES ($1, $2, $3, now())
+        ON CONFLICT (user_id, url) DO UPDATE
+        SET title = COALESCE(EXCLUDED.title, user_trusted_urls.title)
+        RETURNING id, user_id, url, title, created_at
+        """,
+        user_id, url.strip(), title
+    )
+    return dict(row) if row else {}
+
+
+async def get_user_trusted_urls(conn: DbConn, user_id: str) -> list[str]:
+    """Retrieve all pinned trusted event URLs for a user from the database."""
+    rows = await conn.fetch(
+        "SELECT url FROM user_trusted_urls WHERE user_id = $1 ORDER BY created_at DESC",
+        user_id
+    )
+    return [r["url"] for r in rows]
+

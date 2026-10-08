@@ -22,7 +22,6 @@ KNOWN_ROUTE_METADATA = {
     ("/health", "GET"): ("None", "Public Readiness / Neon DB pool ping", "test_api_endpoints.py::test_health_endpoint"),
     ("/admin/consolidate", "POST"): ("verify_token (AUTH_TOKEN)", "Restricted to callers with AUTH_TOKEN", "test_nightly_job.py::test_consolidate_endpoint"),
     ("/admin/usage", "GET"): ("verify_token (AUTH_TOKEN)", "Restricted to callers with AUTH_TOKEN", "test_telemetry.py::test_admin_usage_telemetry"),
-    ("/api/admin/proxy-hops", "GET"): ("None (Diagnostic)", "Inspects proxy hops & XFF chain", "test_round4_hardening.py::test_proxy_hops_shorter_chain_falls_back_to_peer_address"),
     ("/api/admin/usage", "GET"): ("verify_token (AUTH_TOKEN)", "Restricted to callers with AUTH_TOKEN", "test_telemetry.py::test_admin_usage_telemetry"),
     ("/api/agent/activity", "GET"): ("_get_current_identity", "WHERE approved_by = $1 OR args->>'user_id' = $1", "test_round3_corrections.py::test_agent_activity_auth_isolation"),
     ("/api/agent/capabilities", "GET"): ("None", "Static schema of available agent actions", "test_agent_execution.py::test_agent_capabilities"),
@@ -70,8 +69,6 @@ KNOWN_ROUTE_METADATA = {
     ("/api/schedule/conflicts", "GET"): ("_get_current_identity", "Checks schedule clashes for active user", "test_reactive_scheduling.py::test_conflicts"),
     ("/api/schedule/propose", "POST"): ("None / Stateless", "Deterministic schedule generation over tasks", "test_scheduling.py::test_propose_schedule"),
     ("/api/schedule/reactive-check", "POST"): ("None / Stateless", "Slipped task replanning algorithm", "test_reactive_scheduling.py::test_reactive_check"),
-    ("/api/share/{share_token}", "GET"): ("None (Public Token)", "WHERE share_token = $1 AND is_shared = TRUE (token-only)", "test_round4_hardening.py::test_share_link_conversation_id_does_not_resolve"),
-    ("/api/specialist/dispatch", "POST"): ("_get_current_identity", "Rate limited + budget checked specialist dispatch", "test_specialist.py::test_dispatch_specialist"),
     ("/api/tasks", "GET"): ("_get_current_identity", "WHERE user_id = $1", "test_direct_tasks.py::test_list_tasks"),
     ("/api/tasks", "POST"): ("_get_current_identity", "Bound to caller user_id / guest_id", "test_direct_tasks.py::test_create_task"),
     ("/api/tasks/verify-deadlines", "POST"): ("_get_current_identity", "Batch verification for caller tasks", "test_tavily_abstain.py::test_verify_deadlines_batch"),
@@ -89,6 +86,16 @@ KNOWN_ROUTE_METADATA = {
     ("/memory/timeline", "GET"): ("_get_current_identity", "WHERE user_id = $1 memory timeline", "test_direct_tasks.py::test_timeline_endpoint"),
     ("/projects", "GET"): ("_get_current_identity", "WHERE user_id = $1 projects list", "test_direct_tasks.py::test_projects_endpoint"),
     ("/tasks", "GET"): ("_get_current_identity", "WHERE user_id = $1 tasks list", "test_direct_tasks.py::test_list_tasks"),
+    ("/api/chat/recap", "POST"): ("_get_current_identity", "Ownership check: 403 if not owner", "test_round9_negative_coverage.py::test_neg_post_chat_recap"),
+    ("/api/parked", "GET"): ("_get_current_identity", "WHERE user_id = $1", "test_round9_negative_coverage.py::test_neg_get_parked_thoughts"),
+    ("/api/parked", "POST"): ("_get_current_identity", "Bound to caller identity", "test_round9_negative_coverage.py::test_neg_post_parked_thought"),
+    ("/api/parked/{thought_id}", "PATCH"): ("_get_current_identity", "WHERE id = $1 AND user_id = $2 (IDOR safe)", "test_round9_negative_coverage.py::test_neg_patch_parked_thought"),
+    ("/api/parked/{thought_id}/resolve", "PATCH"): ("_get_current_identity", "WHERE id = $1 AND user_id = $2 (IDOR safe)", "test_round9_negative_coverage.py::test_neg_patch_parked_thought_resolve"),
+    ("/api/persona/phrases", "GET"): ("None", "Public persona phrase pools", "test_persona_and_profile.py::test_persona_phrases_endpoint"),
+    ("/api/profile/facts", "GET"): ("_get_current_identity", "WHERE user_id = $1", "test_round9_negative_coverage.py::test_neg_get_profile_facts"),
+    ("/api/profile/facts", "DELETE"): ("_get_current_identity", "WHERE user_id = $1 (forget all)", "test_round9_negative_coverage.py::test_neg_delete_all_profile_facts"),
+    ("/api/profile/facts/{key}", "DELETE"): ("_get_current_identity", "WHERE user_id = $1 AND key = $2", "test_round9_negative_coverage.py::test_neg_delete_single_profile_fact"),
+    ("/api/specialist/dispatch", "POST"): ("_get_current_identity", "Read-only specialist multi-agent analysis", "test_specialist_confirm_gate.py::test_direct_specialist_endpoint_is_strictly_read_only"),
 }
 
 # ---------------------------------------------------------------------------
@@ -119,6 +126,18 @@ NEGATIVE_CROSS_IDENTITY_TESTS = {
     ("/api/conversations/{conversation_id}", "DELETE"): "tests/test_round5_hardening.py::test_cross_identity_conversation_isolation_negative",
     ("/api/conversations/{conversation_id}", "PATCH"): "tests/test_round5_hardening.py::test_cross_identity_conversation_isolation_negative",
     ("/api/conversations/{conversation_id}/messages", "GET"): "tests/test_round5_hardening.py::test_cross_identity_conversation_isolation_negative",
+    ("/api/chat/recap", "POST"): "tests/test_round9_negative_coverage.py::test_neg_post_chat_recap",
+
+    # Profile facts
+    ("/api/profile/facts", "GET"): "tests/test_round9_negative_coverage.py::test_neg_get_profile_facts",
+    ("/api/profile/facts", "DELETE"): "tests/test_round9_negative_coverage.py::test_neg_delete_all_profile_facts",
+    ("/api/profile/facts/{key}", "DELETE"): "tests/test_round9_negative_coverage.py::test_neg_delete_single_profile_fact",
+
+    # Parked thoughts
+    ("/api/parked", "GET"): "tests/test_round9_negative_coverage.py::test_neg_get_parked_thoughts",
+    ("/api/parked", "POST"): "tests/test_round9_negative_coverage.py::test_neg_post_parked_thought",
+    ("/api/parked/{thought_id}", "PATCH"): "tests/test_round9_negative_coverage.py::test_neg_patch_parked_thought",
+    ("/api/parked/{thought_id}/resolve", "PATCH"): "tests/test_round9_negative_coverage.py::test_neg_patch_parked_thought_resolve",
 
     # Guest & Migration
     ("/api/guest/data", "DELETE"): "tests/test_round5_hardening.py::test_cross_identity_migration_isolation_negative",
@@ -161,21 +180,29 @@ NEGATIVE_CROSS_IDENTITY_TESTS = {
 USER_DATA_ROUTES = set(NEGATIVE_CROSS_IDENTITY_TESTS.keys())
 
 
+def get_app_routes() -> list[tuple[str, str]]:
+    """Enumerate all registered FastAPI routes across root app and included routers."""
+    routes = set()
+    paths = app.openapi().get("paths", {})
+    for path, pdata in paths.items():
+        for m in pdata.keys():
+            m_upper = m.upper()
+            if m_upper in ("GET", "POST", "PUT", "PATCH", "DELETE"):
+                routes.add((path, m_upper))
+    for r in app.routes:
+        p = getattr(r, "path", None)
+        if p and p not in ("/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"):
+            for m in getattr(r, "methods", set()):
+                if m in ("GET", "POST", "PUT", "PATCH", "DELETE"):
+                    routes.add((p, m.upper()))
+    return sorted(list(routes))
+
+
 def verify_all_routes():
     untracked = []
-    seen = set()
-    for route in sorted(app.routes, key=lambda r: getattr(r, "path", "")):
-        path = getattr(route, "path", "")
-        methods = getattr(route, "methods", set())
-        for m in sorted(methods):
-            if m in ("OPTIONS", "HEAD"):
-                continue
-            key = (path, m)
-            if key in seen:
-                continue
-            seen.add(key)
-            if key not in KNOWN_ROUTE_METADATA:
-                untracked.append(key)
+    for key in get_app_routes():
+        if key not in KNOWN_ROUTE_METADATA:
+            untracked.append(key)
     return untracked
 
 
@@ -214,21 +241,16 @@ def verify_negative_cross_identity_coverage():
     missing = []
     seen_tests = set()
 
-    for route in sorted(app.routes, key=lambda r: getattr(r, "path", "")):
-        path = getattr(route, "path", "")
-        methods = getattr(route, "methods", set())
-        for m in sorted(methods):
-            if m in ("OPTIONS", "HEAD"):
-                continue
-            key = (path, m)
-            if key in USER_DATA_ROUTES:
-                test_ref = discovered.get(key)
-                if not test_ref:
-                    missing.append((path, m, "No negative test with @pytest.mark.route found in test suite"))
-                else:
-                    if test_ref in seen_tests:
-                        missing.append((path, m, f"Test '{test_ref}' is reused across multiple routes; each user-data route must have its own test"))
-                    seen_tests.add(test_ref)
+    for key in get_app_routes():
+        path, m = key
+        if key in USER_DATA_ROUTES:
+            test_ref = discovered.get(key)
+            if not test_ref:
+                missing.append((path, m, "No negative test with @pytest.mark.route found in test suite"))
+            else:
+                if test_ref in seen_tests:
+                    missing.append((path, m, f"Test '{test_ref}' is reused across multiple routes; each user-data route must have its own test"))
+                seen_tests.add(test_ref)
 
     return missing, len(discovered), len(USER_DATA_ROUTES)
 
@@ -237,20 +259,12 @@ def print_markdown_table():
     discovered = discover_negative_route_tests()
     print("| Route | Method | Identity Dep | Ownership Check / Access Policy | Test Function | Negative Cross-Identity Test |")
     print("| :--- | :--- | :--- | :--- | :--- | :--- |")
-    seen = set()
-    for route in sorted(app.routes, key=lambda r: getattr(r, "path", "")):
-        path = getattr(route, "path", "")
-        methods = getattr(route, "methods", set())
-        for m in sorted(methods):
-            if m in ("OPTIONS", "HEAD"):
-                continue
-            key = (path, m)
-            if key in seen:
-                continue
-            seen.add(key)
-            meta = KNOWN_ROUTE_METADATA.get(key, ("None", "Public or Default", "tests/test_api_endpoints.py"))
-            neg = discovered.get(key, "N/A (Public / Infrastructure)")
-            print(f"| `{path}` | `{m}` | `{meta[0]}` | {meta[1]} | `{meta[2]}` | `{neg}` |")
+    for key in get_app_routes():
+        path, m = key
+        meta = KNOWN_ROUTE_METADATA.get(key, ("None", "Public or Default", "tests/test_api_endpoints.py"))
+        neg = discovered.get(key, "N/A (Public / Infrastructure)")
+        print(f"| `{path}` | `{m}` | `{meta[0]}` | {meta[1]} | `{meta[2]}` | `{neg}` |")
+
 
 
 if __name__ == "__main__":

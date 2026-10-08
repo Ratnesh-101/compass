@@ -17,9 +17,12 @@ import json
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 from backend.memory.db import get_pool
+
+if TYPE_CHECKING:
+    from backend.dependencies import Identity
 
 logger = logging.getLogger("compass.agent_pending")
 
@@ -74,7 +77,7 @@ async def verify_and_claim_action(
     pool: Any,
     action_id: Optional[str],
     run_id: Optional[str],
-    caller_identity: str,
+    caller_identity: str | Identity,
     confirmed_args: Optional[Dict[str, Any]] = None,
 ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
     """Verify ownership, expiry, replay, and args integrity, claiming the action atomically.

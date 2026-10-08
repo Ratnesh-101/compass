@@ -23,7 +23,6 @@ _ORIGINAL_MEMORY_TOOLS = frozenset({
 
 _WIDENED_MEMORY_TOOLS = frozenset({
     "get_hackathon_deadlines",
-    "delegate_to_specialist",
     "list_projects",
     "query_coursework_tasks",
     "detect_deadline_conflicts",
@@ -114,6 +113,8 @@ async def execute_agent_tool_step(
                         is_zero = True
                     elif "projects" in data_field and len(data_field.get("projects", [])) == 0:
                         is_zero = True
+                    elif "notes" in data_field and len(data_field.get("notes", [])) == 0:
+                        is_zero = True
                     elif "findings" in data_field and len(data_field.get("findings", {})) == 0:
                         is_zero = True
                     elif data_field.get("status") in ("unavailable", "error"):
@@ -125,7 +126,7 @@ async def execute_agent_tool_step(
                 if any(phrase in resp_str for phrase in (
                     "found 0", "retrieved 0", "0 task", "0 active", "0 deliverable",
                     "0 relevant", "0 result", "0 tracked", "no tracked", "no task",
-                    "no active", "no deliverable", "no deadline", "no relevant",
+                    "no active", "no deliverable", "no deadline", "no note", "no relevant",
                     "no matching", "not found", "task_id is required", "error",
                     "failed", "none found"
                 )):

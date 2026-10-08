@@ -97,9 +97,15 @@ async def test_admin_consolidate_endpoint(client: AsyncClient, auth_headers: dic
 
 
 @pytest.mark.asyncio
-async def test_shared_conversation_public_endpoint(client: AsyncClient):
-    """GET /api/share/{id} is publicly accessible without auth and returns 404 for nonexistent UUID, not 401/403."""
+async def test_shared_conversation_endpoint_deleted_returns_404(client: AsyncClient):
+    """GET /api/share/{id} was completely removed and returns 404."""
     fake_id = "00000000-0000-0000-0000-000000000000"
     resp = await client.get(f"/api/share/{fake_id}")
-    assert resp.status_code in (404, 500, 503)
-    assert resp.status_code not in (401, 403)
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_specialist_dispatch_endpoint_deleted_returns_404(client: AsyncClient):
+    """POST /api/specialist/dispatch was completely removed and returns 404."""
+    resp = await client.post("/api/specialist/dispatch", json={"capability": "memory", "user_goal": "test"})
+    assert resp.status_code == 404

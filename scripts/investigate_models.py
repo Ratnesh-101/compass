@@ -22,9 +22,9 @@ for ep in endpoints:
         unique_endpoints.append(ep)
 
 for ep in unique_endpoints:
-    print(f"\n=======================================================")
+    print("\n=======================================================")
     print(f"Testing Endpoint: {ep}")
-    print(f"=======================================================")
+    print("=======================================================")
     # GET /models
     req = urllib.request.Request(
         f"{ep}/models",
@@ -47,9 +47,9 @@ for ep in unique_endpoints:
         print(f"GET {ep}/models -> Error: {e}")
 
 # Call POST /embeddings for configured base
-print(f"\n=======================================================")
+print("\n=======================================================")
 print(f"Calling POST /embeddings on configured base: {configured_base}")
-print(f"=======================================================")
+print("=======================================================")
 emb_payload = json.dumps({
     "input": "Compass semantic vector dimension verification",
     "model": "Qwen/Qwen3-Embedding-8B",

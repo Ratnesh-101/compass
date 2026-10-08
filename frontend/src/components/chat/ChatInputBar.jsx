@@ -5,7 +5,7 @@ const QUICK_PROMPTS = [
   { icon: '⚠️', text: 'Check my weekend schedule for conflicts across hackathon and coursework', specialistId: 'calendar' },
   { icon: '🧠', text: 'Why did we choose 768-dim Matryoshka embeddings for pgvector?', specialistId: 'memory' },
   { icon: '🌐', text: 'Verify the Nebius hackathon deadline on Devpost', specialistId: 'research' },
-  { icon: '📚', text: "Review CS 61C RISC-V pipeline lab notes and coursework tasks", specialistId: 'coursework' },
+  { icon: '📚', text: "Review CS 61C RISC-V pipeline lab notes and coursework tasks", specialistId: 'coursework' }
 ]
 
 export default function ChatInputBar({
@@ -213,7 +213,7 @@ export default function ChatInputBar({
       )}
 
       {/* Quick prompt suggestions */}
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', overflowX: 'auto', paddingBottom: '4px' }}>
+      <div className="quick-prompts-scroll" style={{ display: 'flex', gap: '8px', marginBottom: '10px', overflowX: 'auto', overflowY: 'hidden', paddingBottom: '6px' }}>
         {QUICK_PROMPTS.map((item, idx) => (
           <button
             key={idx}

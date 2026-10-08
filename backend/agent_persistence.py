@@ -98,9 +98,9 @@ async def record_audit_log(
         row = await conn.fetchrow(
             """
             INSERT INTO agent_audit_log
-                (run_id, tool, args, affected_table, affected_id, previous_state, new_state, approved_by)
+                (run_id, tool, args, affected_table, affected_id, previous_state, new_state, approved_by, status)
             VALUES
-                ($1, $2, $3::jsonb, $4, $5, $6::jsonb, $7::jsonb, $8)
+                ($1, $2, $3::jsonb, $4, $5, $6::jsonb, $7::jsonb, $8, 'executed')
             RETURNING id
             """,
             run_id,

@@ -1,12 +1,13 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import Sidebar from './components/Sidebar'
 import Timeline from './components/Timeline'
 import CalendarView from './components/CalendarView'
-import NorthstarPanel from './components/NorthstarPanel'
+import CompassPanel from './components/CompassPanel'
 import AuthModal from './components/AuthModal'
 import MigrationModal from './components/MigrationModal'
-import SharedChatView from './components/SharedChatView'
 import NebiusTelemetryModal from './components/NebiusTelemetryModal'
+import { getCustomDomains, removeCustomDomain, getDomainMeta } from './components/timeline/domainMeta'
+import { parseLocation, buildUrl } from './router'
 import {
   checkBackendHealth,
   fetchTasks,
@@ -20,9 +21,13 @@ import {
 
 export default function App() {
   const [tasks, setTasks] = useState([])
-  const [activeTab, setActiveTab] = useState('timeline')
-  const [selectedDomain, setSelectedDomain] = useState('all')
-  const [backendStatus, setBackendStatus] = useState('Connecting...')
+  const [allTasks, setAllTasks] = useState([])
+  const [customDomains, setCustomDomains] = useState(() => getCustomDomains())
+  const initialNav = useMemo(() => parseLocation(), [])
+  const [activeTab, setActiveTab] = useState(() => initialNav.tab)
+  const [selectedDomain, setSelectedDomain] = useState(() => initialNav.domain)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [backendStatus, setBackendStatus] = useState('Waking up the server…')
   const [conversationId, setConversationId] = useState(null)
   const [usageStats, setUsageStats] = useState(null)
   const [showTelemetryModal, setShowTelemetryModal] = useState(false)
@@ -45,19 +50,84 @@ export default function App() {
     return null
   })
   const [showAuthModal, setShowAuthModal] = useState(false)
-
-  const [shareId, setShareId] = useState(() => {
-    const params = new URLSearchParams(window.location.search)
-    return params.get('share') || (window.location.pathname.startsWith('/share/') ? window.location.pathname.replace('/share/', '') : null)
-  })
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
-      text: "Hey! I'm Compass, your productivity copilot. I can track tasks, recall code context, synthesize cross-domain roadmaps, and search the web. What's on your mind?"
+      text: "Hey! I'm Compass. I can track tasks, recall code context, synthesize cross-domain roadmaps, and search the web. What's on your mind?"
     }
   ])
   const [isTyping, setIsTyping] = useState(false)
   const [pendingPrompt, setPendingPrompt] = useState(null)
+
+  const [theme, setTheme] = useState(() => {
+    try {
+      const saved = localStorage.getItem('compass.theme')
+      if (saved === 'dark' || saved === 'light') return saved
+      if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        return 'dark'
+      }
+    } catch {
+      /* ignore storage access error */
+    }
+    return 'light'
+  })
+
+  // Synchronize theme to document root and persist preference
+  useEffect(() => {
+    try {
+      localStorage.setItem('compass.theme', theme)
+    } catch {
+      /* ignore storage access error */
+    }
+    document.documentElement.setAttribute('data-theme', theme)
+    document.documentElement.classList.toggle('dark', theme === 'dark')
+  }, [theme])
+
+  // Listen for system color-scheme changes only if user hasn't set an explicit preference
+  useEffect(() => {
+    const handler = (e) => {
+      try {
+        const saved = localStorage.getItem('compass.theme')
+        if (!saved) {
+          setTheme(e.matches ? 'dark' : 'light')
+        }
+      } catch {}
+    }
+    const mediaQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null
+    if (mediaQuery?.addEventListener) {
+      mediaQuery.addEventListener('change', handler)
+      return () => mediaQuery.removeEventListener('change', handler)
+    }
+  }, [])
+
+  const toggleTheme = useCallback(() => {
+    setTheme(prev => (prev === 'dark' ? 'light' : 'dark'))
+  }, [])
+
+  const navigateTo = useCallback((tab, domain = 'all', replace = false) => {
+    setActiveTab(tab)
+    setSelectedDomain(domain)
+    const targetUrl = buildUrl(tab, domain)
+    const currentUrl = window.location.pathname + window.location.search
+    if (currentUrl !== targetUrl) {
+      if (replace) {
+        window.history.replaceState({ tab, domain }, '', targetUrl)
+      } else {
+        window.history.pushState({ tab, domain }, '', targetUrl)
+      }
+    }
+  }, [])
+
+  // Synchronize browser Back/Forward navigation
+  useEffect(() => {
+    const handlePopState = () => {
+      const loc = parseLocation()
+      setActiveTab(loc.tab)
+      setSelectedDomain(loc.domain)
+    }
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [])
 
   // Keep a ref to the latest tasks state for stable diffing without triggering interval re-creations
   const tasksRef = useRef([])
@@ -78,13 +148,22 @@ export default function App() {
       if (!Array.isArray(incomingTasks)) return
 
       const currentTasks = tasksRef.current
+      const wasFallback = currentTasks.some(t => t.is_fallback)
+      const isIncomingFallback = incomingTasks.some(t => t.is_fallback)
       const hasLengthChanged = incomingTasks.length !== currentTasks.length
       const hasContentChanged = incomingTasks.some((task, i) => {
         const cur = currentTasks[i]
-        return !cur || cur.id !== task.id || cur.title !== task.title || cur.countdown !== task.countdown
+        return !cur || cur.id !== task.id || cur.title !== task.title || cur.countdown !== task.countdown || Boolean(cur.is_fallback) !== Boolean(task.is_fallback)
       })
-      if (hasLengthChanged || hasContentChanged) {
+      if (wasFallback !== isIncomingFallback || hasLengthChanged || hasContentChanged) {
         setTasks(incomingTasks)
+      }
+      if (!domain || domain === 'all') {
+        setAllTasks(incomingTasks)
+      } else {
+        fetchTasks('all').then(total => {
+          if (Array.isArray(total)) setAllTasks(total)
+        }).catch(() => {})
       }
     } catch {
       // Silently preserve current view during transient connection blips
@@ -176,7 +255,7 @@ export default function App() {
         const status = await checkBackendHealth()
         if (isMounted) setBackendStatus(status)
       } catch {
-        if (isMounted) setBackendStatus('Demo Mode • Mock Memory')
+        if (isMounted) setBackendStatus('Waking up the server…')
       }
     }
 
@@ -224,22 +303,71 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const domainCounts = tasks.reduce((acc, t) => {
-    const dom = (t.domain || 'general').toLowerCase().trim()
-    acc[dom] = (acc[dom] || 0) + 1
-    return acc
-  }, {
-    hackathon: 0,
-    coursework: 0,
-    code: 0,
-    general: 0,
-    other: 0,
-  })
+  const domainCounts = useMemo(() => {
+    const counts = {
+      hackathon: 0,
+      coursework: 0,
+      code: 0,
+      general: 0,
+      other: 0,
+    }
+    customDomains.forEach(d => {
+      counts[d.key] = 0
+    })
+    const source = allTasks.length > 0 ? allTasks : tasks
+    source.forEach(t => {
+      const dom = (t.domain || 'general').toLowerCase().trim()
+      counts[dom] = (counts[dom] || 0) + 1
+    })
+    return counts
+  }, [allTasks, tasks, customDomains])
 
-  const handleSendMessage = async (userText) => {
+  const handleSelectTab = useCallback((tabKey) => {
+    if (tabKey === 'timeline') {
+      navigateTo('timeline', 'all')
+    } else if (tabKey === 'compass' || tabKey === 'assistant' || tabKey === 'planner') {
+      navigateTo('compass', 'all')
+    } else if (tabKey === 'calendar' || tabKey === 'schedule') {
+      navigateTo('calendar', 'all')
+    } else {
+      navigateTo(tabKey, 'all')
+    }
+    setMobileMenuOpen(false)
+  }, [navigateTo])
+
+  const handleSelectDomain = useCallback((domainKey) => {
+    navigateTo('timeline', domainKey || 'all')
+    setMobileMenuOpen(false)
+  }, [navigateTo])
+
+  const handleDomainCreated = useCallback((newDomain) => {
+    setCustomDomains(prev => {
+      const filtered = prev.filter(d => d.key !== newDomain.key)
+      return [...filtered, newDomain]
+    })
+    navigateTo('timeline', newDomain.key)
+    setMobileMenuOpen(false)
+  }, [navigateTo])
+
+  const handleDomainDeleted = useCallback((domainKey) => {
+    removeCustomDomain(domainKey)
+    setCustomDomains(prev => prev.filter(d => d.key !== domainKey))
+    if (selectedDomain === domainKey) {
+      navigateTo('timeline', 'all')
+    }
+  }, [selectedDomain, navigateTo])
+
+  const currentDomainMeta = useMemo(() => {
+    if (!selectedDomain || selectedDomain === 'all') {
+      return { label: 'All Domains', icon: '▦' }
+    }
+    return getDomainMeta(selectedDomain)
+  }, [selectedDomain])
+
+  const handleSendMessage = async (userText, tone = null) => {
     setIsTyping(true)
 
-    const result = await sendQueryToAssistant(userText, conversationId)
+    const result = await sendQueryToAssistant(userText, conversationId, tone)
 
     setIsTyping(false)
 
@@ -248,9 +376,9 @@ export default function App() {
       setConversationId(result.conversation_id)
     }
 
-    // P0.2 FIX: Refresh usage counter after every chat turn so the header
-    // reflects real token consumption instead of showing a static string.
+    // P0.2 FIX: Refresh usage counter and task list after every chat turn
     refreshUsage()
+    loadTasks(selectedDomain)
 
     return result.response
   }
@@ -260,48 +388,120 @@ export default function App() {
     ? `⚡ ${usageStats.total_requests ?? 0} calls · $${(usageStats.total_estimated_cost_usd ?? 0).toFixed(5)}`
     : 'Nebius • Nemotron-3'
 
-  if (shareId) {
-    return (
-      <SharedChatView
-        shareId={shareId}
-        onGoToApp={() => {
-          const url = new URL(window.location.href)
-          url.searchParams.delete('share')
-          window.history.pushState({}, '', url.pathname + (url.search ? url.search : ''))
-          setShareId(null)
-          setActiveTab('northstar')
-        }}
-      />
-    )
-  }
-
   return (
-    <div style={{ display: 'flex', height: '100vh', width: '100vw', background: 'var(--bg-app)', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', height: '100vh', width: '100%', background: 'var(--bg-app)', overflow: 'hidden', position: 'relative' }}>
+      {/* Mobile Drawer Backdrop */}
+      {mobileMenuOpen && (
+        <div
+          id="mobile-drawer-backdrop"
+          className="mobile-drawer-backdrop"
+          onClick={() => setMobileMenuOpen(false)}
+        />
+      )}
+
       <Sidebar
         activeDomain={selectedDomain}
-        onSelectDomain={setSelectedDomain}
+        onSelectDomain={handleSelectDomain}
         domainCounts={domainCounts}
         backendStatus={backendStatus}
         activeTab={activeTab}
-        onSelectTab={setActiveTab}
+        onSelectTab={handleSelectTab}
         usageBadge={usageBadge}
         currentUser={currentUser}
         onOpenAuth={() => setShowAuthModal(true)}
         onOpenTelemetry={() => setShowTelemetryModal(true)}
+        customDomains={customDomains}
+        onDomainCreated={handleDomainCreated}
+        onDomainDeleted={handleDomainDeleted}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        mobileOpen={mobileMenuOpen}
+        onCloseMobile={() => setMobileMenuOpen(false)}
       />
 
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'var(--bg-app)', minWidth: 0, overflow: 'hidden' }}>
+        {/* Mobile Header Bar */}
+        <header className="mobile-header">
+          <button
+            id="mobile-menu-button"
+            type="button"
+            onClick={() => setMobileMenuOpen(true)}
+            aria-label="Open Navigation Menu"
+            title="Open navigation menu"
+            style={{
+              background: 'var(--bg-card-soft)',
+              border: '1px solid var(--border)',
+              borderRadius: '8px',
+              width: '40px',
+              height: '40px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--text-primary)',
+              cursor: 'pointer',
+              fontSize: '18px',
+            }}
+          >
+            ☰
+          </button>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+            <span style={{ fontSize: '18px' }}>
+              {activeTab === 'compass' ? '🧭' : activeTab === 'calendar' ? '🗓️' : currentDomainMeta.icon}
+            </span>
+            <span style={{ fontSize: '14px', fontWeight: '800', color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {activeTab === 'compass'
+                ? 'Compass Assistant'
+                : activeTab === 'calendar'
+                ? 'Schedule'
+                : selectedDomain === 'all'
+                ? 'Timeline Feed'
+                : `${currentDomainMeta.label} Domain`}
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {toggleTheme && (
+              <button
+                id="mobile-theme-toggle"
+                type="button"
+                onClick={toggleTheme}
+                aria-label="Toggle Theme"
+                style={{
+                  background: 'var(--bg-card-soft)',
+                  border: '1px solid var(--border)',
+                  borderRadius: '8px',
+                  width: '40px',
+                  height: '40px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--text-primary)',
+                  cursor: 'pointer',
+                  fontSize: '16px',
+                }}
+              >
+                {theme === 'dark' ? '🌙' : '☀️'}
+              </button>
+            )}
+          </div>
+        </header>
+
         {activeTab === 'timeline' ? (
           <Timeline
             tasks={tasks}
+            allTasks={allTasks}
             activeDomain={selectedDomain}
-            onSelectDomain={setSelectedDomain}
+            onSelectDomain={handleSelectDomain}
+            customDomains={customDomains}
+            theme={theme}
+            onToggleTheme={toggleTheme}
             onTasksUpdated={() => {
               loadTasks(selectedDomain)
               refreshUsage()
             }}
-            onOpenNorthstar={(prompt) => {
-              setActiveTab('northstar')
+            onOpenCompass={(prompt) => {
+              navigateTo('compass', 'all')
               setPendingPrompt(prompt)
             }}
             onOpenTelemetry={() => setShowTelemetryModal(true)}
@@ -317,12 +517,10 @@ export default function App() {
             onOpenAuthModal={() => setShowAuthModal(true)}
           />
         ) : (
-          <NorthstarPanel
+          <CompassPanel
             initialSubTab={
               activeTab === 'agent' || activeTab === 'planner'
                 ? 'planner'
-                : activeTab === 'specialist'
-                ? 'specialist'
                 : 'assistant'
             }
             messages={messages}
@@ -331,14 +529,17 @@ export default function App() {
             setConversationId={setConversationId}
             onSendMessage={handleSendMessage}
             isTyping={isTyping}
-            onChatComplete={refreshUsage}
+            onChatComplete={() => {
+              refreshUsage()
+              loadTasks(selectedDomain)
+            }}
             tasks={tasks}
             backendStatus={backendStatus}
             onTaskMutated={() => {
               loadTasks(selectedDomain)
               refreshUsage()
             }}
-            onSelectTab={setActiveTab}
+            onSelectTab={handleSelectTab}
             pendingPrompt={pendingPrompt}
             onClearPendingPrompt={() => setPendingPrompt(null)}
             onOpenMigration={() => setShowMigrationModal(true)}

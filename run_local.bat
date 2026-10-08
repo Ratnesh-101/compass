@@ -53,16 +53,43 @@ echo      • Web Dashboard:    http://localhost:5173
 echo ======================================================================
 echo.
 
-:: 6. Launch Backend in a new terminal window
-start "Compass Backend (FastAPI)" cmd /k "python -m uvicorn backend.main:app --port 8000 --reload"
+:: 6. Launch Backend if not already running
+netstat -ano | findstr :8000 | findstr LISTENING >nul 2>&1
+if %errorlevel% equ 0 (
+    echo [INFO] Backend is already running on http://localhost:8000.
+) else (
+    echo [INFO] Starting Backend server on http://localhost:8000...
+    start "Compass Backend (FastAPI)" cmd /k "python -m uvicorn backend.main:app --port 8000 --reload"
+)
 
-:: 7. Launch Frontend in a new terminal window
-start "Compass Frontend (Vite)" cmd /k "cd frontend && npm run dev"
+:: 7. Launch Frontend if not already running
+netstat -ano | findstr :5173 | findstr LISTENING >nul 2>&1
+if %errorlevel% equ 0 (
+    echo [INFO] Frontend is already running on http://localhost:5173.
+) else (
+    echo [INFO] Starting Frontend dev server on http://localhost:5173...
+    start "Compass Frontend (Vite)" cmd /k "cd frontend && npm run dev"
+)
 
-:: 8. Wait 3 seconds and open browser
-timeout /t 3 /nobreak >nul
+:: 8. Wait for Backend health check to pass before launching browser
+echo [INFO] Waiting for backend to be live and healthy...
+for /l %%i in (1, 1, 20) do (
+    powershell -Command "try { (Invoke-WebRequest -Uri 'http://localhost:8000/health' -UseBasicParsing -TimeoutSec 1).StatusCode } catch { exit 1 }" >nul 2>&1
+    if !errorlevel! equ 0 (
+        echo [INFO] Backend is live and connected!
+        goto :open_browser
+    )
+    timeout /t 1 /nobreak >nul
+)
+
+:open_browser
+echo [INFO] Opening Web Dashboard at http://localhost:5173...
+timeout /t 1 /nobreak >nul
 start http://localhost:5173
 
-echo Compass is now running! Keep the terminal windows open while using the app.
-echo Press any key in this window to close this launcher.
+echo.
+echo ======================================================================
+echo   Compass is now live! Keep terminal windows open while using the app.
+echo   Press any key in this window to exit this launcher.
+echo ======================================================================
 pause >nul

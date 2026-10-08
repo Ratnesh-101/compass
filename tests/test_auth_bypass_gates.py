@@ -117,6 +117,9 @@ async def test_agent_admin_override_logged_to_audit():
         assert row["run_id"] == run_id
         assert row["tool"] == tool_name
         assert row["approved_by"] == "admin_override"
+        assert row["status"] == "executed"
+        assert row["created_at"] is not None
+        assert row["is_reverted"] is False
         args_data = json.loads(row["args"]) if isinstance(row["args"], str) else row["args"]
         assert args_data["title"] == "Admin Created Task"
 

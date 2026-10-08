@@ -119,7 +119,7 @@ def analyze_deadline_drift(
       - CONFLICTING: Multiple authoritative sources disagree.
       - NOT_FOUND: No date found in search results.
       - STALE: Stored date has passed and cannot be verified.
-      - UNVERIFIED: Ambiguous or low-confidence evidence.
+      - UNVERIFIED: Ambiguous evidence without explicit year or official confirmation.
     """
     stored_date: Optional[date] = None
     if stored_due_str and stored_due_str not in ("none", "None", ""):

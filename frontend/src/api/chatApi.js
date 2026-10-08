@@ -7,7 +7,7 @@ import { API_BASE, getAuthHeaders } from './baseClient'
  * Passes conversation_id for multi-turn memory.
  * Returns { response, conversation_id } on success.
  */
-export async function sendQueryToAssistant(prompt, conversationId, specialistId = null) {
+export async function sendQueryToAssistant(prompt, conversationId, tone = null, mode = null, specialistId = null) {
   try {
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 45000)
@@ -15,6 +15,12 @@ export async function sendQueryToAssistant(prompt, conversationId, specialistId 
     const body = { message: prompt }
     if (conversationId) {
       body.conversation_id = conversationId
+    }
+    if (tone) {
+      body.tone = tone
+    }
+    if (mode) {
+      body.mode = mode
     }
     if (specialistId) {
       body.specialist_id = specialistId
@@ -51,15 +57,34 @@ export async function sendQueryToAssistant(prompt, conversationId, specialistId 
 }
 
 /**
+ * Strips completed [[modes]] marker and suppresses incomplete trailing marker prefixes
+ * (e.g. '[', '[[', '[[m', '[[modes', etc.) from flashing in the streaming UI.
+ */
+export function sanitizeModesMarker(text) {
+  if (!text) return ''
+  // Remove all complete occurrences of [[modes]], [modes], [[mode]], [[modes: ...]] etc.
+  let clean = text.replace(/\[{1,2}\s*modes?(?::[^\]]*)?\s*\]{1,2}/gi, '')
+  // Strip trailing partial prefix of [[modes]]
+  clean = clean.replace(/\[(?:\[(?:m(?:o(?:d(?:e(?:s\]?)?)?)?)?)?)?$/i, '')
+  return clean
+}
+
+/**
  * Stream chat tokens via Server-Sent Events (SSE) from /api/chat/stream.
  * Dispatches incremental tokens via onToken, completion metadata via onComplete,
  * and errors via onError.
  */
-export async function streamQueryFromAssistant(prompt, conversationId, { onToken, onComplete, onError, specialistId = null } = {}) {
+export async function streamQueryFromAssistant(prompt, conversationId, { onToken, onComplete, onError, tone = null, mode = null, specialistId = null } = {}) {
   try {
     const body = { message: prompt }
     if (conversationId) {
       body.conversation_id = conversationId
+    }
+    if (tone) {
+      body.tone = tone
+    }
+    if (mode) {
+      body.mode = mode
     }
     if (specialistId) {
       body.specialist_id = specialistId
@@ -72,7 +97,14 @@ export async function streamQueryFromAssistant(prompt, conversationId, { onToken
     })
 
     if (!res.ok) {
-      throw new Error(`SSE endpoint returned HTTP ${res.status}`)
+      let errText = ''
+      try {
+        const errJson = await res.json()
+        errText = errJson.detail || errJson.message || `HTTP ${res.status}`
+      } catch {
+        errText = `HTTP ${res.status}`
+      }
+      throw new Error(`SSE endpoint returned ${errText}`)
     }
 
     const reader = res.body.getReader()
@@ -95,19 +127,29 @@ export async function streamQueryFromAssistant(prompt, conversationId, { onToken
         if (!trimmed || !trimmed.startsWith('data:')) continue
         const jsonStr = trimmed.slice(5).trim()
         if (!jsonStr) continue
+
+        let evt = null
         try {
-          const evt = JSON.parse(jsonStr)
-          if (evt.type === 'token') {
-            fullResponse += evt.value
-            if (onToken) onToken(evt.value, fullResponse)
-          } else if (evt.type === 'done') {
-            if (evt.conversation_id) lastConvId = evt.conversation_id
-            if (evt.skill_used) lastSkill = evt.skill_used
-          } else if (evt.type === 'error') {
-            throw new Error(evt.message || 'Stream error')
-          }
+          evt = JSON.parse(jsonStr)
         } catch (e) {
           console.warn('[Compass SSE Parse Error]', e, jsonStr)
+          continue
+        }
+
+        if (evt.type === 'token') {
+          fullResponse += evt.value
+          if (onToken) onToken(evt.value, sanitizeModesMarker(fullResponse))
+        } else if (evt.type === 'replace') {
+          // Server detected a tool call after partial streaming —
+          // discard any leaked markup and replace with the clean response.
+          fullResponse = evt.value || ''
+          if (onToken) onToken(fullResponse, sanitizeModesMarker(fullResponse))
+        } else if (evt.type === 'done') {
+          if (evt.conversation_id) lastConvId = evt.conversation_id
+          if (evt.skill_used) lastSkill = evt.skill_used
+        } else if (evt.type === 'error') {
+          const errMsg = evt.detail || evt.message || 'Stream error'
+          throw new Error(errMsg)
         }
       }
     }
@@ -137,28 +179,6 @@ export async function streamQueryFromAssistant(prompt, conversationId, { onToken
   }
 }
 
-/**
- * Dispatch a request to the Specialist Multi-Agent System backend.
- */
-export async function dispatchSpecialist({ capability, user_goal, relevant_context }) {
-  const res = await fetch(`${API_BASE}/api/specialist/dispatch`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...getAuthHeaders(),
-    },
-    body: JSON.stringify({
-      capability,
-      user_goal,
-      relevant_context,
-    }),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.detail || `Specialist dispatch failed (HTTP ${res.status})`)
-  }
-  return await res.json()
-}
 
 /**
  * Fetch previous chat conversations list.
@@ -248,19 +268,6 @@ export async function fetchMemoryOverview() {
   }
 }
 
-/**
- * Fetch a publicly shared conversation and its messages.
- */
-export async function fetchSharedConversation(conversationId) {
-  if (!conversationId) return null
-  try {
-    const res = await fetch(`${API_BASE}/api/share/${conversationId}`)
-    if (!res.ok) return null
-    return await res.json()
-  } catch {
-    return null
-  }
-}
 
 /**
  * Seed or refresh the Dual-Degree Hackathon Competitor demo persona for judges.
@@ -281,3 +288,121 @@ export async function seedJudgeDemoPersona() {
     throw err
   }
 }
+
+/**
+ * Fetch persistent user profile facts (name, goals, preferences).
+ */
+export async function fetchProfileFacts() {
+  try {
+    const res = await fetch(`${API_BASE}/api/profile/facts`, {
+      headers: getAuthHeaders(),
+    })
+    if (!res.ok) return {}
+    const data = await res.json()
+    return data.facts || {}
+  } catch {
+    return {}
+  }
+}
+
+/**
+ * Delete a persistent profile fact by key.
+ */
+export async function deleteProfileFact(key) {
+  if (!key) return false
+  try {
+    const res = await fetch(`${API_BASE}/api/profile/facts/${encodeURIComponent(key)}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Delete all persistent profile facts ('forget all').
+ */
+export async function deleteAllProfileFacts() {
+  try {
+    const res = await fetch(`${API_BASE}/api/profile/facts`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+
+/**
+ * Fetch canonical persona signature phrase pools from backend.
+ */
+export async function fetchPersonaPhrases() {
+  try {
+    const res = await fetch(`${API_BASE}/api/persona/phrases`, {
+      headers: getAuthHeaders(),
+    })
+    if (!res.ok) return null
+    return await res.json()
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Fetch open parked thoughts on the shelf.
+ */
+export async function fetchParkedThoughts() {
+  try {
+    const res = await fetch(`${API_BASE}/api/parked`, {
+      headers: getAuthHeaders(),
+    })
+    if (!res.ok) return []
+    const data = await res.json()
+    return data.parked || []
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Mark a parked thought as done.
+ */
+export async function resolveParkedThought(id) {
+  if (!id) return false
+  try {
+    const res = await fetch(`${API_BASE}/api/parked/${id}`, {
+      method: 'PATCH',
+      headers: getAuthHeaders(),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Summarize decisions made, open questions, and next steps for a conversation.
+ */
+export async function fetchChatRecap(conversationId) {
+  try {
+    const res = await fetch(`${API_BASE}/api/chat/recap`, {
+      method: 'POST',
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ conversation_id: conversationId || null }),
+    })
+    if (!res.ok) {
+      return { recap: "I wasn't able to generate a recap right now. Please try again in a moment." }
+    }
+    return await res.json()
+  } catch (err) {
+    console.warn('[Compass Recap Error]', err)
+    return { recap: "I wasn't able to generate a recap right now. Please try again in a moment." }
+  }
+}
+
+
+

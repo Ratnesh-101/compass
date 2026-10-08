@@ -84,6 +84,15 @@ def _create_mock_completion(tool_name: str | None = None, tool_args: dict | None
     return resp
 
 
+@pytest.fixture(autouse=True)
+def mock_default_agent_llm(monkeypatch):
+    """Ensure baseline agent tests don't make real network calls when unmocked."""
+    mock_comp = _create_mock_completion(content="Done. All tasks retrieved.")
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = AsyncMock(return_value=mock_comp)
+    monkeypatch.setattr("backend.agent.AsyncOpenAI", lambda **kwargs: mock_client)
+
+
 # ---------------------------------------------------------------------------
 # Baseline Agent Tests
 # ---------------------------------------------------------------------------
@@ -458,7 +467,7 @@ async def test_audit_log_entry_created_for_mutation():
         assert audit_row["affected_table"] == "tasks"
         assert audit_row["approved_by"] == "test_user"
 
-        new_state = json.loads(audit_row["new_state"])
+        new_state = json.loads(audit_row["new_state"]) if isinstance(audit_row["new_state"], str) else audit_row["new_state"]
         assert new_state["title"] == title
 
         # Clean up

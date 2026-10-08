@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     TRUST_CF_CONNECTING_IP: bool = False
     TRUST_TRUE_CLIENT_IP: bool = False
     EDGE_HMAC_SECRET: str = "compass_vercel_edge_hmac_secret_2026"
-    VERCEL_EDGE_SECRET: str = "compass_vercel_edge_hmac_secret_2026"
+    VERCEL_EDGE_SECRET: str | None = None
 
     # --- Rate Limiter & Abuse Protection ---
     RATE_LIMIT_FAIL_CLOSED: bool = True
@@ -59,14 +59,7 @@ class Settings(BaseSettings):
         "studio.nebius.ai",
         "api.tokenfactory.nebius.com",
     ]
-    PINNED_EVENT_PREFIXES: list[str] = [
-        "https://nebiusglobalaihackathon.devpost.com",
-        "http://nebiusglobalaihackathon.devpost.com",
-        "nebiusglobalaihackathon.devpost.com",
-        "https://nebius-hackathon.devpost.com",
-        "http://nebius-hackathon.devpost.com",
-        "nebius-hackathon.devpost.com",
-    ]
+    PINNED_EVENT_PREFIXES: list[str] = []
 
     # --- Auth ---
     AUTH_TOKEN: str = ""  # Required — set in .env
@@ -82,7 +75,7 @@ class Settings(BaseSettings):
 
     # --- Tavily Search API ---
     TAVILY_API_KEY: str = ""
-    TAVILY_ENABLED: bool = True  # MUST be True in the submitted build
+    TAVILY_ENABLED: bool = False  # Disabled pending explicit team sign-off
     TAVILY_ABSTAIN_FIRST: bool = True
     TAVILY_SEARCH_DEPTH: str = "basic"  # ultra-fast | fast | basic | advanced
     TAVILY_MAX_RESULTS: int = 5
@@ -106,21 +99,60 @@ class Settings(BaseSettings):
         """Check if running in production mode."""
         return self.ENVIRONMENT.lower() in ("production", "prod")
 
+    def get_missing_production_secrets(self) -> tuple[list[str], list[str]]:
+        """Return (missing_secret_names, duplicate_secret_names) for production configuration without exposing secret values."""
+        if not self.is_production():
+            return [], []
+
+        missing = []
+        if not self.AUTH_TOKEN or self.AUTH_TOKEN.strip() in (self.DEFAULT_DEV_TOKEN, "compass-token", "test-token"):
+            missing.append("AUTH_TOKEN")
+        if not self.TOKEN_ENCRYPTION_KEY or self.TOKEN_ENCRYPTION_KEY.strip() == self.DEFAULT_DEV_ENCRYPTION_KEY:
+            missing.append("TOKEN_ENCRYPTION_KEY")
+        if not self.GUEST_SIGNING_SECRET or self.GUEST_SIGNING_SECRET.strip() in ("dev-secret", "test-secret", "compass-guest-token-secret-2026"):
+            missing.append("GUEST_SIGNING_SECRET")
+        effective_edge_secret = (self.EDGE_HMAC_SECRET or self.VERCEL_EDGE_SECRET or "").strip()
+        if not effective_edge_secret or effective_edge_secret in ("dev-secret", "test-secret", "compass_vercel_edge_hmac_secret_2026"):
+            missing.append("EDGE_HMAC_SECRET")
+
+        secrets_dict = {
+            "AUTH_TOKEN": self.AUTH_TOKEN.strip() if self.AUTH_TOKEN else "",
+            "TOKEN_ENCRYPTION_KEY": self.TOKEN_ENCRYPTION_KEY.strip() if self.TOKEN_ENCRYPTION_KEY else "",
+            "GUEST_SIGNING_SECRET": self.GUEST_SIGNING_SECRET.strip() if self.GUEST_SIGNING_SECRET else "",
+            "EDGE_HMAC_SECRET": effective_edge_secret,
+        }
+
+        # Check for duplicates among configured non-empty secrets
+        duplicates = []
+        seen = {}
+        for name, val in secrets_dict.items():
+            if not val or name in missing:
+                continue
+            if val in seen:
+                duplicates.append(f"{seen[val]} == {name}")
+            else:
+                seen[val] = name
+
+        return missing, duplicates
+
     def validate_production_secrets(self) -> None:
-        """Validate that insecure dev-default secrets are not used in production."""
+        """Validate that required production secrets are set, secure, and not reused."""
         if not self.is_production():
             return
 
-        if not self.AUTH_TOKEN or self.AUTH_TOKEN.strip() in (self.DEFAULT_DEV_TOKEN, "compass-token", "test-token"):
-            raise ValueError(
-                "CRITICAL SECURITY CONFIGURATION ERROR: AUTH_TOKEN must be securely configured in production "
-                "and cannot use default development tokens ('dev-token')."
-            )
+        missing, duplicates = self.get_missing_production_secrets()
+        errors = []
+        if missing:
+            errors.append(f"Missing or default required secrets: {', '.join(missing)}")
+        if duplicates:
+            errors.append(f"Secret reuse detected: {', '.join(duplicates)}")
 
-        if not self.TOKEN_ENCRYPTION_KEY or self.TOKEN_ENCRYPTION_KEY.strip() == self.DEFAULT_DEV_ENCRYPTION_KEY:
+        if errors:
             raise ValueError(
-                "CRITICAL SECURITY CONFIGURATION ERROR: TOKEN_ENCRYPTION_KEY must be securely configured in production "
-                "and cannot use the default development encryption key."
+                "CRITICAL SECURITY CONFIGURATION ERROR: "
+                + "; ".join(errors)
+                + "\nAll 4 secrets (AUTH_TOKEN, GUEST_SIGNING_SECRET, EDGE_HMAC_SECRET, TOKEN_ENCRYPTION_KEY) "
+                "must be independently generated with strong random values (e.g. `openssl rand -hex 32`)."
             )
 
     CORS_ORIGINS: list[str] = [

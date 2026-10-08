@@ -134,9 +134,11 @@ async def test_guest_conversation_persistence_and_isolation(client: AsyncClient)
     assert not any(c["id"] == conv_a_id for c in convs_b)
 
     # Authenticated user lists conversations — should NOT see Guest A's conversation before migration
+    from backend.routers.auth import create_session
+    user_auth = f"Bearer {create_session(user_email)}"
     list_user_res = await client.get(
         "/api/conversations",
-        headers={"x-user-id": user_email},
+        headers={"Authorization": user_auth},
     )
     assert list_user_res.status_code == 200
     convs_user = list_user_res.json().get("conversations", [])
@@ -195,7 +197,7 @@ async def test_migration_flow_and_preservation(client: AsyncClient):
     # 2. Check migration status with both user and guest headers
     status_res = await client.get(
         "/api/migration/status",
-        headers={"Authorization": user_auth, "x-user-id": user_email, "x-guest-token": token, "x-guest-id": gid},
+        headers={"Authorization": user_auth, "x-guest-token": token, "x-guest-id": gid},
     )
     assert status_res.status_code == 200
     status_data = status_res.json()
@@ -205,7 +207,7 @@ async def test_migration_flow_and_preservation(client: AsyncClient):
     # 3. Check migration conversations list
     list_mig_res = await client.get(
         "/api/migration/conversations",
-        headers={"Authorization": user_auth, "x-user-id": user_email, "x-guest-token": token, "x-guest-id": gid},
+        headers={"Authorization": user_auth, "x-guest-token": token, "x-guest-id": gid},
     )
     assert list_mig_res.status_code == 200
     mig_convs = list_mig_res.json().get("conversations", [])
@@ -216,7 +218,7 @@ async def test_migration_flow_and_preservation(client: AsyncClient):
     select_res = await client.post(
         "/api/migration/import-selected",
         json={"conversation_ids": [conv_1_id], "import_memory": True},
-        headers={"Authorization": user_auth, "x-user-id": user_email, "x-guest-token": token, "x-guest-id": gid},
+        headers={"Authorization": user_auth, "x-guest-token": token, "x-guest-id": gid},
     )
     assert select_res.status_code == 200
     select_data = select_res.json()
@@ -226,11 +228,10 @@ async def test_migration_flow_and_preservation(client: AsyncClient):
     # 5. Check Authenticated User history — should now contain imported conversation
     user_convs_res = await client.get(
         "/api/conversations",
-        headers={"Authorization": user_auth, "x-user-id": user_email},
+        headers={"Authorization": user_auth},
     )
     assert user_convs_res.status_code == 200
     user_convs = user_convs_res.json().get("conversations", [])
-    # Check by imported_from_id or title
     assert len(user_convs) >= 1
 
     # 6. VERY IMPORTANT (Requirement 7): Guest conversation MUST STILL EXIST!
@@ -247,7 +248,7 @@ async def test_migration_flow_and_preservation(client: AsyncClient):
     repeat_res = await client.post(
         "/api/migration/import-selected",
         json={"conversation_ids": [conv_1_id], "import_memory": False},
-        headers={"Authorization": user_auth, "x-user-id": user_email, "x-guest-token": token, "x-guest-id": gid},
+        headers={"Authorization": user_auth, "x-guest-token": token, "x-guest-id": gid},
     )
     assert repeat_res.status_code == 200
     repeat_data = repeat_res.json()
@@ -258,7 +259,7 @@ async def test_migration_flow_and_preservation(client: AsyncClient):
     # 8. Import All remaining: Should import conv_2_id safely
     import_all_res = await client.post(
         "/api/migration/import-all",
-        headers={"Authorization": user_auth, "x-user-id": user_email, "x-guest-token": token, "x-guest-id": gid},
+        headers={"Authorization": user_auth, "x-guest-token": token, "x-guest-id": gid},
     )
     assert import_all_res.status_code == 200
     import_all_data = import_all_res.json()
@@ -271,14 +272,69 @@ async def test_skip_migration_endpoint(client: AsyncClient):
     """Test POST /api/migration/skip records preference without modifying or deleting data."""
     gid, token = generate_guest_token()
     user_email = f"skip_user_{uuid.uuid4().hex[:6]}@example.com"
+    from backend.routers.auth import create_session
+    user_auth = f"Bearer {create_session(user_email)}"
 
     res = await client.post(
         "/api/migration/skip",
-        headers={"x-user-id": user_email, "x-guest-token": token, "x-guest-id": gid},
+        headers={"Authorization": user_auth, "x-guest-token": token, "x-guest-id": gid},
     )
     assert res.status_code == 200
     data = res.json()
     assert data["status"] in ("ok", "skipped")
+
+
+@pytest.mark.asyncio
+async def test_attacker_with_different_valid_guest_token_cannot_migrate_victim_guest_data(client: AsyncClient):
+    """Attacker User C presenting a different valid guest token cannot migrate Victim Guest A's conversations."""
+    from backend.routers.auth import create_session
+
+    # 1. Victim Guest A creates conversation
+    gid_a, token_a = generate_guest_token()
+    chat_a = await client.post(
+        "/api/chat",
+        json={"message": "Victim Guest A private secret plan", "conversation_id": None},
+        headers={"x-guest-token": token_a, "x-guest-id": gid_a},
+    )
+    assert chat_a.status_code == 200
+    conv_a_id = chat_a.json().get("conversation_id")
+    assert conv_a_id is not None
+
+    # Verify initial message count for Victim Guest A
+    list_a = await client.get("/api/conversations", headers={"x-guest-token": token_a, "x-guest-id": gid_a})
+    assert list_a.status_code == 200
+    a_convs = [c for c in list_a.json().get("conversations", []) if c["id"] == conv_a_id]
+    assert len(a_convs) == 1
+    init_msg_count = a_convs[0]["message_count"]
+
+    # 2. Attacker User C with Attacker Guest B token
+    user_c = f"attacker_{uuid.uuid4().hex[:6]}@example.com"
+    user_c_auth = f"Bearer {create_session(user_c)}"
+    gid_b, token_b = generate_guest_token()
+
+    # 3. Attacker attempts to import Victim Guest A's conversation ID
+    import_res = await client.post(
+        "/api/migration/import-selected",
+        json={"conversation_ids": [conv_a_id], "import_memory": False},
+        headers={"Authorization": user_c_auth, "x-guest-token": token_b, "x-guest-id": gid_b},
+    )
+    assert import_res.status_code == 200
+    import_data = import_res.json()
+    assert import_data["imported_count"] == 0
+
+    # 4. Assert victim's data is unchanged afterwards:
+    # - Guest conversations not imported into attacker account
+    user_c_convs_res = await client.get("/api/conversations", headers={"Authorization": user_c_auth})
+    assert user_c_convs_res.status_code == 200
+    user_c_convs = user_c_convs_res.json().get("conversations", [])
+    assert not any(c["id"] == conv_a_id for c in user_c_convs)
+
+    # - Victim's conversation still exists with identical message count
+    list_a_after = await client.get("/api/conversations", headers={"x-guest-token": token_a, "x-guest-id": gid_a})
+    assert list_a_after.status_code == 200
+    a_convs_after = [c for c in list_a_after.json().get("conversations", []) if c["id"] == conv_a_id]
+    assert len(a_convs_after) == 1
+    assert a_convs_after[0]["message_count"] == init_msg_count
 
 
 @pytest.mark.asyncio

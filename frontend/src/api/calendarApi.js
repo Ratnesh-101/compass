@@ -84,8 +84,8 @@ export async function syncCalendarNow() {
 
 export function getGoogleOAuthConnectUrl(loginHint = null) {
   let url = `${API_BASE}/api/calendar/connect?redirect=true`
-  const hint = loginHint || getCurrentUserId()
-  if (hint && hint.includes('@')) url += `&login_hint=${encodeURIComponent(hint)}`
+  const hint = (typeof loginHint === 'string' && loginHint) || getCurrentUserId()
+  if (typeof hint === 'string' && hint.includes('@')) url += `&login_hint=${encodeURIComponent(hint)}`
   return url
 }
 

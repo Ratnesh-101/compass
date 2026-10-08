@@ -53,11 +53,10 @@ export default function TaskCard({
         {/* Badge & Quick Delete Action */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span className={`badge-${task.domain}`} style={{
-            fontSize: '10.5px',
-            padding: '3px 9px',
+            fontSize: '11px',
+            padding: '3px 10px',
             borderRadius: '20px',
-            textTransform: 'uppercase',
-            fontWeight: '700',
+            fontWeight: '600',
             flexShrink: 0,
             background: 'rgba(255,255,255,0.06)',
             color: meta.color,
@@ -170,9 +169,6 @@ export default function TaskCard({
           <div className={`countdown-badge ${isOverdue ? 'countdown-overdue' : ''}`}>
             {isOverdue && '⚠️ '}
             {task.countdown}
-          </div>
-          <div className="vector-tag">
-            {task.vector_dim || 768}-dim
           </div>
         </div>
       </div>

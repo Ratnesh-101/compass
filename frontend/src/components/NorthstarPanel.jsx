@@ -62,7 +62,7 @@ export default function NorthstarPanel({
             borderRadius: '10px',
             whiteSpace: 'nowrap'
           }}>
-            All-in-One Copilot & Autonomous Agents
+            Copilot & Workspace Assistant
           </span>
         </div>
 

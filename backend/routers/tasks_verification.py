@@ -195,7 +195,7 @@ async def seed_demo_persona_endpoint(request: Request):
                     "Compass 3-Tier NVIDIA Nemotron Architecture: Nemotron-3 Nano (30B MoE, 3B active) executes sub-400ms "
                     "intent routing; Nemotron-3 Super (120B MoE, 12B active) executes ReAct multi-step planning and grounded "
                     "code retrieval; Nemotron-3 Ultra (550B MoE, 55B active) executes executive roadmaps. "
-                    "Hosted on Nebius Token Factory on NVIDIA Tensor Core H100/H200 GPUs with 92.4% cost savings over monolithic models."
+                    "Hosted on Nebius Token Factory on NVIDIA Tensor Core H100/H200 GPUs with active MoE parameter routing."
                 ),
                 "tags": ["nemotron", "nvidia", "nebius", "routing", "moe"],
             },
@@ -271,7 +271,8 @@ async def verify_all_deadlines_endpoint(request: Request):
     try:
         from backend.skills.handlers.web import handle_verify_deadline
         async with pool.acquire() as conn:
-            open_tasks = await structured.list_tasks(conn, status="open", user_id=user_id, limit=5)
+            all_open_tasks = await structured.list_tasks(conn, status="open", user_id=user_id)
+            open_tasks = all_open_tasks[:5]
 
         verifications = []
         for t in open_tasks:

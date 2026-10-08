@@ -3,9 +3,10 @@ import React, { useState } from 'react'
 export default function OnboardingTour({
   onVerifyDeadlines,
   onOpenTelemetry,
-  onOpenNorthstar,
+  onOpenCompass,
   onOpenSeed,
 }) {
+  const handleOpenCompass = onOpenCompass
   const [dismissed, setDismissed] = useState(() => {
     try {
       return localStorage.getItem('compass_tour_dismissed') === '1'
@@ -298,10 +299,10 @@ export default function OnboardingTour({
                 </button>
               )}
 
-              {onOpenNorthstar && (
+              {handleOpenCompass && (
                 <button
-                  id="btn-tour-open-northstar"
-                  onClick={() => onOpenNorthstar("Synthesize a realistic cross-domain roadmap for this weekend")}
+                  id="btn-tour-open-compass"
+                  onClick={() => handleOpenCompass("Synthesize a realistic cross-domain roadmap for this weekend")}
                   style={{
                     background: 'rgba(167, 139, 250, 0.12)',
                     border: '1px solid rgba(167, 139, 250, 0.35)',
@@ -318,7 +319,7 @@ export default function OnboardingTour({
                   title="Test Nemotron Ultra cross-domain roadmap synthesis"
                 >
                   <span>🧭</span>
-                  <span>Test Northstar Copilot</span>
+                  <span>Compass</span>
                 </button>
               )}
             </div>

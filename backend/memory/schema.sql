@@ -161,6 +161,7 @@ CREATE TABLE IF NOT EXISTS agent_audit_log (
     previous_state     JSONB,
     new_state          JSONB,
     approved_by        TEXT          NOT NULL DEFAULT 'user',
+    status             TEXT          NOT NULL DEFAULT 'executed',
     is_reverted        BOOLEAN       NOT NULL DEFAULT FALSE,
     created_at         TIMESTAMPTZ   NOT NULL DEFAULT now()
 );
@@ -234,5 +235,35 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_revoked_at ON sessions(revoked_at);
+
+-- ============================================================
+-- Profile Facts — persistent personal facts (name, goals, preferences)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS user_profile_facts (
+    id                 SERIAL        PRIMARY KEY,
+    user_id            TEXT          NOT NULL DEFAULT 'default_user',
+    key                TEXT          NOT NULL,
+    value              TEXT          NOT NULL,
+    source_message_id  INTEGER       REFERENCES messages(id) ON DELETE SET NULL,
+    created_at         TIMESTAMPTZ   NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ   NOT NULL DEFAULT now(),
+    UNIQUE(user_id, key)
+);
+CREATE INDEX IF NOT EXISTS idx_user_profile_facts_user ON user_profile_facts(user_id);
+
+-- ============================================================
+-- Parked Thoughts — "Park it" shelf for deferred ideas & tangents
+-- ============================================================
+CREATE TABLE IF NOT EXISTS parked_thoughts (
+    id                 SERIAL        PRIMARY KEY,
+    user_id            TEXT          NOT NULL DEFAULT 'default_user',
+    conversation_id    TEXT,
+    text               TEXT          NOT NULL,
+    status             TEXT          NOT NULL DEFAULT 'parked',
+    created_at         TIMESTAMPTZ   NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_parked_thoughts_user_status ON parked_thoughts(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_parked_thoughts_conversation ON parked_thoughts(conversation_id);
+
 
 

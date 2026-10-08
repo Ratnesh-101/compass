@@ -344,7 +344,7 @@ def get_usage_summary() -> Dict[str, Any]:
 
     # Monolithic baseline cost comparison (e.g. GPT-4 at $10 in / $30 out per 1M)
     gpt4_baseline_usd = round((total_prompt_tokens * 10.0 / 1_000_000.0) + (total_completion_tokens * 30.0 / 1_000_000.0), 4)
-    savings_pct = round(((gpt4_baseline_usd - total_cost_usd) / gpt4_baseline_usd) * 100, 1) if gpt4_baseline_usd > total_cost_usd else 92.4
+    savings_pct = round(((gpt4_baseline_usd - total_cost_usd) / gpt4_baseline_usd) * 100, 1) if (gpt4_baseline_usd > 0 and gpt4_baseline_usd > total_cost_usd) else 0.0
 
     # Tiered Nemotron technical specs
     model_metadata = {

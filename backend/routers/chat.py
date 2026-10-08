@@ -32,6 +32,8 @@ import backend.orchestrator as orchestrator
 from backend.models import (
     ChatRequest,
     ChatResponse,
+    ChatRecapRequest,
+    ChatRecapResponse,
     MessagesResponse,
     MessageOut,
     ConversationUpdate,
@@ -53,13 +55,149 @@ async def chat(request: ChatRequest, req: Request, _token: str = Depends(verify_
     ident = _get_current_identity(req)
     user_id = ident.user_id if ident else None
     guest_id = ident.guest_id if ident else None
+
+    if request.conversation_id:
+        pool = await get_pool()
+        if pool:
+            async with pool.acquire() as conn:
+                has_access, err = await conversations.check_conversation_access(
+                    conn, request.conversation_id, user_id=user_id, guest_id=guest_id, is_admin=bool(ident and ident.is_admin), allow_shared=False
+                )
+                if not has_access and err != "Conversation not found":
+                    raise HTTPException(status_code=403, detail="Forbidden: conversation belongs to another user")
+
     result = await orchestrator.handle_message(
         conversation_id=request.conversation_id,
         message=request.message,
         user_id=user_id,
         guest_id=guest_id,
+        tone=request.tone,
+        conv_mode=request.mode,
     )
     return ChatResponse(**result)
+
+
+# ---- POST /api/chat/recap -------------------------------------------------
+@router.post("/api/chat/recap", response_model=ChatRecapResponse)
+async def chat_recap(
+    request: ChatRecapRequest,
+    req: Request,
+):
+    """Summarize decisions made, open questions, and concrete next steps for a conversation."""
+    ident = _get_current_identity(req)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    await rate_limit(req)
+
+    from backend.services.budgets import check_daily_budget
+    check_daily_budget(ident.id)
+
+    conv_id = request.conversation_id
+    if not conv_id:
+        return ChatRecapResponse(
+            conversation_id=None,
+            recap="No conversation was selected to recap.",
+        )
+
+    pool = await get_pool()
+    if not pool:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    async with pool.acquire() as conn:
+        user_id = ident.user_id
+        guest_id = ident.guest_id
+        is_admin = bool(ident.is_admin)
+
+        has_access, err = await conversations.check_conversation_access(
+            conn, conv_id, user_id=user_id, guest_id=guest_id, is_admin=is_admin, allow_shared=False
+        )
+        if not has_access:
+            if err == "Conversation not found":
+                raise HTTPException(status_code=404, detail="Conversation not found")
+            raise HTTPException(status_code=403, detail="Forbidden: conversation belongs to another user")
+
+        # Cap messages sent to last 40 to bound cost
+        rows = await conversations.get_recent_messages(conn, conv_id, limit=40)
+
+
+    if not rows:
+        return ChatRecapResponse(
+            conversation_id=conv_id,
+            recap="This conversation is empty right now — there are no messages to recap.",
+        )
+
+    from backend.memory.conversations import strip_modes_marker
+
+    transcript_lines = []
+    for r in rows:
+        role = r.get("role", "user")
+        content = strip_modes_marker(r.get("content") or "").strip()
+        if content:
+            transcript_lines.append(f"{role.capitalize()}: {content}")
+
+    transcript = "\n".join(transcript_lines)
+
+    from backend.config import get_settings
+    from backend.services.usage import record_usage
+    from backend.persona import build_persona_system_prompt
+    import openai
+
+    settings = get_settings()
+    system_instruction = (
+        f"{build_persona_system_prompt(mode='chat')}\n\n"
+        "TASK: Provide a short, scannable recap of this conversation summarizing:\n"
+        "- Key decisions made\n"
+        "- Open questions or unresolved thoughts\n"
+        "- Concrete next steps (if any)\n\n"
+        "Format with concise bullet points. "
+        "If and only if there is a concrete next step identified, end with: 'That's a solid next step. Want me to write it down?'"
+    )
+
+    recap_text = ""
+    is_placeholder_key = (
+        not settings.NEBIUS_API_KEY
+        or settings.NEBIUS_API_KEY.startswith("your_nebius")
+        or settings.NEBIUS_API_KEY in ("mock", "mock-key-not-used-in-tests")
+    )
+
+    if not is_placeholder_key:
+        try:
+            client = openai.AsyncOpenAI(
+                api_key=settings.NEBIUS_API_KEY,
+                base_url=settings.NEBIUS_BASE_URL,
+                timeout=20.0,
+            )
+            resp: Any = await client.chat.completions.create(
+                model=settings.ROUTER_MODEL,
+                messages=[
+                    {"role": "system", "content": system_instruction},
+                    {"role": "user", "content": f"Here is the conversation transcript:\n\n{transcript}\n\nPlease recap it."},
+                ],
+                max_tokens=350,
+                stream=False,
+            )
+            p_tok = getattr(getattr(resp, "usage", None), "prompt_tokens", 0) or 50
+            c_tok = getattr(getattr(resp, "usage", None), "completion_tokens", 0) or 50
+            record_usage(settings.ROUTER_MODEL, p_tok, c_tok)
+
+            if resp.choices and resp.choices[0].message.content:
+                recap_text = resp.choices[0].message.content.strip()
+        except Exception as e:
+            logger.warning("Recap generation failed: %s", e)
+
+    if not recap_text:
+        last_preview = strip_modes_marker(rows[-1].get('content', ''))[:60] if rows else ""
+        recap_text = (
+            f"Here is a quick recap of our discussion ({len(rows)} messages):\n"
+            f"- We explored key topics including: {last_preview}...\n"
+            "- That's a solid next step. Want me to write it down?"
+        )
+
+    return ChatRecapResponse(
+        conversation_id=conv_id,
+        recap=strip_modes_marker(recap_text),
+    )
 
 
 # ---- GET /api/conversations/{conversation_id}/messages --------------------
@@ -82,7 +220,7 @@ async def get_messages(
             is_admin = bool(ident and ident.is_admin)
 
             has_access, err = await conversations.check_conversation_access(
-                conn, conversation_id, user_id=user_id, guest_id=guest_id, is_admin=is_admin, allow_shared=True
+                conn, conversation_id, user_id=user_id, guest_id=guest_id, is_admin=is_admin, allow_shared=False
             )
             if not has_access:
                 status_code = 404 if err == "Conversation not found" else (400 if err == "Invalid conversation ID" else 403)
@@ -158,15 +296,14 @@ async def update_past_conversation(
                 status_code = 404 if err == "Conversation not found" else (400 if err == "Invalid conversation ID" else 403)
                 raise HTTPException(status_code=status_code, detail=err)
 
-            ok, share_token = await conversations.update_conversation(
+            ok, _ = await conversations.update_conversation(
                 conn,
                 conversation_id,
                 title=payload.title,
                 is_pinned=payload.is_pinned,
                 is_archived=payload.is_archived,
-                is_shared=payload.is_shared,
             )
-            return {"ok": ok, "share_token": share_token}
+            return {"ok": ok}
     except HTTPException:
         raise
     except Exception:
@@ -205,58 +342,6 @@ async def delete_past_conversation(conversation_id: str, request: Request):
         return {"ok": False, "error": "Failed to delete conversation"}
 
 
-# ---- GET /api/share/{share_token} -----------------------------------------
-@router.get("/api/share/{share_token}")
-async def get_shared_conversation(share_token: str, request: Request):
-    """Retrieve shared conversation details and its messages publicly via revocable unguessable share_token.
-
-    Zero owner PII (user_id, guest_id, email) is returned.
-    Conversation ID does NOT resolve a share.
-    """
-    clean_token = (share_token or "").strip()
-    # Validate token: alphanumeric, underscores, hyphens, min 16 chars
-    if not clean_token or len(clean_token) < 16 or len(clean_token) > 128 or not re.match(r"^[A-Za-z0-9_-]+$", clean_token):
-        raise HTTPException(status_code=404, detail="Shared conversation not found or access has been revoked.")
-
-    try:
-        pool = await get_pool()
-        if not pool:
-            raise HTTPException(status_code=503, detail="Database unavailable")
-        async with pool.acquire() as conn:
-            # Look up strictly by share_token WHERE is_shared = TRUE (Zero "OR id = $1")
-            conv_row = await conn.fetchrow(
-                """
-                SELECT id, started_at, last_active_at, COALESCE(title, 'Shared Chat') AS title
-                FROM conversations
-                WHERE share_token = $1 AND is_shared = TRUE
-                """,
-                clean_token,
-            )
-            if not conv_row:
-                raise HTTPException(status_code=404, detail="Shared conversation not found or access has been revoked.")
-
-            real_id = str(conv_row["id"])
-            rows = await conversations.get_recent_messages(conn, real_id, limit=100)
-            messages = [
-                {
-                    "role": r["role"],
-                    "content": r["content"],
-                    "skill_called": r.get("skill_called"),
-                    "created_at": r["created_at"].isoformat() if hasattr(r["created_at"], "isoformat") else str(r["created_at"]),
-                }
-                for r in rows
-            ]
-            return {
-                "title": conv_row["title"],
-                "started_at": conv_row["started_at"].isoformat() if hasattr(conv_row["started_at"], "isoformat") else str(conv_row["started_at"]),
-                "last_active_at": conv_row["last_active_at"].isoformat() if hasattr(conv_row["last_active_at"], "isoformat") else str(conv_row["last_active_at"]),
-                "messages": messages,
-            }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching shared conversation: {e}")
-        raise HTTPException(status_code=500, detail="Failed to load shared conversation")
 
 
 
@@ -446,13 +531,8 @@ async def log_memory_entry(req: LogMemoryRequest, request: Request, _rl: None = 
 @router.post("/api/chat/stream")
 async def stream_chat(req: StreamChatRequest, request: Request, _rl: None = Depends(rate_limit)):
     """Real Server-Sent Events endpoint with token-by-token streaming."""
-    from openai import AsyncOpenAI, AsyncStream
-    from openai.types.chat import ChatCompletionChunk
-    from backend.config import get_settings as _gs
-    from backend.router import TOOLS
-    from backend.services.usage import record_usage
+    from backend.services.chat_stream import generate_chat_events
 
-    _settings = _gs()
     ident = _get_current_identity(request)
     user_id = ident.id if ident and not ident.is_guest else None
     guest_id = ident.id if ident and ident.is_guest else None
@@ -716,10 +796,11 @@ async def stream_chat(req: StreamChatRequest, request: Request, _rl: None = Depe
             yield f"data: {json.dumps({'type': 'error', 'detail': str(e), 'terminal': True})}\n\n"
 
     return StreamingResponse(
-        event_generator(),
+        generate_chat_events(req, request, user_id=user_id, guest_id=guest_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
         },
     )
+

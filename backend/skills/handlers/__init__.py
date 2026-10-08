@@ -37,9 +37,20 @@ from backend.skills.handlers.calendar import (
     handle_commit_schedule,
     handle_detect_schedule_conflicts,
 )
-from backend.skills.handlers.specialist import (
+from backend.skills.handlers.feasibility import (
     handle_assess_feasibility,
     handle_apply_triage_plan,
+)
+from backend.skills.handlers.profile import (
+    handle_remember_fact,
+    handle_forget_fact,
+)
+from backend.skills.handlers.parked import (
+    handle_park_thought,
+    handle_list_parked,
+    handle_resolve_parked,
+)
+from backend.skills.handlers.specialist import (
     handle_delegate_to_specialist,
 )
 
@@ -71,5 +82,9 @@ __all__ = [
     "handle_detect_schedule_conflicts",
     "handle_assess_feasibility",
     "handle_apply_triage_plan",
-    "handle_delegate_to_specialist",
+    "handle_remember_fact",
+    "handle_forget_fact",
+    "handle_park_thought",
+    "handle_list_parked",
+    "handle_resolve_parked",
 ]

@@ -4,6 +4,7 @@ Compass — Admin, Health, and Usage Endpoints.
 
 import os
 import logging
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
@@ -16,20 +17,6 @@ logger = logging.getLogger("compass.routers.admin")
 router = APIRouter(tags=["admin"])
 
 
-@router.get("/api/admin/proxy-hops")
-async def get_proxy_hops_inspection(request: Request, _token: str = Depends(verify_token)):
-    """Admin-gated diagnostic route for inspecting proxy hops and raw XFF chain."""
-    xff = request.headers.get("x-forwarded-for")
-    parts = [p.strip() for p in xff.split(",") if p.strip()] if xff else []
-    return {
-        "x_forwarded_for_raw": xff,
-        "x_forwarded_for_parts": parts,
-        "hops_count": len(parts),
-        "x_real_ip": request.headers.get("x-real-ip"),
-        "client_host": request.client.host if request.client else None,
-        "cf_connecting_ip": request.headers.get("cf-connecting-ip"),
-        "user_agent": request.headers.get("user-agent"),
-    }
 
 
 @router.get("/", include_in_schema=False)
@@ -93,22 +80,38 @@ async def health_check():
     """Health check with SELECT 1 ping against the asyncpg connection pool."""
     db_status = "disconnected"
     try:
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            await conn.fetchval("SELECT 1")
-        db_status = "connected"
+        pool = await asyncio.wait_for(get_pool(), timeout=2.0)
+        if pool is not None:
+            async with pool.acquire(timeout=2.0) as conn:
+                await asyncio.wait_for(conn.fetchval("SELECT 1"), timeout=2.0)
+            db_status = "connected"
     except Exception:
         pass
 
     raw_commit = os.getenv("RENDER_GIT_COMMIT") or os.getenv("GIT_COMMIT") or "unknown"
     commit_sha = raw_commit[:7] if len(raw_commit) >= 7 and raw_commit != "unknown" else raw_commit
 
+    # Verify configuration validity without exposing any secret values
+    config_ok = True
+    try:
+        from backend.config import get_settings
+        settings = get_settings()
+        if settings.is_production():
+            missing_names, duplicate_names = settings.get_missing_production_secrets()
+            if missing_names or duplicate_names:
+                config_ok = False
+        else:
+            settings.validate_production_secrets()
+    except Exception:
+        config_ok = False
+
     return HealthResponse(
-        status="ok",
+        status="ok" if config_ok else "config_error",
         version="0.1.0",
         database=db_status,
         db_connected=(db_status == "connected"),
         commit=commit_sha,
+        config_ok=config_ok,
     )
 
 

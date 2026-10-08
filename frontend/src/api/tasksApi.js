@@ -10,7 +10,7 @@ import { API_BASE, FALLBACK_TASKS, getAuthHeaders } from './baseClient'
 export async function fetchTasks(domain) {
   try {
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 4000)
+    const timeoutId = setTimeout(() => controller.abort(), 10000)
 
     const url = domain && domain !== 'all'
       ? `${API_BASE}/api/tasks?domain=${encodeURIComponent(domain)}`

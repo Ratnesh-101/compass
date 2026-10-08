@@ -15,6 +15,11 @@ from backend.services.usage import get_usage_summary, record_usage
 
 def test_usage_summary_nebius_telemetry():
     """Verify enriched telemetry metrics, cost savings, and MoE metadata."""
+    record_usage(
+        model_name="nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B",
+        prompt_tokens=5000,
+        completion_tokens=1500,
+    )
     summary = get_usage_summary()
 
     # Core accounting

@@ -5,12 +5,21 @@ import {
   fetchConversationMessages,
   fetchMemoryOverview,
   fetchMigrationStatus,
+  fetchProfileFacts,
+  deleteProfileFact,
+  deleteAllProfileFacts,
+  fetchParkedThoughts,
+  resolveParkedThought,
+  fetchChatRecap,
   getCurrentUserId,
 } from '../api/client'
-import ShareModal from './ShareModal'
 import ChatHistoryDrawer from './chat/ChatHistoryDrawer'
 import ChatChatMessageList from './chat/ChatMessageList'
 import ChatInputBar from './chat/ChatInputBar'
+import ChatContextBar from './chat/ChatContextBar'
+import ChatHeaderToolbar from './chat/ChatHeaderToolbar'
+import ParkedThoughtsShelf from './chat/ParkedThoughtsShelf'
+import ProfileFactsShelf from './chat/ProfileFactsShelf'
 
 export default function ChatPanel({
   messages, setMessages, conversationId, setConversationId, onSendMessage, isTyping, onChatComplete,
@@ -26,10 +35,39 @@ export default function ChatPanel({
   const [pastConversations, setPastConversations] = useState([])
   const [pastPlans, setPastPlans] = useState([])
   const [memoryOverview, setMemoryOverview] = useState(null)
+  const [profileFacts, setProfileFacts] = useState({})
+  const [parkedThoughts, setParkedThoughts] = useState([])
+  const [showParkedShelf, setShowParkedShelf] = useState(false)
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [guestMigrationCount, setGuestMigrationCount] = useState(0)
   const [toast, setToast] = useState(null)
-  const [sharingConv, setSharingConv] = useState(null)
+  const [tone, setTone] = useState(() => {
+    try {
+      return localStorage.getItem('compass_chat_tone') || 'balanced'
+    } catch {
+      return 'balanced'
+    }
+  })
+  const [convMode, setConvMode] = useState(null)
+
+  const handleToneChange = (newTone) => {
+    setTone(newTone)
+    try {
+      localStorage.setItem('compass_chat_tone', newTone)
+    } catch {}
+  }
+
+  const handleResolveParked = async (thoughtId) => {
+    try {
+      const ok = await resolveParkedThought(thoughtId)
+      if (ok) {
+        setParkedThoughts((prev) => prev.filter((p) => p.id !== thoughtId))
+        if (showToast) showToast('Parked thought resolved!')
+      }
+    } catch (e) {
+      console.warn('Failed to resolve parked thought:', e)
+    }
+  }
 
   const messagesEndRef = useRef(null)
   const streamTimerRef = useRef(null)
@@ -39,9 +77,11 @@ export default function ChatPanel({
   const loadHistoryData = async () => {
     setLoadingHistory(true)
     try {
-      const [convs, mem] = await Promise.all([
+      const [convs, mem, facts, parked] = await Promise.all([
         fetchConversations(50, true),
         fetchMemoryOverview(),
+        fetchProfileFacts(),
+        fetchParkedThoughts(),
       ])
       if (convs) {
         const sorted = [...convs].sort((a, b) => {
@@ -53,6 +93,12 @@ export default function ChatPanel({
       if (mem) {
         setMemoryOverview(mem)
         if (mem.recent_plans) setPastPlans(mem.recent_plans)
+      }
+      if (facts && typeof facts === 'object') {
+        setProfileFacts(facts)
+      }
+      if (Array.isArray(parked)) {
+        setParkedThoughts(parked)
       }
       const uid = getCurrentUserId()
       if (uid && uid.includes('@')) {
@@ -137,10 +183,53 @@ export default function ChatPanel({
     }, 18)
   }
 
-  const handleSend = async (textToSend, explicitSpecialistId = null) => {
+  const handleRecap = async () => {
+    if (isStreaming || isTyping || isSendingRef.current) return
+    if (!conversationId || messages.length === 0) {
+      setMessages(prev => [
+        ...prev,
+        { role: 'assistant', text: "This conversation is empty right now — there are no messages to recap." }
+      ])
+      return
+    }
+
+    setMessages(prev => [...prev, { role: 'user', text: "Recap where I left off" }])
+    setIsStreaming(true)
+    setStreamingText('Generating recap of decisions, open questions, and next steps…')
+
+    try {
+      const data = await fetchChatRecap(conversationId)
+      setIsStreaming(false)
+      setStreamingText('')
+      setMessages(prev => [
+        ...prev,
+        { role: 'assistant', text: data.recap || "Unable to generate recap right now." }
+      ])
+    } catch (err) {
+      console.warn('Recap error:', err)
+      setIsStreaming(false)
+      setStreamingText('')
+      setMessages(prev => [
+        ...prev,
+        { role: 'assistant', text: "Unable to generate recap right now." }
+      ])
+    }
+  }
+
+  const handleSelectMode = (selectedMode, label) => {
+    setConvMode(selectedMode)
+    handleSend(label, selectedMode)
+  }
+
+  const handleSend = async (textToSend, overrideMode = null, explicitSpecialistId = null) => {
     const text = (textToSend || input).trim()
     if (!text || isStreaming || isTyping || isSendingRef.current) return
 
+    if (text.toLowerCase() === 'recap where i left off') {
+      return handleRecap()
+    }
+
+    const activeMode = overrideMode !== null ? overrideMode : convMode
     const specialistIdToUse = explicitSpecialistId || (activeSpecialist ? activeSpecialist.id : null)
 
     isSendingRef.current = true
@@ -159,6 +248,8 @@ export default function ChatPanel({
 
     try {
       await streamQueryFromAssistant(text, conversationId, {
+        tone,
+        mode: activeMode,
         specialistId: specialistIdToUse,
         onToken: (token, full) => {
           receivedTokens = full
@@ -169,10 +260,11 @@ export default function ChatPanel({
           setIsStreaming(false)
           setStreamingText('')
           isSendingRef.current = false
-          if (receivedTokens && receivedTokens.trim()) {
-            setMessages(prev => [...prev, { role: 'assistant', text: receivedTokens }])
+          const finalText = doneData?.response || receivedTokens
+          if (finalText && finalText.trim()) {
+            setMessages(prev => [...prev, { role: 'assistant', text: finalText }])
           } else if (onSendMessage) {
-            const reply = await onSendMessage(text, specialistIdToUse)
+            const reply = await onSendMessage(text, tone, specialistIdToUse)
             if (reply) {
               streamAssistantResponse(reply)
             }
@@ -189,15 +281,34 @@ export default function ChatPanel({
           console.warn('[SSE Stream Error — falling back to non-streaming chat]', err)
           setIsStreaming(false)
           setStreamingText('')
-          if (onSendMessage) {
-            const reply = await onSendMessage(text, specialistIdToUse)
-            if (reply) {
-              streamAssistantResponse(reply)
-            } else {
-              isSendingRef.current = false
+          try {
+            if (onSendMessage) {
+              const reply = await onSendMessage(text, tone, specialistIdToUse)
+              if (reply) {
+                streamAssistantResponse(reply)
+                return
+              }
             }
-          } else {
+            setMessages(prev => [
+              ...prev,
+              {
+                role: 'assistant',
+                text: "I encountered an issue connecting to Compass. Please verify the service is running and try again.",
+              },
+            ])
+          } catch (fallbackErr) {
+            console.error('[Chat Fallback Error]', fallbackErr)
+            setMessages(prev => [
+              ...prev,
+              {
+                role: 'assistant',
+                text: "I encountered an issue connecting to Compass. Please verify the service is running and try again.",
+              },
+            ])
+          } finally {
             isSendingRef.current = false
+            setIsStreaming(false)
+            setStreamingText('')
           }
         }
       })
@@ -205,15 +316,27 @@ export default function ChatPanel({
       console.warn('[SSE Stream Failed — falling back to non-streaming chat]', err)
       setIsStreaming(false)
       setStreamingText('')
-      if (onSendMessage) {
-        const reply = await onSendMessage(text, specialistIdToUse)
-        if (reply) {
-          streamAssistantResponse(reply)
-        } else {
-          isSendingRef.current = false
+      try {
+        if (onSendMessage) {
+          const reply = await onSendMessage(text, tone, specialistIdToUse)
+          if (reply) {
+            streamAssistantResponse(reply)
+            return
+          }
         }
-      } else {
+      } catch (fallbackErr) {
+        console.error('[Chat Fallback Error]', fallbackErr)
+        setMessages(prev => [
+          ...prev,
+          {
+            role: 'assistant',
+            text: "I encountered an issue connecting to Compass. Please verify the service is running and try again.",
+          },
+        ])
+      } finally {
         isSendingRef.current = false
+        setIsStreaming(false)
+        setStreamingText('')
       }
     }
   }
@@ -233,6 +356,7 @@ export default function ChatPanel({
 
   const handleNewChat = () => {
     if (isStreaming || isTyping) return
+    setConvMode(null)
     setMessages([
       {
         role: 'assistant',
@@ -245,6 +369,7 @@ export default function ChatPanel({
 
   const handleSelectPastChat = async (pastConvId) => {
     if (isStreaming || isTyping) return
+    setConvMode(null)
     try {
       if (setConversationId) setConversationId(pastConvId)
       const msgs = await fetchConversationMessages(pastConvId)
@@ -261,20 +386,15 @@ export default function ChatPanel({
     }
   }
 
-  const showToast = (msg) => {
-    setToast(msg)
-    setTimeout(() => setToast(null), 2500)
-  }
-
-  const handleShareChat = async (conv) => {
-    setSharingConv(conv)
-    const shareUrl = `${window.location.origin}/?share=${conv.id}`
-    try {
-      await navigator.clipboard.writeText(shareUrl)
-      showToast('Share link copied to clipboard! 🔗')
-    } catch {
-      showToast('Share link generated 🔗')
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2500) }
+  const handleDeleteFact = async (k) => {
+    if (await deleteProfileFact(k)) {
+      setProfileFacts(prev => { const n = { ...prev }; delete n[k]; return n })
+      showToast(`Forgotten: ${k}`)
     }
+  }
+  const handleForgetAllFacts = async () => {
+    if (await deleteAllProfileFacts()) { setProfileFacts({}); showToast('All personal facts forgotten') }
   }
 
   const handleSelectPastPlan = (plan) => {
@@ -288,100 +408,29 @@ export default function ChatPanel({
     setShowHistoryDrawer(false)
   }
 
+
   const isInputDisabled = isStreaming || isTyping
   const isOnline = backendStatus.toLowerCase().includes('neon') || backendStatus.toLowerCase().includes('live')
   const overdueCount = tasks.filter(t => (t.countdown || '').toLowerCase().includes('overdue')).length
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', minWidth: 0, background: 'var(--bg-app)', position: 'relative' }}>
-      {/* Sleek Context & Control Sub-bar */}
-      <div style={{
-        padding: '10px 20px', borderBottom: '1px solid var(--border)', background: 'var(--bg-card)',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, gap: '12px'
-      }}>
-        {/* Left: History drawer toggle & Live connection indicator */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
-          <button
-            id="btn-toggle-history-drawer"
-            onClick={() => setShowHistoryDrawer(v => !v)}
-            style={{
-              padding: '6px 12px',
-              borderRadius: '8px',
-              border: '1px solid var(--border)',
-              background: showHistoryDrawer ? 'var(--primary)' : 'var(--bg-card-soft)',
-              color: showHistoryDrawer ? '#fff' : 'var(--text-primary)',
-              fontSize: '12px',
-              fontWeight: '700',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              transition: 'all 0.15s ease',
-              boxShadow: 'var(--shadow-sm)',
-              flexShrink: 0,
-            }}
-            title="View previous chats, plans, and long-term memory"
-          >
-            <span>📜</span>
-            <span>History & Memory</span>
-            {pastConversations.length > 0 && (
-              <span style={{
-                background: showHistoryDrawer ? 'rgba(255,255,255,0.25)' : 'var(--brand)',
-                color: showHistoryDrawer ? '#fff' : '#2a1a00',
-                fontSize: '10.5px',
-                padding: '1px 6px',
-                borderRadius: '10px',
-                fontWeight: '800'
-              }}>
-                {pastConversations.length}
-              </span>
-            )}
-          </button>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', color: 'var(--text-secondary)' }}>
-            <span style={{
-              width: '7px', height: '7px', borderRadius: '50%',
-              background: isOnline ? '#10b981' : '#f5a623', display: 'inline-block'
-            }} />
-            <span style={{ whiteSpace: 'nowrap' }}>{isOnline ? 'Workspace connected' : 'Connecting…'}</span>
-          </div>
-        </div>
-
-        {/* Right: Connected memory pill, Context toggle & New Chat */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '12px',
-            background: 'var(--code-bg)', border: '1px solid rgba(16, 185, 129, 0.3)',
-            fontSize: '11px', color: 'var(--code-text)', fontWeight: '600'
-          }} title="Compass long-term memory is active across sessions to prevent schedule clashes">
-            <span>🧠</span>
-            <span>Memory Active</span>
-          </div>
-
-          <button
-            onClick={() => setShowContext(v => !v)}
-            style={{
-              padding: '5px 11px', borderRadius: '6px', border: '1px solid var(--border)',
-              background: showContext ? 'var(--bg-card-soft)' : 'transparent',
-              color: 'var(--text-secondary)', fontSize: '11.5px', fontWeight: '600', cursor: 'pointer'
-            }}>
-            {showContext ? 'Hide Context' : 'Show Context'}
-          </button>
-
-          <button
-            id="btn-chat-new"
-            onClick={handleNewChat}
-            disabled={isInputDisabled}
-            style={{
-              padding: '5px 12px', borderRadius: '6px', border: '1px solid var(--border)',
-              background: 'transparent', color: 'var(--text-secondary)',
-              fontSize: '11.5px', fontWeight: '700', cursor: isInputDisabled ? 'not-allowed' : 'pointer',
-              opacity: isInputDisabled ? 0.5 : 1
-            }}>
-            + New Chat
-          </button>
-        </div>
-      </div>
+      <ChatHeaderToolbar
+        showHistoryDrawer={showHistoryDrawer}
+        setShowHistoryDrawer={setShowHistoryDrawer}
+        pastConversations={pastConversations}
+        isOnline={isOnline}
+        tone={tone}
+        handleToneChange={handleToneChange}
+        showParkedShelf={showParkedShelf}
+        setShowParkedShelf={setShowParkedShelf}
+        parkedThoughts={parkedThoughts}
+        showContext={showContext}
+        setShowContext={setShowContext}
+        handleRecap={handleRecap}
+        handleNewChat={handleNewChat}
+        isInputDisabled={isInputDisabled}
+      />
 
       {/* Main Body: History Drawer + Chat View */}
       <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
@@ -397,7 +446,6 @@ export default function ChatPanel({
           onSelectPastChat={handleSelectPastChat}
           onNewChat={handleNewChat}
           onSelectPastPlan={handleSelectPastPlan}
-          onShareChat={handleShareChat}
           onCheckScheduleClashes={() => handleSend('Check for any schedule conflicts between my upcoming deadlines and past discussions')}
           showToast={showToast}
           tasks={tasks}
@@ -406,50 +454,31 @@ export default function ChatPanel({
         {/* Main Chat Feed & Input */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, height: '100%', overflow: 'hidden' }}>
           {showContext && (
-            <div style={{
-              display: 'flex', gap: '10px', padding: '12px 24px', borderBottom: '1px solid var(--border)',
-              background: 'var(--bg-card)', flexShrink: 0, flexWrap: 'wrap'
-            }}>
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 12px', borderRadius: '10px',
-                background: overdueCount > 0 ? 'var(--danger-bg)' : 'var(--code-bg)', minWidth: '170px'
-              }}>
-                <span style={{ fontSize: '16px' }}>{overdueCount > 0 ? '⚠️' : '✅'}</span>
-                <div>
-                  <div style={{ fontSize: '12px', fontWeight: '700', color: overdueCount > 0 ? '#b23b3b' : 'var(--code-text)' }}>
-                    {overdueCount > 0 ? `${overdueCount} overdue` : 'On schedule'}
-                  </div>
-                  <div style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>Across all domains</div>
-                </div>
-              </div>
-
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 12px', borderRadius: '10px',
-                background: 'var(--coursework-bg)', minWidth: '170px'
-              }}>
-                <span style={{ fontSize: '16px' }}>📋</span>
-                <div>
-                  <div style={{ fontSize: '12px', fontWeight: '700', color: 'var(--coursework-text)' }}>
-                    {tasks.length} task{tasks.length === 1 ? '' : 's'} tracked
-                  </div>
-                  <div style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>Live in Neon</div>
-                </div>
-              </div>
-
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 12px', borderRadius: '10px',
-                background: isOnline ? 'var(--code-bg)' : 'var(--hackathon-bg)', minWidth: '170px'
-              }}>
-                <span style={{ fontSize: '16px' }}>{isOnline ? '🟢' : '🟡'}</span>
-                <div>
-                  <div style={{ fontSize: '12px', fontWeight: '700', color: isOnline ? 'var(--code-text)' : 'var(--hackathon-text)' }}>
-                    {isOnline ? 'Backend live' : 'Backend offline'}
-                  </div>
-                  <div style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>{backendStatus}</div>
-                </div>
-              </div>
-            </div>
+            <ChatContextBar
+              overdueCount={overdueCount}
+              taskCount={tasks.length}
+              isOnline={isOnline}
+              backendStatus={backendStatus}
+            />
           )}
+
+          {/* Collapsible Parked Thoughts Shelf */}
+          {showParkedShelf && (
+            <ParkedThoughtsShelf
+              parkedThoughts={parkedThoughts}
+              onResolveParked={handleResolveParked}
+            />
+          )}
+
+          {/* Collapsible Profile Facts Shelf */}
+          {showContext && (
+            <ProfileFactsShelf
+              facts={profileFacts}
+              onDeleteFact={handleDeleteFact}
+              onForgetAll={handleForgetAllFacts}
+            />
+          )}
+
 
           <ChatChatMessageList
             messages={messages}
@@ -457,6 +486,10 @@ export default function ChatPanel({
             streamingText={streamingText}
             isTyping={isTyping}
             messagesEndRef={messagesEndRef}
+            profileFacts={profileFacts}
+            pastConversations={pastConversations}
+            onSendMessage={handleSend}
+            onSelectMode={handleSelectMode}
           />
 
           <ChatInputBar
@@ -495,13 +528,6 @@ export default function ChatPanel({
           {toast}
         </div>
       )}
-
-      {/* Share Link Modal */}
-      <ShareModal
-        isOpen={Boolean(sharingConv)}
-        onClose={() => setSharingConv(null)}
-        conversation={sharingConv}
-      />
     </div>
   )
 }
