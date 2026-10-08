@@ -257,8 +257,17 @@ def record_usage(
     norm_key = _normalize_model_name(model_name)
     pricing = PRICING_PER_1M.get(norm_key, {"prompt": 0.06, "completion": 0.24})
 
-    cost = (prompt_tokens * pricing["prompt"] / 1_000_000.0) + (
-        completion_tokens * pricing["completion"] / 1_000_000.0
+    try:
+        p_tok = int(prompt_tokens)
+    except Exception:
+        p_tok = 0
+    try:
+        c_tok = int(completion_tokens)
+    except Exception:
+        c_tok = 0
+
+    cost = (p_tok * pricing["prompt"] / 1_000_000.0) + (
+        c_tok * pricing["completion"] / 1_000_000.0
     )
     cost = round(cost, 6)
 
@@ -268,8 +277,8 @@ def record_usage(
         _USAGE_STATE[canonical_key] = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "cost": 0.0}
     entry = _USAGE_STATE[canonical_key]
     entry["calls"] += 1
-    entry["prompt_tokens"] += prompt_tokens
-    entry["completion_tokens"] += completion_tokens
+    entry["prompt_tokens"] += p_tok
+    entry["completion_tokens"] += c_tok
     entry["cost"] = round(entry["cost"] + cost, 6)
     _USAGE_STATE[model_name] = entry
 
@@ -325,10 +334,22 @@ def get_usage_summary() -> Dict[str, Any]:
             "calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "cost": 0.0
         })
 
-        calls = state.get("calls", 0)
-        p_tokens = state.get("prompt_tokens", 0)
-        c_tokens = state.get("completion_tokens", 0)
-        c_cost = float(state.get("cost", 0.0))
+        try:
+            calls = int(state.get("calls", 0))
+        except Exception:
+            calls = 0
+        try:
+            p_tokens = int(state.get("prompt_tokens", 0))
+        except Exception:
+            p_tokens = 0
+        try:
+            c_tokens = int(state.get("completion_tokens", 0))
+        except Exception:
+            c_tokens = 0
+        try:
+            c_cost = float(state.get("cost", 0.0))
+        except Exception:
+            c_cost = 0.0
 
         total_calls += calls
         total_prompt_tokens += p_tokens
@@ -343,8 +364,15 @@ def get_usage_summary() -> Dict[str, Any]:
         }
 
     # Monolithic baseline cost comparison (e.g. GPT-4 at $10 in / $30 out per 1M)
-    gpt4_baseline_usd = round((total_prompt_tokens * 10.0 / 1_000_000.0) + (total_completion_tokens * 30.0 / 1_000_000.0), 4)
-    savings_pct = round(((gpt4_baseline_usd - total_cost_usd) / gpt4_baseline_usd) * 100, 1) if (gpt4_baseline_usd > 0 and gpt4_baseline_usd > total_cost_usd) else 0.0
+    try:
+        gpt4_baseline_usd = float(round((total_prompt_tokens * 10.0 / 1_000_000.0) + (total_completion_tokens * 30.0 / 1_000_000.0), 4))
+    except Exception:
+        gpt4_baseline_usd = 0.0
+    try:
+        total_cost_float = float(total_cost_usd)
+    except Exception:
+        total_cost_float = 0.0
+    savings_pct = round(((gpt4_baseline_usd - total_cost_float) / gpt4_baseline_usd) * 100, 1) if (gpt4_baseline_usd > 0 and gpt4_baseline_usd > total_cost_float) else 0.0
 
     # Tiered Nemotron technical specs
     model_metadata = {
