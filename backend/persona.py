@@ -206,13 +206,15 @@ def format_tool_response(action: str, details: Dict[str, str]) -> str:
         tz = details.get("timezone") or "UTC"
         roll_forward_note = details.get("roll_forward_note", "")
 
+        domain = details.get("domain")
         time_part = f" at {time_str}" if time_str and time_str not in str(due) else ""
         tz_part = f" ({tz})" if due or time_str else ""
+        dom_part = f" ({domain})" if domain and domain not in ("general", "") else ""
         note_part = f" {roll_forward_note}" if roll_forward_note else ""
 
         if due:
-            return f"Added task '{title}' due {due}{time_part}{tz_part}.{note_part} (Type 'undo' to revert)"
-        return f"Added task '{title}'.{note_part} (Type 'undo' to revert)"
+            return f"Done! Added task '{title}' Due {due}{time_part}{dom_part}{tz_part}.{note_part} (Type 'undo' to revert)"
+        return f"Done! Added task '{title}'{dom_part}.{note_part} (Type 'undo' to revert)"
 
     if action == "shift_task":
         title = details.get("title", "Task")

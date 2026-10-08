@@ -281,8 +281,8 @@ def _extract_task_creation_args(message: str) -> dict:
             r"\b(?:on|at|due|by|for|in)?\s*(?:today|tomorrow|yesterday)\b",
             r"\b(?:next|this)?\s*(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
             r"\b\d{4}-\d{2}-\d{2}\b",
-            r"\b(?:\d{1,2}:\d{2}(?:\s*(?:am|pm))?|\d{1,2}\s*(?:am|pm))\b",
-            r"\b(?:on|at|due|by|for|in)\b",
+            r"^\s*(?:on|at|due|by|in)\s+",
+            r"\s+\b(?:on|at|due|by|in)\s*$",
         ]
         for p in patterns:
             t = re.sub(p, "", t, flags=re.IGNORECASE)
