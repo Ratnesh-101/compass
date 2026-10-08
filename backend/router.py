@@ -298,15 +298,10 @@ def _extract_task_creation_args(message: str) -> dict:
     # Strategy D: Prefix removal for standard forms:
     if not title:
         prefixes = (
-            "add a deadline on", "add a deadline for", "add a deadline:", "add a deadline",
-            "add deadline on", "add deadline for", "add deadline:", "add deadline",
-            "set a deadline for", "set a deadline on", "set a deadline:", "set a deadline",
-            "create a deadline for", "create a deadline on", "create a deadline:", "create a deadline",
-            "add a task for", "add a task on", "add a task:", "add a task",
-            "add task for", "add task on", "add task:", "add task",
-            "create a task for", "create a task on", "create a task:", "create a task",
-            "create task for", "create task on", "create task:", "create task",
-            "new task:", "new task", "new deadline:", "new deadline",
+            "add a deadline on", "add a deadline for", "add a deadline:", "add a deadline", "add deadline on", "add deadline for", "add deadline:", "add deadline",
+            "set a deadline for", "set a deadline on", "set a deadline:", "set a deadline", "create a deadline for", "create a deadline on", "create a deadline:", "create a deadline",
+            "add a task for", "add a task on", "add a task:", "add a task", "add task for", "add task on", "add task:", "add task",
+            "create a task for", "create a task on", "create a task:", "create a task", "create task for", "create task on", "create task:", "create task", "new task:", "new task", "new deadline:", "new deadline",
         )
         for pref in prefixes:
             if msg_lower.startswith(pref):
@@ -493,22 +488,9 @@ def _fallback_route(message: str, history: Optional[list[dict[str, str]]] = None
     if res_match:
         return "resolve_parked", {"thought_id": int(res_match.group(1))}, ""
 
-    park_triggers = (
-        "park that",
-        "park it",
-        "park this for later",
-        "park this",
-        "let's come back to that",
-        "lets come back to that",
-        "come back to that later",
-    )
+    park_triggers = ("park that", "park it", "park this for later", "park this", "let's come back to that", "lets come back to that", "come back to that later")
     is_park_action = any(trigger in msg_lower for trigger in park_triggers)
-    is_ordinary_park = any(
-        term in msg_lower for term in (
-            "car", "vehicle", "parking", "garage", "lot", "national park", "amusement park",
-            "in the park", "to the park", "at the park", "walk in the park", "dog park"
-        )
-    )
+    is_ordinary_park = any(term in msg_lower for term in ("car", "vehicle", "parking", "garage", "lot", "national park", "amusement park", "in the park", "to the park", "at the park", "walk in the park", "dog park"))
     if is_park_action and not is_ordinary_park:
         park_text = message
         for trig in (
