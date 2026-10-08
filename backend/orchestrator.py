@@ -54,8 +54,8 @@ def _parse_iso_date(val: Optional[str]) -> Optional[date]:
 
 
 async def handle_message(
-    conversation_id: Optional[str],
-    message: str,
+    conversation_id: Optional[str] = None,
+    message: str = "",
     user_id: Optional[str] = None,
     guest_id: Optional[str] = None,
     history: Optional[list] = None,
@@ -174,7 +174,78 @@ async def handle_message(
     if conv_mode and isinstance(args, dict):
         args["conv_mode"] = conv_mode
 
-    # 2. Skill Execution: add_task
+    # 2a. Skill Execution: undo
+    if skill_name == "undo":
+        reverted_title = "task"
+        found = False
+        try:
+            pool = await get_pool()
+            if pool:
+                async with pool.acquire() as conn:
+                    row = await conn.fetchrow(
+                        """
+                        SELECT id, tool, affected_id, new_state, previous_state 
+                        FROM agent_audit_log 
+                        WHERE (approved_by = $1 OR approved_by = 'user' OR approved_by = 'default_user') 
+                          AND is_reverted = FALSE 
+                        ORDER BY id DESC LIMIT 1
+                        """,
+                        user_id or "default_user",
+                    )
+                    if row:
+                        found = True
+                        log_id = row["id"]
+                        t_name = row["tool"]
+                        aff_id = row["affected_id"]
+                        new_st = row["new_state"] or {}
+                        if isinstance(new_st, str):
+                            import json
+                            try:
+                                new_st = json.loads(new_st)
+                            except Exception:
+                                new_st = {}
+                        reverted_title = new_st.get("title") or "task"
+
+                        if t_name == "add_task" and aff_id:
+                            await conn.execute("DELETE FROM tasks WHERE id = $1", int(aff_id))
+                        elif t_name in ("edit_task", "update_task_status") and aff_id and row["previous_state"]:
+                            prev_st = row["previous_state"]
+                            if isinstance(prev_st, str):
+                                import json
+                                try:
+                                    prev_st = json.loads(prev_st)
+                                except Exception:
+                                    prev_st = {}
+                            await structured.update_task(conn, int(aff_id), **prev_st)
+
+                        await conn.execute("UPDATE agent_audit_log SET is_reverted = TRUE WHERE id = $1", log_id)
+        except Exception as e:
+            logger.warning(f"Undo operation failed: {e}")
+
+        resp_msg = f"Undid: Removed task '{reverted_title}'." if found else "Nothing to undo."
+        if persist:
+            try:
+                pool = await get_pool()
+                if pool:
+                    async with pool.acquire() as conn:
+                        real_cid = await conversations.get_or_create_conversation(conn, conv_id, user_id=user_id)
+                        await conversations.add_message(conn, real_cid, role="user", content=message)
+                        await conversations.add_message(conn, real_cid, role="assistant", content=resp_msg, skill_called="undo")
+                        conv_id = real_cid
+            except Exception as e:
+                logger.debug(f"Could not persist undo message history: {e}")
+
+        return {
+            "conversation_id": conv_id,
+            "response": resp_msg,
+            "message": resp_msg,
+            "skill_used": "undo",
+            "success": found,
+            "data": None,
+            "routing_latency_ms": int((time.perf_counter() - start_time) * 1000),
+        }
+
+    # 2b. Skill Execution: add_task
     if skill_name == "add_task" and args:
         title = args.get("title") or message
         domain = args.get("domain") or "general"
@@ -333,24 +404,55 @@ async def handle_message(
                 "routing_latency_ms": latency_ms,
             }
 
-        # Build skill summary using persona formatter
+        # Resolve user timezone and record into agent_audit_log for undo
+        user_tz = "UTC"
+        try:
+            pool = await get_pool()
+            if pool:
+                async with pool.acquire() as conn:
+                    row_tz = await conn.fetchrow(
+                        "SELECT value FROM user_profile_facts WHERE user_id = $1 AND key = 'timezone'",
+                        user_id or "default_user",
+                    )
+                    if row_tz and row_tz["value"]:
+                        user_tz = row_tz["value"].strip()
+                    if task_record and "id" in task_record:
+                        import json
+                        await conn.execute(
+                            """
+                            INSERT INTO agent_audit_log 
+                                (run_id, tool, args, affected_table, affected_id, new_state, approved_by, status, is_reverted)
+                            VALUES ($1, 'add_task', $2::jsonb, 'tasks', $3, $4::jsonb, $5, 'executed', FALSE)
+                            """,
+                            conv_id,
+                            json.dumps(args, default=str),
+                            int(task_record["id"]),
+                            json.dumps(task_record, default=str),
+                            user_id or "default_user",
+                        )
+        except Exception as e:
+            logger.debug(f"Audit log recording or timezone lookup failed: {e}")
+
+        # Build skill summary echoing ONLY what user specified (no invented priority or category)
         from backend.persona import format_tool_response
         summary = format_tool_response("add_task", {
             "title": title,
             "due_date": due_str or "",
-            "domain": domain,
             "time_str": args.get("time_str") or "",
+            "timezone": user_tz,
+            "roll_forward_note": args.get("roll_forward_note") or "",
         })
 
         # Persist conversation & messages
         if persist:
             try:
                 pool = await get_pool()
-                async with pool.acquire() as conn:
-                    real_cid = await conversations.get_or_create_conversation(conn, conv_id)
-                    await conversations.add_message(conn, real_cid, role="user", content=message)
-                    await conversations.add_message(conn, real_cid, role="assistant", content=summary, skill_called="add_task")
-                    conv_id = real_cid
+                if pool:
+                    async with pool.acquire() as conn:
+                        real_cid = await conversations.get_or_create_conversation(conn, conv_id, user_id=user_id)
+                        await conversations.add_message(conn, real_cid, role="user", content=message)
+                        await conversations.add_message(conn, real_cid, role="assistant", content=summary, skill_called="add_task")
+                        conv_id = real_cid
             except Exception as e:
                 logger.debug(f"Could not persist message history: {e}")
 
@@ -360,6 +462,7 @@ async def handle_message(
             "response": summary,
             "message": summary,
             "skill_used": "add_task",
+            "success": True,
             "data": task_record,
             "routing_latency_ms": latency_ms,
         }

@@ -143,7 +143,7 @@ async def get_critique_stats(pool: Any) -> Dict[str, Any]:
         }
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT id, goal, accumulated_steps, status, created_at FROM agent_runs ORDER BY created_at DESC LIMIT 200"
+            "SELECT id, goal, accumulated_steps, status, created_at FROM agent_runs ORDER BY created_at DESC LIMIT 50"
         )
     total_runs = len(rows)
     runs_with_critique = 0

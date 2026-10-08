@@ -302,7 +302,7 @@ def get_client_ip(request: Request) -> str:
 
     # 1. Edge Signature Validation (Vercel Edge Middleware -> Backend)
     edge_sig = request.headers.get("x-compass-edge-sig") or request.headers.get("x-vercel-edge-sig")
-    edge_secret = getattr(settings, "EDGE_HMAC_SECRET", "")
+    edge_secret = (getattr(settings, "EDGE_HMAC_SECRET", "") or getattr(settings, "VERCEL_EDGE_SECRET", "") or "").strip()
 
     if edge_sig and edge_secret:
         # Check signed client_ip format: client_ip|timestamp|signature
@@ -329,3 +329,36 @@ def get_client_ip(request: Request) -> str:
         return request.client.host
 
     return "127.0.0.1"
+
+
+def is_edge_ip_trusted(request: Request) -> bool:
+    """Determine whether the client IP in this request has been cryptographically verified.
+    
+    Returns True if:
+      - Valid edge HMAC signature is present and validated against EDGE_HMAC_SECRET (or VERCEL_EDGE_SECRET).
+      - Or TRUST_CF_CONNECTING_IP is True and cf-connecting-ip is present.
+    Returns False when behind a reverse proxy (e.g. Vercel) without a verified signature,
+    meaning all users share the proxy IP and IP-based rate limiting would pool all users together.
+    """
+    from backend.config import get_settings
+    settings = get_settings()
+
+    if getattr(settings, "TRUST_CF_CONNECTING_IP", False):
+        cf_ip = request.headers.get("cf-connecting-ip")
+        if cf_ip and is_valid_ip(cf_ip.strip()):
+            return True
+
+    edge_sig = request.headers.get("x-compass-edge-sig") or request.headers.get("x-vercel-edge-sig")
+    edge_secret = (getattr(settings, "EDGE_HMAC_SECRET", "") or getattr(settings, "VERCEL_EDGE_SECRET", "") or "").strip()
+    if edge_sig and edge_secret:
+        signed_ip = extract_signed_edge_client_ip(edge_sig, edge_secret)
+        if signed_ip:
+            return True
+
+    # If there is no proxy header at all (direct connection, not proxied), consider peer IP trusted
+    xff = request.headers.get("x-forwarded-for")
+    if not xff:
+        return True
+
+    return False
+

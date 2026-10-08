@@ -278,6 +278,9 @@ def _get_current_identity(request: Request) -> Optional[Identity]:
     Returns Identity with explicit is_admin and is_guest flags.
     x-user-id impersonation is allowed ONLY when ENVIRONMENT is explicitly set to an allowed value ('development' or 'test'). Unset or production = forbidden.
     """
+    if hasattr(request, "state") and getattr(request.state, "identity", None):
+        return request.state.identity
+
     settings = get_settings()
     session_token = request.cookies.get("compass_session")
     auth_header = request.headers.get("authorization")

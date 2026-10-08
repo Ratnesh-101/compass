@@ -39,8 +39,6 @@ async def _consume_token(
     from backend.config import get_settings
     settings = get_settings()
     is_fail_closed = fail_closed if fail_closed is not None else getattr(settings, "RATE_LIMIT_FAIL_CLOSED", True)
-    if getattr(settings, "ENVIRONMENT", "").lower() == "test":
-        is_fail_closed = False
 
     try:
         pool = await get_pool()
@@ -126,21 +124,17 @@ async def enforce_rate_limit(
     identity_capacity: float = 30.0,
     identity_refill_per_sec: float = 0.5, # 30/minute
 ) -> None:
-    """Enforce shared multi-tier rate limits: per-IP AND per-Identity (user or guest)."""
+    """Enforce shared multi-tier rate limits: per-IP AND per-Identity (user or guest).
+    
+    Safe fallback for reverse proxies:
+    When EDGE_HMAC_SECRET is unset or edge signature is unverified, all proxy users share the
+    same egress IP (the last proxy hop). In that case, rate-limiting per identity (guest token
+    or user session) is used as the primary rate limit so legitimate users are not throttled
+    by a shared proxy IP bucket.
+    """
     from backend.dependencies import _get_current_identity
+    from backend.services.security import is_edge_ip_trusted
 
-    client_ip = get_client_ip(request)
-    ip_key = f"ip:{client_ip}:{action}"
-
-    allowed, retry_after = await _consume_token(ip_key, ip_capacity, ip_refill_per_sec)
-    if not allowed:
-        raise HTTPException(
-            status_code=429,
-            detail=f"Rate limit exceeded for IP. Maximum {int(ip_capacity)} requests per minute.",
-            headers={"Retry-After": str(retry_after)},
-        )
-
-    # Check identity if authenticated or guest
     ident = _get_current_identity(request)
     identity_key = None
     if ident:
@@ -149,6 +143,9 @@ async def enforce_rate_limit(
         elif ident.user_id:
             identity_key = f"user:{ident.user_id}:{action}"
 
+    is_trusted = is_edge_ip_trusted(request)
+
+    # 1. Identity rate limiting (Primary key when IP is untrusted)
     if identity_key:
         id_allowed, id_retry = await _consume_token(
             identity_key, identity_capacity, identity_refill_per_sec
@@ -158,6 +155,22 @@ async def enforce_rate_limit(
                 status_code=429,
                 detail=f"Rate limit exceeded for identity. Maximum {int(identity_capacity)} requests per minute.",
                 headers={"Retry-After": str(id_retry)},
+            )
+
+    # 2. IP rate limiting:
+    # If the edge IP is cryptographically verified (or direct connection), enforce normal strict IP bucket.
+    # If the edge IP is untrusted and an identity is present, bypass or use generous shared proxy capacity
+    # so unverified proxy users don't exhaust each other's tokens.
+    # If no identity is present, enforce the IP limit.
+    if is_trusted or not identity_key:
+        client_ip = get_client_ip(request)
+        ip_key = f"ip:{client_ip}:{action}"
+        allowed, retry_after = await _consume_token(ip_key, ip_capacity, ip_refill_per_sec)
+        if not allowed:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Rate limit exceeded for IP. Maximum {int(ip_capacity)} requests per minute.",
+                headers={"Retry-After": str(retry_after)},
             )
 
 

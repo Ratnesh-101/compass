@@ -150,8 +150,8 @@ async def test_critique_stats_endpoint_computes_real_metrics(client: AsyncClient
     async with pool.acquire() as conn:
         await conn.execute(
             """
-            INSERT INTO agent_runs (id, goal, status, accumulated_steps, messages, pending_actions, created_at)
-            VALUES ($1, 'Critique test run', 'completed', $2::jsonb, '[]'::jsonb, '[]'::jsonb, now())
+            INSERT INTO agent_runs (id, goal, status, accumulated_steps, messages, pending_actions)
+            VALUES ($1, 'Critique test run', 'completed', $2::jsonb, '[]'::jsonb, '[]'::jsonb)
             """,
             test_run_id,
             json.dumps([critique_step]),

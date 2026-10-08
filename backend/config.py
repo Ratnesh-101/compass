@@ -111,14 +111,15 @@ class Settings(BaseSettings):
             missing.append("TOKEN_ENCRYPTION_KEY")
         if not self.GUEST_SIGNING_SECRET or self.GUEST_SIGNING_SECRET.strip() in ("dev-secret", "test-secret", "compass-guest-token-secret-2026"):
             missing.append("GUEST_SIGNING_SECRET")
-        if not self.EDGE_HMAC_SECRET or self.EDGE_HMAC_SECRET.strip() in ("dev-secret", "test-secret", "compass_vercel_edge_hmac_secret_2026"):
+        effective_edge_secret = (self.EDGE_HMAC_SECRET or self.VERCEL_EDGE_SECRET or "").strip()
+        if not effective_edge_secret or effective_edge_secret in ("dev-secret", "test-secret", "compass_vercel_edge_hmac_secret_2026"):
             missing.append("EDGE_HMAC_SECRET")
 
         secrets_dict = {
             "AUTH_TOKEN": self.AUTH_TOKEN.strip() if self.AUTH_TOKEN else "",
             "TOKEN_ENCRYPTION_KEY": self.TOKEN_ENCRYPTION_KEY.strip() if self.TOKEN_ENCRYPTION_KEY else "",
             "GUEST_SIGNING_SECRET": self.GUEST_SIGNING_SECRET.strip() if self.GUEST_SIGNING_SECRET else "",
-            "EDGE_HMAC_SECRET": self.EDGE_HMAC_SECRET.strip() if self.EDGE_HMAC_SECRET else "",
+            "EDGE_HMAC_SECRET": effective_edge_secret,
         }
 
         # Check for duplicates among configured non-empty secrets

@@ -268,6 +268,19 @@ async def _ensure_tables(pool: asyncpg.Pool) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_parked_thoughts_user_status ON parked_thoughts(user_id, status);
         CREATE INDEX IF NOT EXISTS idx_parked_thoughts_conversation ON parked_thoughts(conversation_id);
+
+        -- Per-task and per-user trusted event URLs
+        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS trusted_event_url TEXT;
+
+        CREATE TABLE IF NOT EXISTS user_trusted_urls (
+            id SERIAL PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            url TEXT NOT NULL,
+            title TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            UNIQUE(user_id, url)
+        );
+        CREATE INDEX IF NOT EXISTS idx_user_trusted_urls_user ON user_trusted_urls(user_id);
         """)
 
 
