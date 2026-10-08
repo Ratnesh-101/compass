@@ -11,9 +11,21 @@ import uuid
 import asyncpg
 from asyncpg.pool import PoolConnectionProxy
 
+import re
+
 logger = logging.getLogger("compass.conversations")
 
 DbConn = Union[asyncpg.Connection, PoolConnectionProxy]
+
+MODES_MARKER_REGEX = re.compile(r"\[{1,2}\s*modes?(?::[^\]]*)?\s*\]{1,2}", re.IGNORECASE)
+
+
+def strip_modes_marker(text: Optional[str]) -> str:
+    """Strip [[modes]] control marker and all variants (e.g. [[modes: advice]], [[modes:plan]]) from text."""
+    if not text:
+        return ""
+    return MODES_MARKER_REGEX.sub("", text).strip()
+
 
 
 async def ensure_conversation_columns(conn: DbConn) -> None:
@@ -143,13 +155,15 @@ async def add_message(
 ) -> dict:
     """Insert a message into the conversation history and update title if first user message."""
     cid = uuid.UUID(conversation_id)
+    # Strip [[modes]] control marker and all variants before persisting
+    clean_content = strip_modes_marker(content)
     row = await conn.fetchrow(
         """
         INSERT INTO messages (conversation_id, role, content, skill_called)
         VALUES ($1, $2, $3, $4)
         RETURNING id, conversation_id, role, content, skill_called, created_at
         """,
-        cid, role, content, skill_called
+        cid, role, clean_content, skill_called
     )
     await conn.execute(
         "UPDATE conversations SET last_active_at = now() WHERE id = $1",
@@ -159,7 +173,7 @@ async def add_message(
     # Set conversation title if it's the first user message
     if role == "user":
         try:
-            clean_title = content.strip().replace("\n", " ")
+            clean_title = strip_modes_marker(content).strip().replace("\n", " ")
             if len(clean_title) > 60:
                 clean_title = clean_title[:57] + "..."
             await conn.execute(
@@ -201,7 +215,13 @@ async def get_recent_messages(
         """,
         cid, limit
     )
-    return [dict(r) for r in rows]
+    return [
+        {
+            **dict(r),
+            "content": strip_modes_marker(r["content"]),
+        }
+        for r in rows
+    ]
 
 
 async def list_conversations(

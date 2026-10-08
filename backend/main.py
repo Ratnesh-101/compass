@@ -13,12 +13,12 @@ Run with:
 
 import asyncio
 import logging
+import urllib.parse
 from contextlib import asynccontextmanager
 
-import urllib.parse
 from fastapi import FastAPI
-from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 
 from backend.config import get_settings
 from backend.memory.db import init_pool, close_pool
@@ -78,6 +78,10 @@ from backend.routers import (
     calendar_router,
     auth_router,
     migration_router,
+    profile_router,
+    persona_router,
+    parked_router,
+    specialist_router,
 )
 
 # ---------------------------------------------------------------------------
@@ -93,8 +97,12 @@ logger = logging.getLogger("compass")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application startup and shutdown."""
-    # 0. Startup Secrets Validation (fails immediately if production secrets are missing or reused)
-    settings.validate_production_secrets()
+    # 0. Startup Secrets Validation (logs exact missing/duplicate secret names; does not take prod down)
+    try:
+        settings.validate_production_secrets()
+        logger.info("✅ Production secrets validation: all required secrets set distinctly")
+    except Exception as e:
+        logger.error(f"⚠️ Production secrets validation issue (config_ok will report false): {e}")
 
     logger.info("🧭 Compass starting up — initializing database pool...")
     cleanup_task = None
@@ -225,6 +233,10 @@ app.include_router(agent_router)
 app.include_router(calendar_router)
 app.include_router(auth_router)
 app.include_router(migration_router)
+app.include_router(profile_router)
+app.include_router(persona_router)
+app.include_router(parked_router)
+app.include_router(specialist_router)
 
 
 @app.get("/")

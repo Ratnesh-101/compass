@@ -158,10 +158,39 @@ async def generate_chat_events(
     message = req.message.strip()
     yield ": ping\n\n"
 
+    specialist_id = req.get_specialist_id() if hasattr(req, "get_specialist_id") else None
+    if specialist_id:
+        from backend.agents.specialist_registry import validate_specialist_id
+        valid_id = validate_specialist_id(specialist_id)
+        if not valid_id:
+            yield f"data: {json.dumps({'type': 'error', 'detail': f'Invalid specialist ID: {specialist_id}', 'terminal': True})}\n\n"
+            return
+
+        from backend.agents.specialist import run_specialist_task
+        pool = await _resolve_pool()
+        spec_result = await run_specialist_task(capability=valid_id, user_goal=message, pool=pool)
+        response_text = spec_result.get("summary", f"Specialist analysis completed for '{message}'.")
+
+        try:
+            if pool:
+                async with pool.acquire() as conn:
+                    real_cid = await conversations.get_or_create_conversation(conn, conv_id, user_id=user_id, guest_id=guest_id)
+                    await conversations.add_message(conn, real_cid, role="user", content=f"[{valid_id}] {message}")
+                    await conversations.add_message(conn, real_cid, role="assistant", content=response_text, skill_called=f"specialist_{valid_id}")
+                    conv_id = real_cid
+        except Exception as e:
+            logger.debug(f"Could not persist specialist message history in stream: {e}")
+
+        yield f"data: {json.dumps({'type': 'token', 'value': response_text})}\n\n"
+        yield f"data: {json.dumps({'type': 'done', 'conversation_id': conv_id, 'skill_used': f'specialist_{valid_id}'})}\n\n"
+        return
+
     needs_tools = message_needs_tools(message)
 
     history_items: List[dict[str, str]] = []
     memory_context = ""
+    profile_facts: dict = {}
+    parked_items: list = []
     try:
         pool = await _resolve_pool()
         if pool:
@@ -191,9 +220,32 @@ async def generate_chat_events(
                             "SELECT title, domain, due_date, status, priority FROM tasks WHERE status != 'completed' ORDER BY due_date ASC NULLS LAST LIMIT 8"
                         )
 
-            rows_h, prior, tasks_rows = await asyncio.gather(
-                _load_history(), _load_prior(), _load_tasks(), return_exceptions=True
+            async def _load_facts():
+                try:
+                    async with pool.acquire() as conn:
+                        from backend.memory.profile import get_profile_facts
+                        return await get_profile_facts(conn, user_id=user_id or "default_user")
+                except Exception as e:
+                    logger.warning("Could not pre-fetch profile facts (continuing gracefully): %s", e)
+                    return {}
+
+            async def _load_parked():
+                try:
+                    async with pool.acquire() as conn:
+                        from backend.memory.parked import list_parked_thoughts
+                        rows = await list_parked_thoughts(conn, user_id=user_id or "default_user", status="parked", limit=5)
+                        return [r["text"] for r in rows if r.get("text")]
+                except Exception as e:
+                    logger.warning("Could not pre-fetch parked thoughts (continuing gracefully): %s", e)
+                    return []
+
+            rows_h, prior, tasks_rows, profile_facts, parked_items = await asyncio.gather(
+                _load_history(), _load_prior(), _load_tasks(), _load_facts(), _load_parked(), return_exceptions=True
             )
+            if not isinstance(profile_facts, dict):
+                profile_facts = {}
+            if not isinstance(parked_items, list):
+                parked_items = []
             if isinstance(rows_h, list):
                 for r in rows_h:
                     role = r.get("role", "user")
@@ -213,6 +265,8 @@ async def generate_chat_events(
                 memory_context = "\n\n".join(mem_parts)
     except Exception as e:
         logger.debug("Pre-fetch failed: %s", e)
+        profile_facts = {}
+        parked_items = []
 
     stream = None
     try:
@@ -223,15 +277,23 @@ async def generate_chat_events(
         )
 
         today_iso = date.today().isoformat()
-        sys_prompt = (
-            f"You are Compass, an intelligent personal assistant with long-term memory across sessions. "
+        date_context = (
             f"Today's date is {today_iso}. When resolving dates without years (e.g. '30th oct'), use {today_iso[:4]}. "
-            f"You maintain context across conversation history AND prior chats/plans. "
             f"When the user asks follow-up questions, recalls earlier conversations, or asks to plan or schedule without clashing, "
-            f"use the provided memory and active schedule context. Be concise, friendly, and helpful."
+            f"use the provided memory and active schedule context."
         )
+        extra = date_context
         if memory_context:
-            sys_prompt += f"\n\n[WORKSPACE MEMORY & PAST CONTEXT]:\n{memory_context}"
+            extra += f"\n\n[WORKSPACE MEMORY & PAST CONTEXT]:\n{memory_context}"
+
+        from backend.persona import build_persona_system_prompt
+        sys_prompt = build_persona_system_prompt(
+            profile_facts=profile_facts if isinstance(profile_facts, dict) else None,
+            extra_context=extra,
+            tone=getattr(req, "tone", None),
+            parked_thoughts=parked_items if isinstance(parked_items, list) and parked_items else None,
+            conv_mode=getattr(req, "mode", None),
+        )
 
         messages: List[ChatCompletionMessageParam] = [
             {"role": "system", "content": sys_prompt},

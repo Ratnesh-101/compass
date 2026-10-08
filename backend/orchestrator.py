@@ -35,7 +35,8 @@ def _parse_iso_date(val: Optional[str]) -> Optional[date]:
     if not val:
         return None
     try:
-        parsed = datetime.strptime(val.strip(), "%Y-%m-%d").date()
+        clean = val.strip().split("T")[0].split(" ")[0]
+        parsed = datetime.strptime(clean, "%Y-%m-%d").date()
         today = date.today()
         # If the date was parsed with a past year (e.g. LLM defaulted to 2024/2025 instead of current year),
         # roll it forward to the current year or next occurrence.
@@ -53,13 +54,15 @@ def _parse_iso_date(val: Optional[str]) -> Optional[date]:
 
 
 async def handle_message(
-    conversation_id: Optional[str],
-    message: str,
+    conversation_id: Optional[str] = None,
+    message: str = "",
     user_id: Optional[str] = None,
     guest_id: Optional[str] = None,
     history: Optional[list] = None,
     memory_context: Optional[str] = None,
     persist: bool = True,
+    tone: Optional[str] = None,
+    conv_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Process an incoming user message through router and skill handlers."""
     start_time = time.perf_counter()
@@ -122,6 +125,24 @@ async def handle_message(
                 )
 
                 sections = []
+                try:
+                    from backend.memory.profile import get_profile_facts
+                    p_facts = await get_profile_facts(conn, user_id=user_id or "default_user")
+                    if p_facts:
+                        facts_str = "\n".join([f"- {k.replace('_', ' ').capitalize()}: {v}" for k, v in sorted(p_facts.items())])
+                        sections.append(f"Personal Profile Facts:\n{facts_str}")
+                except Exception as e:
+                    logger.warning("Could not load profile facts in orchestrator (continuing gracefully): %s", e)
+
+                try:
+                    from backend.memory.parked import list_parked_thoughts
+                    p_thoughts = await list_parked_thoughts(conn, user_id=user_id or "default_user", status="parked", limit=5)
+                    if p_thoughts:
+                        parked_str = "\n".join([f"- {t['text']}" for t in p_thoughts])
+                        sections.append(f"Parked Thoughts on Shelf:\n{parked_str}")
+                except Exception as e:
+                    logger.warning("Could not load parked thoughts in orchestrator (continuing gracefully): %s", e)
+
                 if prior_messages:
                     prior_str = "\n".join([f"- [{m.get('role', 'user')}]: {m.get('content', '')[:120]}" for m in prior_messages])
                     sections.append(f"Past Chats Recall:\n{prior_str}")
@@ -148,8 +169,87 @@ async def handle_message(
     )
     if user_id and isinstance(args, dict):
         args["user_id"] = user_id
+    if tone and isinstance(args, dict):
+        args["tone"] = tone
+    if conv_mode and isinstance(args, dict):
+        args["conv_mode"] = conv_mode
 
-    # 2. Skill Execution: add_task
+    # 2a. Skill Execution: undo
+    if skill_name == "undo":
+        reverted_title = "task"
+        found = False
+        try:
+            pool = await get_pool()
+            if pool:
+                async with pool.acquire() as conn:
+                    row = await conn.fetchrow(
+                        """
+                        SELECT id, tool, affected_id, new_state, previous_state 
+                        FROM agent_audit_log 
+                        WHERE approved_by = $1
+                          AND is_reverted = FALSE 
+                        ORDER BY id DESC LIMIT 1
+                        """,
+                        user_id or "default_user",
+                    )
+                    if row:
+                        found = True
+                        log_id = row["id"]
+                        t_name = row["tool"]
+                        aff_id = row["affected_id"]
+                        new_st = row["new_state"] or {}
+                        if isinstance(new_st, str):
+                            import json
+                            try:
+                                new_st = json.loads(new_st)
+                            except Exception:
+                                new_st = {}
+                        reverted_title = new_st.get("title") or "task"
+
+                        if t_name == "add_task" and aff_id:
+                            await conn.execute(
+                                "DELETE FROM tasks WHERE id = $1 AND user_id = $2",
+                                int(aff_id),
+                                user_id or "default_user",
+                            )
+                        elif t_name in ("edit_task", "update_task_status") and aff_id and row["previous_state"]:
+                            prev_st = row["previous_state"]
+                            if isinstance(prev_st, str):
+                                import json
+                                try:
+                                    prev_st = json.loads(prev_st)
+                                except Exception:
+                                    prev_st = {}
+                            await structured.update_task(conn, int(aff_id), **prev_st)
+
+                        await conn.execute("UPDATE agent_audit_log SET is_reverted = TRUE WHERE id = $1", log_id)
+        except Exception as e:
+            logger.warning(f"Undo operation failed: {e}")
+
+        resp_msg = f"Undid: Removed task '{reverted_title}'." if found else "Nothing to undo."
+        if persist:
+            try:
+                pool = await get_pool()
+                if pool:
+                    async with pool.acquire() as conn:
+                        real_cid = await conversations.get_or_create_conversation(conn, conv_id, user_id=user_id)
+                        await conversations.add_message(conn, real_cid, role="user", content=message)
+                        await conversations.add_message(conn, real_cid, role="assistant", content=resp_msg, skill_called="undo")
+                        conv_id = real_cid
+            except Exception as e:
+                logger.debug(f"Could not persist undo message history: {e}")
+
+        return {
+            "conversation_id": conv_id,
+            "response": resp_msg,
+            "message": resp_msg,
+            "skill_used": "undo",
+            "success": found,
+            "data": None,
+            "routing_latency_ms": int((time.perf_counter() - start_time) * 1000),
+        }
+
+    # 2b. Skill Execution: add_task
     if skill_name == "add_task" and args:
         title = args.get("title") or message
         domain = args.get("domain") or "general"
@@ -308,19 +408,55 @@ async def handle_message(
                 "routing_latency_ms": latency_ms,
             }
 
-        # Build skill summary
-        due_info = f" with due date {due_str}" if due_str else ""
-        summary = f"Added task '{title}' under {domain.upper()} domain{due_info}."
+        # Resolve user timezone and record into agent_audit_log for undo
+        user_tz = "UTC"
+        try:
+            pool = await get_pool()
+            if pool:
+                async with pool.acquire() as conn:
+                    row_tz = await conn.fetchrow(
+                        "SELECT value FROM user_profile_facts WHERE user_id = $1 AND key = 'timezone'",
+                        user_id or "default_user",
+                    )
+                    if row_tz and row_tz["value"]:
+                        user_tz = row_tz["value"].strip()
+                    if task_record and "id" in task_record:
+                        import json
+                        await conn.execute(
+                            """
+                            INSERT INTO agent_audit_log 
+                                (run_id, tool, args, affected_table, affected_id, new_state, approved_by, status, is_reverted)
+                            VALUES ($1, 'add_task', $2::jsonb, 'tasks', $3, $4::jsonb, $5, 'executed', FALSE)
+                            """,
+                            conv_id,
+                            json.dumps(args, default=str),
+                            int(task_record["id"]),
+                            json.dumps(task_record, default=str),
+                            user_id or "default_user",
+                        )
+        except Exception as e:
+            logger.debug(f"Audit log recording or timezone lookup failed: {e}")
+
+        # Build skill summary echoing ONLY what user specified (no invented priority or category)
+        from backend.persona import format_tool_response
+        summary = format_tool_response("add_task", {
+            "title": title,
+            "due_date": due_str or "",
+            "time_str": args.get("time_str") or "",
+            "timezone": user_tz,
+            "roll_forward_note": args.get("roll_forward_note") or "",
+        })
 
         # Persist conversation & messages
         if persist:
             try:
                 pool = await get_pool()
-                async with pool.acquire() as conn:
-                    real_cid = await conversations.get_or_create_conversation(conn, conv_id)
-                    await conversations.add_message(conn, real_cid, role="user", content=message)
-                    await conversations.add_message(conn, real_cid, role="assistant", content=summary, skill_called="add_task")
-                    conv_id = real_cid
+                if pool:
+                    async with pool.acquire() as conn:
+                        real_cid = await conversations.get_or_create_conversation(conn, conv_id, user_id=user_id)
+                        await conversations.add_message(conn, real_cid, role="user", content=message)
+                        await conversations.add_message(conn, real_cid, role="assistant", content=summary, skill_called="add_task")
+                        conv_id = real_cid
             except Exception as e:
                 logger.debug(f"Could not persist message history: {e}")
 
@@ -330,6 +466,7 @@ async def handle_message(
             "response": summary,
             "message": summary,
             "skill_used": "add_task",
+            "success": True,
             "data": task_record,
             "routing_latency_ms": latency_ms,
         }

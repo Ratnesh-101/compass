@@ -501,6 +501,124 @@ APPLY_TRIAGE_PLAN_TOOL: Dict[str, Any] = {
     },
 }
 
+REMEMBER_FACT_TOOL: Dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "remember_fact",
+        "description": "Store or update an explicit personal fact or preference shared by the user (name, goals, preferences, worries).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string",
+                    "description": "The category or attribute key (e.g. 'name', 'goal', 'preference', 'study_topic')",
+                },
+                "value": {
+                    "type": "string",
+                    "description": "The specific detail or preference to remember",
+                },
+            },
+            "required": ["key", "value"],
+        },
+    },
+}
+
+FORGET_FACT_TOOL: Dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "forget_fact",
+        "description": "Delete a previously remembered personal fact or preference when the user asks to forget it.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string",
+                    "description": "The key or attribute to remove (e.g. 'name', 'goal', 'preference')",
+                },
+            },
+            "required": ["key"],
+        },
+    },
+}
+
+PARK_THOUGHT_TOOL: Dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "park_thought",
+        "description": "Park a tangent, idea, or thought to come back to later.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "description": "The thought, idea, or topic to park on the shelf for later.",
+                },
+            },
+            "required": ["text"],
+        },
+    },
+}
+
+LIST_PARKED_TOOL: Dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "list_parked",
+        "description": "List thoughts and tangents parked on the shelf for later discussion.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "description": "Status filter ('parked' or 'done')",
+                    "default": "parked",
+                },
+            },
+            "required": [],
+        },
+    },
+}
+
+RESOLVE_PARKED_TOOL: Dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "resolve_parked",
+        "description": "Mark a parked thought or tangent as done / resolved.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "thought_id": {
+                    "type": "integer",
+                    "description": "ID of the parked thought to mark as resolved.",
+                },
+            },
+            "required": ["thought_id"],
+        },
+    },
+}
+
+DELEGATE_TO_SPECIALIST_TOOL: Dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "delegate_to_specialist",
+        "description": "Delegate a sub-task to a specialized agent (coursework, research, calendar, memory).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "capability": {
+                    "type": "string",
+                    "enum": ["coursework", "research", "calendar", "memory"],
+                    "description": "Specialist capability domain",
+                },
+                "task_description": {
+                    "type": "string",
+                    "description": "Goal or sub-task description for the specialist",
+                },
+            },
+            "required": ["capability", "task_description"],
+        },
+    },
+}
+
 # Registered tools exposed to the Nemotron router
 BASE_TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     ADD_TASK_TOOL,
@@ -525,6 +643,12 @@ BASE_TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     DETECT_SCHEDULE_CONFLICTS_TOOL,
     ASSESS_FEASIBILITY_TOOL,
     APPLY_TRIAGE_PLAN_TOOL,
+    REMEMBER_FACT_TOOL,
+    FORGET_FACT_TOOL,
+    PARK_THOUGHT_TOOL,
+    LIST_PARKED_TOOL,
+    RESOLVE_PARKED_TOOL,
+    DELEGATE_TO_SPECIALIST_TOOL,
 ]
 
 

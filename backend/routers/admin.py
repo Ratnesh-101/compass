@@ -91,12 +91,27 @@ async def health_check():
     raw_commit = os.getenv("RENDER_GIT_COMMIT") or os.getenv("GIT_COMMIT") or "unknown"
     commit_sha = raw_commit[:7] if len(raw_commit) >= 7 and raw_commit != "unknown" else raw_commit
 
+    # Verify configuration validity without exposing any secret values
+    config_ok = True
+    try:
+        from backend.config import get_settings
+        settings = get_settings()
+        if settings.is_production():
+            missing_names, duplicate_names = settings.get_missing_production_secrets()
+            if missing_names or duplicate_names:
+                config_ok = False
+        else:
+            settings.validate_production_secrets()
+    except Exception:
+        config_ok = False
+
     return HealthResponse(
-        status="ok",
+        status="ok" if config_ok else "config_error",
         version="0.1.0",
         database=db_status,
         db_connected=(db_status == "connected"),
         commit=commit_sha,
+        config_ok=config_ok,
     )
 
 

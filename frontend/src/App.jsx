@@ -27,7 +27,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState(() => initialNav.tab)
   const [selectedDomain, setSelectedDomain] = useState(() => initialNav.domain)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
-  const [backendStatus, setBackendStatus] = useState('Connecting...')
+  const [backendStatus, setBackendStatus] = useState('Waking up the server…')
   const [conversationId, setConversationId] = useState(null)
   const [usageStats, setUsageStats] = useState(null)
   const [showTelemetryModal, setShowTelemetryModal] = useState(false)
@@ -255,7 +255,7 @@ export default function App() {
         const status = await checkBackendHealth()
         if (isMounted) setBackendStatus(status)
       } catch {
-        if (isMounted) setBackendStatus('Demo Mode • Mock Memory')
+        if (isMounted) setBackendStatus('Waking up the server…')
       }
     }
 
@@ -364,10 +364,10 @@ export default function App() {
     return getDomainMeta(selectedDomain)
   }, [selectedDomain])
 
-  const handleSendMessage = async (userText) => {
+  const handleSendMessage = async (userText, tone = null) => {
     setIsTyping(true)
 
-    const result = await sendQueryToAssistant(userText, conversationId)
+    const result = await sendQueryToAssistant(userText, conversationId, tone)
 
     setIsTyping(false)
 
@@ -376,9 +376,9 @@ export default function App() {
       setConversationId(result.conversation_id)
     }
 
-    // P0.2 FIX: Refresh usage counter after every chat turn so the header
-    // reflects real token consumption instead of showing a static string.
+    // P0.2 FIX: Refresh usage counter and task list after every chat turn
     refreshUsage()
+    loadTasks(selectedDomain)
 
     return result.response
   }
@@ -529,7 +529,10 @@ export default function App() {
             setConversationId={setConversationId}
             onSendMessage={handleSendMessage}
             isTyping={isTyping}
-            onChatComplete={refreshUsage}
+            onChatComplete={() => {
+              refreshUsage()
+              loadTasks(selectedDomain)
+            }}
             tasks={tasks}
             backendStatus={backendStatus}
             onTaskMutated={() => {

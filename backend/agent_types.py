@@ -43,6 +43,7 @@ READ_ONLY_TOOLS = frozenset({
     "get_calendar_availability",
     "propose_schedule",
     "detect_schedule_conflicts",
+    "delegate_to_specialist",
 })
 
 # In-memory registry for live SSE confirmation events: run_id -> (asyncio.Event, outcome_dict)

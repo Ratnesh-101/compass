@@ -276,10 +276,11 @@ async def handle_summarize_across_domains(args: Dict[str, Any], pool: Any) -> Di
                 "Provide a clear, structured markdown roadmap without meta-commentary or thinking preamble.\n\n"
                 f"{combined_context}"
             )
+            from backend.persona import build_persona_system_prompt
             resp: Any = await client.chat.completions.create(
                 model=settings.SYNTHESIS_MODEL,
                 messages=[
-                    {"role": "system", "content": "You provide comprehensive, multi-domain executive roadmap briefings."},
+                    {"role": "system", "content": build_persona_system_prompt(mode="synthesis", tone=args.get("tone"), conv_mode=args.get("conv_mode"))},
                     {"role": "user", "content": prompt}
                 ],
                 max_tokens=2048,
@@ -339,11 +340,12 @@ async def handle_chat_skill(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
 
     if settings.NEBIUS_API_KEY and msg != "Hello! I am Compass, your persistent multi-domain AI assistant.":
         try:
+            from backend.persona import build_persona_system_prompt
             client = AsyncOpenAI(api_key=settings.NEBIUS_API_KEY, base_url=settings.NEBIUS_BASE_URL, timeout=10.0)
             resp: Any = await client.chat.completions.create(
                 model=settings.ROUTER_MODEL,
                 messages=[
-                    {"role": "system", "content": "You are Compass, a smart multi-domain AI assistant managing Hackathon, Coursework, and Code. Be concise, friendly, and helpful."},
+                    {"role": "system", "content": build_persona_system_prompt(mode="chat", tone=args.get("tone"), conv_mode=args.get("conv_mode"))},
                     {"role": "user", "content": str(msg)}
                 ],
                 max_tokens=150,

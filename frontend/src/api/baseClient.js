@@ -233,6 +233,6 @@ export async function checkBackendHealth() {
     }
     return 'Edge Online • Syncing'
   } catch {
-    return 'Backend Offline • Connection Refused'
+    return 'Waking up the server…'
   }
 }

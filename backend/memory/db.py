@@ -12,6 +12,7 @@ from pgvector.asyncpg import register_vector
 
 
 _pool: asyncpg.Pool | None = None
+_tables_ensured: bool = False
 
 
 async def _init_connection(conn: asyncpg.Connection) -> None:
@@ -56,13 +57,34 @@ async def _ensure_tables(pool: asyncpg.Pool) -> None:
             id                      SERIAL        PRIMARY KEY,
             guest_id                TEXT          NOT NULL,
             user_id                 TEXT          NOT NULL,
-            guest_conversation_id   UUID          NOT NULL,
-            user_conversation_id    UUID          NOT NULL,
-            imported_at             TIMESTAMPTZ   NOT NULL DEFAULT now(),
-            UNIQUE(guest_conversation_id, user_id)
+            guest_conversation_id   UUID,
+            user_conversation_id    UUID,
+            entity_type             TEXT          NOT NULL DEFAULT 'conversation',
+            entity_key              TEXT,
+            detail                  JSONB         DEFAULT '{}'::jsonb,
+            imported_at             TIMESTAMPTZ   NOT NULL DEFAULT now()
         );
+        ALTER TABLE guest_migration_log ALTER COLUMN guest_conversation_id DROP NOT NULL;
+        ALTER TABLE guest_migration_log ALTER COLUMN user_conversation_id DROP NOT NULL;
+        ALTER TABLE guest_migration_log ADD COLUMN IF NOT EXISTS entity_type TEXT NOT NULL DEFAULT 'conversation';
+        ALTER TABLE guest_migration_log ADD COLUMN IF NOT EXISTS entity_key TEXT;
+        ALTER TABLE guest_migration_log ADD COLUMN IF NOT EXISTS detail JSONB DEFAULT '{}'::jsonb;
         CREATE INDEX IF NOT EXISTS idx_guest_mig_guest ON guest_migration_log(guest_id);
         CREATE INDEX IF NOT EXISTS idx_guest_mig_user ON guest_migration_log(user_id);
+        CREATE INDEX IF NOT EXISTS idx_guest_mig_entity ON guest_migration_log(guest_id, user_id, entity_type);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_guest_mig_conv_uniq ON guest_migration_log(guest_conversation_id, user_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_guest_mig_entity_uniq ON guest_migration_log(guest_id, user_id, entity_type, entity_key) WHERE entity_key IS NOT NULL;
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM pg_indexes 
+                WHERE indexname = 'idx_guest_mig_conv_uniq' 
+                AND indexdef LIKE '%WHERE%'
+            ) THEN
+                DROP INDEX idx_guest_mig_conv_uniq;
+                CREATE UNIQUE INDEX idx_guest_mig_conv_uniq ON guest_migration_log(guest_conversation_id, user_id);
+            END IF;
+        END $$;
 
         CREATE TABLE IF NOT EXISTS agent_audit_log (
             id                 SERIAL        PRIMARY KEY,
@@ -221,6 +243,44 @@ async def _ensure_tables(pool: asyncpg.Pool) -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         );
         CREATE INDEX IF NOT EXISTS idx_guest_mint_created ON guest_mint_log(created_at);
+
+        -- Persistent Profile Facts Memory
+        CREATE TABLE IF NOT EXISTS user_profile_facts (
+            id                 SERIAL        PRIMARY KEY,
+            user_id            TEXT          NOT NULL DEFAULT 'default_user',
+            key                TEXT          NOT NULL,
+            value              TEXT          NOT NULL,
+            source_message_id  INTEGER       REFERENCES messages(id) ON DELETE SET NULL,
+            created_at         TIMESTAMPTZ   NOT NULL DEFAULT now(),
+            updated_at         TIMESTAMPTZ   NOT NULL DEFAULT now(),
+            UNIQUE(user_id, key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_user_profile_facts_user ON user_profile_facts(user_id);
+
+        -- Parked Thoughts — "Park it" shelf for deferred ideas & tangents
+        CREATE TABLE IF NOT EXISTS parked_thoughts (
+            id                 SERIAL        PRIMARY KEY,
+            user_id            TEXT          NOT NULL DEFAULT 'default_user',
+            conversation_id    TEXT,
+            text               TEXT          NOT NULL,
+            status             TEXT          NOT NULL DEFAULT 'parked',
+            created_at         TIMESTAMPTZ   NOT NULL DEFAULT now()
+        );
+        CREATE INDEX IF NOT EXISTS idx_parked_thoughts_user_status ON parked_thoughts(user_id, status);
+        CREATE INDEX IF NOT EXISTS idx_parked_thoughts_conversation ON parked_thoughts(conversation_id);
+
+        -- Per-task and per-user trusted event URLs
+        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS trusted_event_url TEXT;
+
+        CREATE TABLE IF NOT EXISTS user_trusted_urls (
+            id SERIAL PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            url TEXT NOT NULL,
+            title TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            UNIQUE(user_id, url)
+        );
+        CREATE INDEX IF NOT EXISTS idx_user_trusted_urls_user ON user_trusted_urls(user_id);
         """)
 
 
@@ -230,7 +290,7 @@ async def init_pool(dsn: str | None = None) -> asyncpg.Pool:
     Args:
         dsn: PostgreSQL connection string. If None, reads from settings.
     """
-    global _pool
+    global _pool, _tables_ensured
     import asyncio
 
     try:
@@ -252,19 +312,55 @@ async def init_pool(dsn: str | None = None) -> asyncpg.Pool:
         from backend.config import get_settings
         dsn = get_settings().DATABASE_URL
 
-    _pool = await asyncpg.create_pool(
-        dsn,
-        min_size=2,
-        max_size=10,
-        timeout=5.0,
-        command_timeout=10.0,
-        init=_init_connection,  # register pgvector on every connection
-    )
-    try:
-        await asyncio.wait_for(_ensure_tables(_pool), timeout=10.0)
-    except Exception as e:
-        import logging
-        logging.getLogger("compass.db").warning(f"Could not auto-create tables: {e}")
+    # Retry with exponential backoff for Neon scale-to-zero wakeups and Render cold starts
+    max_retries = 3
+    last_err = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            _pool = await asyncpg.create_pool(
+                dsn,
+                min_size=2,
+                max_size=10,
+                timeout=30.0,
+                command_timeout=30.0,
+                init=_init_connection,  # register pgvector on every connection
+            )
+            break
+        except Exception as e:
+            last_err = e
+            if attempt < max_retries:
+                backoff = attempt * 1.5
+                import logging
+                logging.getLogger("compass.db").warning(
+                    f"⚠️ Neon pool init attempt {attempt}/{max_retries} failed ({e}); retrying in {backoff}s..."
+                )
+                await asyncio.sleep(backoff)
+            else:
+                raise last_err
+    if not _tables_ensured:
+        try:
+            await asyncio.wait_for(_ensure_tables(_pool), timeout=15.0)
+        except Exception as e:
+            import logging
+            logging.getLogger("compass.db").warning(f"Could not auto-create tables: {e}")
+
+        # Verify critical tables exist; never silently degrade
+        try:
+            async with _pool.acquire(timeout=10.0) as check_conn:
+                existing_tables = await check_conn.fetch(
+                    "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('user_profile_facts', 'parked_thoughts')"
+                )
+                found = {r["table_name"] for r in existing_tables}
+                import logging
+                db_logger = logging.getLogger("compass.db")
+                for req_table in ("user_profile_facts", "parked_thoughts"):
+                    if req_table not in found:
+                        db_logger.error(f"ERROR: Required database table '{req_table}' is missing! Feature will degrade.")
+        except Exception as e:
+            import logging
+            logging.getLogger("compass.db").warning(f"Could not verify table existence at startup: {e}")
+        _tables_ensured = True
+
     return _pool  # type: ignore[return-value]
 
 

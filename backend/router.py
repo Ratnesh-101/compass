@@ -60,24 +60,40 @@ def is_explicit_task_creation(message: str) -> bool:
     if not msg:
         return False
 
+    # Queries, questions, or passive statements must NOT be treated as task creation
+    if re.search(r"^(when\s+is|what\s+is|what's|where\s+is|who\s+is|how\s+to|why\s+is|is\s+there|are\s+there|tell\s+me|show\s+me|check\s+the|find\s+the|do\s+i\s+have)\b", msg):
+        return False
+    if msg.endswith("?"):
+        return False
+
+    # Declarative sentences describing existing deadlines (e.g. "The deadline for X is ...") are NOT creation commands
+    if re.search(r"^(the|my|our|their|this)\s+(submission\s+)?(deadline|task|due\s+date)\b", msg):
+        return False
+
     task_phrases = (
         "add a task", "add task", "new task", "create task", "create a task",
         "schedule a task", "schedule task",
         "add a deadline", "add deadline", "new deadline", "create deadline",
         "create a deadline", "set a deadline", "set deadline",
         "schedule a deadline", "schedule deadline",
-        "remind me to", "remind me",
+        "remind me to",
         "add a reminder", "add reminder", "create a reminder", "set a reminder",
     )
     if any(p in msg for p in task_phrases):
         return True
 
-    # Regex matches: "add ... deadline", "create ... task", etc.
+    # Imperative verbs followed by task/deadline/todo/reminder
     if re.search(r"\b(add|create|new|set|schedule|put|track)\b.*\b(deadline|task|todo|reminder)\b", msg):
         return True
-    if re.search(r"\b(deadline|task)\b.*\b(on|for|at|due|named|with the name)\b", msg):
-        return True
+
     return False
+
+
+def is_undo_request(message: str) -> bool:
+    """Check if message is an undo/revert command."""
+    msg = message.lower().strip()
+    return msg in ("undo", "undo that", "revert", "revert that", "undo last action", "undo task")
+
 
 
 def _parse_time(text: str) -> Tuple[Optional[str], Optional[str]]:
@@ -253,31 +269,48 @@ def _extract_task_creation_args(message: str) -> dict:
         if m_quote:
             title = m_quote.group(1).strip(" .!?:;'\"")
 
+    # Helper to strip date patterns from candidate title
+    def _strip_dates_and_times(text_cand: str) -> str:
+        if not text_cand:
+            return ""
+        t = text_cand.strip(" .!?:;'\"")
+        month_rx = "|".join(MONTH_MAP.keys())
+        patterns = [
+            rf"\b(?:on|at|due|by|for|in)?\s*\d{{1,2}}(?:st|nd|rd|th)?\s+(?:of\s+)?({month_rx})\b(?:\s+\d{{4}})?",
+            rf"\b(?:on|at|due|by|for|in)?\s*({month_rx})\s+\d{{1,2}}(?:st|nd|rd|th)?\b(?:\s+\d{{4}})?",
+            r"\b(?:on|at|due|by|for|in)?\s*(?:today|tomorrow|yesterday)\b",
+            r"\b(?:next|this)?\s*(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+            r"\b\d{4}-\d{2}-\d{2}\b",
+            r"\b(?:at\s+)?(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?\s*(?:am|pm)?\b",
+            r"\b(?:at\s+)?(?:1[0-2]|0?[1-9])\s*(?:am|pm)\b",
+            r"\b(?:at\s+)?(?:midnight|noon)\b",
+            r"^\s*(?:on|at|due|by|in)\s+",
+            r"\s+\b(?:on|at|due|by|in)\s*$",
+        ]
+        for p in patterns:
+            t = re.sub(p, "", t, flags=re.IGNORECASE)
+        return t.strip(" .!?:;'\"")
+
     # Strategy C: "remind me to X [by/on/at ...]"
     if not title and "remind me to " in msg_lower:
         idx = msg_lower.find("remind me to ") + len("remind me to ")
         rest = msg[idx:]
-        m_split = re.split(r"\b(?:by|on|at|due|before|in)\b", rest, flags=re.IGNORECASE)
+        m_split = re.split(r"\b(?:by|on|at|due|before|in|tomorrow|today|yesterday|next\s+[a-z]+|this\s+[a-z]+)\b", rest, flags=re.IGNORECASE)
         title = m_split[0].strip(" .!?:;'\"")
 
     # Strategy D: Prefix removal for standard forms:
     if not title:
         prefixes = (
-            "add a deadline on", "add a deadline for", "add a deadline:", "add a deadline",
-            "add deadline on", "add deadline for", "add deadline:", "add deadline",
-            "set a deadline for", "set a deadline on", "set a deadline:", "set a deadline",
-            "create a deadline for", "create a deadline on", "create a deadline:", "create a deadline",
-            "add a task for", "add a task on", "add a task:", "add a task",
-            "create a task for", "create a task on", "create a task:", "create a task",
-            "new task:", "new task", "new deadline:", "new deadline",
+            "add a deadline on", "add a deadline for", "add a deadline:", "add a deadline", "add deadline on", "add deadline for", "add deadline:", "add deadline",
+            "set a deadline for", "set a deadline on", "set a deadline:", "set a deadline", "create a deadline for", "create a deadline on", "create a deadline:", "create a deadline",
+            "add a task for", "add a task on", "add a task:", "add a task", "add task for", "add task on", "add task:", "add task",
+            "create a task for", "create a task on", "create a task:", "create a task", "create task for", "create task on", "create task:", "create task", "new task:", "new task", "new deadline:", "new deadline",
         )
         for pref in prefixes:
             if msg_lower.startswith(pref):
                 rest = msg[len(pref):].strip(" :,-")
-                cleaned = re.sub(r"\b(?:on|at|due|by|for|in)\s+(?:\d{1,2}(?:st|nd|rd|th)?|\d{4}-\d{2}-\d{2}|today|tomorrow|yesterday|next\s+[a-z]+|this\s+[a-z]+|[a-z]+day|\d+\s+days?|\d+\s+weeks?|[a-z]+\s+\d{1,2})[^\n]*", "", rest, flags=re.IGNORECASE)
-                cleaned = re.sub(r"\b(?:next\s+[a-z]+|this\s+[a-z]+|[a-z]+day|tomorrow|today|yesterday)\b", "", cleaned, flags=re.IGNORECASE)
-                cleaned = re.sub(r"\bdomain[:= ]\s*[a-z0-9_-]+", "", cleaned, flags=re.IGNORECASE)
-                cleaned = cleaned.strip(" .!?:;'\"")
+                cleaned = _strip_dates_and_times(rest)
+                cleaned = re.sub(r"\bdomain[:= ]\s*[a-z0-9_-]+", "", cleaned, flags=re.IGNORECASE).strip(" .!?:;'\"")
                 if cleaned and cleaned.lower() not in ("tomorrow", "today", "yesterday"):
                     title = cleaned
                 break
@@ -285,12 +318,19 @@ def _extract_task_creation_args(message: str) -> dict:
     # Strategy E: Fallback clean-up if still empty
     if not title:
         cand = re.sub(r"\b(add|create|new|set|schedule|remind me to|a deadline|deadline|a task|task|todo)\b", "", msg, flags=re.IGNORECASE)
-        cand = re.sub(r"\b(?:on|at|due|by|for|in)\s+(?:\d{1,2}(?:st|nd|rd|th)?|\d{4}-\d{2}-\d{2}|today|tomorrow|yesterday|next\s+[a-z]+|this\s+[a-z]+|[a-z]+day|\d+\s+days?|\d+\s+weeks?|[a-z]+\s+\d{1,2})[^\n]*", "", cand, flags=re.IGNORECASE)
-        cand = re.sub(r"\b(?:next\s+[a-z]+|this\s+[a-z]+|[a-z]+day|tomorrow|today|yesterday)\b", "", cand, flags=re.IGNORECASE)
+        cand = _strip_dates_and_times(cand)
         cand = cand.strip(" .!?:;'\"")
         date_words = {"tomorrow", "today", "yesterday", "october", "deadline", "task", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"}
-        if len(cand) > 2 and not any(kw == cand.lower() for kw in date_words):
+        if len(cand) >= 1 and not any(kw == cand.lower() for kw in date_words):
             title = cand
+
+    # Final guard: if title after stripping dates is empty or was purely date words/digits/time, clear it
+    if title:
+        residual = _strip_dates_and_times(title)
+        if not residual or re.fullmatch(r"[\d:\sAPMapm\.,\-]+", residual):
+            title = ""
+        else:
+            title = residual
 
     if title:
         if title.islower():
@@ -303,8 +343,10 @@ def _extract_task_creation_args(message: str) -> dict:
         res["time_str"] = time_12
     elif time_24:
         res["time_str"] = time_24
-    elif parsed_date:
-        res["time_str"] = "11:59 PM"
+    has_explicit_year = bool(re.search(r"\b20\d{2}\b", msg))
+    if parsed_date and not has_explicit_year and parsed_date.year > date.today().year:
+        res["roll_forward_note"] = f"(Note: {parsed_date.strftime('%B %-d')} has passed this year; scheduled for {parsed_date.year})"
+
     return res
 
 
@@ -315,8 +357,8 @@ def is_task_mutation_request(msg: str) -> bool:
 
 def parse_natural_due_date(text: str) -> Tuple[Optional[str], str]:
     """Parse natural dates like '12th october', '12 oct', '2026-10-12', 'october 12th' from text."""
-    iso_val, clean = _parse_natural_date(text)
-    return iso_val, clean
+    pdate, _, _ = _parse_natural_date(text)
+    return pdate.isoformat() if pdate else None, text
 
 
 def message_needs_tools(message: str) -> bool:
@@ -449,22 +491,9 @@ def _fallback_route(message: str, history: Optional[list[dict[str, str]]] = None
     if res_match:
         return "resolve_parked", {"thought_id": int(res_match.group(1))}, ""
 
-    park_triggers = (
-        "park that",
-        "park it",
-        "park this for later",
-        "park this",
-        "let's come back to that",
-        "lets come back to that",
-        "come back to that later",
-    )
+    park_triggers = ("park that", "park it", "park this for later", "park this", "let's come back to that", "lets come back to that", "come back to that later")
     is_park_action = any(trigger in msg_lower for trigger in park_triggers)
-    is_ordinary_park = any(
-        term in msg_lower for term in (
-            "car", "vehicle", "parking", "garage", "lot", "national park", "amusement park",
-            "in the park", "to the park", "at the park", "walk in the park", "dog park"
-        )
-    )
+    is_ordinary_park = any(term in msg_lower for term in ("car", "vehicle", "parking", "garage", "lot", "national park", "amusement park", "in the park", "to the park", "at the park", "walk in the park", "dog park"))
     if is_park_action and not is_ordinary_park:
         park_text = message
         for trig in (
@@ -495,6 +524,8 @@ def _fallback_route(message: str, history: Optional[list[dict[str, str]]] = None
         f_days = int(days_match.group(1)) if days_match else 5
         f_hours = float(hours_match.group(1)) if hours_match else 4.0
         return "assess_feasibility", {"days": f_days, "hours_per_day": f_hours}, ""
+    if is_undo_request(message):
+        return "undo", {"message": message}, ""
     if is_explicit_task_creation(message):
         extracted = _extract_task_creation_args(message)
         if not extracted.get("title"):
@@ -527,9 +558,15 @@ async def route_message(
 
     Returns:
         (skill_name, tool_arguments, text_response)
-        - If a tool was chosen: ('add_task', {'title': ...}, '')
-        - If regular chat: (None, None, 'Assistant text response')
     """
+    if is_undo_request(message):
+        return "undo", {"message": message}, ""
+    if is_explicit_task_creation(message):
+        extracted = _extract_task_creation_args(message)
+        if not extracted.get("title"):
+            return None, None, "What would you like to name this task? Please provide a title or description."
+        return "add_task", extracted, ""
+
     is_placeholder_key = (
         not settings.NEBIUS_API_KEY
         or settings.NEBIUS_API_KEY.startswith("your_nebius")

@@ -282,6 +282,19 @@ See **[docs/testing.md](docs/testing.md)** for per-file breakdown and test infra
 
 Compass uses GitHub Actions for continuous integration and provider-native continuous delivery. Merges to the `main` branch target automated deployment via Vercel (frontend) and Render (backend), with post-deployment health verification performed via `scripts/verify_deployment.py`.
 
+### Deploy Checklist
+
+Before launching or triggering production deployments, ensure the following environment variables are securely configured with distinct values (e.g. generated via `openssl rand -hex 32`):
+
+1. **Render Dashboard (Backend Service Environment):**
+   - `AUTH_TOKEN`: Master administrative API token.
+   - `TOKEN_ENCRYPTION_KEY`: 32-byte key for encrypting user tokens and secrets in the database.
+   - `GUEST_SIGNING_SECRET`: Secret used to cryptographically sign anonymous guest JWTs.
+   - `EDGE_HMAC_SECRET`: Shared secret used to verify requests forwarded by the Vercel edge reverse proxy.
+2. **Vercel Dashboard (Frontend Project Environment Variables):**
+   - `EDGE_HMAC_SECRET`: Must match the exact value set on Render. Used by `frontend/middleware.js` to sign forwarded client IP and timestamp headers (`x-compass-edge-sig`).
+   - *Note on `VERCEL_EDGE_SECRET`:* Compass supports `VERCEL_EDGE_SECRET` as a documented backward-compatible alias for `EDGE_HMAC_SECRET`. If `EDGE_HMAC_SECRET` is not set, Compass automatically falls back to `VERCEL_EDGE_SECRET`.
+
 See **[docs/deployment.md](docs/deployment.md)** for full architecture, environment variables, verification, and rollback runbooks.
 
 ---
