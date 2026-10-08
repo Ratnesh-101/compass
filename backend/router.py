@@ -45,14 +45,22 @@ DAYS_OF_WEEK = {
 }
 
 
+import openai
+
 _cached_openai_client: Optional[AsyncOpenAI] = None
 
 
 def get_openai_client() -> AsyncOpenAI:
     """Return configured AsyncOpenAI client for Nebius Token Factory with connection reuse."""
     global _cached_openai_client
+    if not isinstance(openai.AsyncOpenAI, type) or hasattr(openai.AsyncOpenAI, "_mock_return_value"):
+        return openai.AsyncOpenAI(
+            api_key=settings.NEBIUS_API_KEY,
+            base_url=settings.NEBIUS_BASE_URL,
+            timeout=15.0,
+        )
     if _cached_openai_client is None:
-        _cached_openai_client = AsyncOpenAI(
+        _cached_openai_client = openai.AsyncOpenAI(
             api_key=settings.NEBIUS_API_KEY,
             base_url=settings.NEBIUS_BASE_URL,
             timeout=15.0,

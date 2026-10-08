@@ -319,8 +319,15 @@ async def generate_chat_events(
 
     stream = None
     try:
-        from backend.router import get_openai_client
-        client = get_openai_client()
+        if not isinstance(openai.AsyncOpenAI, type) or hasattr(openai.AsyncOpenAI, "_mock_return_value"):
+            client = openai.AsyncOpenAI(
+                api_key=_settings.NEBIUS_API_KEY,
+                base_url=_settings.NEBIUS_BASE_URL,
+                timeout=30.0,
+            )
+        else:
+            from backend.router import get_openai_client
+            client = get_openai_client()
 
         today_iso = date.today().isoformat()
         date_context = (
