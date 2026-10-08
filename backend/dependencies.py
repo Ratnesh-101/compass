@@ -282,6 +282,15 @@ def _get_current_identity(request: Request) -> Optional[Identity]:
         return request.state.identity
 
     settings = get_settings()
+
+    user_header = request.headers.get("x-user-id") or request.cookies.get("compass_user_id")
+    if user_header and user_header.strip():
+        if settings.is_production():
+            raise HTTPException(
+                status_code=403,
+                detail="x-user-id impersonation is forbidden in production environment",
+            )
+
     session_token = request.cookies.get("compass_session")
     auth_header = request.headers.get("authorization")
     bearer_token = None
@@ -312,13 +321,12 @@ def _get_current_identity(request: Request) -> Optional[Identity]:
         return Identity(id="admin", is_admin=True, is_guest=False, user_id="admin", guest_id=verified_guest)
 
     # 3. Development / testing quick identity header or cookie
-    user_header = request.headers.get("x-user-id") or request.cookies.get("compass_user_id")
     if user_header and user_header.strip():
         target = user_header.strip().lower()
         if settings.is_development() or "@" in target:
             return Identity(id=target, is_admin=(target == "admin"), is_guest=False, user_id=target, guest_id=verified_guest)
 
-    # 3. Verified guest token
+    # 4. Verified guest token
     if verified_guest:
         return Identity(
             id=verified_guest,
