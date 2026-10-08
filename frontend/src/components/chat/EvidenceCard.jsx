@@ -70,7 +70,7 @@ export default function EvidenceCard({ evidence }) {
       {items.map((item, idx) => {
         const vStyle = getVerdictStyle(item.verdict)
         const tierBadge = getTierBadge(item)
-        const quote = item.exact_quote || item.verbatim_quote
+        const quote = item.display_quote || item.exact_quote || item.verbatim_quote
         const localDeadline = item.local_deadline_ist
 
         return (

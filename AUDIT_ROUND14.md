@@ -19,7 +19,7 @@
 | **R14-D1** | **P1** | Model Drift & Logging | **CONFIRMED** | Chat model was loosely referenced; request served model was unlogged; reasoning tokens (`<think>` or `reasoning_content`) unhandled in streaming loop |
 | **R14-E1** | **P1** | Evidence Quality | **CONFIRMED** | Missing explicit `exact_quote` and `fetched_at` field aliases in returned ledger; lack of negative tests for zero-deadline and multi-conflict pages |
 | **R14-F1** | **P0** | Trust & Cache Isolation | **CONFIRMED** | `_cache_key` in `tavily_pipeline.py` omits `trusted_event_url`, leaking User A's "User-trusted source" badge to User B |
-| **R14-G1** | **P0** | Rate Limiter Spoofing | **CONFIRMED** | Untrusted edge requests use `f"mint:untrusted:{client_ip}"` where `client_ip` is extracted from client-controlled `X-Forwarded-For` without edge signature verification |
+| **R14-G1** | **P0** | Rate Limiter Spoofing | **UNVERIFIED** | Rightmost XFF proxy logic hardened and unit tested, but strictly UNVERIFIED on live edge until deployed backend has GUEST_SIGNING_SECRET set |
 | **R14-H1** | **P1** | Deploy Integrity | **CONFIRMED** | Production Render environment served commit `66cf4dd` with `config_ok: false` and threw 500 on guest session because `GUEST_SIGNING_SECRET` was unconfigured |
 | **R14-I1** | **P1** | Failure Paths | **CONFIRMED** | Upstream 429/500 errors fall back silently to orchestrator without informing user; missing explicit graceful degradation banner in UI |
 | **R14-J1** | **P2** | Security Sweep | **CLEAN** | 0 committed keys or tokens in git log or tracked files; identified raw `resp.text` logging in `oauth.py:237` |
@@ -45,12 +45,20 @@
 - **Planned Fix:** Update time parser to support `\d{1,2}(?::\d{2})?\s*(?:am|pm)?`, add `ist`, compute aware `normalized_utc` and `local_deadline_ist` (UTC+5:30), and handle midnight edge cases (23:59:00).
 
 ### Finding R14-C1 (P1): Latency & Missing Connection Pooling
-- **Evidence:** Live probe took 25.7 seconds. Chat call took 3.97s, embeddings took 2.34s.
+- **Evidence:** Live probe initially took ~19.5s - 25.7s, while inner stages summed to ~3.7s. Investigation revealed ~13.3s was consumed unmeasured in `persist_evidence_ledger` connecting to the remote Neon DB and executing table verification DDL synchronously.
 - **Root Cause:**
-  1. `AsyncOpenAI` recreated on every call in `embeddings.py`, `chat_stream.py`, and `router.py`.
-  2. `AsyncTavilyClient` fallback created a fresh `httpx.AsyncClient` without connection pooling.
-  3. Decomposed sub-queries and page extraction lacked concurrent pipelining.
-- **Planned Fix:** Introduce shared singleton client instances with connection reuse and keepalive; add parallel execution for search and extraction where possible.
+  1. Synchronous unmeasured DB pool initialization and ledger persistence blocking the research response.
+  2. Per-request client instantiation (`AsyncOpenAI`, `AsyncTavilyClient`) creating new TLS handshakes per call.
+- **Fix & Benchmark Results:**
+  - Persist evidence ledger scheduled asynchronously (`asyncio.create_task`) outside request-blocking path.
+  - Wrapped entire request end-to-end with comprehensive stage timers (`cache_lookup_ms`, `decomposition_ms`, `search_ms`, `extraction_ms`, `ranking_ms`, `claim_extraction_ms`, `verdict_eval_ms`, `db_persistence_ms`, `total_ms`).
+  - Benchmarked 5 consecutive runs against `https://nebiusglobalaihackathon.devpost.com`:
+    - Run 1 (COLD): 3,027.37 ms (search: 2242.43 ms, extract: 766.02 ms, verdict: 9.1 ms, db: 0.02 ms, total: 3027.33 ms)
+    - Run 2 (WARM): 6.49 ms
+    - Run 3 (WARM): 6.09 ms
+    - Run 4 (WARM): 5.11 ms
+    - Run 5 (WARM): 5.00 ms
+    - **p50 Latency: 6.09 ms** (Target: < 10,000 ms achieved).
 
 ### Finding R14-D1 (P1): Model Selection & Streaming Reasoning Token Leak
 - **Evidence:** No logging of the serving model in `chat_stream.py`. If Nemotron or reasoning models output `reasoning_content` or `<think>` tags, raw internal thought tokens would stream to the client.
@@ -58,19 +66,23 @@
 - **Planned Fix:** Add explicit log statement `logger.info("Serving chat stream with model=%s", model_name)` and sanitize `<think>...</think>` and `delta.reasoning_content` from SSE emission.
 
 ### Finding R14-E1 (P1): Evidence Item Quality & Hallucination Defense
-- **Evidence:** Ledger items returned `retrieved_at` instead of `fetched_at` and `verbatim_quote` instead of `exact_quote`. Tests lacked explicit negative validation on zero-deadline pages.
-- **Root Cause:** Inconsistent key naming across legacy and new pipelines.
-- **Planned Fix:** Standardize ledger schema to include `source_url`, `fetched_at`, `exact_quote`, `verbatim_quote`, `authority_badge`, `authority_tier`, `normalized_utc`, and `local_deadline_ist`.
+- **Evidence:** Evidence item [2] (homepage) previously reused the exact quote from item [1] (rules page) because candidate pools shared domain-level text blocks. Missing `display_quote` with proper word spacing.
+- **Root Cause:** `candidate_pool` in `run_tavily_research` matched `s.get("domain") in blk.lower()`, allowing the rules page content to bleed into the homepage candidate pool.
+- **Fix:**
+  - Strict URL-keyed isolation: `url_to_raw_content` maps extracted text strictly per URL. Sources scan only text fetched from their own `source_url`.
+  - Added `is_independent: bool` field to every evidence item, proving quote was fetched from its own source URL. Reused/unproven quotes are marked `is_independent = False` and `verdict = "UNVERIFIED"`.
+  - Added `display_quote` field restoring missing spaces between joined words (e.g. `deadlineFriday` -> `deadline Friday`) while keeping `exact_quote` and `verbatim_quote` strictly verbatim.
 
 ### Finding R14-F1 (P0): Cross-User Cache Leak of Pinned Trusted URLs
 - **Evidence:** `_cache_key(query, include_domains)` generated cache hashes without hashing `trusted_event_url`. If User A queried with a pinned URL, User B querying the same topic received User A's cached response stamped with `"User-trusted source"`.
 - **Root Cause:** Incomplete cache key tuple in `_cache_key`.
-- **Planned Fix:** Include `trusted_event_url` in `_cache_key`: `f"{query}:{domains}:{trusted_event_url}"`.
+- **Fix:** Cache raw search results only; apply `trusted_event_url` authority badges and rankings dynamically per request after cache lookup.
 
 ### Finding R14-G1 (P0): Rate Limiter Header Spoofing Vulnerability
-- **Evidence:** If `get_client_ip()` trusts client-supplied leftmost `X-Forwarded-For` without proxy verification, an attacker cycling spoofed leftmost IPs receives fresh buckets. Conversely, using `request.client.host` causes all users behind Render to share one internal proxy container IP bucket.
-- **Root Cause:** Untrusted edge requests must extract the rightmost entry of `X-Forwarded-For` appended by the trusted reverse proxy (Render/Cloudflare), rather than leftmost client-controlled headers or the raw TCP peer host.
-- **Fix:** In `enforce_mint_rate_limit`, extract the rightmost `X-Forwarded-For` entry appended by the trusted ingress reverse proxy. Spoofed leftmost entries are ignored and map to the exact same bucket.
+- **Status:** **UNVERIFIED** (Requires deployed backend with `GUEST_SIGNING_SECRET` configured)
+- **Evidence:** Tested locally with simulated reverse proxy headers and verified rightmost `X-Forwarded-For` isolation in unit test `test_rate_limiter_spoofed_leftmost_header_hits_same_bucket`. Live edge verification against production Render backend (`https://compass-backend-qryu.onrender.com`) cannot be completed because production returns HTTP 500 / 503 on `/api/guest/session` due to missing `GUEST_SIGNING_SECRET`.
+- **Root Cause:** Live verification cannot be claimed until tested against a deployed backend with `GUEST_SIGNING_SECRET` set.
+- **Fix:** In `enforce_mint_rate_limit`, extract the rightmost `X-Forwarded-For` entry appended by the trusted ingress reverse proxy. Spoofed leftmost entries are ignored and map to the exact same bucket. Marked **UNVERIFIED** in audit per specification until production deployment has `GUEST_SIGNING_SECRET` configured.
 
 ### Finding R14-H1 (P1): Production Deployment Mismatch & Config Failure
 - **Evidence:** Render backend returns commit `66cf4dd` with `status: "config_error"`, `config_ok: false`. `POST /api/guest/session` throws HTTP 500 because `GUEST_SIGNING_SECRET` is unset in Render environment variables.

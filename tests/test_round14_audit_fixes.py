@@ -264,3 +264,167 @@ def test_streaming_think_filter_strips_reasoning_and_tags():
     assert "Let me think" not in result_text
     assert "internal reflection" not in result_text
     assert result_text == "Hello! The verified deadline is October 30, 2026."
+
+
+def test_display_quote_formatting_and_verbatim_exact_quote():
+    """Verify display_quote inserts missing spaces between joined words while exact_quote remains verbatim."""
+    from backend.services.tavily_pipeline import format_display_quote, evaluate_deterministic_verdict
+
+    raw_quote = "Submission deadlineFriday, 30 October2026 at 10:00am Pacific Time"
+    formatted = format_display_quote(raw_quote)
+    assert formatted == "Submission deadline Friday, 30 October 2026 at 10:00am Pacific Time"
+    assert "deadline Friday" in formatted
+    assert "October 2026" in formatted
+
+    claims = [{
+        "claim": raw_quote,
+        "source_url": "https://nebiusglobalaihackathon.devpost.com/rules",
+        "exact_quote": raw_quote,
+        "extracted_date": "30 October 2026",
+    }]
+    sources = [{
+        "url": "https://nebiusglobalaihackathon.devpost.com/rules",
+        "authority_tier": AuthorityTier.TIER_1_OFFICIAL.value,
+        "authority_badge": "Official Organizer",
+    }]
+    source_map = {"https://nebiusglobalaihackathon.devpost.com/rules": raw_quote}
+
+    overall, ledger = evaluate_deterministic_verdict(
+        claims=claims,
+        raw_extracted_text=raw_quote,
+        sources=sources,
+        source_text_map=source_map,
+    )
+    assert len(ledger) == 1
+    item = ledger[0]
+    # exact_quote remains strictly verbatim
+    assert item["exact_quote"] == raw_quote
+    assert item["verbatim_quote"] == raw_quote
+    # display_quote has spaces inserted
+    assert item["display_quote"] == "Submission deadline Friday, 30 October 2026 at 10:00am Pacific Time"
+
+
+def test_quote_isolation_per_source_url():
+    """Prove each item's quote was found in the text fetched from its own source_url.
+    If an item reuses or borrows text from a different page, it must be marked non-independent.
+    """
+    from backend.services.tavily_pipeline import evaluate_deterministic_verdict
+
+    rules_quote = "Submission deadline: Friday, October 30, 2026 at 10:00 am Pacific Time"
+    homepage_text = "Nebius x NVIDIA Hackathon Homepage. Join builders. October 30 at 1:00pm EDT to deadline."
+
+    claims = [
+        {
+            "claim": rules_quote,
+            "source_url": "https://nebiusglobalaihackathon.devpost.com/rules",
+            "exact_quote": rules_quote,
+            "extracted_date": "October 30, 2026",
+        },
+        {
+            # Homepage artificially attempting to reuse rules_quote
+            "claim": rules_quote,
+            "source_url": "https://nebiusglobalaihackathon.devpost.com",
+            "exact_quote": rules_quote,
+            "extracted_date": "October 30, 2026",
+        },
+    ]
+    sources = [
+        {"url": "https://nebiusglobalaihackathon.devpost.com/rules", "authority_tier": "tier_1_official", "authority_badge": "User-trusted source"},
+        {"url": "https://nebiusglobalaihackathon.devpost.com", "authority_tier": "tier_1_official", "authority_badge": "User-trusted source"},
+    ]
+    source_map = {
+        "https://nebiusglobalaihackathon.devpost.com/rules": rules_quote,
+        "https://nebiusglobalaihackathon.devpost.com": homepage_text,
+    }
+
+    overall, ledger = evaluate_deterministic_verdict(
+        claims=claims,
+        raw_extracted_text=rules_quote + "\n" + homepage_text,
+        sources=sources,
+        source_text_map=source_map,
+    )
+    assert len(ledger) == 2
+    # Item 1 is verified and independent because its quote was fetched from /rules
+    assert ledger[0]["is_independent"] is True
+    assert ledger[0]["verdict"] == "VERIFIED"
+    assert ledger[0]["verbatim_verified"] is True
+
+    # Item 2 reused the rules quote which does NOT exist in homepage_text -> must be non-independent and UNVERIFIED
+    assert ledger[1]["is_independent"] is False
+    assert ledger[1]["verdict"] == "UNVERIFIED"
+    assert ledger[1]["verbatim_verified"] is False
+
+
+def test_user_pinned_url_always_ranks_above_official_organizer():
+    """Confirm a user-pinned URL always ranks above nebius.com (Official Organizer), even if raw score is lower."""
+    from backend.services.tavily_authority import sort_and_enrich_sources
+
+    results = [
+        {
+            "url": "https://nebius.com/events/nebius-nvidia-ai-builders-hackathon",
+            "title": "Nebius Official Event",
+            "score": 0.99,  # High search relevance
+        },
+        {
+            "url": "https://nebiusglobalaihackathon.devpost.com/rules",
+            "title": "Devpost Rules Page",
+            "score": 0.70,  # Lower search relevance
+        },
+    ]
+
+    # Without pinned URL: nebius.com ranks first because it's Official Organizer and higher score
+    unpinned = sort_and_enrich_sources(results, trusted_event_url=None)
+    assert unpinned[0]["domain"] == "nebius.com"
+
+    # With user-pinned URL: devpost URL is pinned and MUST rank #1 above nebius.com
+    pinned = sort_and_enrich_sources(results, trusted_event_url="https://nebiusglobalaihackathon.devpost.com")
+    assert pinned[0]["url"] == "https://nebiusglobalaihackathon.devpost.com/rules"
+    assert pinned[0]["authority_badge"] == "User-trusted source"
+    assert pinned[1]["domain"] == "nebius.com"
+    assert pinned[1]["authority_badge"] == "Official Organizer"
+
+
+@pytest.mark.asyncio
+async def test_full_pipeline_stage_timers_and_nonblocking_persistence(monkeypatch):
+    """Verify entire request is wrapped in timers with stage timings accounting for total elapsed time."""
+    from backend.services.tavily_pipeline import run_tavily_research, _RAW_SEARCH_CACHE
+    _RAW_SEARCH_CACHE.clear()
+
+    mock_search = AsyncMock(return_value={
+        "results": [
+            {
+                "url": "https://nebiusglobalaihackathon.devpost.com/rules",
+                "title": "Nebius Global AI Hackathon Rules",
+                "content": "Submission Period: Wednesday, August 26, 2026 (9:00 am Pacific Time) – Friday, October 30, 2026 (10:00 am Pacific Time)",
+            }
+        ]
+    })
+    mock_extract = AsyncMock(return_value={
+        "results": [
+            {
+                "url": "https://nebiusglobalaihackathon.devpost.com/rules",
+                "raw_content": "Official Rules. Submission Period: Wednesday, August 26, 2026 (9:00 am Pacific Time) – Friday, October 30, 2026 (10:00 am Pacific Time).",
+            }
+        ]
+    })
+
+    monkeypatch.setattr("backend.services.tavily_pipeline.tavily_available", lambda: True)
+    monkeypatch.setattr("backend.services.tavily_pipeline.tavily_search", mock_search)
+    monkeypatch.setattr("backend.services.tavily_pipeline.tavily_extract", mock_extract)
+    monkeypatch.setattr("backend.services.tavily_pipeline.persist_evidence_ledger", AsyncMock())
+
+    res = await run_tavily_research(
+        query="Nebius Global AI Hackathon deadline",
+        trusted_event_url="https://nebiusglobalaihackathon.devpost.com",
+    )
+    timings = res.get("stage_timings", {})
+    expected_stages = [
+        "cache_lookup_ms", "decomposition_ms", "search_ms", "extraction_ms",
+        "ranking_ms", "claim_extraction_ms", "verdict_eval_ms", "db_persistence_ms", "total_ms"
+    ]
+    for stage in expected_stages:
+        assert stage in timings, f"Missing timer stage {stage}"
+        assert isinstance(timings[stage], (int, float))
+
+    assert timings["total_ms"] > 0
+
