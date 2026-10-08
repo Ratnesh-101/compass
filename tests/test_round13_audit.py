@@ -38,26 +38,28 @@ def test_user_trusted_source_label_and_isolation():
     assert auth_other["badge"] != "User-trusted source"
 
 
-def test_past_date_asks_user_for_clarification():
-    """Verify that a task request with a past date and no year prompts the user instead of creating a task."""
+def test_past_date_roll_forward_with_frozen_clock():
+    """Verify that a task request with a past date without year rolls forward with an explicit notice."""
     with patch("backend.router.date") as mock_date:
         # Freeze today to Oct 8, 2026
         mock_date.today.return_value = date(2026, 10, 8)
         mock_date.side_effect = lambda *args, **kw: date(*args, **kw)
 
-        # 1. Past date (Oct 5) without explicit year
+        # 1. Past date (Oct 5) without explicit year rolls forward to 2027 with explanatory note
         msg_past = "add a deadline on 5th of October 23:59 with the name finish report"
         skill, args, resp = _fallback_route(msg_past)
-        assert skill is None
-        assert args is None
-        assert "Oct 5 has passed; did you mean 2027?" in resp
+        assert skill == "add_task"
+        assert args["title"] == "Finish report"
+        assert "2027-10-05" in args["due_date"]
+        assert "has passed this year; scheduled for 2027" in args.get("roll_forward_note", "")
 
-        # 2. Future date (Oct 10) creates task normally
+        # 2. Future date (Oct 10) creates task in current year (2026) without roll-forward note
         msg_future = "add a deadline on 10th of October 23:59 with the name finish report"
         skill_fut, args_fut, resp_fut = _fallback_route(msg_future)
         assert skill_fut == "add_task"
         assert args_fut["title"] == "Finish report"
         assert "2026-10-10" in args_fut["due_date"]
+        assert "roll_forward_note" not in args_fut
 
         # 3. Explicit past year (Oct 5 2025) allows explicit year intent
         msg_explicit = "add a deadline on 5th of October 2025 with the name historic task"
