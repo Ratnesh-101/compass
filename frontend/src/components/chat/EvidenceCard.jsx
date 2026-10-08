@@ -2,7 +2,8 @@ import React from 'react'
 
 /**
  * EvidenceCard — Renders verifiable source claims, domain authority tiers,
- * and verbatim citations directly within chat assistant answers.
+ * local-time deadline normalized schedules, and verbatim citations directly
+ * within chat assistant answers with full dark mode and mobile responsiveness.
  */
 export default function EvidenceCard({ evidence }) {
   if (!evidence || (!evidence.claim && !evidence.source_url && !evidence.items)) {
@@ -10,17 +11,40 @@ export default function EvidenceCard({ evidence }) {
   }
 
   const items = evidence.items || (Array.isArray(evidence) ? evidence : [evidence])
+  if (items.length === 0) {
+    return null
+  }
 
   const getVerdictStyle = (verdict) => {
     switch ((verdict || '').toUpperCase()) {
       case 'VERIFIED':
-        return { bg: '#e6f4ea', text: '#137333', border: '#ceead6', label: 'VERIFIED' }
+        return {
+          bg: 'rgba(19, 115, 51, 0.15)',
+          text: '#2e7d32',
+          border: 'rgba(46, 125, 50, 0.35)',
+          label: 'VERIFIED',
+        }
       case 'STALE':
-        return { bg: '#fef7e0', text: '#b06000', border: '#feefc3', label: 'STALE' }
+        return {
+          bg: 'rgba(176, 96, 0, 0.15)',
+          text: '#e65100',
+          border: 'rgba(230, 81, 0, 0.35)',
+          label: 'STALE',
+        }
       case 'CONFLICTING':
-        return { bg: '#fce8e6', text: '#c5221f', border: '#fad2cf', label: 'CONFLICTING' }
+        return {
+          bg: 'rgba(197, 34, 31, 0.15)',
+          text: '#c62828',
+          border: 'rgba(198, 40, 40, 0.35)',
+          label: 'CONFLICTING',
+        }
       default:
-        return { bg: '#f1f3f4', text: '#5f6368', border: '#dadce0', label: 'UNVERIFIED' }
+        return {
+          bg: 'var(--bg-secondary, rgba(95, 99, 104, 0.12))',
+          text: 'var(--text-secondary, #5f6368)',
+          border: 'var(--border, #dadce0)',
+          label: 'UNVERIFIED',
+        }
     }
   }
 
@@ -34,7 +58,7 @@ export default function EvidenceCard({ evidence }) {
       case 'tier_2_technical':
         return { label: 'Platform / Technical Host', color: '#9334e6' }
       default:
-        return { label: 'General Web', color: '#5f6368' }
+        return { label: 'General Web', color: 'var(--text-secondary, #5f6368)' }
     }
   }
 
@@ -46,6 +70,8 @@ export default function EvidenceCard({ evidence }) {
       {items.map((item, idx) => {
         const vStyle = getVerdictStyle(item.verdict)
         const tierBadge = getTierBadge(item)
+        const quote = item.exact_quote || item.verbatim_quote
+        const localDeadline = item.local_deadline_ist
 
         return (
           <div
@@ -54,14 +80,14 @@ export default function EvidenceCard({ evidence }) {
               padding: '10px 14px',
               borderRadius: '8px',
               border: `1px solid ${vStyle.border}`,
-              background: 'var(--bg-card-soft, #fafafa)',
+              background: 'var(--bg-card, var(--bg-card-soft, #fafafa))',
               display: 'flex',
               flexDirection: 'column',
               gap: '6px',
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                 <span
                   style={{
                     padding: '2px 8px',
@@ -111,7 +137,27 @@ export default function EvidenceCard({ evidence }) {
               </div>
             )}
 
-            {item.verbatim_quote && (
+            {localDeadline && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '4px 8px',
+                  borderRadius: '6px',
+                  background: 'rgba(26, 115, 232, 0.08)',
+                  border: '1px solid rgba(26, 115, 232, 0.2)',
+                  fontSize: '11.5px',
+                  fontWeight: '600',
+                  color: 'var(--coursework, #1a73e8)',
+                  width: 'fit-content',
+                }}
+              >
+                🕒 Local Deadline: {localDeadline}
+              </div>
+            )}
+
+            {quote && (
               <blockquote
                 style={{
                   margin: '4px 0 0 0',
@@ -124,7 +170,7 @@ export default function EvidenceCard({ evidence }) {
                   borderRadius: '0 4px 4px 0',
                 }}
               >
-                "{item.verbatim_quote}"
+                "{quote}"
               </blockquote>
             )}
           </div>
