@@ -270,11 +270,8 @@ async def generate_chat_events(
 
     stream = None
     try:
-        client = openai.AsyncOpenAI(
-            api_key=_settings.NEBIUS_API_KEY,
-            base_url=_settings.NEBIUS_BASE_URL,
-            timeout=30.0,
-        )
+        from backend.router import get_openai_client
+        client = get_openai_client()
 
         today_iso = date.today().isoformat()
         date_context = (
@@ -344,6 +341,7 @@ async def generate_chat_events(
             _schedule_stream_persistence(conv_id, message, response_text, user_id, guest_id, skill_used)
             return
 
+        logger.info("Serving chat stream request with model=%s", _settings.ROUTER_MODEL)
         call_kwargs: dict[str, Any] = {
             "model": _settings.ROUTER_MODEL,
             "messages": messages,

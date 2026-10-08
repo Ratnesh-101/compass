@@ -11,10 +11,64 @@ import logging
 import math
 import re
 from typing import Any, Dict, List, Optional
+import httpx
 try:
     from tavily import AsyncTavilyClient  # type: ignore[import-untyped]
 except ImportError:
-    AsyncTavilyClient = Any  # type: ignore[misc,assignment]
+    _shared_http_client: Optional[httpx.AsyncClient] = None
+
+    def _get_shared_http() -> httpx.AsyncClient:
+        global _shared_http_client
+        if _shared_http_client is None or _shared_http_client.is_closed:
+            _shared_http_client = httpx.AsyncClient(
+                timeout=30.0,
+                limits=httpx.Limits(max_keepalive_connections=10, max_connections=20, keepalive_expiry=60.0),
+            )
+        return _shared_http_client
+
+    class _HttpTavilyClient:  # type: ignore[no-redef]
+        def __init__(self, api_key: str):
+            self.api_key = api_key
+            self.base_url = "https://api.tavily.com"
+
+        async def search(
+            self,
+            query: str,
+            max_results: int = 5,
+            search_depth: str = "basic",
+            topic: str = "general",
+            include_domains: Optional[List[str]] = None,
+        ) -> Dict[str, Any]:
+            client = _get_shared_http()
+            payload: Dict[str, Any] = {
+                "api_key": self.api_key,
+                "query": query,
+                "max_results": max_results,
+                "search_depth": search_depth,
+                "topic": topic,
+            }
+            if include_domains:
+                payload["include_domains"] = include_domains
+            resp = await client.post(f"{self.base_url}/search", json=payload)
+            resp.raise_for_status()
+            return resp.json()
+
+        async def extract(
+            self,
+            urls: List[str],
+            extract_depth: str = "basic",
+        ) -> Dict[str, Any]:
+            client = _get_shared_http()
+            payload: Dict[str, Any] = {
+                "api_key": self.api_key,
+                "urls": urls,
+                "extract_depth": extract_depth,
+            }
+            resp = await client.post(f"{self.base_url}/extract", json=payload)
+            resp.raise_for_status()
+            return resp.json()
+
+    AsyncTavilyClient = _HttpTavilyClient  # type: ignore[assignment,misc]
 
 from backend.config import get_settings
 from backend.services.usage import record_tavily_credits
@@ -33,7 +87,7 @@ def tavily_available() -> bool:
     return bool(settings.TAVILY_ENABLED and settings.TAVILY_API_KEY)
 
 
-def _get_client() -> AsyncTavilyClient:
+def _get_client() -> Any:
     """Obtain or instantiate the singleton AsyncTavilyClient."""
     global _client
     if _client is None:

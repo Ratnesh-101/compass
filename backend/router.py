@@ -45,13 +45,19 @@ DAYS_OF_WEEK = {
 }
 
 
+_cached_openai_client: Optional[AsyncOpenAI] = None
+
+
 def get_openai_client() -> AsyncOpenAI:
-    """Return configured AsyncOpenAI client for Nebius Token Factory."""
-    return AsyncOpenAI(
-        api_key=settings.NEBIUS_API_KEY,
-        base_url=settings.NEBIUS_BASE_URL,
-        timeout=15.0,
-    )
+    """Return configured AsyncOpenAI client for Nebius Token Factory with connection reuse."""
+    global _cached_openai_client
+    if _cached_openai_client is None:
+        _cached_openai_client = AsyncOpenAI(
+            api_key=settings.NEBIUS_API_KEY,
+            base_url=settings.NEBIUS_BASE_URL,
+            timeout=15.0,
+        )
+    return _cached_openai_client
 
 
 def is_explicit_task_creation(message: str) -> bool:
