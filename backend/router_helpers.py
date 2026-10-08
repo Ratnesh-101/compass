@@ -159,8 +159,9 @@ def _parse_time(text: str) -> Tuple[Optional[str], Optional[str]]:
             elif ampm_lower == "am" and hh == 12:
                 hh = 0
         time_24 = f"{hh:02d}:{mm:02d}"
-        dt = datetime.strptime(time_24, "%H:%M")
-        time_12 = dt.strftime("%-I:%M %p") if hasattr(dt, "strftime") else f"{hh}:{mm}"
+        display_hh = hh % 12 or 12
+        display_ampm = "PM" if hh >= 12 else "AM"
+        time_12 = f"{display_hh}:{mm:02d} {display_ampm}"
         return time_24, time_12
 
     # 2. at 5pm / 5 pm
@@ -303,13 +304,18 @@ def _extract_task_creation_args(message: str) -> dict:
     title = ""
 
     # Strategy A: Explicit name indicators: "with the name X", "named X", "called X", "titled X"
-    m_named = re.search(
-        r"(?:with the name|named|called|titled)\s+[:\"']?([^\"'\n,;]+?)[:\"']?(?:\s+(?:on|at|due|by|for|in)\b|$)",
-        msg,
-        re.IGNORECASE,
-    )
-    if m_named:
-        title = m_named.group(1).strip(" .!?:;'\"")
+    for indicator in ("with the name", "named", "called", "titled"):
+        pattern = rf"\b{indicator}\s+[:\"']?([^\"'\n,;]+)"
+        m_named = re.search(pattern, msg, re.IGNORECASE)
+        if m_named:
+            cand = m_named.group(1)
+            m_stop = re.search(r"\s+\b(on|at|due|by|for|in)\b", cand, re.IGNORECASE)
+            if m_stop:
+                cand = cand[:m_stop.start()]
+            cand = cand.strip(" .!?:;'\"")
+            if cand:
+                title = cand
+                break
 
     # Strategy B: Quotes: "add a deadline ... 'title'" or "task 'title'"
     if not title:
