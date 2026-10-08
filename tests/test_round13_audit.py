@@ -89,7 +89,7 @@ async def test_undo_cross_user_isolation():
     try:
         # User A creates a task
         res_a = await handle_message(
-            message="add a deadline on 10th of October 23:59 with the name task for user a",
+            message="add a deadline on 10th of October 23:59 with the name isolated task alpha",
             user_id=user_a,
             persist=False,
         )
@@ -110,7 +110,7 @@ async def test_undo_cross_user_isolation():
             task_a = await structured.get_task(conn, task_a_id)
             assert task_a is not None
             assert task_a["user_id"] == user_a
-            assert "task for user a" in task_a["title"].lower()
+            assert "isolated task alpha" in task_a["title"].lower()
 
     finally:
         async with pool.acquire() as conn:
