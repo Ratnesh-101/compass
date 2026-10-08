@@ -158,6 +158,33 @@ async def generate_chat_events(
     message = req.message.strip()
     yield ": ping\n\n"
 
+    specialist_id = req.get_specialist_id() if hasattr(req, "get_specialist_id") else None
+    if specialist_id:
+        from backend.agents.specialist_registry import validate_specialist_id
+        valid_id = validate_specialist_id(specialist_id)
+        if not valid_id:
+            yield f"data: {json.dumps({'type': 'error', 'detail': f'Invalid specialist ID: {specialist_id}', 'terminal': True})}\n\n"
+            return
+
+        from backend.agents.specialist import run_specialist_task
+        pool = await _resolve_pool()
+        spec_result = await run_specialist_task(capability=valid_id, user_goal=message, pool=pool)
+        response_text = spec_result.get("summary", f"Specialist analysis completed for '{message}'.")
+
+        try:
+            if pool:
+                async with pool.acquire() as conn:
+                    real_cid = await conversations.get_or_create_conversation(conn, conv_id, user_id=user_id, guest_id=guest_id)
+                    await conversations.add_message(conn, real_cid, role="user", content=f"[{valid_id}] {message}")
+                    await conversations.add_message(conn, real_cid, role="assistant", content=response_text, skill_called=f"specialist_{valid_id}")
+                    conv_id = real_cid
+        except Exception as e:
+            logger.debug(f"Could not persist specialist message history in stream: {e}")
+
+        yield f"data: {json.dumps({'type': 'token', 'value': response_text})}\n\n"
+        yield f"data: {json.dumps({'type': 'done', 'conversation_id': conv_id, 'skill_used': f'specialist_{valid_id}'})}\n\n"
+        return
+
     needs_tools = message_needs_tools(message)
 
     history_items: List[dict[str, str]] = []

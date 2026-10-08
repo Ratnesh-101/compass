@@ -26,6 +26,7 @@ export default function ChatPanel({
   onOpenMigration = null,
 }) {
   const [input, setInput] = useState('')
+  const [activeSpecialist, setActiveSpecialist] = useState(null)
   const [streamingText, setStreamingText] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
   const [showContext, setShowContext] = useState(false)
@@ -219,7 +220,7 @@ export default function ChatPanel({
     handleSend(label, selectedMode)
   }
 
-  const handleSend = async (textToSend, overrideMode = null) => {
+  const handleSend = async (textToSend, overrideMode = null, explicitSpecialistId = null) => {
     const text = (textToSend || input).trim()
     if (!text || isStreaming || isTyping || isSendingRef.current) return
 
@@ -228,11 +229,17 @@ export default function ChatPanel({
     }
 
     const activeMode = overrideMode !== null ? overrideMode : convMode
+    const specialistIdToUse = explicitSpecialistId || (activeSpecialist ? activeSpecialist.id : null)
 
     isSendingRef.current = true
     setInput('')
+    setActiveSpecialist(null)
 
-    setMessages(prev => [...prev, { role: 'user', text }])
+    const userMsgText = activeSpecialist
+      ? `[${activeSpecialist.icon} ${activeSpecialist.name}] ${text}`
+      : text
+
+    setMessages(prev => [...prev, { role: 'user', text: userMsgText }])
     setIsStreaming(true)
     setStreamingText('')
 
@@ -242,6 +249,7 @@ export default function ChatPanel({
       await streamQueryFromAssistant(text, conversationId, {
         tone,
         mode: activeMode,
+        specialistId: specialistIdToUse,
         onToken: (token, full) => {
           receivedTokens = full
           setStreamingText(full)
@@ -255,7 +263,7 @@ export default function ChatPanel({
           if (finalText && finalText.trim()) {
             setMessages(prev => [...prev, { role: 'assistant', text: finalText }])
           } else if (onSendMessage) {
-            const reply = await onSendMessage(text, tone)
+            const reply = await onSendMessage(text, tone, specialistIdToUse)
             if (reply) {
               streamAssistantResponse(reply)
             }
@@ -274,7 +282,7 @@ export default function ChatPanel({
           setStreamingText('')
           try {
             if (onSendMessage) {
-              const reply = await onSendMessage(text, tone)
+              const reply = await onSendMessage(text, tone, specialistIdToUse)
               if (reply) {
                 streamAssistantResponse(reply)
                 return
@@ -309,7 +317,7 @@ export default function ChatPanel({
       setStreamingText('')
       try {
         if (onSendMessage) {
-          const reply = await onSendMessage(text)
+          const reply = await onSendMessage(text, tone, specialistIdToUse)
           if (reply) {
             streamAssistantResponse(reply)
             return
@@ -659,6 +667,8 @@ export default function ChatPanel({
             onSend={handleSend}
             isInputDisabled={isInputDisabled}
             isStreaming={isStreaming}
+            activeSpecialist={activeSpecialist}
+            setActiveSpecialist={setActiveSpecialist}
           />
         </div>
       </div>

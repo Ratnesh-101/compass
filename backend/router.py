@@ -305,8 +305,18 @@ def _extract_task_creation_args(message: str) -> dict:
         res["time_str"] = time_24
     elif parsed_date:
         res["time_str"] = "11:59 PM"
-
     return res
+
+
+def is_task_mutation_request(msg: str) -> bool:
+    """Check if a prompt contains intent to add, create, or schedule a task or deadline."""
+    return is_explicit_task_creation(msg)
+
+
+def parse_natural_due_date(text: str) -> Tuple[Optional[str], str]:
+    """Parse natural dates like '12th october', '12 oct', '2026-10-12', 'october 12th' from text."""
+    iso_val, clean = _parse_natural_date(text)
+    return iso_val, clean
 
 
 def message_needs_tools(message: str) -> bool:

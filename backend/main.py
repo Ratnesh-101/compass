@@ -13,10 +13,12 @@ Run with:
 
 import asyncio
 import logging
+import urllib.parse
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 
 from backend.config import get_settings
 from backend.memory.db import init_pool, close_pool
@@ -235,4 +237,21 @@ app.include_router(profile_router)
 app.include_router(persona_router)
 app.include_router(parked_router)
 app.include_router(specialist_router)
+
+
+@app.get("/")
+async def root_redirect(request: Request):
+    """Root redirect handler. Resolves active frontend origin or redirects to frontend dev server."""
+    query_str = request.url.query
+    query_suffix = f"?{query_str}" if query_str else ""
+    referer = request.headers.get("referer") or request.headers.get("origin")
+    if referer:
+        parsed = urllib.parse.urlparse(referer)
+        if parsed.scheme and parsed.netloc:
+            target = f"{parsed.scheme}://{parsed.netloc}/{query_suffix}"
+            return RedirectResponse(url=target)
+
+    frontend_url = "http://localhost:5173" if settings.is_development() else "https://compass-kappa-nine.vercel.app"
+    return RedirectResponse(url=f"{frontend_url}/{query_suffix}")
+
 

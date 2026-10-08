@@ -14,6 +14,23 @@ class ChatRequest(BaseModel):
     conversation_id: Optional[str] = None
     tone: Optional[str] = None
     mode: Optional[str] = None
+    specialist_id: Optional[str] = None
+    specialistId: Optional[str] = None
+
+    def get_specialist_id(self) -> Optional[str]:
+        return self.specialist_id or self.specialistId
+
+
+class PublicChatRequest(BaseModel):
+    message: str
+    domain: Optional[str] = None
+    project: Optional[str] = None
+    conversation_id: Optional[str] = None
+    specialist_id: Optional[str] = None
+    specialistId: Optional[str] = None
+
+    def get_specialist_id(self) -> Optional[str]:
+        return self.specialist_id or self.specialistId
 
 
 class ChatResponse(BaseModel):
@@ -209,12 +226,6 @@ class UpdateTaskRequest(BaseModel):
     is_fixed: Optional[bool] = None
 
 
-class PublicChatRequest(BaseModel):
-    message: str
-    domain: Optional[str] = None
-    project: Optional[str] = None
-    conversation_id: Optional[str] = None
-
 
 class PublicChatResponse(BaseModel):
     response: str
@@ -237,6 +248,11 @@ class StreamChatRequest(BaseModel):
     domain: Optional[str] = None
     tone: Optional[str] = None
     mode: Optional[str] = None
+    specialist_id: Optional[str] = None
+    specialistId: Optional[str] = None
+
+    def get_specialist_id(self) -> Optional[str]:
+        return self.specialist_id or self.specialistId
 
 
 class AgentRequest(BaseModel):
