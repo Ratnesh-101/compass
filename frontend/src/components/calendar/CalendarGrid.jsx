@@ -35,16 +35,16 @@ export function CalendarGrid({
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '14px', overflow: 'hidden', boxShadow: 'var(--shadow-sm)' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid var(--border)', flexWrap: 'wrap', gap: '8px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <button onClick={() => setSelectedDate(toIso(today))} style={pillBtnStyle}>Today</button>
-          <button onClick={() => setSelectedDate(toIso(addDays(selectedDateObj, -7)))} style={iconBtnStyle}>‹</button>
-          <button onClick={() => setSelectedDate(toIso(addDays(selectedDateObj, 7)))} style={iconBtnStyle}>›</button>
+          <button onClick={() => setSelectedDate(toIso(today))} className="btn-touch-target" style={{ ...pillBtnStyle, minHeight: '38px', padding: '6px 14px' }}>Today</button>
+          <button onClick={() => setSelectedDate(toIso(addDays(selectedDateObj, -7)))} className="btn-touch-target" style={{ ...iconBtnStyle, minWidth: '38px', minHeight: '38px', fontSize: '18px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>‹</button>
+          <button onClick={() => setSelectedDate(toIso(addDays(selectedDateObj, 7)))} className="btn-touch-target" style={{ ...iconBtnStyle, minWidth: '38px', minHeight: '38px', fontSize: '18px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>›</button>
           <div style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)' }}>{weekLabel}</div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden' }}>
             {['week', 'agenda'].map(m => (
-              <button key={m} onClick={() => setViewMode(m)} style={{
-                padding: '6px 12px', border: 'none', cursor: 'pointer', fontSize: '11.5px', fontWeight: '600',
+              <button key={m} onClick={() => setViewMode(m)} className="btn-touch-target" style={{
+                padding: '6px 14px', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: '600',
                 background: viewMode === m ? 'var(--coursework)' : 'var(--bg-card)',
                 color: viewMode === m ? '#fff' : 'var(--text-secondary)', textTransform: 'capitalize'
               }}>{m}</button>
@@ -54,10 +54,11 @@ export function CalendarGrid({
             id="btn-auto-schedule"
             onClick={handleAutoSchedule}
             disabled={proposing}
+            className="btn-touch-target"
             style={{
-              padding: '7px 14px', borderRadius: '8px', border: 'none',
+              padding: '8px 16px', borderRadius: '8px', border: 'none',
               background: 'linear-gradient(135deg, #6c5ce7, #8b5cf6)', color: '#fff',
-              fontSize: '12px', fontWeight: '700', cursor: proposing ? 'wait' : 'pointer',
+              fontSize: '12.5px', fontWeight: '700', cursor: proposing ? 'wait' : 'pointer',
               opacity: proposing ? 0.7 : 1
             }}>
             {proposing ? '⚡ Optimizing…' : '⚡ Auto-Schedule'}

@@ -37,13 +37,14 @@ export default function ChatHeaderToolbar({
         <button
           id="btn-toggle-history-drawer"
           onClick={() => setShowHistoryDrawer((v) => !v)}
+          className="btn-touch-target"
           style={{
-            padding: '6px 12px',
+            padding: '8px 14px',
             borderRadius: '8px',
             border: '1px solid var(--border)',
             background: showHistoryDrawer ? 'var(--primary)' : 'var(--bg-card-soft)',
             color: showHistoryDrawer ? '#fff' : 'var(--text-primary)',
-            fontSize: '12px',
+            fontSize: '12.5px',
             fontWeight: '700',
             cursor: 'pointer',
             display: 'flex',
@@ -154,16 +155,17 @@ export default function ChatHeaderToolbar({
           id="btn-toggle-parked"
           type="button"
           onClick={() => setShowParkedShelf((v) => !v)}
+          className="btn-touch-target"
           style={{
             display: 'flex',
             alignItems: 'center',
             gap: '4px',
-            padding: '4px 9px',
+            padding: '6px 11px',
             borderRadius: '7px',
             border: '1px solid var(--border)',
             background: showParkedShelf ? 'var(--coursework-bg)' : 'transparent',
             color: showParkedShelf ? 'var(--coursework)' : 'var(--text-secondary)',
-            fontSize: '11px',
+            fontSize: '11.5px',
             fontWeight: '600',
             cursor: 'pointer',
           }}
@@ -175,13 +177,14 @@ export default function ChatHeaderToolbar({
 
         <button
           onClick={() => setShowContext((v) => !v)}
+          className="btn-touch-target"
           style={{
-            padding: '5px 11px',
+            padding: '6px 12px',
             borderRadius: '6px',
             border: '1px solid var(--border)',
             background: showContext ? 'var(--bg-card-soft)' : 'transparent',
             color: 'var(--text-secondary)',
-            fontSize: '11.5px',
+            fontSize: '12px',
             fontWeight: '600',
             cursor: 'pointer',
           }}
@@ -194,13 +197,14 @@ export default function ChatHeaderToolbar({
           type="button"
           onClick={handleRecap}
           disabled={isInputDisabled}
+          className="btn-touch-target"
           style={{
-            padding: '5px 11px',
+            padding: '6px 12px',
             borderRadius: '6px',
             border: '1px solid var(--border)',
             background: 'transparent',
             color: 'var(--text-secondary)',
-            fontSize: '11.5px',
+            fontSize: '12px',
             fontWeight: '600',
             cursor: isInputDisabled ? 'not-allowed' : 'pointer',
             opacity: isInputDisabled ? 0.5 : 1,
@@ -214,13 +218,14 @@ export default function ChatHeaderToolbar({
           id="btn-chat-new"
           onClick={handleNewChat}
           disabled={isInputDisabled}
+          className="btn-touch-target"
           style={{
-            padding: '5px 12px',
+            padding: '6px 14px',
             borderRadius: '6px',
             border: '1px solid var(--border)',
             background: 'transparent',
             color: 'var(--text-secondary)',
-            fontSize: '11.5px',
+            fontSize: '12px',
             fontWeight: '700',
             cursor: isInputDisabled ? 'not-allowed' : 'pointer',
             opacity: isInputDisabled ? 0.5 : 1,

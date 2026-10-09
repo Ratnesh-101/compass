@@ -290,14 +290,14 @@ export default function ChatMessageList({
                 <div key={idx} style={{ display: 'flex', flexDirection: 'column', alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start', gap: '8px' }}>
                   <div style={{ display: 'flex', gap: '10px', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start', width: '100%' }}>
                     {msg.role === 'assistant' && (
-                      <div style={{
+                      <div className="chat-msg-avatar" style={{
                         width: '30px', height: '30px', borderRadius: '8px', background: 'var(--bg-sidebar)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', flexShrink: 0
                       }}>
                         🧭
                       </div>
                     )}
-                    <div style={{
+                    <div className="chat-msg-bubble" style={{
                       maxWidth: '75%',
                       padding: '13px 17px',
                       borderRadius: '14px',
@@ -352,13 +352,13 @@ export default function ChatMessageList({
             {/* Active Progressive Token Streaming Bubble */}
             {isStreaming && (
               <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-start' }}>
-                <div style={{
+                <div className="chat-msg-avatar" style={{
                   width: '30px', height: '30px', borderRadius: '8px', background: 'var(--bg-sidebar)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', flexShrink: 0
                 }}>
                   🧭
                 </div>
-                <div style={{
+                <div className="chat-msg-bubble" style={{
                   maxWidth: '75%',
                   padding: '13px 17px',
                   borderRadius: '14px',

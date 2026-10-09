@@ -41,22 +41,23 @@ export default function NorthstarPanel({
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100vh', minWidth: 0, overflow: 'hidden', background: 'var(--bg-app)' }}>
       {/* Northstar Header Sub-bar */}
       <div style={{
-        height: '52px',
+        minHeight: '48px',
         borderBottom: '1px solid var(--border)',
         background: 'var(--bg-card)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: '0 20px',
+        padding: '0 14px',
         flexShrink: 0,
-        gap: '12px',
+        gap: '10px',
+        flexWrap: 'wrap',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
           <span style={{ fontSize: '18px' }}>🧭</span>
           <span style={{ fontSize: '14px', fontWeight: '800', color: 'var(--text-primary)', letterSpacing: '-0.2px' }}>
             Northstar AI
           </span>
-          <span style={{
+          <span className="sidebar-specs-card" style={{
             fontSize: '11px',
             color: 'var(--text-muted)',
             background: 'var(--bg-card-soft)',
@@ -70,13 +71,14 @@ export default function NorthstarPanel({
         </div>
 
         {/* Right side controls: View Toggle + Dark Mode Toggle */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
           <div style={{ display: 'flex', background: 'var(--bg-card-soft)', padding: '3px', borderRadius: '8px', border: '1px solid var(--border)', flexShrink: 0 }}>
             <button
               id="northstar-subtab-chat"
               onClick={() => setActiveSubTab('assistant')}
+              className="btn-touch-target"
               style={{
-                padding: '5px 14px',
+                padding: '6px 14px',
                 borderRadius: '6px',
                 border: 'none',
                 background: (activeSubTab === 'assistant' || activeSubTab === 'specialist') ? 'var(--bg-card)' : 'transparent',
@@ -87,13 +89,14 @@ export default function NorthstarPanel({
                 cursor: 'pointer',
                 transition: 'all 0.15s ease',
               }}>
-              💬 Chat Copilot
+              💬 Chat
             </button>
             <button
               id="northstar-subtab-planner"
               onClick={() => setActiveSubTab('planner')}
+              className="btn-touch-target"
               style={{
-                padding: '5px 14px',
+                padding: '6px 14px',
                 borderRadius: '6px',
                 border: 'none',
                 background: activeSubTab === 'planner' ? 'var(--bg-card)' : 'transparent',
@@ -104,7 +107,7 @@ export default function NorthstarPanel({
                 cursor: 'pointer',
                 transition: 'all 0.15s ease',
               }}>
-              📋 Goal Planner
+              📋 Planner
             </button>
           </div>
 

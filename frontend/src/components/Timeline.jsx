@@ -129,19 +129,19 @@ export default function Timeline({
       {/* Header with Heading, Dark Mode Toggle, and Action Buttons */}
       <div style={{ marginBottom: '22px' }}>
         {/* Top Row: Title / Subtitle on Left, Dark Mode Toggle on Right */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '16px', marginBottom: '14px' }}>
-          <div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', marginBottom: '14px', flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-              <h2 style={{ fontSize: '24px', fontWeight: '800', color: 'var(--text-primary)', letterSpacing: '-0.4px', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <h2 style={{ fontSize: '22px', fontWeight: '800', color: 'var(--text-primary)', letterSpacing: '-0.4px', margin: 0, display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                 {domainMeta ? (
                   <>
-                    <span style={{ fontSize: '22px' }}>{domainMeta.icon}</span>
+                    <span style={{ fontSize: '20px' }}>{domainMeta.icon}</span>
                     <span>{domainMeta.label} Domain</span>
                   </>
                 ) : (
                   <span>Timeline Feed</span>
                 )}
-                <span className="serif-accent" style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>— {today}</span>
+                <span className="serif-accent" style={{ color: 'var(--text-secondary)', fontWeight: '600', fontSize: '16px' }}>— {today}</span>
               </h2>
               {domainMeta && (
                 <button
@@ -174,21 +174,24 @@ export default function Timeline({
             </p>
           </div>
 
-          <DarkModeToggle
-            isDarkMode={darkMode}
-            onToggleDarkMode={toggleDark}
-            id="timeline-theme-toggle"
-          />
+          <div style={{ flexShrink: 0 }}>
+            <DarkModeToggle
+              isDarkMode={darkMode}
+              onToggleDarkMode={toggleDark}
+              id="timeline-theme-toggle"
+            />
+          </div>
         </div>
 
         {/* Action Buttons Row Below */}
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+        <div className="timeline-actions-group" style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
 
           {onOpenTelemetry && (
             <button
               id="btn-open-telemetry"
               type="button"
               onClick={onOpenTelemetry}
+              className="btn-touch-target"
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -223,6 +226,7 @@ export default function Timeline({
             type="button"
             onClick={handleVerifyAll}
             disabled={verifyingDeadlines}
+            className="btn-touch-target"
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -256,6 +260,7 @@ export default function Timeline({
             type="button"
             onClick={handleSeedJudgePersona}
             disabled={seedingPersona}
+            className="btn-touch-target"
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -287,6 +292,7 @@ export default function Timeline({
           <button
             id="btn-add-deadline"
             onClick={() => setShowAddModal(true)}
+            className="btn-touch-target"
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -376,8 +382,20 @@ export default function Timeline({
         onOpenSeed={handleSeedJudgePersona}
       />
 
-      {/* Filter pills */}
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '22px', flexWrap: 'wrap' }}>
+      {/* Filter pills: horizontal scroll on mobile */}
+      <div
+        className="domain-filter-pills-row quick-prompts-scroll"
+        style={{
+          display: 'flex',
+          gap: '8px',
+          marginBottom: '20px',
+          overflowX: 'auto',
+          overflowY: 'hidden',
+          paddingBottom: '4px',
+          maxWidth: '100%',
+          WebkitOverflowScrolling: 'touch',
+        }}
+      >
         {(() => {
           const basePills = ['all', 'hackathon', 'coursework', 'code', 'general', 'other']
           const customPills = [
@@ -395,6 +413,7 @@ export default function Timeline({
                 id={`filter-pill-${dom}`}
                 onClick={() => onSelectDomain(dom)}
                 className={`filter-pill ${activeDomain === dom ? 'active' : ''}`}
+                style={{ flexShrink: 0, minHeight: '38px' }}
               >
                 {pillMeta.label}
               </button>

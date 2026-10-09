@@ -49,9 +49,15 @@
   --bg-input: #ffffff;
   --bg-modal: #ffffff;
 
+  --pad-sm: 8px;
+  --pad-md: 16px;
+  --pad-lg: 24px;
+  --touch-target: 44px;
+
   --scrollbar-track: #f1ede3;
   --scrollbar-thumb: #d8d2c2;
   --scrollbar-thumb-hover: #bfb8a3;
+  --fill-ghost-hover: rgba(0, 0, 0, 0.05);
   /* Guide / Architecture Tour tokens */
   --guide-bg: var(--bg-card);
   --guide-border: var(--border);
@@ -118,6 +124,11 @@
   --text-main: #f4f1fb;
   --bg-input: #1a1a2e;
   --bg-modal: #1a1a2e;
+
+  --pad-sm: 8px;
+  --pad-md: 16px;
+  --pad-lg: 24px;
+  --touch-target: 44px;
 
   --scrollbar-track: #090912;
   --scrollbar-thumb: #25233d;
@@ -467,12 +478,26 @@ code, pre, .mono {
 }
 
 @media (max-width: 768px) {
+  :root {
+    --pad-sm: 6px;
+    --pad-md: 12px;
+    --pad-lg: 16px;
+  }
+
+  /* Typography minimum sizes on mobile */
+  body, p, input, button, textarea {
+    font-size: 14px;
+  }
+  h1, h2 {
+    font-size: 18px !important;
+  }
+
   .mobile-header {
     display: flex !important;
     align-items: center;
     justify-content: space-between;
-    height: 54px;
-    padding: 0 16px;
+    height: 56px;
+    padding: 0 12px;
     background: var(--bg-card);
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
@@ -481,8 +506,16 @@ code, pre, .mono {
     z-index: 100;
   }
 
+  #mobile-menu-button,
+  #mobile-theme-toggle {
+    min-width: 44px !important;
+    min-height: 44px !important;
+  }
+
   .mobile-close-btn {
     display: flex !important;
+    min-width: 44px !important;
+    min-height: 44px !important;
   }
 
   #sidebar-collapse-toggle {
@@ -495,7 +528,7 @@ code, pre, .mono {
     left: 0 !important;
     bottom: 0 !important;
     height: 100vh !important;
-    width: 280px !important;
+    width: 290px !important;
     max-width: 85vw !important;
     min-width: 260px !important;
     z-index: 1000 !important;
@@ -511,6 +544,15 @@ code, pre, .mono {
   aside.compass-sidebar.mobile-open {
     transform: translateX(0) !important;
     pointer-events: auto !important;
+  }
+
+  /* Touch friendly sidebar items */
+  aside.compass-sidebar .nav-item {
+    min-height: 44px !important;
+    padding: 10px 14px !important;
+  }
+  aside.compass-sidebar #sidebar-account-btn {
+    min-height: 44px !important;
   }
 
   .mobile-drawer-backdrop {
@@ -529,12 +571,44 @@ code, pre, .mono {
     overflow-x: hidden !important;
   }
 
+  /* Timeline mobile responsiveness */
   .timeline-container {
-    padding: 16px 14px !important;
+    padding: 12px 10px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .timeline-feed {
+    gap: 10px !important;
+    width: 100% !important;
   }
 
   .timeline-card {
-    padding: 14px 14px !important;
+    padding: 14px 12px !important;
+    border-radius: 10px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .timeline-actions-group {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    width: 100% !important;
+    gap: 8px !important;
+  }
+
+  .timeline-actions-group > button,
+  .timeline-actions-group > a {
+    width: 100% !important;
+    min-height: 44px !important;
+    justify-content: center !important;
+    box-sizing: border-box !important;
+  }
+
+  /* Touch-friendly buttons (44px min) */
+  .btn-touch-target {
+    min-height: 44px !important;
+    min-width: 44px !important;
   }
 
   .card-hackathon, .card-coursework, .card-code, .card-general {
@@ -559,17 +633,153 @@ code, pre, .mono {
   .header-model-badge {
     display: none !important;
   }
+
+  /* On mobile (< 768px), keep Dark Mode toggle ONLY in top mobile-header navbar */
+  #timeline-theme-toggle,
+  #calendar-theme-toggle,
+  #compass-theme-toggle,
+  #northstar-theme-toggle {
+    display: none !important;
+  }
+
+  /* Calendar View Google Calendar Adaptations */
+  .calendar-drawer-toggle-btn {
+    display: inline-flex !important;
+  }
+
+  .calendar-header-bar {
+    padding: 10px 14px !important;
+  }
+
+  .calendar-policy-subtext {
+    font-size: 11px !important;
+    line-height: 1.4 !important;
+  }
+
+  /* Desktop layout: Left calendar sidebar (max 300px), Right content flex:1.
+     On mobile: Hide left calendar sidebar, show tasks/events full width! */
+  .calendar-google-layout {
+    flex-direction: column !important;
+    padding: 12px 12px 28px !important;
+    gap: 16px !important;
+    overflow-y: auto !important;
+  }
+
+  .calendar-left-sidebar {
+    display: none !important;
+  }
+
+  .calendar-main-content {
+    flex-direction: column !important;
+    width: 100% !important;
+    gap: 16px !important;
+    overflow: visible !important;
+  }
+
+  .calendar-grid-section {
+    width: 100% !important;
+    min-height: 340px !important;
+    max-height: 480px !important;
+  }
+
+  .calendar-tasks-section {
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  /* Mobile Calendar Drawer Overlay */
+  .mobile-calendar-drawer-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(3px);
+    z-index: 1000;
+    display: flex;
+    justify-content: flex-start;
+    align-items: stretch;
+    animation: fadeIn 150ms ease-out;
+  }
+
+  .mobile-calendar-drawer-content {
+    background: var(--bg-card);
+    width: 86vw;
+    max-width: 360px;
+    height: 100%;
+    overflow-y: auto;
+    padding: 18px 16px;
+    box-shadow: var(--shadow-lg);
+    border-right: 1px solid var(--border);
+    animation: slideInLeft 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .calendar-day-btn {
+    min-height: 38px !important;
+    font-size: 13px !important;
+  }
+
+  /* Northstar / Chat / Agent Mobile */
+  .chat-input-container {
+    padding: 10px 12px 14px !important;
+    position: sticky !important;
+    bottom: 0 !important;
+    background: var(--bg-app) !important;
+    z-index: 20 !important;
+  }
+
+  .chat-input-box {
+    min-height: 44px !important;
+    font-size: 14px !important;
+  }
+
+  .chat-send-btn {
+    min-height: 44px !important;
+    min-width: 60px !important;
+    padding: 0 16px !important;
+  }
+
+  .chat-msg-avatar {
+    width: 26px !important;
+    height: 26px !important;
+    font-size: 12px !important;
+  }
+
+  .chat-msg-bubble {
+    max-width: 88% !important;
+    font-size: 14px !important;
+  }
+
+  .northstar-actions-row {
+    flex-direction: column !important;
+    width: 100% !important;
+  }
+
+  .northstar-btn-grid {
+    display: grid !important;
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 8px !important;
+    width: 100% !important;
+  }
 }
 
 @media (max-width: 480px) {
+  :root {
+    --pad-sm: 4px;
+    --pad-md: 10px;
+    --pad-lg: 12px;
+  }
+
   .timeline-container {
-    padding: 12px 10px !important;
+    padding: 10px 8px !important;
   }
   .timeline-card {
     padding: 12px 10px !important;
   }
   .card-hackathon, .card-coursework, .card-code, .card-general {
     padding: 10px !important;
+  }
+
+  .northstar-btn-grid {
+    grid-template-columns: 1fr !important;
   }
 }
 

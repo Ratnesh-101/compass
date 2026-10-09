@@ -65,7 +65,7 @@ export default function TaskCard({
             {meta.label}
           </span>
           <button
-            className="btn-delete-deadline"
+            className="btn-delete-deadline btn-touch-target"
             id={`btn-delete-task-${task.id}`}
             title="Delete deadline"
             onClick={async (e) => {
@@ -78,14 +78,14 @@ export default function TaskCard({
               background: 'transparent',
               border: '1px solid transparent',
               color: '#64748b',
-              width: '26px',
-              height: '26px',
-              borderRadius: '6px',
+              minWidth: '40px',
+              minHeight: '40px',
+              borderRadius: '8px',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: '13px',
+              fontSize: '14px',
               lineHeight: 1,
               transition: 'all 0.15s ease'
             }}
@@ -116,8 +116,10 @@ export default function TaskCard({
             onToggleStatus(task.id, isCompleted)
           }}
           style={{
-            width: '22px',
-            height: '22px',
+            width: '28px',
+            height: '28px',
+            minWidth: '28px',
+            minHeight: '28px',
             borderRadius: '50%',
             border: isCompleted ? '1.5px solid #10b981' : '1.5px solid var(--border)',
             background: isCompleted ? '#10b981' : 'var(--bg-card-soft)',
@@ -126,7 +128,7 @@ export default function TaskCard({
             alignItems: 'center',
             justifyContent: 'center',
             cursor: 'pointer',
-            fontSize: '12px',
+            fontSize: '13px',
             flexShrink: 0,
             transition: 'all 0.15s ease'
           }}

@@ -22,11 +22,11 @@ export function CalendarSidebar({
     <div style={{ width: '270px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '14px', overflowY: 'auto' }}>
       <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '14px', padding: '14px', boxShadow: 'var(--shadow-sm)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-          <button onClick={() => setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() - 1, 1))} style={iconBtnStyle}>‹</button>
-          <div style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-primary)' }}>
+          <button onClick={() => setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() - 1, 1))} className="btn-touch-target" style={{ ...iconBtnStyle, minWidth: '40px', minHeight: '40px', fontSize: '18px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>‹</button>
+          <div style={{ fontSize: '13.5px', fontWeight: '700', color: 'var(--text-primary)' }}>
             {monthCursor.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
           </div>
-          <button onClick={() => setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1))} style={iconBtnStyle}>›</button>
+          <button onClick={() => setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1))} className="btn-touch-target" style={{ ...iconBtnStyle, minWidth: '40px', minHeight: '40px', fontSize: '18px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>›</button>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '3px', marginBottom: '4px' }}>
           {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
@@ -43,16 +43,18 @@ export function CalendarSidebar({
             return (
               <button
                 key={i}
+                className="calendar-day-btn"
                 onClick={() => setSelectedDate(iso)}
                 style={{
                   aspectRatio: '1', border: 'none', borderRadius: '7px', cursor: 'pointer',
                   background: isSelected ? 'var(--brand)' : 'transparent',
                   color: isSelected ? '#2a1a00' : (inMonth ? 'var(--text-primary)' : 'var(--text-muted)'),
-                  fontWeight: isToday ? '800' : '500', fontSize: '11.5px',
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '2px'
+                  fontWeight: isToday ? '800' : '500', fontSize: '12px',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '2px',
+                  minHeight: '34px',
                 }}>
                 {d.getDate()}
-                {hasEvents && !isSelected && <span style={{ width: '3px', height: '3px', borderRadius: '50%', background: 'var(--brand)' }} />}
+                {hasEvents && !isSelected && <span style={{ width: '4px', height: '4px', borderRadius: '50%', background: 'var(--brand)' }} />}
               </button>
             )
           })}

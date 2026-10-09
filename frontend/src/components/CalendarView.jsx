@@ -332,35 +332,61 @@ export default function CalendarView({
 
   const weekLabel = `Week of ${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
 
+  const [mobileCalendarDrawerOpen, setMobileCalendarDrawerOpen] = useState(false)
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: 'var(--bg-app)' }}>
-      {/* Top Header Bar — condensed */}
-      <div style={{
-        padding: '14px 24px', borderBottom: '1px solid var(--border)', background: 'var(--bg-card)',
+      {/* Top Header Bar — Google Calendar Style */}
+      <div className="calendar-header-bar" style={{
+        padding: '12px 16px', borderBottom: '1px solid var(--border)', background: 'var(--bg-card)',
         flexShrink: 0,
       }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '16px', marginBottom: '10px' }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-              <h2 style={{ fontSize: '17px', fontWeight: '700', color: 'var(--text-primary)', letterSpacing: '-0.3px', margin: 0 }}>
-                🗓️ Schedule
-              </h2>
-              <div
-                onClick={() => { if (onOpenAuthModal) onOpenAuthModal(); else setShowQuickModal(true) }}
-                title="Click to switch account or manage Google Calendar"
-                style={{
-                  display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '20px',
-                  background: isLive ? 'var(--code-bg)' : 'var(--hackathon-bg)',
-                  fontSize: '11px', color: isLive ? 'var(--code-text)' : 'var(--hackathon-text)',
-                  fontWeight: '600', cursor: 'pointer'
-                }}>
-                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isLive ? '#10b981' : '#f5a623' }} />
-                {isLive ? `${calendarStatus.account_email} (Live)` : `${calendarStatus.account_email || 'demo-scholar@compass.ai'} (demo — click to link)`}
-              </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', minWidth: 0 }}>
+            {/* Mobile Calendar Drawer Toggle Button */}
+            <button
+              id="btn-toggle-calendar-drawer"
+              type="button"
+              onClick={() => setMobileCalendarDrawerOpen(v => !v)}
+              className="calendar-drawer-toggle-btn btn-touch-target"
+              aria-label="Toggle Calendar Drawer"
+              title="Open / Close Calendar"
+              style={{
+                display: 'none',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                padding: '8px 12px',
+                borderRadius: '8px',
+                border: '1px solid var(--border)',
+                background: mobileCalendarDrawerOpen ? 'var(--coursework)' : 'var(--bg-card-soft)',
+                color: mobileCalendarDrawerOpen ? '#ffffff' : 'var(--text-primary)',
+                fontWeight: '700',
+                fontSize: '13px',
+                cursor: 'pointer'
+              }}
+            >
+              <span>📅</span>
+              <span>{mobileCalendarDrawerOpen ? 'Hide Cal' : 'View Cal'}</span>
+            </button>
+
+            <h2 style={{ fontSize: '17px', fontWeight: '800', color: 'var(--text-primary)', letterSpacing: '-0.3px', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span>🗓️</span> <span>Schedule</span>
+            </h2>
+            <div
+              onClick={() => { if (onOpenAuthModal) onOpenAuthModal(); else setShowQuickModal(true) }}
+              title="Click to switch account or manage Google Calendar"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '20px',
+                background: isLive ? 'var(--code-bg)' : 'var(--hackathon-bg)',
+                fontSize: '11px', color: isLive ? 'var(--code-text)' : 'var(--hackathon-text)',
+                fontWeight: '600', cursor: 'pointer', maxWidth: '240px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+              }}>
+              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isLive ? '#10b981' : '#f5a623', flexShrink: 0 }} />
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {isLive ? `${calendarStatus.account_email}` : (calendarStatus.account_email || 'demo')}
+              </span>
             </div>
-            <p style={{ fontSize: '11.5px', color: 'var(--text-muted)', marginTop: '3px', marginBottom: 0 }}>
-              Working hours 09:00–18:00 · 15m inter-task buffer · deterministic slot allocator
-            </p>
           </div>
 
           <DarkModeToggle
@@ -370,72 +396,80 @@ export default function CalendarView({
           />
         </div>
 
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-          <button
-            id="btn-check-slipped"
-            onClick={handleCheckReactive}
-            disabled={checkingReactive}
-            style={{
-              padding: '8px 14px', borderRadius: '8px', background: 'var(--hackathon-bg)', border: 'none',
-              color: 'var(--hackathon-text)', fontSize: '12px', fontWeight: '600', cursor: checkingReactive ? 'wait' : 'pointer'
-            }}>
-            {checkingReactive ? '🔄 Scanning...' : '⚡ Scan Slip'}
-          </button>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', marginTop: '6px' }}>
+          <p className="calendar-policy-subtext" style={{ fontSize: '11.5px', color: 'var(--text-muted)', margin: 0 }}>
+            09:00–18:00 UTC · 15m buffer · deterministic allocation
+          </p>
 
-          <div ref={moreMenuRef} style={{ position: 'relative' }}>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <button
-              onClick={() => setShowMoreMenu(v => !v)}
+              id="btn-check-slipped"
+              onClick={handleCheckReactive}
+              disabled={checkingReactive}
+              className="btn-touch-target"
               style={{
-                padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-card)',
-                color: 'var(--text-secondary)', fontSize: '13px', fontWeight: '700', cursor: 'pointer'
+                padding: '8px 14px', borderRadius: '8px', background: 'var(--hackathon-bg)', border: 'none',
+                color: 'var(--hackathon-text)', fontSize: '12px', fontWeight: '600', cursor: checkingReactive ? 'wait' : 'pointer'
               }}>
-              •••
+              {checkingReactive ? '🔄 Scanning...' : '⚡ Scan Slip'}
             </button>
-            {showMoreMenu && (
-              <div style={{
-                position: 'absolute', top: '110%', right: 0, background: 'var(--bg-card)', border: '1px solid var(--border)',
-                borderRadius: '12px', boxShadow: 'var(--shadow-lg)', width: '240px', padding: '8px', zIndex: 50
-              }}>
-                <button
-                  id="btn-sync-gcal"
-                  onClick={handleSyncNow}
-                  disabled={syncingCalendar}
-                  style={menuItemStyle}>
-                  {syncingCalendar ? '🔄 Syncing...' : (isLive ? '📅 Sync to Google Calendar' : '📅 Slot / Sync Tasks')}
-                </button>
-                <a id="btn-export-ics" href={getCalendarExportUrl(activeDomain)} download="compass_schedule.ics" style={{ ...menuItemStyle, textDecoration: 'none', display: 'block' }}>
-                  📥 Export .ics Feed
-                </a>
-                <button onClick={() => { setShowIcsModal(true); setShowMoreMenu(false) }} style={menuItemStyle}>
-                  📘 Sync Guide
-                </button>
-                <div style={{ height: '1px', background: 'var(--border-soft)', margin: '6px 0' }} />
-                {calendarStatus.connected ? (
-                  <>
-                    <a href="https://calendar.google.com" target="_blank" rel="noreferrer" style={{ ...menuItemStyle, textDecoration: 'none', display: 'block' }}>
-                      Open Google Calendar ↗
-                    </a>
-                    {!isLive && (
-                      <a id="btn-connect-google" href={getGoogleOAuthConnectUrl()} style={{ ...menuItemStyle, textDecoration: 'none', display: 'block' }}>
-                        🔗 Sign in with Google
+
+            <div ref={moreMenuRef} style={{ position: 'relative' }}>
+              <button
+                onClick={() => setShowMoreMenu(v => !v)}
+                className="btn-touch-target"
+                style={{
+                  padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-card)',
+                  color: 'var(--text-secondary)', fontSize: '13px', fontWeight: '700', cursor: 'pointer'
+                }}>
+                •••
+              </button>
+              {showMoreMenu && (
+                <div style={{
+                  position: 'absolute', top: '110%', right: 0, background: 'var(--bg-card)', border: '1px solid var(--border)',
+                  borderRadius: '12px', boxShadow: 'var(--shadow-lg)', width: '240px', padding: '8px', zIndex: 50
+                }}>
+                  <button
+                    id="btn-sync-gcal"
+                    onClick={handleSyncNow}
+                    disabled={syncingCalendar}
+                    style={menuItemStyle}>
+                    {syncingCalendar ? '🔄 Syncing...' : (isLive ? '📅 Sync to Google Calendar' : '📅 Slot / Sync Tasks')}
+                  </button>
+                  <a id="btn-export-ics" href={getCalendarExportUrl(activeDomain)} download="compass_schedule.ics" style={{ ...menuItemStyle, textDecoration: 'none', display: 'block' }}>
+                    📥 Export .ics Feed
+                  </a>
+                  <button onClick={() => { setShowIcsModal(true); setShowMoreMenu(false) }} style={menuItemStyle}>
+                    📘 Sync Guide
+                  </button>
+                  <div style={{ height: '1px', background: 'var(--border-soft)', margin: '6px 0' }} />
+                  {calendarStatus.connected ? (
+                    <>
+                      <a href="https://calendar.google.com" target="_blank" rel="noreferrer" style={{ ...menuItemStyle, textDecoration: 'none', display: 'block' }}>
+                        Open Google Calendar ↗
                       </a>
-                    )}
-                    <button id="btn-disconnect-google" onClick={handleDisconnect} style={{ ...menuItemStyle, color: '#dc2626' }}>
-                      Disconnect
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button id="btn-connect-google" onClick={() => { if (onOpenAuthModal) onOpenAuthModal(); else setShowQuickModal(true); setShowMoreMenu(false) }} style={menuItemStyle}>
-                      🔗 Connect Google Calendar
-                    </button>
-                    <button id="btn-quick-login" onClick={() => { if (onOpenAuthModal) onOpenAuthModal(); else setShowQuickModal(true); setShowMoreMenu(false) }} style={menuItemStyle}>
-                      ⚡ Switch Account
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
+                      {!isLive && (
+                        <a id="btn-connect-google" href={getGoogleOAuthConnectUrl()} style={{ ...menuItemStyle, textDecoration: 'none', display: 'block' }}>
+                          🔗 Sign in with Google
+                        </a>
+                      )}
+                      <button id="btn-disconnect-google" onClick={handleDisconnect} style={{ ...menuItemStyle, color: '#dc2626' }}>
+                        Disconnect
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button id="btn-connect-google" onClick={() => { if (onOpenAuthModal) onOpenAuthModal(); else setShowQuickModal(true); setShowMoreMenu(false) }} style={menuItemStyle}>
+                        🔗 Connect Google Calendar
+                      </button>
+                      <button id="btn-quick-login" onClick={() => { if (onOpenAuthModal) onOpenAuthModal(); else setShowQuickModal(true); setShowMoreMenu(false) }} style={menuItemStyle}>
+                        ⚡ Switch Account
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -453,113 +487,197 @@ export default function CalendarView({
         </div>
       )}
 
-      {/* Main 3-column layout */}
-      <div style={{ flex: 1, display: 'flex', gap: '16px', padding: '16px', overflow: 'hidden', minHeight: 0 }}>
-        {/* Left: mini month calendar + selected-day panel */}
-        <CalendarSidebar
-          monthCursor={monthCursor}
-          setMonthCursor={setMonthCursor}
-          monthDays={monthDays}
-          selectedDate={selectedDate}
-          setSelectedDate={setSelectedDate}
-          selectedDateObj={selectedDateObj}
-          today={today}
-          scheduledDateSet={scheduledDateSet}
-          scheduledForDay={scheduledForDay}
-          getCalendarDomainStyle={getCalendarDomainStyle}
-          toIso={toIso}
-          isSameDay={isSameDay}
-        />
-
-        {/* Center: week grid / agenda */}
-        <CalendarGrid
-          viewMode={viewMode}
-          setViewMode={setViewMode}
-          selectedDate={selectedDate}
-          setSelectedDate={setSelectedDate}
-          selectedDateObj={selectedDateObj}
-          today={today}
-          weekLabel={weekLabel}
-          weekDays={weekDays}
-          handleAutoSchedule={handleAutoSchedule}
-          proposing={proposing}
-          HOURS={HOURS}
-          HOUR_ROW_HEIGHT={HOUR_ROW_HEIGHT}
-          scheduledForDay={scheduledForDay}
-          externalEventsForDay={externalEventsForDay}
-          getEventPosition={getEventPosition}
-          getCalendarDomainStyle={getCalendarDomainStyle}
-          isLive={isLive}
-          allScheduledTasks={allScheduledTasks}
-          toIso={toIso}
-          addDays={addDays}
-          isSameDay={isSameDay}
-        />
-
-        {/* Right: pending tasks + policy widget (unchanged content) */}
-        <div style={{ width: '280px', flexShrink: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '14px', padding: '16px', overflowY: 'auto', boxShadow: 'var(--shadow-sm)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <h3 style={{ fontSize: '12.5px', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-primary)', fontWeight: '700' }}>
-              Pending Tasks ({unscheduledTasks.length})
-            </h3>
-            <span style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>Unscheduled</span>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
-            {unscheduledTasks.map(task => {
-              const s = getCalendarDomainStyle(task.domain)
-              return (
-                <div key={task.id} style={{ padding: '10px 12px', borderRadius: '8px', background: 'var(--bg-card-soft)', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <span style={{ fontSize: '12px', color: 'var(--text-primary)', fontWeight: '600' }}>{task.title}</span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span className={s.badgeClass} style={{ padding: '1px 6px', borderRadius: '4px', fontSize: '9.5px', fontWeight: '700' }}>{task.domain}</span>
-                      <button
-                        title="Delete task/deadline"
-                        onClick={async (e) => {
-                          e.stopPropagation()
-                          if (window.confirm(`Delete "${task.title}"?`)) {
-                            try {
-                              await deleteTask(task.id)
-                              if (onTasksUpdated) onTasksUpdated()
-                            } catch (err) {
-                              alert(`Failed to delete: ${err.message}`)
-                            }
-                          }
-                        }}
-                        style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px 4px', borderRadius: '4px', fontSize: '11px' }}
-                        onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
-                        onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
-                      >🗑️</button>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
-                    <span style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>⏱️ {task.duration_minutes || 60}m · {task.priority || 'medium'}</span>
-                    <span style={{ fontSize: '10.5px', color: 'var(--hackathon-text)', fontWeight: '600' }}>{task.countdown || 'Needs slot'}</span>
-                  </div>
-                </div>
-              )
-            })}
-
-            {unscheduledTasks.length === 0 && (
-              <div style={{ padding: '20px 14px', textAlign: 'center', color: 'var(--text-muted)', background: 'var(--bg-card-soft)', borderRadius: '8px', border: '1px dashed var(--border)' }}>
-                <span style={{ fontSize: '18px' }}>🎉</span>
-                <p style={{ fontSize: '11.5px', marginTop: '6px' }}>All tasks are scheduled into calendar time slots!</p>
+      {/* Mobile Calendar Drawer Overlay / Modal */}
+      {mobileCalendarDrawerOpen && (
+        <div className="mobile-calendar-drawer-backdrop" onClick={() => setMobileCalendarDrawerOpen(false)}>
+          <div className="mobile-calendar-drawer-content" onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', borderBottom: '1px solid var(--border)', paddingBottom: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '18px' }}>🗓️</span>
+                <h3 style={{ fontSize: '15px', fontWeight: '800', color: 'var(--text-primary)', margin: 0 }}>Calendar Picker & Overview</h3>
               </div>
-            )}
-          </div>
+              <button
+                type="button"
+                onClick={() => setMobileCalendarDrawerOpen(false)}
+                className="btn-touch-target"
+                style={{
+                  background: 'var(--bg-card-soft)', border: '1px solid var(--border)', borderRadius: '8px',
+                  width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: '16px', color: 'var(--text-secondary)', cursor: 'pointer'
+                }}
+              >
+                ✕
+              </button>
+            </div>
 
-          <div style={{ marginTop: 'auto', padding: '14px', borderRadius: '8px', background: 'var(--coursework-bg)' }}>
-            <h4 style={{ fontSize: '11.5px', fontWeight: '700', color: 'var(--coursework-text)', marginBottom: '8px' }}>⚙️ Deterministic Policy</h4>
-            <ul style={{ fontSize: '10.5px', color: 'var(--text-secondary)', lineHeight: '1.6', paddingLeft: '14px' }}>
-              <li>Working Window: 09:00 - 18:00 UTC</li>
-              <li>Days: Monday - Friday (workdays)</li>
-              <li>Inter-task buffer: 15 minutes</li>
-              <li>LLM slot hallucinations: 0% (pure Python)</li>
-              <li>Calendar sync: Instant RFC 5545 + Google</li>
-            </ul>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <CalendarSidebar
+                monthCursor={monthCursor}
+                setMonthCursor={setMonthCursor}
+                monthDays={monthDays}
+                selectedDate={selectedDate}
+                setSelectedDate={(date) => {
+                  setSelectedDate(date)
+                  setMobileCalendarDrawerOpen(false)
+                }}
+                selectedDateObj={selectedDateObj}
+                today={today}
+                scheduledDateSet={scheduledDateSet}
+                scheduledForDay={scheduledForDay}
+                getCalendarDomainStyle={getCalendarDomainStyle}
+                toIso={toIso}
+                isSameDay={isSameDay}
+              />
+              <div style={{ marginTop: '8px', borderTop: '1px solid var(--border-soft)', paddingTop: '14px' }}>
+                <div style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '10px' }}>Week Grid View</div>
+                <div style={{ minHeight: '340px' }}>
+                  <CalendarGrid
+                    viewMode={viewMode}
+                    setViewMode={setViewMode}
+                    selectedDate={selectedDate}
+                    setSelectedDate={setSelectedDate}
+                    selectedDateObj={selectedDateObj}
+                    today={today}
+                    weekLabel={weekLabel}
+                    weekDays={weekDays}
+                    handleAutoSchedule={handleAutoSchedule}
+                    proposing={proposing}
+                    HOURS={HOURS}
+                    HOUR_ROW_HEIGHT={HOUR_ROW_HEIGHT}
+                    scheduledForDay={scheduledForDay}
+                    externalEventsForDay={externalEventsForDay}
+                    getEventPosition={getEventPosition}
+                    getCalendarDomainStyle={getCalendarDomainStyle}
+                    isLive={isLive}
+                    allScheduledTasks={allScheduledTasks}
+                    toIso={toIso}
+                    addDays={addDays}
+                    isSameDay={isSameDay}
+                  />
+                </div>
+              </div>
+            </div>
           </div>
         </div>
+      )}
+
+      {/* Google Calendar Layout:
+          DESKTOP: Left: Compact Calendar (Sidebar, max-width: 300px) | Right: Tasks/Events & Schedule (flex: 1)
+          MOBILE: Calendar is hidden in drawer; Main Content (Tasks/Events) is full width and primary!
+      */}
+      <div className="calendar-google-layout" style={{ flex: 1, display: 'flex', gap: '16px', padding: '16px', overflow: 'hidden', minHeight: 0 }}>
+        {/* Left: Compact Calendar (Secondary on Desktop, max-width: 300px, hidden on mobile) */}
+        <aside className="calendar-left-sidebar" style={{ width: '280px', maxWidth: '300px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '14px', overflowY: 'auto' }}>
+          <CalendarSidebar
+            monthCursor={monthCursor}
+            setMonthCursor={setMonthCursor}
+            monthDays={monthDays}
+            selectedDate={selectedDate}
+            setSelectedDate={setSelectedDate}
+            selectedDateObj={selectedDateObj}
+            today={today}
+            scheduledDateSet={scheduledDateSet}
+            scheduledForDay={scheduledForDay}
+            getCalendarDomainStyle={getCalendarDomainStyle}
+            toIso={toIso}
+            isSameDay={isSameDay}
+          />
+        </aside>
+
+        {/* Center/Right: Primary Content (Tasks & Events - flex: 1, full width on mobile) */}
+        <main className="calendar-main-content" style={{ flex: 1, display: 'flex', gap: '16px', minWidth: 0, overflow: 'hidden' }}>
+          {/* Calendar week/agenda grid view */}
+          <section className="calendar-grid-section" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <CalendarGrid
+              viewMode={viewMode}
+              setViewMode={setViewMode}
+              selectedDate={selectedDate}
+              setSelectedDate={setSelectedDate}
+              selectedDateObj={selectedDateObj}
+              today={today}
+              weekLabel={weekLabel}
+              weekDays={weekDays}
+              handleAutoSchedule={handleAutoSchedule}
+              proposing={proposing}
+              HOURS={HOURS}
+              HOUR_ROW_HEIGHT={HOUR_ROW_HEIGHT}
+              scheduledForDay={scheduledForDay}
+              externalEventsForDay={externalEventsForDay}
+              getEventPosition={getEventPosition}
+              getCalendarDomainStyle={getCalendarDomainStyle}
+              isLive={isLive}
+              allScheduledTasks={allScheduledTasks}
+              toIso={toIso}
+              addDays={addDays}
+              isSameDay={isSameDay}
+            />
+          </section>
+
+          {/* Tasks & Policy column: visible directly beside grid on desktop, or stacked full width on tablet/mobile */}
+          <section className="calendar-tasks-section" style={{ width: '320px', flexShrink: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '14px', padding: '16px', overflowY: 'auto', boxShadow: 'var(--shadow-sm)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <h3 style={{ fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-primary)', fontWeight: '700' }}>
+                Pending Tasks ({unscheduledTasks.length})
+              </h3>
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Unscheduled</span>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
+              {unscheduledTasks.map(task => {
+                const s = getCalendarDomainStyle(task.domain)
+                return (
+                  <div key={task.id} style={{ padding: '12px 14px', borderRadius: '10px', background: 'var(--bg-card-soft)', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <span style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: '600' }}>{task.title}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span className={s.badgeClass} style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: '700' }}>{task.domain}</span>
+                        <button
+                          title="Delete task/deadline"
+                          onClick={async (e) => {
+                            e.stopPropagation()
+                            if (window.confirm(`Delete "${task.title}"?`)) {
+                              try {
+                                await deleteTask(task.id)
+                                if (onTasksUpdated) onTasksUpdated()
+                              } catch (err) {
+                                alert(`Failed to delete: ${err.message}`)
+                              }
+                            }
+                          }}
+                          style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px 4px', borderRadius: '4px', fontSize: '12px' }}
+                          onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
+                          onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
+                        >🗑️</button>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>⏱️ {task.duration_minutes || 60}m · {task.priority || 'medium'}</span>
+                      <span style={{ fontSize: '11px', color: 'var(--hackathon-text)', fontWeight: '600' }}>{task.countdown || 'Needs slot'}</span>
+                    </div>
+                  </div>
+                )
+              })}
+
+              {unscheduledTasks.length === 0 && (
+                <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-muted)', background: 'var(--bg-card-soft)', borderRadius: '10px', border: '1px dashed var(--border)' }}>
+                  <span style={{ fontSize: '22px' }}>🎉</span>
+                  <p style={{ fontSize: '12px', marginTop: '6px' }}>All tasks are scheduled into calendar time slots!</p>
+                </div>
+              )}
+            </div>
+
+            <div style={{ marginTop: 'auto', padding: '14px', borderRadius: '10px', background: 'var(--coursework-bg)' }}>
+              <h4 style={{ fontSize: '12px', fontWeight: '700', color: 'var(--coursework-text)', marginBottom: '8px' }}>⚙️ Deterministic Policy</h4>
+              <ul style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: '1.6', paddingLeft: '14px' }}>
+                <li>Working Window: 09:00 - 18:00 UTC</li>
+                <li>Days: Monday - Friday (workdays)</li>
+                <li>Inter-task buffer: 15 minutes</li>
+                <li>Deterministic slot allocator</li>
+                <li>RFC 5545 + Google Calendar sync</li>
+              </ul>
+            </div>
+          </section>
+        </main>
       </div>
 
       {/* Extracted Calendar Modals */}

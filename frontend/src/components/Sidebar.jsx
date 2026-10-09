@@ -21,8 +21,6 @@ export default function Sidebar({
   customDomains = [],
   onDomainCreated,
   onDomainDeleted,
-  theme = 'light',
-  onToggleTheme,
   mobileOpen = false,
   onCloseMobile,
 }) {
@@ -147,7 +145,7 @@ export default function Sidebar({
             {onCloseMobile && (
               <button
                 id="mobile-drawer-close"
-                className="mobile-close-btn"
+                className="mobile-close-btn btn-touch-target"
                 onClick={onCloseMobile}
                 title="Close sidebar"
                 aria-label="Close navigation drawer"
@@ -157,12 +155,14 @@ export default function Sidebar({
                   borderRadius: '8px',
                   color: 'var(--text-on-dark)',
                   cursor: 'pointer',
-                  width: '30px',
-                  height: '30px',
+                  width: '44px',
+                  height: '44px',
+                  minWidth: '44px',
+                  minHeight: '44px',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  fontSize: '15px',
+                  fontSize: '18px',
                   lineHeight: 1,
                   flexShrink: 0,
                 }}

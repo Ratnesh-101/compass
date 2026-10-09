@@ -99,7 +99,7 @@ export default function AgentHeader({
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', flexWrap: 'wrap' }}>
         <input
           id="agent-goal-input"
           type="text"
@@ -109,7 +109,8 @@ export default function AgentHeader({
           placeholder="Ask a question or plan your schedule (e.g. 'What are my top priorities today?')"
           disabled={isRunning}
           style={{
-            flex: 1,
+            flex: '1 1 200px',
+            minHeight: '44px',
             padding: '10px 14px',
             background: 'var(--bg-app)',
             border: '1px solid var(--border)',
@@ -118,14 +119,17 @@ export default function AgentHeader({
             fontSize: '14px',
             outline: 'none',
             fontFamily: 'Inter, system-ui, sans-serif',
+            boxSizing: 'border-box',
           }}
         />
         {isRunning ? (
           <button
             id="agent-stop-btn"
             onClick={onStopAgent}
+            className="btn-touch-target"
             style={{
               padding: '10px 18px',
+              minHeight: '44px',
               background: '#dc2626',
               border: 'none',
               borderRadius: '8px',
@@ -143,8 +147,10 @@ export default function AgentHeader({
             id="agent-run-btn"
             onClick={() => onRunAgent(goal)}
             disabled={!goal.trim()}
+            className="btn-touch-target"
             style={{
               padding: '10px 18px',
+              minHeight: '44px',
               background: goal.trim() ? 'var(--primary)' : 'var(--bg-card-soft)',
               border: '1px solid var(--border)',
               borderRadius: '8px',
@@ -162,8 +168,10 @@ export default function AgentHeader({
         <button
           id="agent-history-toggle-btn"
           onClick={() => { onFetchRunsHistory(); setShowHistory(!showHistory) }}
+          className="btn-touch-target"
           style={{
             padding: '10px 14px',
+            minHeight: '44px',
             background: showHistory ? 'var(--primary)' : 'var(--bg-card-soft)',
             border: '1px solid var(--border)',
             borderRadius: '8px',
@@ -185,8 +193,10 @@ export default function AgentHeader({
           <button
             id="agent-copy-trace-btn"
             onClick={onCopyTrace}
+            className="btn-touch-target"
             style={{
               padding: '10px 14px',
+              minHeight: '44px',
               background: 'var(--bg-card-soft)',
               border: '1px solid var(--border)',
               borderRadius: '8px',

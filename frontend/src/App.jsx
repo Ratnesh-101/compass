@@ -413,8 +413,6 @@ export default function App() {
         customDomains={customDomains}
         onDomainCreated={handleDomainCreated}
         onDomainDeleted={handleDomainDeleted}
-        theme={theme}
-        onToggleTheme={toggleTheme}
         mobileOpen={mobileMenuOpen}
         onCloseMobile={() => setMobileMenuOpen(false)}
       />
@@ -432,14 +430,16 @@ export default function App() {
               background: 'var(--bg-card-soft)',
               border: '1px solid var(--border)',
               borderRadius: '8px',
-              width: '40px',
-              height: '40px',
+              width: '44px',
+              height: '44px',
+              minWidth: '44px',
+              minHeight: '44px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               color: 'var(--text-primary)',
               cursor: 'pointer',
-              fontSize: '18px',
+              fontSize: '20px',
             }}
           >
             ☰
@@ -449,7 +449,7 @@ export default function App() {
             <span style={{ fontSize: '18px' }}>
               {activeTab === 'compass' ? '🧭' : activeTab === 'calendar' ? '🗓️' : currentDomainMeta.icon}
             </span>
-            <span style={{ fontSize: '14px', fontWeight: '800', color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            <span style={{ fontSize: '15px', fontWeight: '800', color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {activeTab === 'compass'
                 ? 'Compass Assistant'
                 : activeTab === 'calendar'
@@ -471,14 +471,16 @@ export default function App() {
                   background: 'var(--bg-card-soft)',
                   border: '1px solid var(--border)',
                   borderRadius: '8px',
-                  width: '40px',
-                  height: '40px',
+                  width: '44px',
+                  height: '44px',
+                  minWidth: '44px',
+                  minHeight: '44px',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   color: 'var(--text-primary)',
                   cursor: 'pointer',
-                  fontSize: '16px',
+                  fontSize: '18px',
                 }}
               >
                 {theme === 'dark' ? '🌙' : '☀️'}

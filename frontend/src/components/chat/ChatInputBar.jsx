@@ -123,7 +123,7 @@ export default function ChatInputBar({
   }, [])
 
   return (
-    <div style={{ padding: '14px 24px 20px', background: 'var(--bg-app)', flexShrink: 0, position: 'relative' }}>
+    <div className="chat-input-container" style={{ padding: '14px 24px 20px', background: 'var(--bg-app)', flexShrink: 0, position: 'relative' }}>
       {/* Slash Command Specialist Picker Modal */}
       {showSlashPicker && (
         <div
@@ -302,6 +302,7 @@ export default function ChatInputBar({
           <input
             ref={inputRef}
             type="text"
+            className="chat-input-box"
             value={input}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
@@ -329,6 +330,7 @@ export default function ChatInputBar({
           />
           <button
             type="submit"
+            className="chat-send-btn btn-touch-target"
             disabled={isInputDisabled || !input.trim()}
             style={{
               padding: '0 24px',
