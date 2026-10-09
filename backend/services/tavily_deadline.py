@@ -22,17 +22,17 @@ MONTHS = (
     r"Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)"
 )
 DATE_PATTERN = re.compile(
-    rf"\b({MONTHS}\s+\d{{1,2}}(?:st|nd|rd|th)?(?:,?\s+\d{{4}})?|\d{{4}}-\d{{2}}-\d{{2}})\b",
+    rf"\b(?:\d{{1,2}}(?:st|nd|rd|th)?\s+{MONTHS}(?:,?\s+\d{{4}})?|{MONTHS}\s+\d{{1,2}}(?:st|nd|rd|th)?(?:,?\s+\d{{4}})?|\d{{4}}-\d{{2}}-\d{{2}})\b",
     re.IGNORECASE,
 )
 
 
 def parse_date_candidate(text: str) -> Optional[date]:
-    """Parse standard date candidate strings."""
+    """Parse standard date candidate strings in both Month-Day and Day-Month formats."""
     clean = re.sub(r"(\d+)(st|nd|rd|th)", r"\1", text.strip())
     clean = clean.replace(",", " ")
     clean = " ".join(clean.split())
-    for fmt in ("%B %d %Y", "%b %d %Y", "%Y-%m-%d"):
+    for fmt in ("%d %B %Y", "%d %b %Y", "%B %d %Y", "%b %d %Y", "%Y-%m-%d"):
         try:
             return datetime.datetime.strptime(clean, fmt).date()
         except ValueError:

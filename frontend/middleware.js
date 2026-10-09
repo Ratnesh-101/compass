@@ -2,6 +2,8 @@
 // Signs proxy requests to Compass backend with an HMAC SHA-256 edge signature
 // over the current timestamp, allowing backend to safely trust parts[-2] in XFF.
 
+import { next } from '@vercel/edge'
+
 export const config = {
   matcher: ['/api/:path*', '/chat', '/health'],
 }
@@ -33,7 +35,9 @@ export default async function middleware(request) {
   const requestHeaders = new Headers(request.headers)
   requestHeaders.set('x-compass-edge-sig', edgeSigHeader)
 
-  return new Response(null, {
-    headers: requestHeaders,
+  return next({
+    request: {
+      headers: requestHeaders,
+    },
   })
 }

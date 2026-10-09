@@ -15,6 +15,7 @@ import {
 import { CalendarGrid } from './calendar/CalendarGrid'
 import { CalendarSidebar } from './calendar/CalendarSidebar'
 import { ProposedPlanModal, QuickConnectModal, IcsExportModal } from './calendar/CalendarModals'
+import DarkModeToggle from './DarkModeToggle'
 
 const DOMAIN_STYLES = {
   hackathon: {
@@ -102,7 +103,14 @@ function startOfMonthGrid(cursor) {
   return startOfWeek(first)
 }
 
-export default function CalendarView({ tasks, activeDomain, onTasksUpdated, onOpenAuthModal }) {
+export default function CalendarView({
+  tasks,
+  activeDomain,
+  onTasksUpdated,
+  onOpenAuthModal,
+  isDarkMode,
+  onToggleDarkMode,
+}) {
   const [calendarStatus, setCalendarStatus] = useState({ connected: false, mode: 'demo', account_email: 'demo-scholar@compass.ai' })
   const [selectedDate, setSelectedDate] = useState(() => toIso(new Date()))
   const [monthCursor, setMonthCursor] = useState(() => new Date())
@@ -329,32 +337,40 @@ export default function CalendarView({ tasks, activeDomain, onTasksUpdated, onOp
       {/* Top Header Bar — condensed */}
       <div style={{
         padding: '14px 24px', borderBottom: '1px solid var(--border)', background: 'var(--bg-card)',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, flexWrap: 'wrap', gap: '10px'
+        flexShrink: 0,
       }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-            <h2 style={{ fontSize: '17px', fontWeight: '700', color: 'var(--text-primary)', letterSpacing: '-0.3px' }}>
-              🗓️ Schedule
-            </h2>
-            <div
-              onClick={() => { if (onOpenAuthModal) onOpenAuthModal(); else setShowQuickModal(true) }}
-              title="Click to switch account or manage Google Calendar"
-              style={{
-                display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '20px',
-                background: isLive ? 'var(--code-bg)' : 'var(--hackathon-bg)',
-                fontSize: '11px', color: isLive ? 'var(--code-text)' : 'var(--hackathon-text)',
-                fontWeight: '600', cursor: 'pointer'
-              }}>
-              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isLive ? '#10b981' : '#f5a623' }} />
-              {isLive ? `${calendarStatus.account_email} (Live)` : `${calendarStatus.account_email || 'demo-scholar@compass.ai'} (demo — click to link)`}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '16px', marginBottom: '10px' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <h2 style={{ fontSize: '17px', fontWeight: '700', color: 'var(--text-primary)', letterSpacing: '-0.3px', margin: 0 }}>
+                🗓️ Schedule
+              </h2>
+              <div
+                onClick={() => { if (onOpenAuthModal) onOpenAuthModal(); else setShowQuickModal(true) }}
+                title="Click to switch account or manage Google Calendar"
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '20px',
+                  background: isLive ? 'var(--code-bg)' : 'var(--hackathon-bg)',
+                  fontSize: '11px', color: isLive ? 'var(--code-text)' : 'var(--hackathon-text)',
+                  fontWeight: '600', cursor: 'pointer'
+                }}>
+                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isLive ? '#10b981' : '#f5a623' }} />
+                {isLive ? `${calendarStatus.account_email} (Live)` : `${calendarStatus.account_email || 'demo-scholar@compass.ai'} (demo — click to link)`}
+              </div>
             </div>
+            <p style={{ fontSize: '11.5px', color: 'var(--text-muted)', marginTop: '3px', marginBottom: 0 }}>
+              Working hours 09:00–18:00 · 15m inter-task buffer · deterministic slot allocator
+            </p>
           </div>
-          <p style={{ fontSize: '11.5px', color: 'var(--text-muted)', marginTop: '3px' }}>
-            Working hours 09:00–18:00 · 15m inter-task buffer · deterministic slot allocator
-          </p>
+
+          <DarkModeToggle
+            isDarkMode={Boolean(isDarkMode)}
+            onToggleDarkMode={onToggleDarkMode}
+            id="calendar-theme-toggle"
+          />
         </div>
 
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
           <button
             id="btn-check-slipped"
             onClick={handleCheckReactive}

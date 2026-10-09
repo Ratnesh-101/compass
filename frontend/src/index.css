@@ -52,6 +52,7 @@
   --scrollbar-track: #f1ede3;
   --scrollbar-thumb: #d8d2c2;
   --scrollbar-thumb-hover: #bfb8a3;
+  --fill-ghost-hover: rgba(31, 27, 46, 0.06);
 }
 
 :root[data-theme="dark"], html.dark {
@@ -102,6 +103,7 @@
   --scrollbar-track: #090912;
   --scrollbar-thumb: #25233d;
   --scrollbar-thumb-hover: #373357;
+  --fill-ghost-hover: rgba(255, 255, 255, 0.08);
 }
 
 html, body {

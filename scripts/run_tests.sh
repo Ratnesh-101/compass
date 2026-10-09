@@ -5,6 +5,12 @@ echo "=== Compass Test Suite Runner ==="
 
 # 1. Check Docker availability
 if ! command -v docker &>/dev/null; then
+    if [ -x "/Applications/Docker.app/Contents/Resources/bin/docker" ]; then
+        export PATH="/Applications/Docker.app/Contents/Resources/bin:~/.docker/bin:/usr/local/bin:$PATH"
+    fi
+fi
+
+if ! command -v docker &>/dev/null; then
     echo "ERROR: Docker is not installed or not in PATH."
     echo "Please install Docker Desktop for Mac:"
     echo "  brew install --cask docker"
@@ -56,6 +62,10 @@ for i in {1..20}; do
     fi
     sleep 1
 done
+
+# 5. Initialize test database schema
+echo "Initializing test database schema with pgvector..."
+docker exec -i "${CONTAINER_NAME}" psql -U compass -d compass_test < backend/memory/schema.sql &>/dev/null || true
 
 # 5. Set environment and run pytest
 export TEST_DATABASE_URL="postgresql://compass:compass@localhost:5433/compass_test"

@@ -234,15 +234,15 @@ async def exchange_code_for_tokens(
                 },
             )
             if resp.status_code != 200:
-                logger.error(f"Google token endpoint returned HTTP {resp.status_code}: {resp.text}")
-                err_detail = resp.text
+                err_type = "unknown_error"
                 try:
                     err_json = resp.json()
-                    err_detail = err_json.get("error_description") or err_json.get("error") or resp.text
-                except (ValueError, KeyError) as e:
-                    logger.debug("Failed to decode Google error response JSON: %s", e)
+                    err_type = err_json.get("error") or "error_response"
+                except Exception:
+                    pass
+                logger.error(f"Google token endpoint returned HTTP {resp.status_code} (error_type={err_type})")
                 return {
-                    "error": f"Google Token Exchange Failed ({resp.status_code}): {err_detail}",
+                    "error": f"Google Token Exchange Failed ({resp.status_code}): {err_type}",
                     "status_code": resp.status_code,
                 }
 
@@ -326,7 +326,12 @@ async def refresh_google_access_token(
                     "access_token": data.get("access_token"),
                     "expires_in": data.get("expires_in", 3600),
                 }
-            logger.warning(f"Token refresh failed HTTP {resp.status_code}: {resp.text}")
+            err_type = "unknown_error"
+            try:
+                err_type = resp.json().get("error") or "error_response"
+            except Exception:
+                pass
+            logger.warning(f"Token refresh failed HTTP {resp.status_code} (error_type={err_type})")
             return None
     except Exception as e:
         logger.error(f"Token refresh network error: {e}")

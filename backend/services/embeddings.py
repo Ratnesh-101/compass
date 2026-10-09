@@ -9,7 +9,7 @@ import os
 import math
 import asyncio
 import logging
-from typing import List
+from typing import List, Optional
 from openai import OpenAI, AsyncOpenAI
 from backend.config import get_settings
 
@@ -44,6 +44,16 @@ def _normalize_vector(vec: List[float], dim: int = 768) -> List[float]:
     return [round(x / norm, 6) for x in truncated]
 
 
+_async_client: Optional[AsyncOpenAI] = None
+
+
+def _get_async_client(api_key: str, base_url: str) -> AsyncOpenAI:
+    global _async_client
+    if _async_client is None:
+        _async_client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=8.0)
+    return _async_client
+
+
 async def get_embedding(text: str) -> List[float]:
     """Generate a 768-dimensional normalized embedding via Nebius Token Factory.
 
@@ -61,8 +71,7 @@ async def get_embedding(text: str) -> List[float]:
         and getattr(settings, "ENVIRONMENT", "") != "test"
     ):
         try:
-            # Using AsyncOpenAI with 8.0s timeout safeguard
-            client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=8.0)
+            client = _get_async_client(api_key, base_url)
             resp = await client.embeddings.create(
                 model=model_name,
                 input=text,

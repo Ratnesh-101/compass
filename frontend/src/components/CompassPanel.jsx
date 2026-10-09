@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import ChatPanel from './ChatPanel'
 import AgentPanel from './AgentPanel'
+import DarkModeToggle from './DarkModeToggle'
 
 export default function CompassPanel({
   initialSubTab = 'assistant',
@@ -18,6 +19,8 @@ export default function CompassPanel({
   pendingPrompt,
   onClearPendingPrompt,
   onOpenMigration,
+  isDarkMode,
+  onToggleDarkMode,
 }) {
   const [activeSubTab, setActiveSubTab] = useState(initialSubTab)
 
@@ -103,6 +106,11 @@ export default function CompassPanel({
             📋 Planner
           </button>
         </div>
+        <DarkModeToggle
+          isDarkMode={Boolean(isDarkMode)}
+          onToggleDarkMode={onToggleDarkMode}
+          id="compass-theme-toggle"
+        />
       </div>
 
       {/* Main Unified View Area */}

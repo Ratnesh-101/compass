@@ -496,6 +496,8 @@ export default function App() {
             customDomains={customDomains}
             theme={theme}
             onToggleTheme={toggleTheme}
+            isDarkMode={theme === 'dark'}
+            onToggleDarkMode={toggleTheme}
             onTasksUpdated={() => {
               loadTasks(selectedDomain)
               refreshUsage()
@@ -515,6 +517,8 @@ export default function App() {
               refreshUsage()
             }}
             onOpenAuthModal={() => setShowAuthModal(true)}
+            isDarkMode={theme === 'dark'}
+            onToggleDarkMode={toggleTheme}
           />
         ) : (
           <CompassPanel
@@ -543,6 +547,8 @@ export default function App() {
             pendingPrompt={pendingPrompt}
             onClearPendingPrompt={() => setPendingPrompt(null)}
             onOpenMigration={() => setShowMigrationModal(true)}
+            isDarkMode={theme === 'dark'}
+            onToggleDarkMode={toggleTheme}
           />
         )}
       </main>

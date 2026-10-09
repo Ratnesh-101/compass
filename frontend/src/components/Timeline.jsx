@@ -10,6 +10,7 @@ import { getDomainMeta } from './timeline/domainMeta'
 import TaskCard from './timeline/TaskCard'
 import TaskDetailModal from './timeline/TaskDetailModal'
 import AddDeadlineModal from './timeline/AddDeadlineModal'
+import DarkModeToggle from './DarkModeToggle'
 
 // Re-export for backward compatibility
 export { getDomainMeta } from './timeline/domainMeta'
@@ -25,7 +26,11 @@ export default function Timeline({
   customDomains = [],
   theme = 'light',
   onToggleTheme,
+  isDarkMode,
+  onToggleDarkMode,
 }) {
+  const darkMode = typeof isDarkMode === 'boolean' ? isDarkMode : theme === 'dark'
+  const toggleDark = onToggleDarkMode || onToggleTheme
   const [selectedTask, setSelectedTask] = useState(null)
   const [showAddModal, setShowAddModal] = useState(false)
   const [seedingPersona, setSeedingPersona] = useState(false)
@@ -121,90 +126,63 @@ export default function Timeline({
         </div>
       )}
 
-      {/* Header with Direct Add Deadline Button */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '22px', gap: '16px', flexWrap: 'wrap' }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            <h2 style={{ fontSize: '24px', fontWeight: '800', color: 'var(--text-primary)', letterSpacing: '-0.4px', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
-              {domainMeta ? (
-                <>
-                  <span style={{ fontSize: '22px' }}>{domainMeta.icon}</span>
-                  <span>{domainMeta.label} Domain</span>
-                </>
-              ) : (
-                <span>Timeline Feed</span>
+      {/* Header with Heading, Dark Mode Toggle, and Action Buttons */}
+      <div style={{ marginBottom: '22px' }}>
+        {/* Top Row: Title / Subtitle on Left, Dark Mode Toggle on Right */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '16px', marginBottom: '14px' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <h2 style={{ fontSize: '24px', fontWeight: '800', color: 'var(--text-primary)', letterSpacing: '-0.4px', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {domainMeta ? (
+                  <>
+                    <span style={{ fontSize: '22px' }}>{domainMeta.icon}</span>
+                    <span>{domainMeta.label} Domain</span>
+                  </>
+                ) : (
+                  <span>Timeline Feed</span>
+                )}
+                <span className="serif-accent" style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>— {today}</span>
+              </h2>
+              {domainMeta && (
+                <button
+                  type="button"
+                  id="btn-return-all-domains"
+                  onClick={() => onSelectDomain('all')}
+                  style={{
+                    background: 'var(--bg-card)',
+                    border: '1px solid var(--border)',
+                    color: 'var(--text-secondary)',
+                    padding: '3px 10px',
+                    borderRadius: '12px',
+                    fontSize: '11px',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.color = 'var(--brand)'; e.currentTarget.style.borderColor = 'var(--brand)' }}
+                  onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-secondary)'; e.currentTarget.style.borderColor = 'var(--border)' }}
+                  title="View all domains"
+                >
+                  ← View all
+                </button>
               )}
-              <span className="serif-accent" style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>— {today}</span>
-            </h2>
-            {domainMeta && (
-              <button
-                type="button"
-                id="btn-return-all-domains"
-                onClick={() => onSelectDomain('all')}
-                style={{
-                  background: 'var(--bg-card)',
-                  border: '1px solid var(--border)',
-                  color: 'var(--text-secondary)',
-                  padding: '3px 10px',
-                  borderRadius: '12px',
-                  fontSize: '11px',
-                  fontWeight: '600',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                }}
-                onMouseEnter={e => { e.currentTarget.style.color = 'var(--brand)'; e.currentTarget.style.borderColor = 'var(--brand)' }}
-                onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-secondary)'; e.currentTarget.style.borderColor = 'var(--border)' }}
-                title="View all domains"
-              >
-                ← View all
-              </button>
-            )}
+            </div>
+            <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '4px', marginBottom: 0 }}>
+              {domainMeta
+                ? `Deadlines, context, and focus allocation for ${domainMeta.label}`
+                : "What's happening across your workspace today"}
+            </p>
           </div>
-          <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '4px', marginBottom: 0 }}>
-            {domainMeta
-              ? `Deadlines, context, and focus allocation for ${domainMeta.label}`
-              : "What's happening across your workspace today"}
-          </p>
+
+          <DarkModeToggle
+            isDarkMode={darkMode}
+            onToggleDarkMode={toggleDark}
+            id="timeline-theme-toggle"
+          />
         </div>
 
+        {/* Action Buttons Row Below */}
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-          {onToggleTheme && (
-            <button
-              id="header-theme-toggle"
-              type="button"
-              role="switch"
-              aria-checked={theme === 'dark'}
-              aria-label={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
-              title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
-              onClick={onToggleTheme}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                background: 'var(--bg-card)',
-                color: 'var(--text-primary)',
-                border: '1px solid var(--border)',
-                padding: '9px 13px',
-                borderRadius: '10px',
-                fontSize: '13px',
-                fontWeight: '600',
-                cursor: 'pointer',
-                boxShadow: 'var(--shadow-sm)',
-                transition: 'all 0.15s ease',
-              }}
-              onMouseEnter={e => {
-                e.currentTarget.style.borderColor = 'var(--brand)'
-                e.currentTarget.style.transform = 'translateY(-1px)'
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.borderColor = 'var(--border)'
-                e.currentTarget.style.transform = 'translateY(0)'
-              }}
-            >
-              <span>{theme === 'dark' ? '🌙' : '☀️'}</span>
-              <span>{theme === 'dark' ? 'Dark' : 'Light'}</span>
-            </button>
-          )}
 
           {onOpenTelemetry && (
             <button

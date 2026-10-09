@@ -277,7 +277,7 @@ def compute_composite_score(tavily_score: float, authority_weight: float) -> flo
 def sort_and_enrich_sources(results: List[Dict[str, Any]], trusted_event_url: Optional[str] = None) -> List[Dict[str, Any]]:
     """Enrich each search result with domain authority tier, badge, and composite score.
 
-    Sorts highest composite score first.
+    Sorts user-pinned URLs first (guaranteed rank #1), then by highest composite score.
     """
     enriched = []
     for r in results:
@@ -292,8 +292,12 @@ def sort_and_enrich_sources(results: List[Dict[str, Any]], trusted_event_url: Op
         item["authority_weight"] = auth_meta["weight"]
         item["domain"] = auth_meta["domain"]
         item["composite_score"] = composite
+        item["is_user_pinned"] = bool(auth_meta["badge"] == "User-trusted source")
         enriched.append(item)
 
-    # Sort descending by composite score, then by raw score
-    enriched.sort(key=lambda x: (x.get("composite_score", 0.0), x.get("score", 0.0)), reverse=True)
+    # Sort descending: user-pinned source first (1 > 0), then composite score, then raw score
+    enriched.sort(
+        key=lambda x: (1 if x.get("is_user_pinned") else 0, x.get("composite_score", 0.0), x.get("score", 0.0)),
+        reverse=True,
+    )
     return enriched

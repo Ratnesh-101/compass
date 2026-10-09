@@ -609,10 +609,13 @@ async def test_chat_recap_endpoint(client: AsyncClient, auth_headers: dict):
         {"role": "assistant", "content": "Let's break down the priorities."},
         {"role": "user", "content": "Let's finish the report by Friday."},
     ]
+    mock_choice = MagicMock(message=MagicMock(content="Next steps: finish report. That's a solid next step. Want me to write it down?"))
+    mock_ai = MagicMock(chat=MagicMock(completions=MagicMock(create=AsyncMock(return_value=MagicMock(choices=[mock_choice], usage=MagicMock(prompt_tokens=10, completion_tokens=10))))))
     with patch("backend.routers.chat.get_pool", new_callable=AsyncMock) as mock_get_pool, \
          patch("backend.memory.conversations.check_conversation_access", new_callable=AsyncMock) as mock_access, \
          patch("backend.memory.conversations.get_recent_messages", new_callable=AsyncMock) as mock_msgs, \
-         patch("backend.services.usage.record_usage") as mock_record_usage:
+         patch("backend.services.usage.record_usage") as mock_record_usage, \
+         patch("openai.AsyncOpenAI", return_value=mock_ai):
 
         mock_pool = MagicMock()
         mock_conn = AsyncMock()

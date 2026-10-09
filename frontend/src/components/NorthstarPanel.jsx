@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import ChatPanel from './ChatPanel'
 import AgentPanel from './AgentPanel'
 import SpecialistPanel from './SpecialistPanel'
+import DarkModeToggle from './DarkModeToggle'
 
 export default function NorthstarPanel({
   initialSubTab = 'assistant',
@@ -19,6 +20,8 @@ export default function NorthstarPanel({
   pendingPrompt,
   onClearPendingPrompt,
   onOpenMigration,
+  isDarkMode,
+  onToggleDarkMode,
 }) {
   const [activeSubTab, setActiveSubTab] = useState(initialSubTab)
 
@@ -66,42 +69,50 @@ export default function NorthstarPanel({
           </span>
         </div>
 
-        {/* View Toggle */}
-        <div style={{ display: 'flex', background: 'var(--bg-card-soft)', padding: '3px', borderRadius: '8px', border: '1px solid var(--border)', flexShrink: 0 }}>
-          <button
-            id="northstar-subtab-chat"
-            onClick={() => setActiveSubTab('assistant')}
-            style={{
-              padding: '5px 14px',
-              borderRadius: '6px',
-              border: 'none',
-              background: (activeSubTab === 'assistant' || activeSubTab === 'specialist') ? 'var(--bg-card)' : 'transparent',
-              color: (activeSubTab === 'assistant' || activeSubTab === 'specialist') ? 'var(--text-primary)' : 'var(--text-secondary)',
-              boxShadow: (activeSubTab === 'assistant' || activeSubTab === 'specialist') ? 'var(--shadow-sm)' : 'none',
-              fontSize: '12.5px',
-              fontWeight: (activeSubTab === 'assistant' || activeSubTab === 'specialist') ? '700' : '500',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-            }}>
-            💬 Chat Copilot
-          </button>
-          <button
-            id="northstar-subtab-planner"
-            onClick={() => setActiveSubTab('planner')}
-            style={{
-              padding: '5px 14px',
-              borderRadius: '6px',
-              border: 'none',
-              background: activeSubTab === 'planner' ? 'var(--bg-card)' : 'transparent',
-              color: activeSubTab === 'planner' ? 'var(--text-primary)' : 'var(--text-secondary)',
-              boxShadow: activeSubTab === 'planner' ? 'var(--shadow-sm)' : 'none',
-              fontSize: '12.5px',
-              fontWeight: activeSubTab === 'planner' ? '700' : '500',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-            }}>
-            📋 Goal Planner
-          </button>
+        {/* Right side controls: View Toggle + Dark Mode Toggle */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+          <div style={{ display: 'flex', background: 'var(--bg-card-soft)', padding: '3px', borderRadius: '8px', border: '1px solid var(--border)', flexShrink: 0 }}>
+            <button
+              id="northstar-subtab-chat"
+              onClick={() => setActiveSubTab('assistant')}
+              style={{
+                padding: '5px 14px',
+                borderRadius: '6px',
+                border: 'none',
+                background: (activeSubTab === 'assistant' || activeSubTab === 'specialist') ? 'var(--bg-card)' : 'transparent',
+                color: (activeSubTab === 'assistant' || activeSubTab === 'specialist') ? 'var(--text-primary)' : 'var(--text-secondary)',
+                boxShadow: (activeSubTab === 'assistant' || activeSubTab === 'specialist') ? 'var(--shadow-sm)' : 'none',
+                fontSize: '12.5px',
+                fontWeight: (activeSubTab === 'assistant' || activeSubTab === 'specialist') ? '700' : '500',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}>
+              💬 Chat Copilot
+            </button>
+            <button
+              id="northstar-subtab-planner"
+              onClick={() => setActiveSubTab('planner')}
+              style={{
+                padding: '5px 14px',
+                borderRadius: '6px',
+                border: 'none',
+                background: activeSubTab === 'planner' ? 'var(--bg-card)' : 'transparent',
+                color: activeSubTab === 'planner' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                boxShadow: activeSubTab === 'planner' ? 'var(--shadow-sm)' : 'none',
+                fontSize: '12.5px',
+                fontWeight: activeSubTab === 'planner' ? '700' : '500',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}>
+              📋 Goal Planner
+            </button>
+          </div>
+
+          <DarkModeToggle
+            isDarkMode={Boolean(isDarkMode)}
+            onToggleDarkMode={onToggleDarkMode}
+            id="northstar-theme-toggle"
+          />
         </div>
       </div>
 
