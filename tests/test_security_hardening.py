@@ -206,13 +206,13 @@ async def test_task_idor_user_cannot_modify_other_user_task(client: AsyncClient,
     monkeypatch.setattr(structured, "get_task", mock_get_task)
 
     from backend.routers.auth import create_session
-    bob_cookie = {"compass_session": create_session("bob")}
-    alice_cookie = {"compass_session": create_session("alice")}
+    bob_headers = {"Cookie": f"compass_session={create_session('bob')}"}
+    alice_headers = {"Cookie": f"compass_session={create_session('alice')}"}
 
     # 1. User 'bob' attempts to PATCH Alice's task -> must be 403 Forbidden
     patch_resp = await client.patch(
         "/api/tasks/999",
-        cookies=bob_cookie,
+        headers=bob_headers,
         json={"title": "Hacked Title by Bob"},
     )
     assert patch_resp.status_code == 403
@@ -221,7 +221,7 @@ async def test_task_idor_user_cannot_modify_other_user_task(client: AsyncClient,
     # 2. User 'bob' attempts to DELETE Alice's task -> must be 403 Forbidden
     delete_resp = await client.delete(
         "/api/tasks/999",
-        cookies=bob_cookie,
+        headers=bob_headers,
     )
     assert delete_resp.status_code == 403
     assert "Forbidden" in delete_resp.json()["detail"]
@@ -235,7 +235,7 @@ async def test_task_idor_user_cannot_modify_other_user_task(client: AsyncClient,
     monkeypatch.setattr(structured, "update_task", mock_update_task)
     alice_patch_resp = await client.patch(
         "/api/tasks/999",
-        cookies=alice_cookie,
+        headers=alice_headers,
         json={"title": "Alice Updated Project"},
     )
     assert alice_patch_resp.status_code == 200

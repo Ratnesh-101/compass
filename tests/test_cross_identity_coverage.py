@@ -127,9 +127,8 @@ async def test_neg_delete_task_dependency(client: AsyncClient):
     """User B cannot remove dependencies from User A's task."""
     user_b = f"bob_{uuid.uuid4().hex[:6]}@example.com"
     res = await client.delete("/api/tasks/99999/dependencies/88888", headers=_auth(user_b))
-    assert res.status_code in (200, 400, 403, 404)
-    if res.status_code == 200:
-        assert res.json().get("deleted") is False
+    assert res.status_code == 200
+    assert res.json().get("deleted") is False
 
 
 @pytest.mark.asyncio
@@ -145,14 +144,16 @@ async def test_neg_verify_task_deadline(client: AsyncClient):
 
 @pytest.mark.asyncio
 @pytest.mark.route("POST /api/tasks/verify-deadlines")
-async def test_neg_verify_deadlines_batch(client: AsyncClient):
-    """Batch verify without tasks returns empty or safe response.
-    500 is accepted when the test DB pool is unavailable."""
+async def test_neg_verify_deadlines_batch(client: AsyncClient, monkeypatch):
+    """Batch verify without tasks returns empty or safe response, mocking live Tavily search."""
+    from unittest.mock import AsyncMock
+    from backend.services import tavily as tavily_service
+    monkeypatch.setattr(tavily_service, "search", AsyncMock(return_value={"results": []}))
     user_b = f"bob_{uuid.uuid4().hex[:6]}@example.com"
     res = await client.post("/api/tasks/verify-deadlines", headers=_auth(user_b))
-    assert res.status_code in (200, 401, 422, 500)
-    if res.status_code == 200:
-        assert res.json().get("checked_count", 0) >= 0
+    assert res.status_code == 200
+    assert res.json().get("status") == "ok"
+    assert res.json().get("checked_count", 0) >= 0
 
 
 # ---------------------------------------------------------------------------
@@ -477,9 +478,10 @@ async def test_neg_post_agent_undo(client: AsyncClient):
 @pytest.mark.asyncio
 @pytest.mark.route("GET /api/calendar/availability")
 async def test_neg_get_calendar_availability(client: AsyncClient):
-    """Availability query returns empty or fallback structure."""
+    """Availability query returns structured availability payload."""
     res = await client.get("/api/calendar/availability?start_date=2026-01-01&end_date=2026-01-02")
-    assert res.status_code in (200, 401, 500)
+    assert res.status_code == 200
+    assert "available_intervals" in res.json().get("data", {}) or "response" in res.json()
 
 
 @pytest.mark.asyncio

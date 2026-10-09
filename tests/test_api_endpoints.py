@@ -87,13 +87,15 @@ async def test_admin_consolidate_endpoint(client: AsyncClient, auth_headers: dic
     resp_unauth = await client.post("/admin/consolidate", json={"dry_run": True})
     assert resp_unauth.status_code in (401, 403)
 
-    # Authenticated dry-run (won't crash even if DB is offline, returns 500 or 200 depending on DB availability)
+    # Authenticated dry-run
     resp = await client.post("/admin/consolidate", headers=auth_headers, json={"dry_run": True})
-    assert resp.status_code in (200, 500)
-    if resp.status_code == 200:
-        data = resp.json()
-        assert data["status"] == "ok"
-        assert data["dry_run"] is True
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "ok"
+    assert data["dry_run"] is True
+    assert "overdue_tasks_flagged" in data
+    assert "duplicate_chunks_merged" in data
+    assert "stale_conversations_rolled_up" in data
 
 
 @pytest.mark.asyncio

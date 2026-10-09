@@ -31,9 +31,10 @@ _CONFIGURED_PROD_MARKER = os.environ.get("PROD_DATABASE_MARKER", "production").s
 
 test_db_url = os.environ.get("TEST_DATABASE_URL", "").strip()
 
-# Set DATABASE_URL from test_db_url before importing backend
+# Set DATABASE_URL and ENVIRONMENT before importing backend
 if test_db_url:
     os.environ["DATABASE_URL"] = test_db_url
+os.environ["ENVIRONMENT"] = "test"
 
 from backend.main import app
 from backend.config import get_settings
