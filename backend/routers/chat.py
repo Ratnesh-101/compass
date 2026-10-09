@@ -13,11 +13,19 @@ from typing import Any, List, Optional, cast
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
+from openai import AsyncOpenAI, AsyncStream
 try:
-    from openai.types.chat import ChatCompletionMessageParam, ChatCompletionToolParam
+    from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam, ChatCompletionToolParam
 except (ImportError, ModuleNotFoundError):
+    ChatCompletionChunk = Any  # type: ignore[misc,assignment]
     ChatCompletionMessageParam = Any  # type: ignore[misc,assignment]
     ChatCompletionToolParam = Any  # type: ignore[misc,assignment]
+
+from backend.config import get_settings
+from backend.router import TOOLS
+from backend.services.usage import record_usage
+
+_settings = get_settings()
 
 from backend.dependencies import (
     rate_limit,
@@ -139,7 +147,6 @@ async def chat_recap(
     transcript = "\n".join(transcript_lines)
 
     from backend.config import get_settings
-    from backend.services.usage import record_usage
     from backend.persona import build_persona_system_prompt
     import openai
 
@@ -463,7 +470,6 @@ async def public_chat(req: PublicChatRequest, request: Request, _rl: None = Depe
 async def log_memory_entry(req: LogMemoryRequest, request: Request, _rl: None = Depends(rate_limit)):
     """Accepts memory content, generates 768-dim embedding, inserts into Neon."""
     from backend.services.embeddings import get_embedding
-    from backend.services.usage import record_usage
     from backend.memory import structured
 
     text = (req.content or "").strip()

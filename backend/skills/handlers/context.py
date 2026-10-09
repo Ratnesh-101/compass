@@ -290,9 +290,8 @@ async def handle_summarize_across_domains(args: Dict[str, Any], pool: Any) -> Di
             record_usage(settings.SYNTHESIS_MODEL, p_tok, c_tok)
             if raw_content is not None and raw_content.strip():
                 import re
-                cleaned = re.sub(r'<think>.*?</think>', '', raw_content, flags=re.DOTALL)
-                cleaned = re.sub(r'</?[a-zA-Z_][a-zA-Z0-9_.:-]*[^>]*>', '', cleaned)
-                cleaned = re.sub(r'</[a-zA-Z_][a-zA-Z0-9_.:-]*\.?$', '', cleaned).strip()
+                cleaned = re.sub(r'<think>[\s\S]*?</think>', '', raw_content)
+                cleaned = re.sub(r'<[^>\n]+>', '', cleaned).strip()
                 summary = cleaned or raw_content.strip()
             else:
                 summary = f"Multi-domain roadmap: {len(tasks)} tasks across {len(by_domain)} domains, {len(code_chunks)} code chunks, {len(cw_chunks)} coursework notes."

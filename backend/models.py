@@ -6,7 +6,7 @@ Shared request and response schemas matching docs/api_contract.md.
 
 from datetime import date
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ChatRequest(BaseModel):
@@ -31,6 +31,22 @@ class PublicChatRequest(BaseModel):
 
     def get_specialist_id(self) -> Optional[str]:
         return self.specialist_id or self.specialistId
+
+
+class PublicChatResponse(BaseModel):
+    response: str
+    skill_used: Optional[str] = None
+    agent_reasoning: Optional[str] = None
+    data: Optional[Any] = None
+    conversation_id: Optional[str] = None
+
+
+class LogMemoryRequest(BaseModel):
+    content: str
+    domain: Optional[str] = "general"
+    project: Optional[str] = None
+    tags: Optional[List[str]] = Field(default_factory=list)
+
 
 
 class ChatResponse(BaseModel):
@@ -224,22 +240,6 @@ class UpdateTaskRequest(BaseModel):
     scheduled_start: Optional[str] = None
     scheduled_end: Optional[str] = None
     is_fixed: Optional[bool] = None
-
-
-
-class PublicChatResponse(BaseModel):
-    response: str
-    skill_used: Optional[str] = None
-    agent_reasoning: Optional[str] = None
-    data: Optional[Any] = None
-    conversation_id: Optional[str] = None
-
-
-class LogMemoryRequest(BaseModel):
-    content: str
-    domain: Optional[str] = "general"
-    project: Optional[str] = None
-    tags: Optional[List[str]] = []
 
 
 class StreamChatRequest(BaseModel):

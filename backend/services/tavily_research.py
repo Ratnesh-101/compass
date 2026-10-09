@@ -71,15 +71,18 @@ def decompose_query(topic: str, max_subqueries: int = 3) -> List[str]:
     # Heuristic decomposition based on query intent
     if any(k in lower for k in ("vs", "versus", "compare", "comparison", "difference")):
         # Extract comparison parts: e.g. "X vs Y"
-        match = re.search(r"([\w\s]+?)\s+(?:vs\.?|versus|compare[d]?\s+to|or)\s+([\w\s]+)", clean, re.IGNORECASE)
-        if match:
-            part1 = match.group(1).strip()
-            part2 = match.group(2).strip()
-            subqueries = [
-                f"{part1} overview features architecture",
-                f"{part2} overview features architecture",
-                f"{part1} vs {part2} tradeoffs comparison benchmarks",
-            ]
+        for sep in (" versus ", " vs. ", " vs ", " compared to ", " compare to "):
+            if sep in lower:
+                idx = lower.find(sep)
+                part1 = clean[:idx].strip()
+                part2 = clean[idx + len(sep):].strip()
+                if part1 and part2:
+                    subqueries = [
+                        f"{part1} overview features architecture",
+                        f"{part2} overview features architecture",
+                        f"{part1} vs {part2} tradeoffs comparison benchmarks",
+                    ]
+                    break
     elif any(k in lower for k in ("deploy", "hosting", "production", "infrastructure", "nebius")):
         subqueries = [
             f"{clean} official documentation",
