@@ -510,6 +510,16 @@ export default function App() {
             onSelectDomain={handleSelectDomain}
             isDarkMode={theme === 'dark'}
             onToggleDarkMode={toggleTheme}
+            onTasksUpdated={() => {
+              loadTasks(selectedDomain)
+              refreshUsage()
+            }}
+            onOpenCompass={(prompt) => {
+              navigateTo('compass', 'all')
+              setPendingPrompt(prompt)
+            }}
+            onOpenAuth={() => setShowAuthModal(true)}
+            customDomains={customDomains}
           />
         ) : activeTab === 'timeline' ? (
           <Timeline
