@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import Sidebar from './components/Sidebar'
+import Dashboard from './components/Dashboard'
 import Timeline from './components/Timeline'
 import CalendarView from './components/CalendarView'
 import CompassPanel from './components/CompassPanel'
@@ -323,7 +324,9 @@ export default function App() {
   }, [allTasks, tasks, customDomains])
 
   const handleSelectTab = useCallback((tabKey) => {
-    if (tabKey === 'timeline') {
+    if (tabKey === 'dashboard') {
+      navigateTo('dashboard', 'all')
+    } else if (tabKey === 'timeline') {
       navigateTo('timeline', 'all')
     } else if (tabKey === 'compass' || tabKey === 'assistant' || tabKey === 'planner') {
       navigateTo('compass', 'all')
@@ -447,10 +450,18 @@ export default function App() {
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
             <span style={{ fontSize: '18px' }}>
-              {activeTab === 'compass' ? '🧭' : activeTab === 'calendar' ? '🗓️' : currentDomainMeta.icon}
+              {activeTab === 'dashboard'
+                ? '📊'
+                : activeTab === 'compass'
+                ? '🧭'
+                : activeTab === 'calendar'
+                ? '🗓️'
+                : currentDomainMeta.icon}
             </span>
             <span style={{ fontSize: '15px', fontWeight: '800', color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {activeTab === 'compass'
+              {activeTab === 'dashboard'
+                ? 'Dashboard'
+                : activeTab === 'compass'
                 ? 'Compass Assistant'
                 : activeTab === 'calendar'
                 ? 'Schedule'
@@ -489,7 +500,18 @@ export default function App() {
           </div>
         </header>
 
-        {activeTab === 'timeline' ? (
+        {activeTab === 'dashboard' ? (
+          <Dashboard
+            tasks={allTasks.length > 0 ? allTasks : tasks}
+            backendStatus={backendStatus}
+            usageStats={usageStats}
+            currentUser={currentUser}
+            onSelectTab={handleSelectTab}
+            onSelectDomain={handleSelectDomain}
+            isDarkMode={theme === 'dark'}
+            onToggleDarkMode={toggleTheme}
+          />
+        ) : activeTab === 'timeline' ? (
           <Timeline
             tasks={tasks}
             allTasks={allTasks}

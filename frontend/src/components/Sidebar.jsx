@@ -2,6 +2,7 @@ import React from 'react'
 import CreateDomainModal from './timeline/CreateDomainModal'
 
 const NAV_ITEMS = [
+  { key: 'dashboard', icon: '📊', label: 'Dashboard', sub: 'Overview & metrics' },
   { key: 'timeline', icon: '▦', label: 'Timeline', sub: 'Tasks & deadlines' },
   { key: 'compass', icon: '🧭', label: 'Compass', sub: 'Assistant & planner' },
   { key: 'calendar', icon: '🗓️', label: 'Schedule', sub: 'Calendar & Google sync' },
@@ -99,8 +100,8 @@ export default function Sidebar({
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', marginBottom: '20px', userSelect: 'none' }}>
           <div
             id="sidebar-brand-header"
-            onClick={() => { onSelectTab('timeline'); if (onSelectDomain) onSelectDomain('all') }}
-            title="Compass Workspace — Click to return to default Timeline Feed"
+            onClick={() => onSelectTab('dashboard')}
+            title="Compass Workspace — Click to return to Dashboard"
             style={{ width: '38px', height: '38px', borderRadius: '10px', background: 'var(--brand)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', cursor: 'pointer', boxShadow: '0 4px 12px rgba(245, 166, 35, 0.25)', flexShrink: 0, transition: 'opacity 0.15s ease' }}
             onMouseEnter={e => (e.currentTarget.style.opacity = '0.85')}
             onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
@@ -124,14 +125,13 @@ export default function Sidebar({
           <div
             id="sidebar-brand-header"
             onClick={() => {
-              onSelectTab('timeline')
-              if (onSelectDomain) onSelectDomain('all')
+              onSelectTab('dashboard')
               if (onCloseMobile) onCloseMobile()
             }}
             style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', transition: 'opacity 0.15s ease', minWidth: 0 }}
             onMouseEnter={e => (e.currentTarget.style.opacity = '0.85')}
             onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
-            title="Compass Workspace — Click to return to default Timeline Feed"
+            title="Compass Workspace — Click to return to Dashboard"
           >
             <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: 'var(--brand)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', flexShrink: 0, boxShadow: '0 4px 12px rgba(245, 166, 35, 0.25)' }}>
               🧭
