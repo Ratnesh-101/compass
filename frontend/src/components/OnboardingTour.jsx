@@ -4,7 +4,7 @@ export default function OnboardingTour({
   onVerifyDeadlines,
   onOpenTelemetry,
   onOpenCompass,
-  onOpenSeed,
+  onOpenSeed: _onOpenSeed,
 }) {
   const handleOpenCompass = onOpenCompass
   const [dismissed, setDismissed] = useState(() => {
@@ -20,7 +20,9 @@ export default function OnboardingTour({
     setDismissed(true)
     try {
       localStorage.setItem('compass_tour_dismissed', '1')
-    } catch {}
+    } catch {
+      /* ignore storage access error */
+    }
   }
 
   const handleReopen = () => {
@@ -28,7 +30,9 @@ export default function OnboardingTour({
     setIsCollapsed(false)
     try {
       localStorage.removeItem('compass_tour_dismissed')
-    } catch {}
+    } catch {
+      /* ignore storage access error */
+    }
   }
 
   if (dismissed) {

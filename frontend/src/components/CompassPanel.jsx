@@ -15,7 +15,7 @@ export default function CompassPanel({
   onTaskMutated,
   tasks = [],
   backendStatus = 'Live • Neon Connected',
-  onSelectTab,
+  onSelectTab: _onSelectTab,
   pendingPrompt,
   onClearPendingPrompt,
   onOpenMigration,
@@ -37,7 +37,7 @@ export default function CompassPanel({
   }, [pendingPrompt])
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100vh', minWidth: 0, overflow: 'hidden', background: 'var(--bg-app)' }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, minWidth: 0, overflow: 'hidden', background: 'var(--bg-app)' }}>
       {/* Header Sub-bar */}
       <div style={{
         minHeight: '48px',

@@ -38,7 +38,9 @@ function getEmptyStateGreeting(isReturning, userName, startingPool = DEFAULT_STA
   try {
     const val = localStorage.getItem(storageKey)
     if (val !== null) lastIdx = parseInt(val, 10)
-  } catch {}
+  } catch {
+    /* ignore storage access error */
+  }
 
   let candidates = pool.map((_, i) => i).filter(i => isNaN(lastIdx) || i !== lastIdx)
   if (candidates.length === 0) candidates = pool.map((_, i) => i)
@@ -46,7 +48,9 @@ function getEmptyStateGreeting(isReturning, userName, startingPool = DEFAULT_STA
   const chosenIdx = candidates[Math.floor(Math.random() * candidates.length)]
   try {
     localStorage.setItem(storageKey, String(chosenIdx))
-  } catch {}
+  } catch {
+    /* ignore storage access error */
+  }
 
   let phrase = pool[chosenIdx] || pool[0] || "Where should we begin?"
 

@@ -17,7 +17,8 @@ export default function SharedChatView({ shareId, onGoToApp }) {
         } else {
           setError('Conversation not found or has been deleted.')
         }
-      } catch (err) {
+      } catch {
+        /* ignore fetch error */
         setError('Failed to load shared conversation.')
       } finally {
         setLoading(false)

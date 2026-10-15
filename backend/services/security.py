@@ -30,7 +30,7 @@ BLOCKED_HOSTNAMES = {
 
 def _is_ip_blocked(ip: Union[ipaddress.IPv4Address, ipaddress.IPv6Address]) -> bool:
     """Check if an IP address belongs to any blocked non-global networks, unwrapping IPv4-mapped IPv6."""
-    if getattr(ip, "ipv4_mapped", None):
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
         mapped = ip.ipv4_mapped
         if mapped is not None:
             ip = mapped
@@ -95,9 +95,9 @@ def is_safe_url(url: str) -> Tuple[bool, str]:
         except ValueError:
             return False, f"Invalid numeric hostname encoding '{hostname}'."
         if 0 <= val <= 0xFFFFFFFF:
-            ip = ipaddress.IPv4Address(val)
-            if _is_ip_blocked(ip):
-                return False, f"Access to non-global IP address '{ip}' is forbidden."
+            numeric_ip = ipaddress.IPv4Address(val)
+            if _is_ip_blocked(numeric_ip):
+                return False, f"Access to non-global IP address '{numeric_ip}' is forbidden."
             return True, ""
         else:
             return False, f"Numeric IP value out of range '{hostname}'."
@@ -116,17 +116,17 @@ def is_safe_url(url: str) -> Tuple[bool, str]:
 
     try:
         # Check if hostname is directly an IP literal
-        ip = ipaddress.ip_address(hostname)
-        if _is_ip_blocked(ip):
-            return False, f"Access to non-global IP address '{ip}' is forbidden."
+        ip_parsed: Union[ipaddress.IPv4Address, ipaddress.IPv6Address] = ipaddress.ip_address(hostname)
+        if _is_ip_blocked(ip_parsed):
+            return False, f"Access to non-global IP address '{ip_parsed}' is forbidden."
     except ValueError:
         # Hostname is a domain name, resolve via DNS
         try:
             addr_info = socket.getaddrinfo(hostname, None)
             for item in addr_info:
                 ip_str = item[4][0]
-                ip = ipaddress.ip_address(ip_str)
-                if _is_ip_blocked(ip):
+                resolved_ip: Union[ipaddress.IPv4Address, ipaddress.IPv6Address] = ipaddress.ip_address(ip_str)
+                if _is_ip_blocked(resolved_ip):
                     return False, f"Hostname '{hostname}' resolves to non-global IP '{ip_str}'."
         except socket.gaierror:
             return False, f"Could not resolve hostname '{hostname}'."

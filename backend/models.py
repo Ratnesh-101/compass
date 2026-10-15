@@ -39,6 +39,8 @@ class PublicChatResponse(BaseModel):
     agent_reasoning: Optional[str] = None
     data: Optional[Any] = None
     conversation_id: Optional[str] = None
+    routing_latency_ms: Optional[int] = None
+    message: Optional[str] = None
 
 
 class LogMemoryRequest(BaseModel):

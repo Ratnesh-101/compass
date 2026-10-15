@@ -8,7 +8,6 @@ import {
   checkGoogleOAuthStatus,
   quickConnectUser,
   setCurrentUserId,
-  getKnownAccounts,
 } from '../api/client'
 import GoogleCloudSetupGuide from './auth/GoogleCloudSetupGuide'
 

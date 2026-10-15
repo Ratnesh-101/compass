@@ -2,13 +2,11 @@ import React from 'react'
 import {
   CheckCircle2,
   XCircle,
-  AlertTriangle,
   FileEdit,
   ShieldAlert,
   Calendar,
   Trash2,
   PlusCircle,
-  Undo2,
 } from 'lucide-react'
 
 function friendlyAction(tool) {

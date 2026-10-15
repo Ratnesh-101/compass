@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import ChatPanel from './ChatPanel'
 import AgentPanel from './AgentPanel'
-import SpecialistPanel from './SpecialistPanel'
 import DarkModeToggle from './DarkModeToggle'
 
 export default function NorthstarPanel({
@@ -16,7 +15,7 @@ export default function NorthstarPanel({
   onTaskMutated,
   tasks = [],
   backendStatus = 'Live • Neon Connected',
-  onSelectTab,
+  onSelectTab: _onSelectTab,
   pendingPrompt,
   onClearPendingPrompt,
   onOpenMigration,
@@ -38,7 +37,7 @@ export default function NorthstarPanel({
   }, [pendingPrompt])
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100vh', minWidth: 0, overflow: 'hidden', background: 'var(--bg-app)' }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, minWidth: 0, overflow: 'hidden', background: 'var(--bg-app)' }}>
       {/* Northstar Header Sub-bar */}
       <div style={{
         minHeight: '48px',

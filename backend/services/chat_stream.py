@@ -288,9 +288,15 @@ async def generate_chat_events(
                     logger.warning("Could not pre-fetch parked thoughts (continuing gracefully): %s", e)
                     return []
 
-            rows_h, prior, tasks_rows, profile_facts, parked_items = await asyncio.gather(
+            gather_res: tuple[Any, ...] = await asyncio.gather(
                 _load_history(), _load_prior(), _load_tasks(), _load_facts(), _load_parked(), return_exceptions=True
             )
+            rows_h = gather_res[0]
+            prior = gather_res[1]
+            tasks_rows = gather_res[2]
+            profile_facts = gather_res[3]
+            parked_items = gather_res[4]
+
             if not isinstance(profile_facts, dict):
                 profile_facts = {}
             if not isinstance(parked_items, list):
@@ -352,7 +358,7 @@ async def generate_chat_events(
             {"role": "system", "content": sys_prompt},
         ]
         if history_items:
-            messages.extend(history_items)
+            messages.extend(cast(Any, history_items))
         messages.append({"role": "user", "content": message})
 
         tools: Any = cast(List[ChatCompletionToolParam], TOOLS) if needs_tools else None
@@ -433,11 +439,11 @@ async def generate_chat_events(
             record_usage(_settings.ROUTER_MODEL, prompt_est, completion_est)
 
             is_first = True
-            async for chunk in stream_chunks(response_text):
+            async for text_chunk in stream_chunks(response_text):
                 if not is_first:
                     await asyncio.sleep(0.012)
                 is_first = False
-                yield f"data: {json.dumps({'type': 'token', 'value': chunk})}\n\n"
+                yield f"data: {json.dumps({'type': 'token', 'value': text_chunk})}\n\n"
 
             yield f"data: {json.dumps({'type': 'done', 'conversation_id': result.get('conversation_id', conv_id), 'skill_used': skill_used})}\n\n"
             _schedule_stream_persistence(conv_id, message, response_text, user_id, guest_id, skill_used)
@@ -450,17 +456,17 @@ async def generate_chat_events(
         think_filter = StreamingThinkFilter()
 
         try:
-            async for chunk in stream:
+            async for stream_chunk in stream:
                 if await request.is_disconnected():
                     logger.info("Client disconnected from chat SSE stream; closing upstream stream.")
                     if hasattr(stream, "aclose"):
                         await stream.aclose()
                     return
 
-                if hasattr(chunk, "usage") and chunk.usage:
-                    usage_data = chunk.usage
+                if hasattr(stream_chunk, "usage") and stream_chunk.usage:
+                    usage_data = stream_chunk.usage
 
-                choices = chunk.choices or []
+                choices = stream_chunk.choices or []
                 if choices:
                     delta = choices[0].delta
                     finish_reason = choices[0].finish_reason
@@ -486,10 +492,10 @@ async def generate_chat_events(
                 await stream.aclose()
             raise
         except Exception as stream_err:
-            logger.error("Mid-stream failure reading model chunks: %s", stream_err)
+            logger.error("Mid-stream failure reading model chunks: %s", stream_err, exc_info=True)
             if stream and hasattr(stream, "aclose"):
                 await stream.aclose()
-            yield f"data: {json.dumps({'type': 'error', 'detail': str(stream_err), 'terminal': True})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'detail': f'Stream error: {stream_err}', 'terminal': True})}\n\n"
             return
 
         if tool_call_detected:
@@ -516,11 +522,11 @@ async def generate_chat_events(
             elif not emitted_text:
                 # Nothing was streamed yet — emit full response as tokens
                 is_first = True
-                async for chunk in stream_chunks(response_text):
+                async for sc_token in stream_chunks(response_text):
                     if not is_first:
                         await asyncio.sleep(0.012)
                     is_first = False
-                    yield f"data: {json.dumps({'type': 'token', 'value': chunk})}\n\n"
+                    yield f"data: {json.dumps({'type': 'token', 'value': sc_token})}\n\n"
             else:
                 # Partial streamed text does NOT match orchestrator response —
                 # send a replace event so the client discards the leaked markup
@@ -548,11 +554,11 @@ async def generate_chat_events(
             record_usage(_settings.ROUTER_MODEL, prompt_est, completion_est)
 
             is_first = True
-            async for chunk in stream_chunks(response_text):
+            async for sc_token in stream_chunks(response_text):
                 if not is_first:
                     await asyncio.sleep(0.012)
                 is_first = False
-                yield f"data: {json.dumps({'type': 'token', 'value': chunk})}\n\n"
+                yield f"data: {json.dumps({'type': 'token', 'value': sc_token})}\n\n"
 
             yield f"data: {json.dumps({'type': 'done', 'conversation_id': result.get('conversation_id', conv_id), 'skill_used': skill_used})}\n\n"
             _schedule_stream_persistence(conv_id, message, response_text, user_id, guest_id, skill_used)
@@ -575,7 +581,7 @@ async def generate_chat_events(
             await stream.aclose()
         raise
     except Exception as e:
-        logger.error("SSE stream outer error: %s", e)
+        logger.error("SSE stream outer error: %s", e, exc_info=True)
         if stream and hasattr(stream, "aclose"):
             await stream.aclose()
-        yield f"data: {json.dumps({'type': 'error', 'detail': str(e), 'terminal': True})}\n\n"
+        yield f"data: {json.dumps({'type': 'error', 'detail': 'Internal error occurred while processing stream.', 'terminal': True})}\n\n"

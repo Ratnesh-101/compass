@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     # --- Proxy & IP Resolution ---
     # Path: Vercel rewrite -> Render (2 hops: Render is hop 1, Vercel is hop 2)
     TRUSTED_PROXY_HOPS: int = 1
-    TRUST_CF_CONNECTING_IP: bool = False
+    TRUST_CF_CONNECTING_IP: bool = True
     TRUST_TRUE_CLIENT_IP: bool = False
     EDGE_HMAC_SECRET: str = "compass_vercel_edge_hmac_secret_2026"
     VERCEL_EDGE_SECRET: str | None = None
@@ -49,8 +49,6 @@ class Settings(BaseSettings):
     GLOBAL_DAILY_MODEL_CALL_CAP: int = 1000
     GLOBAL_DAILY_MINT_CAP: int = 200
     COMPASS_KILL_SWITCH_ACTIVE: bool = False
-    TRUST_CF_CONNECTING_IP: bool = True
-    TRUSTED_PROXY_HOPS: int = 1
 
     # --- Pinned Authority Domains & Event Prefixes ---
     PINNED_TIER_1_DOMAINS: list[str] = [
@@ -124,7 +122,7 @@ class Settings(BaseSettings):
 
         # Check for duplicates among configured non-empty secrets
         duplicates = []
-        seen = {}
+        seen: dict[str, str] = {}
         for name, val in secrets_dict.items():
             if not val or name in missing:
                 continue

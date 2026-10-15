@@ -44,7 +44,7 @@ const SPECIALISTS = [
   },
 ]
 
-export default function SpecialistPanel({ onTaskMutated }) {
+export default function SpecialistPanel({ onTaskMutated: _onTaskMutated }) {
   const [selectedSpecialist, setSelectedSpecialist] = useState(null) // null = Auto Dispatcher
   const [goal, setGoal] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import Sidebar from './components/Sidebar'
 import Dashboard from './components/Dashboard'
+import MobileNavBar from './components/MobileNavBar'
 import Timeline from './components/Timeline'
 import CalendarView from './components/CalendarView'
 import CompassPanel from './components/CompassPanel'
@@ -47,7 +48,9 @@ export default function App() {
           calendar: { connected: false, mode: 'demo', is_simulated: true },
         }
       }
-    } catch {}
+    } catch {
+      /* ignore localStorage access error */
+    }
     return null
   })
   const [showAuthModal, setShowAuthModal] = useState(false)
@@ -92,7 +95,9 @@ export default function App() {
         if (!saved) {
           setTheme(e.matches ? 'dark' : 'light')
         }
-      } catch {}
+      } catch {
+        /* ignore localStorage access error */
+      }
     }
     const mediaQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null
     if (mediaQuery?.addEventListener) {
@@ -586,6 +591,14 @@ export default function App() {
           />
         )}
       </main>
+
+      {/* Mobile Bottom Navigation Bar (< 768px) */}
+      <MobileNavBar
+        activeTab={activeTab}
+        onSelectTab={handleSelectTab}
+        onOpenMenu={() => setMobileMenuOpen(true)}
+        activeDomain={selectedDomain}
+      />
 
       <AuthModal
         isOpen={showAuthModal}

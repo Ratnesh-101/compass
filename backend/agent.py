@@ -521,7 +521,7 @@ async def run_agent(
             else:
                 reply = choice.message.content or ""
 
-                should_escalate, is_abstained_signal, escalate_step, step_num = evaluate_abstention_and_web_escalation(
+                should_escalate, is_abstained_signal, eval_step, step_num = evaluate_abstention_and_web_escalation(
                     reply=reply,
                     tools_used=tools_used,
                     abstain_first=abstain_first,
@@ -533,12 +533,12 @@ async def run_agent(
                 )
                 if is_abstained_signal:
                     is_abstained = True
-                if should_escalate and escalate_step:
+                if should_escalate and eval_step:
                     web_escalation_used = True
                     search_web_unlocked = True
                     forced_tool_choice = {"type": "function", "function": {"name": "search_web"}}
-                    yield escalate_step
-                    accumulated_steps.append(escalate_step)
+                    yield eval_step
+                    accumulated_steps.append(eval_step)
                     continue
 
                 if enable_critic and reply:

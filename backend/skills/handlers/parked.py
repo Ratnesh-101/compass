@@ -93,6 +93,12 @@ async def handle_resolve_parked(args: Dict[str, Any], pool: Any) -> Dict[str, An
     thought_id = args.get("thought_id")
     user_id = str(args.get("user_id") or "default_user")
 
+    if thought_id is None:
+        return {
+            "response": "Could you specify which parked item ID to mark as done?",
+            "data": {"status": "error", "error": "invalid_thought_id"},
+        }
+
     try:
         tid = int(thought_id)
     except (TypeError, ValueError):

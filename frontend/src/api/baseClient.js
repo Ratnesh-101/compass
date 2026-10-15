@@ -66,7 +66,9 @@ export function getKnownAccounts() {
         return merged
       }
     }
-  } catch {}
+  } catch {
+    /* ignore storage access error */
+  }
   return DEFAULT_ACCOUNTS
 }
 
@@ -78,7 +80,9 @@ export function addKnownAccount(email) {
   filtered.unshift(clean)
   try {
     localStorage.setItem('compass_known_accounts', JSON.stringify(filtered.slice(0, 6)))
-  } catch {}
+  } catch {
+    /* ignore storage access error */
+  }
 }
 
 export function getGuestToken() {
@@ -106,7 +110,9 @@ export function setGuestSession(guestId, guestToken) {
       localStorage.removeItem('compass_guest_id')
       localStorage.removeItem('compass_guest_token')
     }
-  } catch {}
+  } catch {
+    /* ignore storage access error */
+  }
 }
 
 export async function initGuestSession() {
@@ -177,7 +183,9 @@ export function setCurrentUserId(userId) {
     if (isHttps) {
       try {
         document.cookie = `compass_user_id=${encodeURIComponent(clean)}; path=/; max-age=31536000; SameSite=Lax; Secure`
-      } catch {}
+      } catch {
+        /* ignore cookie write error */
+      }
     }
   } else {
     localStorage.removeItem('compass_user_id')
@@ -185,7 +193,9 @@ export function setCurrentUserId(userId) {
     if (isHttps) {
       try {
         document.cookie = `compass_user_id=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure`
-      } catch {}
+      } catch {
+        /* ignore cookie write error */
+      }
     }
   }
 }

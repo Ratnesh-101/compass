@@ -36,6 +36,9 @@ export default function Sidebar({
     }
   })
 
+  // Never collapse when opened as a mobile drawer
+  const effectivelyCollapsed = isCollapsed && !mobileOpen
+
   const toggleCollapsed = () => {
     setIsCollapsed(prev => {
       const next = !prev
@@ -78,31 +81,46 @@ export default function Sidebar({
 
   return (
     <aside
-      className={`compass-sidebar ${isCollapsed ? 'sidebar-collapsed' : 'sidebar-expanded'} ${mobileOpen ? 'mobile-open' : ''}`}
+      className={`compass-sidebar ${effectivelyCollapsed ? 'sidebar-collapsed' : 'sidebar-expanded'} ${mobileOpen ? 'mobile-open' : ''}`}
       style={{
-        width: isCollapsed ? '68px' : '260px',
-        minWidth: isCollapsed ? '68px' : '240px',
-        maxWidth: isCollapsed ? '68px' : '280px',
+        width: effectivelyCollapsed ? '68px' : '260px',
+        minWidth: effectivelyCollapsed ? '68px' : '240px',
+        maxWidth: effectivelyCollapsed ? '68px' : '280px',
         flexShrink: 0,
         borderRight: '1px solid var(--border)',
         background: 'var(--bg-sidebar)',
         display: 'flex',
         flexDirection: 'column',
-        padding: isCollapsed ? '20px 8px' : '22px 16px',
+        padding: effectivelyCollapsed ? '18px 8px' : '22px 16px',
         height: '100vh',
         overflowY: 'auto',
         overflowX: 'hidden',
         boxSizing: 'border-box',
+        transition: 'width 0.2s cubic-bezier(0.16, 1, 0.3, 1), min-width 0.2s cubic-bezier(0.16, 1, 0.3, 1), padding 0.2s ease',
       }}
     >
       {/* Brand Header */}
-      {isCollapsed ? (
+      {effectivelyCollapsed ? (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', marginBottom: '20px', userSelect: 'none' }}>
           <div
             id="sidebar-brand-header"
             onClick={() => onSelectTab('dashboard')}
             title="Compass Workspace — Click to return to Dashboard"
-            style={{ width: '38px', height: '38px', borderRadius: '10px', background: 'var(--brand)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', cursor: 'pointer', boxShadow: '0 4px 12px rgba(245, 166, 35, 0.25)', flexShrink: 0, transition: 'opacity 0.15s ease' }}
+            aria-label="Compass Workspace Dashboard"
+            style={{
+              width: '42px',
+              height: '42px',
+              borderRadius: '10px',
+              background: 'var(--brand)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '20px',
+              cursor: 'pointer',
+              boxShadow: '0 4px 12px rgba(245, 166, 35, 0.25)',
+              flexShrink: 0,
+              transition: 'opacity 0.15s ease'
+            }}
             onMouseEnter={e => (e.currentTarget.style.opacity = '0.85')}
             onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
           >
@@ -113,9 +131,32 @@ export default function Sidebar({
             onClick={toggleCollapsed}
             title="Expand sidebar"
             aria-label="Expand sidebar"
-            style={{ background: 'rgba(255, 255, 255, 0.04)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '6px', color: 'var(--text-muted)', cursor: 'pointer', width: '28px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', lineHeight: 1, padding: 0, transition: 'all 0.15s ease' }}
-            onMouseEnter={e => { e.currentTarget.style.color = 'var(--text-on-dark)'; e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'; e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)' }}
-            onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.background = 'rgba(255, 255, 255, 0.04)'; e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)' }}
+            style={{
+              background: 'rgba(255, 255, 255, 0.04)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              borderRadius: '6px',
+              color: 'var(--text-muted)',
+              cursor: 'pointer',
+              width: '28px',
+              height: '24px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '15px',
+              lineHeight: 1,
+              padding: 0,
+              transition: 'all 0.15s ease'
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.color = 'var(--text-on-dark)'
+              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'
+              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)'
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.color = 'var(--text-muted)'
+              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.04)'
+              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)'
+            }}
           >
             ›
           </button>
@@ -175,9 +216,33 @@ export default function Sidebar({
               onClick={toggleCollapsed}
               title="Collapse sidebar"
               aria-label="Collapse sidebar"
-              style={{ background: 'transparent', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '6px', color: 'var(--text-muted)', cursor: 'pointer', width: '26px', height: '26px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', lineHeight: 1, padding: 0, transition: 'all 0.15s ease', flexShrink: 0 }}
-              onMouseEnter={e => { e.currentTarget.style.color = 'var(--text-on-dark)'; e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'; e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)' }}
-              onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)' }}
+              style={{
+                background: 'transparent',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                borderRadius: '6px',
+                color: 'var(--text-muted)',
+                cursor: 'pointer',
+                width: '26px',
+                height: '26px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '15px',
+                lineHeight: 1,
+                padding: 0,
+                transition: 'all 0.15s ease',
+                flexShrink: 0
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.color = 'var(--text-on-dark)'
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'
+                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)'
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.color = 'var(--text-muted)'
+                e.currentTarget.style.background = 'transparent'
+                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)'
+              }}
             >
               ‹
             </button>
@@ -186,8 +251,8 @@ export default function Sidebar({
       )}
 
       {/* Navigation */}
-      <div style={{ marginBottom: isCollapsed ? '16px' : '24px' }}>
-        {!isCollapsed && (
+      <div style={{ marginBottom: effectivelyCollapsed ? '16px' : '24px' }}>
+        {!effectivelyCollapsed && (
           <p style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', fontWeight: '700', marginBottom: '10px', padding: '0 4px' }}>
             Navigation
           </p>
@@ -199,6 +264,55 @@ export default function Sidebar({
               : item.key === 'compass'
               ? activeTab === 'compass' || activeTab === 'assistant' || activeTab === 'planner' || activeTab === 'agent'
               : activeTab === item.key
+
+          if (effectivelyCollapsed) {
+            return (
+              <button
+                key={item.key}
+                id={`sidebar-tab-${item.key}`}
+                onClick={() => {
+                  onSelectTab(item.key)
+                  if (onCloseMobile) onCloseMobile()
+                }}
+                className={`nav-item-collapsed ${isActive ? 'active' : ''}`}
+                title={`${item.label} — ${item.sub}`}
+                aria-label={`${item.label}: ${item.sub}`}
+                style={{
+                  width: '44px',
+                  height: '44px',
+                  minWidth: '44px',
+                  minHeight: '44px',
+                  margin: '0 auto 6px',
+                  padding: 0,
+                  borderRadius: '10px',
+                  border: 'none',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: isActive ? 'var(--brand)' : 'transparent',
+                  color: isActive ? '#16152a' : 'var(--text-secondary)',
+                  boxShadow: isActive ? '0 4px 12px rgba(245, 166, 35, 0.3)' : 'none',
+                  transition: 'all 0.15s ease',
+                }}
+                onMouseEnter={e => {
+                  if (!isActive) {
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'
+                    e.currentTarget.style.color = 'var(--text-on-dark)'
+                  }
+                }}
+                onMouseLeave={e => {
+                  if (!isActive) {
+                    e.currentTarget.style.background = 'transparent'
+                    e.currentTarget.style.color = 'var(--text-secondary)'
+                  }
+                }}
+              >
+                <span style={{ fontSize: '18px', lineHeight: 1 }}>{item.icon}</span>
+              </button>
+            )
+          }
+
           return (
             <button
               key={item.key}
@@ -209,17 +323,14 @@ export default function Sidebar({
               }}
               className={`nav-item ${isActive ? 'active' : ''}`}
               title={item.label}
-              style={isCollapsed ? { justifyContent: 'center', padding: '8px 0', width: '100%', gap: 0 } : undefined}
             >
               <span className="nav-icon">{item.icon}</span>
-              {!isCollapsed && (
-                <span>
-                  <div style={{ fontSize: '13.5px', fontWeight: '700', color: isActive ? 'var(--text-on-dark)' : 'inherit' }}>
-                    {item.label}
-                  </div>
-                  <div style={{ fontSize: '11px', opacity: 0.75 }}>{item.sub}</div>
-                </span>
-              )}
+              <span>
+                <div style={{ fontSize: '13.5px', fontWeight: '700', color: isActive ? 'var(--text-on-dark)' : 'inherit' }}>
+                  {item.label}
+                </div>
+                <div style={{ fontSize: '11px', opacity: 0.75 }}>{item.sub}</div>
+              </span>
             </button>
           )
         })}
@@ -227,7 +338,7 @@ export default function Sidebar({
 
       {/* Domain Isolation Metrics */}
       <div style={{ marginBottom: 'auto' }}>
-        {!isCollapsed && (
+        {!effectivelyCollapsed && (
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', padding: '0 4px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <p style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', fontWeight: '700', margin: 0 }}>
@@ -283,6 +394,62 @@ export default function Sidebar({
         {displayDomains.map(dom => {
           const isCustom = !baseDomains.some(b => b.key === dom.key)
           const isSelected = activeTab === 'timeline' && activeDomain === dom.key
+          const count = domainCounts[dom.key] ?? 0
+
+          if (effectivelyCollapsed) {
+            return (
+              <div
+                key={dom.key}
+                id={`sidebar-domain-${dom.key}`}
+                onClick={() => {
+                  onSelectDomain(dom.key)
+                  if (onCloseMobile) onCloseMobile()
+                }}
+                title={`${dom.label} (${count} tasks)`}
+                aria-label={`${dom.label}: ${count} tasks`}
+                style={{
+                  width: '40px',
+                  height: '40px',
+                  minWidth: '40px',
+                  minHeight: '40px',
+                  margin: '0 auto 4px',
+                  padding: 0,
+                  borderRadius: '10px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: isSelected ? 'rgba(245, 166, 35, 0.16)' : 'transparent',
+                  border: isSelected ? '1px solid rgba(245, 166, 35, 0.35)' : '1px solid transparent',
+                  cursor: 'pointer',
+                  position: 'relative',
+                  transition: 'all 0.15s ease',
+                }}
+                onMouseEnter={e => {
+                  if (!isSelected) e.currentTarget.style.background = 'rgba(255, 255, 255, 0.06)'
+                }}
+                onMouseLeave={e => {
+                  if (!isSelected) e.currentTarget.style.background = 'transparent'
+                }}
+              >
+                <span style={{ fontSize: '17px', lineHeight: 1 }}>{dom.icon}</span>
+                {count > 0 && (
+                  <span
+                    style={{
+                      position: 'absolute',
+                      top: '4px',
+                      right: '4px',
+                      width: '6px',
+                      height: '6px',
+                      borderRadius: '50%',
+                      background: dom.color || 'var(--brand)',
+                      boxShadow: '0 0 4px rgba(0, 0, 0, 0.5)',
+                    }}
+                  />
+                )}
+              </div>
+            )
+          }
+
           return (
             <div
               key={dom.key}
@@ -291,14 +458,14 @@ export default function Sidebar({
                 onSelectDomain(dom.key)
                 if (onCloseMobile) onCloseMobile()
               }}
-              title={isCollapsed ? `${dom.label} (${domainCounts[dom.key] ?? 0})` : dom.label}
+              title={dom.label}
               style={{
-                padding: isCollapsed ? '6px 0' : '8px 10px',
+                padding: '8px 10px',
                 borderRadius: '10px',
                 marginBottom: '4px',
                 cursor: 'pointer',
                 display: 'flex',
-                justifyContent: isCollapsed ? 'center' : 'space-between',
+                justifyContent: 'space-between',
                 alignItems: 'center',
                 background: isSelected ? 'var(--bg-sidebar-active)' : 'transparent',
                 transition: 'background 0.15s ease',
@@ -313,78 +480,70 @@ export default function Sidebar({
                 if (!isSelected) e.currentTarget.style.background = 'transparent'
               }}
             >
-              {isCollapsed ? (
-                <span style={{ fontSize: '16px', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', background: isSelected ? 'rgba(255, 255, 255, 0.08)' : 'transparent' }}>
-                  {dom.icon}
-                </span>
-              ) : (
-                <>
-                  <span style={{ fontSize: '13px', color: isSelected ? 'var(--text-on-dark)' : 'var(--text-secondary)', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    <span>{dom.icon}</span>
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{dom.label}</span>
-                  </span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
-                    {isCustom && confirmDeleteKey === dom.key ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }} onClick={e => e.stopPropagation()}>
-                        <span style={{ fontSize: '10px', color: '#f87171', fontWeight: '700' }}>Del?</span>
-                        <button
-                          id={`btn-confirm-delete-domain-${dom.key}`}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            if (onDomainDeleted) onDomainDeleted(dom.key)
-                            setConfirmDeleteKey(null)
-                          }}
-                          style={{ background: '#ef4444', border: 'none', color: '#fff', borderRadius: '4px', padding: '2px 5px', fontSize: '10px', cursor: 'pointer', fontWeight: '700' }}
-                        >
-                          Yes
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setConfirmDeleteKey(null)
-                          }}
-                          style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.2)', color: 'var(--text-muted)', borderRadius: '4px', padding: '2px 4px', fontSize: '10px', cursor: 'pointer' }}
-                        >
-                          No
-                        </button>
-                      </div>
-                    ) : (
-                      <>
-                        <span style={{ padding: '2px 7px', borderRadius: '20px', fontSize: '10.5px', fontWeight: '700', background: 'rgba(255, 255, 255, 0.08)', color: dom.color }}>
-                          {domainCounts[dom.key] ?? 0}
-                        </span>
-                        {isCustom && (
-                          <button
-                            id={`btn-remove-domain-${dom.key}`}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setConfirmDeleteKey(dom.key)
-                            }}
-                            title={`Remove ${dom.label} domain`}
-                            aria-label={`Remove ${dom.label} domain`}
-                            style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '12px', lineHeight: 1, padding: '2px 4px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', opacity: 0.6, transition: 'all 0.15s ease' }}
-                            onMouseEnter={e => {
-                              e.currentTarget.style.color = '#f87171'
-                              e.currentTarget.style.opacity = '1'
-                            }}
-                            onMouseLeave={e => {
-                              e.currentTarget.style.color = 'var(--text-muted)'
-                              e.currentTarget.style.opacity = '0.6'
-                            }}
-                          >
-                            ✕
-                          </button>
-                        )}
-                      </>
-                    )}
+              <span style={{ fontSize: '13px', color: isSelected ? 'var(--text-on-dark)' : 'var(--text-secondary)', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span>{dom.icon}</span>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{dom.label}</span>
+              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+                {isCustom && confirmDeleteKey === dom.key ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }} onClick={e => e.stopPropagation()}>
+                    <span style={{ fontSize: '10px', color: '#f87171', fontWeight: '700' }}>Del?</span>
+                    <button
+                      id={`btn-confirm-delete-domain-${dom.key}`}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        if (onDomainDeleted) onDomainDeleted(dom.key)
+                        setConfirmDeleteKey(null)
+                      }}
+                      style={{ background: '#ef4444', border: 'none', color: '#fff', borderRadius: '4px', padding: '2px 5px', fontSize: '10px', cursor: 'pointer', fontWeight: '700' }}
+                    >
+                      Yes
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setConfirmDeleteKey(null)
+                      }}
+                      style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.2)', color: 'var(--text-muted)', borderRadius: '4px', padding: '2px 4px', fontSize: '10px', cursor: 'pointer' }}
+                    >
+                      No
+                    </button>
                   </div>
-                </>
-              )}
+                ) : (
+                  <>
+                    <span style={{ padding: '2px 7px', borderRadius: '20px', fontSize: '10.5px', fontWeight: '700', background: 'rgba(255, 255, 255, 0.08)', color: dom.color }}>
+                      {count}
+                    </span>
+                    {isCustom && (
+                      <button
+                        id={`btn-remove-domain-${dom.key}`}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setConfirmDeleteKey(dom.key)
+                        }}
+                        title={`Remove ${dom.label} domain`}
+                        aria-label={`Remove ${dom.label} domain`}
+                        style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '12px', lineHeight: 1, padding: '2px 4px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', opacity: 0.6, transition: 'all 0.15s ease' }}
+                        onMouseEnter={e => {
+                          e.currentTarget.style.color = '#f87171'
+                          e.currentTarget.style.opacity = '1'
+                        }}
+                        onMouseLeave={e => {
+                          e.currentTarget.style.color = 'var(--text-muted)'
+                          e.currentTarget.style.opacity = '0.6'
+                        }}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
           )
         })}
 
-        {isCollapsed && (
+        {effectivelyCollapsed && (
           <div style={{ display: 'flex', justifyContent: 'center', margin: '4px 0 6px' }}>
             <button
               id="btn-add-domain-collapsed"
@@ -394,15 +553,15 @@ export default function Sidebar({
               style={{
                 background: 'transparent',
                 border: '1px dashed rgba(255, 255, 255, 0.18)',
-                borderRadius: '8px',
+                borderRadius: '10px',
                 color: 'var(--text-muted)',
                 cursor: 'pointer',
-                width: '32px',
-                height: '32px',
+                width: '40px',
+                height: '40px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                fontSize: '15px',
+                fontSize: '18px',
                 lineHeight: 1,
                 transition: 'all 0.15s ease',
               }}
@@ -423,27 +582,27 @@ export default function Sidebar({
         )}
       </div>
 
-      {/* Live status card — replaces fake mock with real backend status */}
-      {isCollapsed ? (
+      {/* Live status card */}
+      {effectivelyCollapsed ? (
         <div
           id="sidebar-specs-card"
           onClick={() => onOpenTelemetry && onOpenTelemetry()}
-          title={isOnline ? `${totalActive} tasks synced — ${backendStatus}` : `Reconnecting — ${backendStatus}`}
+          title={isOnline ? `${totalActive} tasks synced — ${backendStatus} (Click for telemetry)` : `Reconnecting — ${backendStatus}`}
+          aria-label={isOnline ? `${totalActive} tasks synced — ${backendStatus}` : `Reconnecting — ${backendStatus}`}
           style={{
-            padding: '10px 0',
+            width: '44px',
+            height: '44px',
+            margin: '12px auto 6px',
             borderRadius: '10px',
             background: 'rgba(255, 255, 255, 0.04)',
-            border: '1px solid rgba(255, 255, 255, 0.06)',
-            marginTop: '16px',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
             display: 'flex',
-            flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
             cursor: onOpenTelemetry ? 'pointer' : 'default',
-            gap: '6px',
-            transition: 'background 0.15s ease',
-            width: '100%',
-            boxSizing: 'border-box',
+            position: 'relative',
+            transition: 'all 0.15s ease',
+            flexShrink: 0,
           }}
           onMouseEnter={e => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'}
           onMouseLeave={e => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.04)'}
@@ -453,12 +612,12 @@ export default function Sidebar({
             height: '8px',
             borderRadius: '50%',
             background: isOnline ? '#34d399' : '#f5a623',
-            boxShadow: isOnline ? '0 0 8px rgba(52, 211, 153, 0.4)' : '0 0 8px rgba(245, 166, 35, 0.4)',
-            flexShrink: 0,
+            boxShadow: isOnline ? '0 0 8px rgba(52, 211, 153, 0.5)' : '0 0 8px rgba(245, 166, 35, 0.5)',
+            position: 'absolute',
+            top: '7px',
+            right: '7px',
           }} />
-          {usageBadge && (
-            <span style={{ fontSize: '11px', opacity: 0.85 }}>📊</span>
-          )}
+          <span style={{ fontSize: '17px' }}>⚡</span>
         </div>
       ) : (
         <div style={{
@@ -513,31 +672,31 @@ export default function Sidebar({
         </div>
       )}
 
-
       {/* Account / Workspace Switcher */}
-      {isCollapsed ? (
+      {effectivelyCollapsed ? (
         <div
           id="sidebar-account-btn"
           onClick={() => onOpenAuth && onOpenAuth()}
           title={currentUser?.authenticated ? `Signed in as ${currentUser.email} — Click to switch` : 'Sign in / Account'}
+          aria-label={currentUser?.authenticated ? `Signed in as ${currentUser.email}` : 'Sign in / Account'}
           style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '10px 0',
+            width: '44px',
+            height: '44px',
+            margin: '4px auto 0',
             borderRadius: '10px',
             background: 'rgba(255, 255, 255, 0.04)',
             border: '1px solid rgba(255, 255, 255, 0.08)',
             cursor: 'pointer',
-            marginTop: '10px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
             transition: 'all 0.15s ease',
-            width: '100%',
-            boxSizing: 'border-box',
+            flexShrink: 0,
           }}
           onMouseEnter={e => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'}
           onMouseLeave={e => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.04)'}
         >
-          <span style={{ fontSize: '15px' }}>👤</span>
+          <span style={{ fontSize: '18px' }}>👤</span>
         </div>
       ) : (
         <div

@@ -223,7 +223,7 @@ export function ReportCard({ reportCard }) {
   )
 }
 
-export default function StepCard({ step, index }) {
+export default function StepCard({ step, index: _index }) {
   const style = STEP_STYLES[step.type] || STEP_STYLES.think
   const isGradient = step.type === 'synthesize'
   const isAbstained = step.metadata?.abstained || (typeof step.content === 'string' && step.content.includes('[ABSTAIN]'))
@@ -233,7 +233,9 @@ export default function StepCard({ step, index }) {
     try {
       const parsed = JSON.parse(step.content)
       reportCard = parsed.report_card
-    } catch {}
+    } catch {
+      /* ignore JSON parse error */
+    }
   }
 
   return (

@@ -316,7 +316,7 @@ def _extract_task_creation_args(message: str) -> dict:
         m_named = re.search(pattern, msg, re.IGNORECASE)
         if m_named:
             cand = m_named.group(1)
-            m_stop = re.search(r"\s+\b(on|at|due|by|for|in)\b", cand, re.IGNORECASE)
+            m_stop = re.search(r"\s+(?:on|at|due|by|for|in)(?!\w)", cand, re.IGNORECASE)
             if m_stop:
                 cand = cand[:m_stop.start()]
             cand = cand.strip(" .!?:;'\"")
@@ -346,7 +346,7 @@ def _extract_task_creation_args(message: str) -> dict:
             r"\b(?:at\s+)?(?:1[0-2]|0?[1-9])\s*(?:am|pm)\b",
             r"\b(?:at\s+)?(?:midnight|noon)\b",
             r"^\s*(?:on|at|due|by|in)\s+",
-            r"\s+\b(?:on|at|due|by|in)\s*$",
+            r"\s+(?:on|at|due|by|in)\s*$",
         ]
         for p in patterns:
             t = re.sub(p, "", t, flags=re.IGNORECASE)
@@ -529,15 +529,16 @@ def _fallback_route(message: str, history: Optional[list[dict[str, str]]] = None
         ):
             if trig in msg_lower:
                 idx = msg_lower.find(trig) + len(trig)
-                extracted = message[idx:].strip(" .!?")
-                if extracted:
-                    park_text = extracted
+                extracted_text = message[idx:].strip(" .!?")
+                if extracted_text:
+                    park_text = extracted_text
                     break
         if park_text.lower().strip(" .!?") in ("park that", "park it", "park this", "let's come back to that", "lets come back to that"):
             if history:
                 for h in reversed(history):
-                    if h.get("content"):
-                        park_text = h.get("content")[:200]
+                    h_content = h.get("content")
+                    if h_content:
+                        park_text = h_content[:200]
                         break
         return "park_thought", {"text": park_text[:200]}, ""
 
@@ -550,10 +551,10 @@ def _fallback_route(message: str, history: Optional[list[dict[str, str]]] = None
     if is_undo_request(message):
         return "undo", {"message": message}, ""
     if is_explicit_task_creation(message):
-        extracted = _extract_task_creation_args(message)
-        if not extracted.get("title"):
+        task_args = _extract_task_creation_args(message)
+        if not task_args.get("title"):
             return None, None, "What would you like to name this task? Please provide a title or description."
-        return "add_task", extracted, ""
+        return "add_task", task_args, ""
     if history:
         for h in reversed(history):
             content = h.get("content", "")

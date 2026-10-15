@@ -188,10 +188,12 @@ async def handle_commit_schedule(args: Dict[str, Any], pool: Any) -> Dict[str, A
 
                 prev = await get_task(conn, t_id)
                 if prev:
+                    p_start = prev.get("scheduled_start")
+                    p_end = prev.get("scheduled_end")
                     previous_states.append({
                         "task_id": t_id,
-                        "scheduled_start": prev.get("scheduled_start").isoformat() if prev.get("scheduled_start") else None,
-                        "scheduled_end": prev.get("scheduled_end").isoformat() if prev.get("scheduled_end") else None,
+                        "scheduled_start": p_start.isoformat() if (p_start is not None and hasattr(p_start, "isoformat")) else (str(p_start) if p_start else None),
+                        "scheduled_end": p_end.isoformat() if (p_end is not None and hasattr(p_end, "isoformat")) else (str(p_end) if p_end else None),
                     })
 
                 s_start_dt = _ensure_utc(s_start)

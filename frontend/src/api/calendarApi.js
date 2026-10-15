@@ -35,7 +35,9 @@ export async function logoutUser() {
   setCurrentUserId('')
   try {
     await fetch(`${API_BASE}/api/auth/logout`, { method: 'POST', headers: getAuthHeaders() })
-  } catch {}
+  } catch {
+    /* ignore logout network failure */
+  }
   return { status: 'ok' }
 }
 

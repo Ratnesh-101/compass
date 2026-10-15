@@ -9,7 +9,6 @@ import {
   disconnectCalendar,
   checkReactiveSchedule,
   syncCalendarNow,
-  quickConnectUser,
   deleteTask,
 } from '../api/client'
 import { CalendarGrid } from './calendar/CalendarGrid'
@@ -115,7 +114,7 @@ export default function CalendarView({
   const [selectedDate, setSelectedDate] = useState(() => toIso(new Date()))
   const [monthCursor, setMonthCursor] = useState(() => new Date())
   const [busyIntervals, setBusyIntervals] = useState([])
-  const [loadingAvailability, setLoadingAvailability] = useState(false)
+  const [_loadingAvailability, setLoadingAvailability] = useState(false)
   const [proposing, setProposing] = useState(false)
   const [committing, setCommitting] = useState(false)
   const [proposedPlan, setProposedPlan] = useState(null)
@@ -709,11 +708,4 @@ export default function CalendarView({
 const menuItemStyle = {
   width: '100%', textAlign: 'left', padding: '9px 10px', borderRadius: '8px', border: 'none',
   background: 'transparent', color: 'var(--text-primary)', fontSize: '12.5px', fontWeight: '600', cursor: 'pointer'
-}
-const iconBtnStyle = {
-  background: 'none', border: 'none', cursor: 'pointer', fontSize: '15px', color: 'var(--text-secondary)', padding: '2px 6px'
-}
-const pillBtnStyle = {
-  padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-card)',
-  color: 'var(--text-secondary)', fontSize: '12px', fontWeight: '600', cursor: 'pointer'
 }

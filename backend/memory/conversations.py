@@ -17,7 +17,7 @@ logger = logging.getLogger("compass.conversations")
 
 DbConn = Union[asyncpg.Connection, PoolConnectionProxy]
 
-MODES_MARKER_REGEX = re.compile(r"\[{1,2}\s*modes?(?::[^\]]*)?\s*\]{1,2}", re.IGNORECASE)
+MODES_MARKER_REGEX = re.compile(r"\[{1,2}\s*modes?(?::[^\r\n\]]*|\s*)\]{1,2}", re.IGNORECASE)
 
 
 def strip_modes_marker(text: Optional[str]) -> str:

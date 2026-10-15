@@ -214,9 +214,11 @@ async def get_user_from_session_async(token: str) -> Optional[str]:
             if sess.get("revoked_at") is not None:
                 return None
             now_dt = datetime.now(timezone.utc)
-            if sess.get("expires_at") and now_dt > sess.get("expires_at"):
+            exp_at = sess.get("expires_at")
+            if isinstance(exp_at, datetime) and now_dt > exp_at:
                 return None
-            if sess.get("last_accessed_at") and (now_dt - sess.get("last_accessed_at")) > IDLE_TIMEOUT:
+            last_acc = sess.get("last_accessed_at")
+            if isinstance(last_acc, datetime) and (now_dt - last_acc) > IDLE_TIMEOUT:
                 return None
             return sess.get("user_id")
 
@@ -287,7 +289,7 @@ def is_session_oauth_verified(token: str) -> bool:
 def _resolve_oauth_redirect_uri(request: Request) -> str:
     """Consistently resolve OAuth callback URL across local dev and production reverse-proxies."""
     fwd_host = request.headers.get("x-forwarded-host")
-    host = fwd_host or request.headers.get("host", "localhost:8000")
+    host = fwd_host or request.headers.get("host") or "localhost:8000"
     hostname = host.split(":")[0].lower()
 
     if hostname in ("localhost", "127.0.0.1") or hostname.endswith(".localhost"):
@@ -399,7 +401,8 @@ async def auth_quick_connect(response: Response, body: Optional[QuickConnectBody
         )
 
     from backend.services.calendar import save_calendar_connection
-    raw_val = re.sub(r"[^\w@.-]", "", (body.email or body.auth_code or "").strip().lower())
+    body_val = body or QuickConnectBody()
+    raw_val = re.sub(r"[^\w@.-]", "", (body_val.email or body_val.auth_code or "").strip().lower())
     if "@" in raw_val:
         email = raw_val
     else:
@@ -422,7 +425,7 @@ async def auth_quick_connect(response: Response, body: Optional[QuickConnectBody
         value=session_token,
         max_age=86400 * 30,
         httponly=True,
-        secure=True,
+        secure=not settings.is_development(),
         samesite="lax",
     )
     return {
@@ -558,12 +561,17 @@ async def calendar_callback(
 </html>"""
     response = HTMLResponse(html_content)
     session_token = create_session(str(email), oauth_verified=True)
+    is_secure = (
+        request.url.scheme == "https"
+        or request.headers.get("x-forwarded-proto") == "https"
+        or not settings.is_development()
+    )
     response.set_cookie(
         key="compass_session",
         value=session_token,
         max_age=86400 * 30,
         httponly=True,
-        secure=True,
+        secure=is_secure,
         samesite="lax",
     )
     return response

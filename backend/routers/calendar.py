@@ -4,7 +4,7 @@ Compass — Calendar and Scheduling Endpoints.
 
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import Any, Dict, Optional, cast
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
@@ -198,7 +198,7 @@ async def reactive_schedule_check_endpoint(body: Optional[ReactiveCheckBody] = N
             type="confirm_request",
             content=rationale,
             tool_name="commit_schedule",
-            tool_args=pending_action["args"],
+            tool_args=cast(Dict[str, Any], pending_action["args"]),
             step_number=2,
             run_id=run_id,
         )

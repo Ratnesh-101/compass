@@ -34,11 +34,11 @@ export default function ChatPanel({
   const [showHistoryDrawer, setShowHistoryDrawer] = useState(false)
   const [pastConversations, setPastConversations] = useState([])
   const [pastPlans, setPastPlans] = useState([])
-  const [memoryOverview, setMemoryOverview] = useState(null)
+  const [_memoryOverview, setMemoryOverview] = useState(null)
   const [profileFacts, setProfileFacts] = useState({})
   const [parkedThoughts, setParkedThoughts] = useState([])
   const [showParkedShelf, setShowParkedShelf] = useState(false)
-  const [loadingHistory, setLoadingHistory] = useState(false)
+  const [_loadingHistory, setLoadingHistory] = useState(false)
   const [guestMigrationCount, setGuestMigrationCount] = useState(0)
   const [toast, setToast] = useState(null)
   const [tone, setTone] = useState(() => {
@@ -54,7 +54,9 @@ export default function ChatPanel({
     setTone(newTone)
     try {
       localStorage.setItem('compass_chat_tone', newTone)
-    } catch {}
+    } catch {
+      /* ignore storage access error */
+    }
   }
 
   const handleResolveParked = async (thoughtId) => {

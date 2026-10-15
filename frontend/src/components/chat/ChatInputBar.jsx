@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { SPECIALIST_AGENTS, filterSpecialists, getSpecialistById } from '../../api/specialistRegistry'
+import { filterSpecialists, getSpecialistById } from '../../api/specialistRegistry'
 
 const QUICK_PROMPTS = [
   { icon: '⚠️', text: 'Check my weekend schedule for conflicts across hackathon and coursework', specialistId: 'calendar' },

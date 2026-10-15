@@ -55,7 +55,13 @@ def _get_encryption_key() -> bytes:
         or getattr(settings, "AUTH_TOKEN", None)
         or "compass-secret-encryption-key-salt"
     )
-    return hashlib.sha256(secret.encode("utf-8")).digest()
+    return hashlib.pbkdf2_hmac(
+        "sha256",
+        secret.encode("utf-8"),
+        b"compass_token_salt_fixed",
+        iterations=100_000,
+        dklen=32,
+    )
 
 
 def encrypt_token(plain_text: Optional[str]) -> Optional[str]:
@@ -135,7 +141,7 @@ def generate_oauth_state(user_id: str) -> str:
     secret = _get_encryption_key()
     ts = int(time.time())
     payload = f"{user_id}:{ts}".encode("utf-8")
-    sig = hmac.new(secret, payload, hashlib.sha256).hexdigest()[:16]
+    sig = hmac.new(secret, payload, digestmod="sha256").hexdigest()[:16]
     raw = f"{user_id}:{ts}:{sig}"
     return base64.urlsafe_b64encode(raw.encode("utf-8")).decode("utf-8")
 
@@ -158,7 +164,7 @@ def verify_oauth_state(state: str, expected_user_id: str, max_age_seconds: int =
             return False
         secret = _get_encryption_key()
         payload = f"{user_id}:{ts}".encode("utf-8")
-        expected_sig = hmac.new(secret, payload, hashlib.sha256).hexdigest()[:16]
+        expected_sig = hmac.new(secret, payload, digestmod="sha256").hexdigest()[:16]
         return hmac.compare_digest(sig, expected_sig)
     except Exception:
         return False
@@ -279,15 +285,20 @@ async def exchange_code_for_tokens(
             }
     except Exception as e:
         logger.error(f"Error during token exchange: {e}")
+        if is_dev and ("mock" in code.lower() or code.startswith("test")):
+            return {
+                "access_token": f"mock_ya29_{secrets.token_hex(16)}",
+                "refresh_token": f"mock_1//_{secrets.token_hex(20)}",
+                "expires_in": 3600,
+                "email": "scholar.authenticated@gmail.com",
+                "name": "Compass Scholar",
+                "picture": "https://lh3.googleusercontent.com/a/default-user",
+                "account_email": "scholar.authenticated@gmail.com",
+                "mode": "live_simulated",
+            }
         return {
-            "access_token": f"mock_ya29_{secrets.token_hex(16)}",
-            "refresh_token": f"mock_1//_{secrets.token_hex(20)}",
-            "expires_in": 3600,
-            "email": "scholar.authenticated@gmail.com",
-            "name": "Compass Scholar",
-            "picture": "https://lh3.googleusercontent.com/a/default-user",
-            "account_email": "scholar.authenticated@gmail.com",
-            "mode": "live_simulated",
+            "error": f"Error during token exchange: {e}",
+            "mode": "error",
         }
 
 

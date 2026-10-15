@@ -127,7 +127,6 @@ async def execute_deep_research(
     if not subqueries:
         subqueries = [topic]
 
-    tasks = []
     cache_hits = 0
     start_t = time.perf_counter()
 

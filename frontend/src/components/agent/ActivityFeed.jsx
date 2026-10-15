@@ -1,14 +1,12 @@
 import React from 'react'
 import {
   RotateCcw,
-  CheckCircle2,
   History,
   Plus,
   Trash2,
   Edit3,
   FileText,
   Calendar,
-  Sparkles,
   RefreshCw,
 } from 'lucide-react'
 
