@@ -209,6 +209,70 @@ def classify_posting_recency(
         }
 
 
+def format_compensation(
+    min_amt: Any,
+    max_amt: Any,
+    currency: Optional[str] = "USD",
+    interval: Optional[str] = "yearly",
+) -> Optional[str]:
+    """Validates salary range, currency, and pay period before formatting.
+    Guards against NaN, Inf, empty, or negative values.
+    """
+    import math
+
+    def _clean_amount(val: Any) -> Optional[float]:
+        if val is None:
+            return None
+        if isinstance(val, (int, float)):
+            if math.isnan(val) or math.isinf(val) or val <= 0:
+                return None
+            return float(val)
+        if isinstance(val, str):
+            s = val.strip().lower()
+            if s in ("", "nan", "none", "null", "undefined"):
+                return None
+            try:
+                f = float(s.replace(",", ""))
+                if math.isnan(f) or math.isinf(f) or f <= 0:
+                    return None
+                return f
+            except ValueError:
+                return None
+        return None
+
+    clean_min = _clean_amount(min_amt)
+    clean_max = _clean_amount(max_amt)
+
+    if clean_min is None and clean_max is None:
+        return None
+
+    curr_str = str(currency or "").strip().upper()
+    if not curr_str or curr_str.lower() in ("nan", "none", "null", "undefined"):
+        curr_str = "USD"
+
+    int_str = str(interval or "").strip().lower()
+    if not int_str or int_str in ("nan", "none", "null", "undefined"):
+        int_str = "year"
+    elif int_str in ("yearly", "year", "annual", "annually"):
+        int_str = "year"
+    elif int_str in ("monthly", "month"):
+        int_str = "month"
+    elif int_str in ("hourly", "hour"):
+        int_str = "hr"
+
+    if clean_min is not None and clean_max is not None:
+        if clean_min == clean_max:
+            return f"{curr_str} {clean_min:,.0f} / {int_str}"
+        low = min(clean_min, clean_max)
+        high = max(clean_min, clean_max)
+        return f"{curr_str} {low:,.0f} - {high:,.0f} / {int_str}"
+    elif clean_min is not None:
+        return f"{curr_str} {clean_min:,.0f} / {int_str}"
+    elif clean_max is not None:
+        return f"Up to {curr_str} {clean_max:,.0f} / {int_str}"
+    return None
+
+
 def normalize_jobspy_opportunity(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Normalizes a single JobSpy dataframe record into Compass Radar schema.
@@ -221,14 +285,22 @@ def normalize_jobspy_opportunity(row: Dict[str, Any]) -> Optional[Dict[str, Any]
     if not title or not company or not raw_url:
         return None
 
+    # Guard against NaN/None strings from DataFrame conversion
+    if any(s.lower() in ("nan", "none", "null", "undefined") for s in (title, company, raw_url)):
+        return None
+
     # Check internship keyword relevance
-    desc = str(row.get("description") or "")
+    desc = str(row.get("description") or "").strip()
+    if desc.lower() in ("nan", "none", "null", "undefined"):
+        desc = ""
     job_type = str(row.get("job_type") or "")
     if not is_internship_role(title, desc, job_type):
         return None
 
     site = str(row.get("site") or "jobspy").lower().replace(" ", "_")
-    location = str(row.get("location") or "Remote").strip()
+    location = str(row.get("location") or "").strip()
+    if not location or location.lower() in ("nan", "none", "null", "undefined"):
+        location = "Flexible"
     is_remote = bool(row.get("is_remote", False)) or "remote" in location.lower()
     work_arr = "remote" if is_remote else ("hybrid" if "hybrid" in location.lower() else "onsite")
 
@@ -251,24 +323,29 @@ def normalize_jobspy_opportunity(row: Dict[str, Any]) -> Optional[Dict[str, Any]
         f"Direct posting: {raw_url[:80]}"
     )
 
-    # Compensation parsing if present
-    min_amt = row.get("min_amount")
-    max_amt = row.get("max_amount")
-    currency = row.get("currency") or "USD"
-    interval = row.get("interval") or "yearly"
-    compensation_str = None
-    if min_amt and max_amt:
-        compensation_str = f"{currency} {min_amt:,.0f} - {max_amt:,.0f} / {interval}"
-    elif min_amt:
-        compensation_str = f"{currency} {min_amt:,.0f} / {interval}"
+    # Validated compensation parsing
+    compensation_str = format_compensation(
+        row.get("min_amount"),
+        row.get("max_amount"),
+        row.get("currency"),
+        row.get("interval"),
+    )
 
     # Extract required skills if present
     skills_raw = row.get("skills")
     required_skills = []
     if isinstance(skills_raw, list):
-        required_skills = [str(s).strip() for s in skills_raw if str(s).strip()]
+        required_skills = [
+            str(s).strip()
+            for s in skills_raw
+            if str(s).strip() and str(s).strip().lower() not in ("nan", "none", "null", "undefined")
+        ]
     elif isinstance(skills_raw, str) and skills_raw:
-        required_skills = [s.strip() for s in skills_raw.split(",") if s.strip()]
+        required_skills = [
+            s.strip()
+            for s in skills_raw.split(",")
+            if s.strip() and s.strip().lower() not in ("nan", "none", "null", "undefined")
+        ]
 
     deg_types = []
     text_check = f"{title} {desc}".lower()
@@ -279,6 +356,8 @@ def normalize_jobspy_opportunity(row: Dict[str, Any]) -> Optional[Dict[str, Any]
 
     precision_val = "exact" if recency_meta["timestamp_precision"] == "EXACT_TIMESTAMP" else ("date_only" if recency_meta["timestamp_precision"] == "DATE_ONLY" else "unknown")
 
+    india_eligible = is_india_or_remote(location, is_remote=False)
+
     return {
         "company_name": company,
         "role_title": title,
@@ -288,22 +367,22 @@ def normalize_jobspy_opportunity(row: Dict[str, Any]) -> Optional[Dict[str, Any]
         "location": location,
         "work_arrangement": work_arr,
         "country": "India" if "india" in location.lower() else ("USA" if "usa" in location.lower() or "united states" in location.lower() else "Global"),
-        "is_india_eligible": is_india_or_remote(location, is_remote=is_remote),
+        "is_india_eligible": india_eligible,
         "compensation": compensation_str,
         "official_application_url": raw_url,
         "canonical_url": canon_url,
-        "current_status": OpportunityStatus.OPEN_CONFIRMED,
+        "current_status": OpportunityStatus.NEEDS_VERIFICATION,
         "confirmed_open_date": posted_date or date.today(),
         "description": desc[:1500] if desc else f"{title} at {company}. Discovered on {site.capitalize()}.",
         "verification_evidence": evidence_str,
-        "employer_identity_verified": True,
-        "official_source_confirmed": True,
-        "application_url_checked": True,
+        "employer_identity_verified": False,
+        "official_source_confirmed": False,
+        "application_url_checked": False,
         "source_name": f"JobSpy ({site.capitalize()})",
         "source_type": f"jobspy_{site}",
         "source_url": raw_url,
-        "source_authority": "tier_1",
-        "is_official_source": True,
+        "source_authority": "tier_2",
+        "is_official_source": False,
         "recency_tier": recency_meta["recency_tier"],
         "is_verified_within_24h": is_verified_24h,
         "timestamp_precision": recency_meta["timestamp_precision"],
@@ -314,7 +393,7 @@ def normalize_jobspy_opportunity(row: Dict[str, Any]) -> Optional[Dict[str, Any]
         "first_seen_at": first_seen_at,
         "requirements": {
             "required_skills": required_skills[:8],
-            "eligible_countries": ["India"] if is_india_or_remote(location, is_remote) else [],
+            "eligible_countries": ["India"] if india_eligible else [],
             "eligible_degree_types": deg_types,
         },
     }

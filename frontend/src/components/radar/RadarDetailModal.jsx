@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { ExternalLink, CheckCircle2, XCircle, AlertCircle, Info, RefreshCw } from 'lucide-react'
 
 const PIPELINE_STATUSES = [
   { id: 'interested', label: 'Interested' },
@@ -13,13 +14,19 @@ const PIPELINE_STATUSES = [
   { id: 'closed_without_applying', label: 'Closed Without Applying' },
 ]
 
+function isCleanString(val) {
+  if (!val) return false
+  const s = String(val).trim().toLowerCase()
+  return s !== '' && s !== 'nan' && s !== 'null' && s !== 'undefined' && s !== 'none' && s !== 'n/a'
+}
+
 export default function RadarDetailModal({
   opportunity,
   onClose,
   onUpdateApp,
   onVerify,
   isVerifying,
-  onApply,
+  onNavigateToResumeStudio,
 }) {
   const [activeTab, setActiveTab] = useState('overview') // 'overview' | 'eligibility' | 'history' | 'tracking'
   const [appStatus, setAppStatus] = useState(opportunity?.application_status || 'interested')
@@ -54,6 +61,7 @@ export default function RadarDetailModal({
     work_arrangement,
     current_status,
     official_application_url,
+    canonical_url,
     description,
     compensation,
     duration,
@@ -64,42 +72,61 @@ export default function RadarDetailModal({
     prediction,
     sources = [],
     last_verified_at,
+    posted_at,
+    confirmed_open_date,
     employer_type,
     verification_evidence,
-    employer_identity_verified,
-    official_source_confirmed,
-    application_url_checked,
-    is_official_source: _is_official_source,
-    verification_failure_reason,
     source_identifier,
+    requirements,
   } = opportunity
 
-  const getEmployerTypeLabel = type => {
-    switch (type) {
-      case 'startup':
-        return { label: '🚀 Startup', color: '#8b5cf6', bg: 'rgba(139, 92, 246, 0.1)' }
-      case 'research':
-        return { label: '🔬 Research Lab', color: '#06b6d4', bg: 'rgba(6, 182, 212, 0.1)' }
-      case 'government':
-        return { label: '🏛️ Government / Public', color: '#d97706', bg: 'rgba(217, 119, 6, 0.1)' }
-      case 'open_source':
-        return { label: '🌐 Open Source Fellowship', color: '#10b981', bg: 'rgba(16, 185, 129, 0.1)' }
-      case 'sme':
-        return { label: '💼 SME', color: '#6366f1', bg: 'rgba(99, 102, 241, 0.1)' }
-      case 'enterprise':
+  // Data cleansing
+  const cleanCompany = isCleanString(company_name) ? company_name.trim() : 'Company'
+  const cleanRole = isCleanString(role_title) ? role_title.trim() : 'Internship Opportunity'
+  const cleanLocation = isCleanString(location) ? location.trim() : null
+  const cleanCompensation = isCleanString(compensation) ? compensation.trim() : null
+  const cleanDuration = isCleanString(duration) ? duration.trim() : null
+  const cleanDescription = isCleanString(description) ? description.trim() : null
+
+  // Format distinct dates
+  const rawPostingDate = posted_at || confirmed_open_date
+  const formattedPosted = rawPostingDate
+    ? new Date(rawPostingDate).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+    : null
+
+  const formattedVerified = last_verified_at
+    ? `${new Date(last_verified_at).toLocaleDateString()} ${new Date(last_verified_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+    : null
+
+  // Validate external application URL
+  const originalUrl = official_application_url || canonical_url
+  const hasValidExternalUrl = Boolean(
+    originalUrl &&
+    typeof originalUrl === 'string' &&
+    /^https?:\/\//i.test(originalUrl.trim()) &&
+    !originalUrl.toLowerCase().includes('javascript:')
+  )
+
+  const getStatusLabel = () => {
+    switch (current_status) {
+      case 'OPEN_CONFIRMED':
+        return 'Verified Open'
+      case 'UPCOMING_CONFIRMED':
+      case 'ANNOUNCED':
+        return 'Upcoming Confirmed'
+      case 'CLOSED_CONFIRMED':
+        return 'Closed'
       default:
-        return { label: '🏢 Enterprise', color: '#3b82f6', bg: 'rgba(59, 130, 246, 0.1)' }
+        return 'Needs Verification'
     }
   }
-
-  const empTypeInfo = getEmployerTypeLabel(employer_type)
 
   return (
     <div
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.65)',
+        backgroundColor: 'rgba(20, 22, 29, 0.65)',
         zIndex: 999,
         display: 'flex',
         alignItems: 'center',
@@ -112,11 +139,11 @@ export default function RadarDetailModal({
       <div
         style={{
           width: '100%',
-          maxWidth: '720px',
+          maxWidth: '740px',
           maxHeight: '90vh',
-          background: 'var(--bg-card)',
-          borderRadius: '16px',
-          border: '1px solid var(--border)',
+          background: 'var(--bg-card, #ffffff)',
+          borderRadius: 'var(--radius-modal, 8px)',
+          border: '1px solid var(--border, #e6e1d6)',
           boxShadow: 'var(--shadow-lg)',
           display: 'flex',
           flexDirection: 'column',
@@ -125,152 +152,240 @@ export default function RadarDetailModal({
         }}
         onClick={e => e.stopPropagation()}
       >
-        {/* Header */}
+        {/* Modal Header */}
         <div
           style={{
-            padding: '20px 24px',
-            borderBottom: '1px solid var(--border)',
+            padding: '18px 24px',
+            borderBottom: '1px solid var(--border, #e6e1d6)',
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'flex-start',
             gap: '16px',
+            background: 'var(--bg-card, #ffffff)',
           }}
         >
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', flexWrap: 'wrap' }}>
-              <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--brand)', textTransform: 'uppercase' }}>
-                {company_name}
+              <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--brand-dark, #b47507)', textTransform: 'uppercase' }}>
+                {cleanCompany}
               </span>
-              <span
-                style={{
-                  fontSize: '11px',
-                  fontWeight: 600,
-                  padding: '2px 8px',
-                  borderRadius: '6px',
-                  color: empTypeInfo.color,
-                  backgroundColor: empTypeInfo.bg,
-                }}
-              >
-                {empTypeInfo.label}
-              </span>
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>•</span>
-              <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                Status: <strong>{current_status.replace(/_/g, ' ')}</strong>
+              {employer_type && isCleanString(employer_type) && (
+                <span
+                  style={{
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    padding: '1px 6px',
+                    borderRadius: '4px',
+                    color: 'var(--text-secondary, #3d3a35)',
+                    backgroundColor: 'var(--bg-card-soft, #f2eee6)',
+                    border: '1px solid var(--border, #e6e1d6)',
+                    textTransform: 'capitalize',
+                  }}
+                >
+                  {employer_type.replace(/_/g, ' ')}
+                </span>
+              )}
+              <span style={{ fontSize: '12px', color: 'var(--text-muted, #5f5a52)' }}>•</span>
+              <span style={{ fontSize: '12px', color: 'var(--text-secondary, #3d3a35)' }}>
+                Status: <strong>{getStatusLabel()}</strong>
               </span>
             </div>
-            <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
-              {role_title}
+            <h2 style={{ fontSize: '19px', fontWeight: 700, color: 'var(--text-primary, #1b1a17)', margin: 0, lineHeight: 1.3 }}>
+              {cleanRole}
             </h2>
           </div>
 
           <button
             type="button"
             onClick={onClose}
+            aria-label="Close details"
             style={{
               background: 'transparent',
               border: 'none',
               fontSize: '22px',
-              color: 'var(--text-muted)',
+              color: 'var(--text-muted, #5f5a52)',
               cursor: 'pointer',
-              padding: '4px',
+              padding: '4px 8px',
+              lineHeight: 1,
             }}
           >
             ✕
           </button>
         </div>
 
-        {/* Modal Navigation Sub-tabs */}
+        {/* Modal Sub-tabs */}
         <div
           style={{
             display: 'flex',
-            borderBottom: '1px solid var(--border)',
-            background: 'var(--bg-app)',
+            borderBottom: '1px solid var(--border, #e6e1d6)',
+            background: 'var(--bg-app, #f7f5ef)',
             padding: '0 24px',
-            gap: '12px',
+            gap: '8px',
             overflowX: 'auto',
           }}
         >
           {[
             { id: 'overview', label: 'Overview & Details' },
-            { id: 'eligibility', label: `Eligibility Audit (${eligibility_classification})` },
+            { id: 'eligibility', label: 'Eligibility Audit' },
             { id: 'history', label: `Recruitment Cycles (${cycles.length})` },
-            { id: 'tracking', label: 'My Application Tracker' },
-          ].map(tab => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id)}
-              style={{
-                padding: '12px 14px',
-                background: 'transparent',
-                border: 'none',
-                borderBottom: activeTab === tab.id ? '2px solid var(--brand)' : '2px solid transparent',
-                color: activeTab === tab.id ? 'var(--brand)' : 'var(--text-secondary)',
-                fontWeight: activeTab === tab.id ? 600 : 500,
-                fontSize: '13px',
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {tab.label}
-            </button>
-          ))}
+            { id: 'tracking', label: 'Application Tracker' },
+          ].map(tab => {
+            const isActive = activeTab === tab.id
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                style={{
+                  padding: '11px 14px',
+                  background: 'transparent',
+                  border: 'none',
+                  borderBottom: isActive ? '2px solid var(--brand, #f5a623)' : '2px solid transparent',
+                  color: isActive ? 'var(--text-primary, #1b1a17)' : 'var(--text-secondary, #3d3a35)',
+                  fontWeight: isActive ? 600 : 500,
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {tab.label}
+              </button>
+            )
+          })}
         </div>
 
-        {/* Modal Content Scroll Area */}
-        <div style={{ padding: '24px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        {/* Modal Scroll Area */}
+        <div style={{ padding: '22px 24px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '18px' }}>
           {/* TAB 1: OVERVIEW */}
           {activeTab === 'overview' && (
             <>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
-                <div style={{ padding: '12px', borderRadius: '8px', background: 'var(--bg-app)' }}>
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Location</div>
-                  <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', marginTop: '2px' }}>
-                    {location || 'Flexible / India'}
+              {/* Metadata Highlights */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px' }}>
+                <div style={{ padding: '10px 12px', borderRadius: '6px', background: 'var(--bg-app, #f7f5ef)', border: '1px solid var(--border, #e6e1d6)' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted, #5f5a52)', textTransform: 'uppercase', fontWeight: 600 }}>Location</div>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary, #1b1a17)', marginTop: '2px' }}>
+                    {cleanLocation || 'Flexible'}
                   </div>
                 </div>
-                <div style={{ padding: '12px', borderRadius: '8px', background: 'var(--bg-app)' }}>
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Work Arrangement</div>
-                  <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', marginTop: '2px', textTransform: 'capitalize' }}>
-                    {work_arrangement}
+
+                <div style={{ padding: '10px 12px', borderRadius: '6px', background: 'var(--bg-app, #f7f5ef)', border: '1px solid var(--border, #e6e1d6)' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted, #5f5a52)', textTransform: 'uppercase', fontWeight: 600 }}>Arrangement</div>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary, #1b1a17)', marginTop: '2px', textTransform: 'capitalize' }}>
+                    {work_arrangement || 'Unspecified'}
                   </div>
                 </div>
-                {compensation && (
-                  <div style={{ padding: '12px', borderRadius: '8px', background: 'var(--bg-app)' }}>
-                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Compensation</div>
-                    <div style={{ fontSize: '13px', fontWeight: 600, color: '#10b981', marginTop: '2px' }}>
-                      {compensation}
+
+                {cleanCompensation && (
+                  <div style={{ padding: '10px 12px', borderRadius: '6px', background: 'var(--bg-app, #f7f5ef)', border: '1px solid var(--border, #e6e1d6)' }}>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted, #5f5a52)', textTransform: 'uppercase', fontWeight: 600 }}>Compensation</div>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--domain-code, #1c8a62)', marginTop: '2px' }}>
+                      {cleanCompensation}
                     </div>
                   </div>
                 )}
-                {duration && (
-                  <div style={{ padding: '12px', borderRadius: '8px', background: 'var(--bg-app)' }}>
-                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Duration</div>
-                    <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', marginTop: '2px' }}>
-                      {duration}
+
+                {cleanDuration && (
+                  <div style={{ padding: '10px 12px', borderRadius: '6px', background: 'var(--bg-app, #f7f5ef)', border: '1px solid var(--border, #e6e1d6)' }}>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted, #5f5a52)', textTransform: 'uppercase', fontWeight: 600 }}>Duration</div>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary, #1b1a17)', marginTop: '2px' }}>
+                      {cleanDuration}
                     </div>
                   </div>
                 )}
               </div>
 
-              {description && (
+              {/* Verified Dates & Provenance */}
+              <div
+                style={{
+                  padding: '12px 14px',
+                  borderRadius: '6px',
+                  background: 'var(--bg-card-soft, #f2eee6)',
+                  border: '1px solid var(--border, #e6e1d6)',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: '8px',
+                  fontSize: '12px',
+                  color: 'var(--text-secondary, #3d3a35)',
+                }}
+              >
                 <div>
-                  <h4 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '8px' }}>
-                    Role Overview
+                  <strong>Posted:</strong> {formattedPosted || 'Date unrecorded by source'}
+                </div>
+                <div>
+                  <strong>Last Verified:</strong> {formattedVerified || 'Pending verification'}
+                </div>
+                {source_identifier && (
+                  <div>
+                    <strong>Requisition ID:</strong> <code>{source_identifier}</code>
+                  </div>
+                )}
+              </div>
+
+              {/* Requirements & Restrictions if available */}
+              {requirements && (
+                <div>
+                  <h4 style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary, #1b1a17)', marginBottom: '8px' }}>
+                    Published Requirements & Qualifications
                   </h4>
-                  <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.6, whiteSpace: 'pre-line' }}>
-                    {description}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '8px', fontSize: '12px' }}>
+                    {requirements.eligible_graduation_years && requirements.eligible_graduation_years.length > 0 && (
+                      <div style={{ padding: '8px 10px', background: 'var(--bg-app, #f7f5ef)', borderRadius: '4px', border: '1px solid var(--border-soft, #eee9de)' }}>
+                        <strong>Target Graduation Cohort:</strong> {requirements.eligible_graduation_years.join(', ')}
+                      </div>
+                    )}
+                    {requirements.eligible_academic_years && requirements.eligible_academic_years.length > 0 && (
+                      <div style={{ padding: '8px 10px', background: 'var(--bg-app, #f7f5ef)', borderRadius: '4px', border: '1px solid var(--border-soft, #eee9de)' }}>
+                        <strong>Accepted Academic Year(s):</strong> {requirements.eligible_academic_years.join(', ')}
+                      </div>
+                    )}
+                    {requirements.eligible_degree_types && requirements.eligible_degree_types.length > 0 && (
+                      <div style={{ padding: '8px 10px', background: 'var(--bg-app, #f7f5ef)', borderRadius: '4px', border: '1px solid var(--border-soft, #eee9de)' }}>
+                        <strong>Accepted Degree(s):</strong> {requirements.eligible_degree_types.join(', ')}
+                      </div>
+                    )}
+                    {requirements.min_gpa !== null && requirements.min_gpa !== undefined && (
+                      <div style={{ padding: '8px 10px', background: 'var(--bg-app, #f7f5ef)', borderRadius: '4px', border: '1px solid var(--border-soft, #eee9de)' }}>
+                        <strong>Minimum CGPA:</strong> {requirements.min_gpa} / {requirements.gpa_scale || 10.0}
+                      </div>
+                    )}
+                    {requirements.no_active_backlogs === true && (
+                      <div style={{ padding: '8px 10px', background: 'var(--bg-app, #f7f5ef)', borderRadius: '4px', border: '1px solid var(--border-soft, #eee9de)' }}>
+                        <strong>Backlogs:</strong> 0 Active Backlogs required
+                      </div>
+                    )}
+                    {requirements.required_skills && requirements.required_skills.length > 0 && (
+                      <div style={{ padding: '8px 10px', background: 'var(--bg-app, #f7f5ef)', borderRadius: '4px', border: '1px solid var(--border-soft, #eee9de)' }}>
+                        <strong>Mandatory Skills:</strong> {requirements.required_skills.join(', ')}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
 
-              {/* Provenance Sources */}
+              {/* Source-backed Job Description */}
+              <div>
+                <h4 style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary, #1b1a17)', marginBottom: '8px' }}>
+                  Role Overview
+                </h4>
+                {cleanDescription ? (
+                  <div style={{ fontSize: '13px', color: 'var(--text-secondary, #3d3a35)', lineHeight: 1.6, whiteSpace: 'pre-line' }}>
+                    {cleanDescription}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: '13px', color: 'var(--text-muted, #5f5a52)', fontStyle: 'italic' }}>
+                    No extended description was published for this listing. Please review the official employer posting.
+                  </div>
+                )}
+              </div>
+
+              {/* Provenance & Verified Sources */}
               {sources.length > 0 && (
                 <div>
-                  <h4 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '8px' }}>
-                    Provenance & Verified Sources
+                  <h4 style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary, #1b1a17)', marginBottom: '8px' }}>
+                    Audit & Provenance Sources
                   </h4>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     {sources.map((src, i) => (
                       <div
                         key={i}
@@ -278,20 +393,22 @@ export default function RadarDetailModal({
                           display: 'flex',
                           justifyContent: 'space-between',
                           alignItems: 'center',
-                          padding: '10px 14px',
-                          borderRadius: '8px',
-                          border: '1px solid var(--border)',
-                          background: 'var(--bg-app)',
+                          padding: '8px 12px',
+                          borderRadius: '6px',
+                          border: '1px solid var(--border, #e6e1d6)',
+                          background: 'var(--bg-app, #f7f5ef)',
                           fontSize: '12px',
                         }}
                       >
                         <div>
                           <strong>{src.source_name}</strong> ({src.source_type})
-                          <div style={{ color: 'var(--text-muted)', fontSize: '11px' }}>
-                            {src.source_url}
-                          </div>
+                          {src.source_url && (
+                            <div style={{ color: 'var(--text-muted, #5f5a52)', fontSize: '11px' }}>
+                              {src.source_url}
+                            </div>
+                          )}
                         </div>
-                        <span style={{ padding: '2px 8px', borderRadius: '4px', background: 'var(--bg-card)', fontSize: '11px' }}>
+                        <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'var(--bg-card, #ffffff)', border: '1px solid var(--border-soft, #eee9de)', fontSize: '11px' }}>
                           {src.source_authority}
                         </span>
                       </div>
@@ -300,73 +417,13 @@ export default function RadarDetailModal({
                 </div>
               )}
 
-              {/* Evidence-Based Verification Status */}
-              <div
-                style={{
-                  padding: '16px',
-                  borderRadius: '10px',
-                  background: 'rgba(59, 130, 246, 0.05)',
-                  border: '1px solid rgba(59, 130, 246, 0.2)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '10px',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-                  <h4 style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span>🛡️</span>
-                    <span>Evidence-Based Verification Status</span>
-                  </h4>
-                  {last_verified_at && (
-                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                      Last checked: {new Date(last_verified_at).toLocaleDateString()} {new Date(last_verified_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  )}
+              {/* Verification Evidence */}
+              {verification_evidence && (
+                <div style={{ padding: '10px 12px', borderRadius: '6px', background: 'var(--bg-app, #f7f5ef)', border: '1px solid var(--border, #e6e1d6)', fontSize: '12px', color: 'var(--text-secondary, #3d3a35)' }}>
+                  <strong>Verification Basis: </strong>
+                  <span>{verification_evidence}</span>
                 </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '8px', fontSize: '12px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span>{official_source_confirmed ? '✅' : '⚠️'}</span>
-                    <span style={{ color: 'var(--text-secondary)' }}>
-                      Official Portal: <strong>{official_source_confirmed ? 'Confirmed' : 'Aggregated / Discovery'}</strong>
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span>{employer_identity_verified ? '✅' : 'ℹ️'}</span>
-                    <span style={{ color: 'var(--text-secondary)' }}>
-                      Employer Identity: <strong>{employer_identity_verified ? 'Verified Entity' : 'Candidate'}</strong>
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span>{application_url_checked ? '✅' : '❓'}</span>
-                    <span style={{ color: 'var(--text-secondary)' }}>
-                      Application Link: <strong>{application_url_checked ? 'Reachable (Live)' : 'Pending Check'}</strong>
-                    </span>
-                  </div>
-                  {source_identifier && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span>🏷️</span>
-                      <span style={{ color: 'var(--text-secondary)' }}>
-                        Requisition ID: <code style={{ fontSize: '11px' }}>{source_identifier}</code>
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                {verification_evidence && (
-                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)', background: 'var(--bg-card)', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)' }}>
-                    <span style={{ fontWeight: 600 }}>Evidence Note: </span>
-                    <span>{verification_evidence}</span>
-                  </div>
-                )}
-
-                {verification_failure_reason && (
-                  <div style={{ fontSize: '12px', color: '#dc2626', background: 'rgba(239, 68, 68, 0.08)', padding: '8px 12px', borderRadius: '6px', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
-                    <span style={{ fontWeight: 600 }}>Verification Note: </span>
-                    <span>{verification_failure_reason}</span>
-                  </div>
-                )}
-              </div>
+              )}
             </>
           )}
 
@@ -376,47 +433,34 @@ export default function RadarDetailModal({
               {/* Classification Summary Card */}
               <div
                 style={{
-                  padding: '16px',
-                  borderRadius: '10px',
+                  padding: '14px 16px',
+                  borderRadius: '6px',
                   marginBottom: '16px',
-                  background:
-                    eligibility_classification === 'ELIGIBLE'
-                      ? 'rgba(16, 185, 129, 0.1)'
-                      : (eligibility_classification === 'INELIGIBLE'
-                          ? 'rgba(239, 68, 68, 0.1)'
-                          : 'rgba(245, 166, 35, 0.1)'),
-                  border: `1px solid ${
-                    eligibility_classification === 'ELIGIBLE'
-                      ? '#10b981'
-                      : (eligibility_classification === 'INELIGIBLE'
-                          ? '#ef4444'
-                          : '#f5a623')
-                  }`,
+                  background: 'var(--bg-card-soft, #f2eee6)',
+                  border: '1px solid var(--border, #e6e1d6)',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-                  <span style={{ fontSize: '18px' }}>
-                    {eligibility_classification === 'ELIGIBLE' ? '✅' : (eligibility_classification === 'INELIGIBLE' ? '❌' : '⚠️')}
-                  </span>
-                  <div style={{ fontWeight: 700, fontSize: '15px', color: 'var(--text-primary)' }}>
-                    {eligibility_classification === 'ELIGIBLE' && 'Confirmed Eligible to Apply'}
-                    {(eligibility_classification === 'POTENTIAL_MATCH' || eligibility_classification === 'POTENTIALLY_ELIGIBLE') && 'Potentially Eligible (Verification Required)'}
-                    {eligibility_classification === 'INELIGIBLE' && 'Ineligible Based on Published Criteria'}
-                    {eligibility_classification === 'INSUFFICIENT_INFORMATION' && 'Insufficient Requirements Information'}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                  <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text-primary, #1b1a17)' }}>
+                    {eligibility_classification === 'ELIGIBLE' && 'Confirmed Match'}
+                    {(eligibility_classification === 'POTENTIAL_MATCH' || eligibility_classification === 'POTENTIALLY_ELIGIBLE') && 'Possible Match'}
+                    {eligibility_classification === 'INELIGIBLE' && 'Likely Ineligible'}
+                    {eligibility_classification === 'INSUFFICIENT_INFORMATION' && 'Eligibility Unconfirmed'}
                   </div>
                 </div>
-                <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                  {eligibility_explanation || 'Mandatory published requirements deterministically evaluated against candidate academic profile.'}
+                <div style={{ fontSize: '13px', color: 'var(--text-secondary, #3d3a35)', lineHeight: 1.5 }}>
+                  {eligibility_explanation || 'Position requirements evaluated against verified candidate profile.'}
                 </div>
               </div>
 
-              <div style={{ marginBottom: '12px', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>
-                Requirement-by-Requirement Evidence Breakdown:
+              {/* Requirement-by-Requirement Evidence Breakdown */}
+              <div style={{ marginBottom: '10px', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary, #1b1a17)' }}>
+                Requirement Evidence Breakdown:
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {eligibility_reasons.length === 0 ? (
-                  <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-                    No explicit eligibility constraints detected or profile incomplete.
+                  <div style={{ fontSize: '13px', color: 'var(--text-muted, #5f5a52)', padding: '12px', background: 'var(--bg-app, #f7f5ef)', borderRadius: '6px' }}>
+                    No explicit eligibility constraints found on this listing or candidate profile is incomplete.
                   </div>
                 ) : (
                   eligibility_reasons.map((r, i) => {
@@ -428,25 +472,28 @@ export default function RadarDetailModal({
                         key={i}
                         style={{
                           display: 'flex',
-                          gap: '12px',
-                          padding: '12px 16px',
-                          borderRadius: '8px',
-                          background: isPass ? 'rgba(16, 185, 129, 0.08)' : (isFail ? 'rgba(239, 68, 68, 0.08)' : (isUnknown ? 'rgba(245, 166, 35, 0.08)' : 'var(--bg-app)')),
-                          border: `1px solid ${isPass ? '#10b981' : (isFail ? '#ef4444' : (isUnknown ? '#f5a623' : 'var(--border)'))}`,
+                          gap: '10px',
+                          padding: '10px 12px',
+                          borderRadius: '6px',
+                          background: 'var(--bg-app, #f7f5ef)',
+                          border: '1px solid var(--border, #e6e1d6)',
                           alignItems: 'flex-start',
                         }}
                       >
-                        <span style={{ fontSize: '16px' }}>
-                          {isPass ? '✅' : (isFail ? '❌' : (isUnknown ? '⚠️' : 'ℹ️'))}
-                        </span>
-                        <div>
-                          <div style={{ fontWeight: 600, fontSize: '13px', textTransform: 'capitalize', color: 'var(--text-primary)' }}>
-                            {r.field.replace(/_/g, ' ')}
-                            <span style={{ marginLeft: '8px', fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)' }}>
-                              ({isPass ? 'Satisfied' : (isFail ? 'Not Satisfied' : (isUnknown ? 'Action Needed / Unverified' : 'Informational'))})
+                        <div style={{ marginTop: '2px' }}>
+                          {isPass && <CheckCircle2 size={16} color="var(--domain-code, #1c8a62)" />}
+                          {isFail && <XCircle size={16} color="var(--danger-text, #b91c1c)" />}
+                          {isUnknown && <AlertCircle size={16} color="var(--brand-dark, #b47507)" />}
+                          {!isPass && !isFail && !isUnknown && <Info size={16} color="var(--text-muted, #5f5a52)" />}
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 600, fontSize: '12px', textTransform: 'capitalize', color: 'var(--text-primary, #1b1a17)' }}>
+                            {r.field ? r.field.replace(/_/g, ' ') : 'Requirement'}
+                            <span style={{ marginLeft: '8px', fontSize: '11px', fontWeight: 500, color: 'var(--text-muted, #5f5a52)' }}>
+                              ({isPass ? 'Satisfied' : isFail ? 'Mandatory Mismatch' : isUnknown ? 'Missing Evidence' : 'Informational'})
                             </span>
                           </div>
-                          <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                          <div style={{ fontSize: '12px', color: 'var(--text-secondary, #3d3a35)', marginTop: '2px', lineHeight: 1.4 }}>
                             {r.detail}
                           </div>
                         </div>
@@ -455,53 +502,87 @@ export default function RadarDetailModal({
                   })
                 )}
               </div>
+
+              {/* Navigation prompt to Resume Studio if candidate profile needs attention */}
+              {onNavigateToResumeStudio && (
+                <div
+                  style={{
+                    marginTop: '16px',
+                    padding: '12px',
+                    background: 'var(--bg-card-soft, #f2eee6)',
+                    borderRadius: '6px',
+                    border: '1px solid var(--border, #e6e1d6)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '10px',
+                  }}
+                >
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary, #3d3a35)' }}>
+                    Need to update your degree, skills, or graduation cohort? Manage your profile in Resume Studio.
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose()
+                      onNavigateToResumeStudio()
+                    }}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: 'var(--radius-btn, 6px)',
+                      background: 'var(--brand, #f5a623)',
+                      color: 'var(--accent-text, #1b1a17)',
+                      border: 'none',
+                      fontSize: '12px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Go to Resume Studio
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
-          {/* TAB 3: RECRUITMENT CYCLES & PREDICTIONS */}
+          {/* TAB 3: RECRUITMENT CYCLES */}
           {activeTab === 'history' && (
             <div>
-              {/* Statistical Prediction Card */}
-              {prediction && (
+              {prediction && prediction.estimated_open_window && (
                 <div
                   style={{
-                    padding: '16px',
-                    borderRadius: '10px',
-                    background: 'rgba(59, 130, 246, 0.08)',
-                    border: '1px solid #3b82f6',
-                    marginBottom: '20px',
+                    padding: '14px',
+                    borderRadius: '6px',
+                    background: 'var(--bg-card-soft, #f2eee6)',
+                    border: '1px solid var(--border, #e6e1d6)',
+                    marginBottom: '16px',
                   }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                    <span style={{ fontSize: '12px', fontWeight: 700, color: '#2563eb', textTransform: 'uppercase' }}>
-                      Historical Recruitment Window Estimate
-                    </span>
-                    <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '4px', background: '#3b82f6', color: '#fff' }}>
-                      {prediction.confidence} Confidence
-                    </span>
+                  <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--domain-coursework, #2f64c8)', textTransform: 'uppercase' }}>
+                    Historical Recruitment Window Forecast
                   </div>
-                  <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '4px' }}>
-                    {prediction.estimated_open_window || 'No confirmed historical window yet'}
+                  <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary, #1b1a17)', margin: '4px 0' }}>
+                    {prediction.estimated_open_window} ({prediction.confidence} Confidence)
                   </div>
-                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary, #3d3a35)' }}>
                     {prediction.evidence_basis}
                   </div>
                 </div>
               )}
 
-              {/* Cycles Table */}
-              <h4 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '10px' }}>
-                Observed Previous Recruitment Cycles
+              <h4 style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary, #1b1a17)', marginBottom: '8px' }}>
+                Observed Recruitment Cycles
               </h4>
               {cycles.length === 0 ? (
-                <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+                <div style={{ fontSize: '13px', color: 'var(--text-muted, #5f5a52)', padding: '12px', background: 'var(--bg-app, #f7f5ef)', borderRadius: '6px' }}>
                   No historical cycle records verified yet for this company. Compass will record observations as cycles open.
                 </div>
               ) : (
                 <div style={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
                     <thead>
-                      <tr style={{ borderBottom: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
+                      <tr style={{ borderBottom: '1px solid var(--border, #e6e1d6)', color: 'var(--text-secondary, #3d3a35)' }}>
                         <th style={{ padding: '8px' }}>Cycle Year</th>
                         <th style={{ padding: '8px' }}>Observed Open</th>
                         <th style={{ padding: '8px' }}>Observed Close</th>
@@ -511,12 +592,12 @@ export default function RadarDetailModal({
                     </thead>
                     <tbody>
                       {cycles.map((c, idx) => (
-                        <tr key={idx} style={{ borderBottom: '1px solid var(--border-soft)' }}>
+                        <tr key={idx} style={{ borderBottom: '1px solid var(--border-soft, #eee9de)' }}>
                           <td style={{ padding: '8px', fontWeight: 600 }}>{c.cycle_year}</td>
                           <td style={{ padding: '8px' }}>{c.observed_open_date || 'N/A'}</td>
                           <td style={{ padding: '8px' }}>{c.observed_close_date || 'N/A'}</td>
                           <td style={{ padding: '8px', textTransform: 'capitalize' }}>{c.observation_type}</td>
-                          <td style={{ padding: '8px', color: 'var(--text-muted)' }}>{c.notes || 'Verified'}</td>
+                          <td style={{ padding: '8px', color: 'var(--text-muted, #5f5a52)' }}>{c.notes || 'Verified'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -526,11 +607,11 @@ export default function RadarDetailModal({
             </div>
           )}
 
-          {/* TAB 4: MY APPLICATION TRACKER */}
+          {/* TAB 4: APPLICATION TRACKER */}
           {activeTab === 'tracking' && (
-            <form onSubmit={handleSaveTracking} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <form onSubmit={handleSaveTracking} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '6px' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-primary, #1b1a17)', marginBottom: '4px' }}>
                   Application Pipeline Status
                 </label>
                 <select
@@ -538,11 +619,11 @@ export default function RadarDetailModal({
                   onChange={e => setAppStatus(e.target.value)}
                   style={{
                     width: '100%',
-                    padding: '10px',
-                    borderRadius: '8px',
-                    border: '1px solid var(--border)',
-                    background: 'var(--bg-app)',
-                    color: 'var(--text-primary)',
+                    padding: '8px 10px',
+                    borderRadius: 'var(--radius-input, 6px)',
+                    border: '1px solid var(--border, #e6e1d6)',
+                    background: 'var(--bg-app, #f7f5ef)',
+                    color: 'var(--text-primary, #1b1a17)',
                     fontSize: '13px',
                   }}
                 >
@@ -555,7 +636,7 @@ export default function RadarDetailModal({
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '6px' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-primary, #1b1a17)', marginBottom: '4px' }}>
                   Personal Target Deadline
                 </label>
                 <input
@@ -564,11 +645,11 @@ export default function RadarDetailModal({
                   onChange={e => setPersonalDeadline(e.target.value)}
                   style={{
                     width: '100%',
-                    padding: '10px',
-                    borderRadius: '8px',
-                    border: '1px solid var(--border)',
-                    background: 'var(--bg-app)',
-                    color: 'var(--text-primary)',
+                    padding: '8px 10px',
+                    borderRadius: 'var(--radius-input, 6px)',
+                    border: '1px solid var(--border, #e6e1d6)',
+                    background: 'var(--bg-app, #f7f5ef)',
+                    color: 'var(--text-primary, #1b1a17)',
                     fontSize: '13px',
                     boxSizing: 'border-box',
                   }}
@@ -576,21 +657,21 @@ export default function RadarDetailModal({
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '6px' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-primary, #1b1a17)', marginBottom: '4px' }}>
                   Private Notes & Preparation Topics
                 </label>
                 <textarea
                   rows={4}
                   value={privateNotes}
                   onChange={e => setPrivateNotes(e.target.value)}
-                  placeholder="Record interview rounds, referral contacts, resume tweaks for this role…"
+                  placeholder="Record interview notes, referral contacts, or requirements for this role…"
                   style={{
                     width: '100%',
-                    padding: '10px',
-                    borderRadius: '8px',
-                    border: '1px solid var(--border)',
-                    background: 'var(--bg-app)',
-                    color: 'var(--text-primary)',
+                    padding: '8px 10px',
+                    borderRadius: 'var(--radius-input, 6px)',
+                    border: '1px solid var(--border, #e6e1d6)',
+                    background: 'var(--bg-app, #f7f5ef)',
+                    color: 'var(--text-primary, #1b1a17)',
                     fontSize: '13px',
                     resize: 'vertical',
                     boxSizing: 'border-box',
@@ -598,15 +679,15 @@ export default function RadarDetailModal({
                 />
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <button
                   type="submit"
                   disabled={isSavingApp}
                   style={{
-                    padding: '10px 18px',
-                    borderRadius: '8px',
-                    background: 'var(--brand)',
-                    color: '#ffffff',
+                    padding: '8px 16px',
+                    borderRadius: 'var(--radius-btn, 6px)',
+                    background: 'var(--brand, #f5a623)',
+                    color: 'var(--accent-text, #1b1a17)',
                     border: 'none',
                     fontWeight: 600,
                     fontSize: '13px',
@@ -616,8 +697,8 @@ export default function RadarDetailModal({
                   {isSavingApp ? 'Saving…' : 'Save Application State'}
                 </button>
                 {saveSuccess && (
-                  <span style={{ fontSize: '13px', color: '#10b981', fontWeight: 600 }}>
-                    ✓ Application updated successfully!
+                  <span style={{ fontSize: '12px', color: 'var(--domain-code, #1c8a62)', fontWeight: 600 }}>
+                    ✓ Application state saved
                   </span>
                 )}
               </div>
@@ -628,68 +709,43 @@ export default function RadarDetailModal({
         {/* Modal Footer */}
         <div
           style={{
-            padding: '16px 24px',
-            borderTop: '1px solid var(--border)',
-            background: 'var(--bg-app)',
+            padding: '14px 24px',
+            borderTop: '1px solid var(--border, #e6e1d6)',
+            background: 'var(--bg-card, #ffffff)',
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
             flexWrap: 'wrap',
-            gap: '12px',
+            gap: '10px',
           }}
         >
-          {/* Live Re-check Button */}
+          {/* Re-verify Status Button */}
           <button
             type="button"
-            onClick={() => onVerify(opportunity.id)}
+            onClick={() => onVerify && onVerify(opportunity.id)}
             disabled={isVerifying}
             style={{
               display: 'flex',
               alignItems: 'center',
               gap: '6px',
-              padding: '8px 14px',
-              borderRadius: '8px',
-              border: '1px solid var(--border)',
-              background: 'var(--bg-card)',
-              color: 'var(--text-primary)',
+              padding: '7px 12px',
+              borderRadius: 'var(--radius-btn, 6px)',
+              border: '1px solid var(--border, #e6e1d6)',
+              background: 'var(--bg-card-soft, #f2eee6)',
+              color: 'var(--text-primary, #1b1a17)',
               fontSize: '12px',
               fontWeight: 500,
               cursor: isVerifying ? 'not-allowed' : 'pointer',
             }}
           >
-            <span>{isVerifying ? '⏳' : '🔍'}</span>
-            <span>{isVerifying ? 'Verifying Official URL…' : 'Live Re-verify Status'}</span>
+            <RefreshCw size={13} className={isVerifying ? 'spin' : ''} />
+            <span>{isVerifying ? 'Checking Official Status…' : 'Re-verify Status'}</span>
           </button>
 
-          {/* Action: Open internal Application Workspace */}
-          <button
-            type="button"
-            onClick={() => {
-              onClose()
-              if (onApply) onApply(opportunity)
-            }}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '8px 16px',
-              borderRadius: '8px',
-              background: 'var(--brand)',
-              color: '#ffffff',
-              border: 'none',
-              fontSize: '13px',
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            <span>Open Application Workspace</span>
-            <span>⚡</span>
-          </button>
-
-          {/* Action: Open official application portal */}
-          {official_application_url && (
+          {/* Action: Open original listing (validated external link) */}
+          {hasValidExternalUrl ? (
             <a
-              href={official_application_url}
+              href={originalUrl}
               target="_blank"
               rel="noopener noreferrer"
               style={{
@@ -697,18 +753,41 @@ export default function RadarDetailModal({
                 alignItems: 'center',
                 gap: '6px',
                 padding: '8px 16px',
-                borderRadius: '8px',
-                background: 'var(--bg-card)',
-                color: 'var(--text-primary)',
-                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-btn, 6px)',
+                background: 'var(--brand, #f5a623)',
+                color: 'var(--accent-text, #1b1a17)',
                 fontSize: '13px',
                 fontWeight: 600,
                 textDecoration: 'none',
+                cursor: 'pointer',
               }}
+              title="Open external original job posting in a new tab"
             >
-              <span>Employer Portal</span>
-              <span>↗</span>
+              <span>Open original listing</span>
+              <ExternalLink size={13} strokeWidth={2} />
             </a>
+          ) : (
+            <button
+              type="button"
+              disabled
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 16px',
+                borderRadius: 'var(--radius-btn, 6px)',
+                background: 'var(--bg-card-soft, #f2eee6)',
+                color: 'var(--text-muted, #5f5a52)',
+                border: '1px solid var(--border, #e6e1d6)',
+                fontSize: '13px',
+                fontWeight: 500,
+                cursor: 'not-allowed',
+                opacity: 0.6,
+              }}
+              title="Original listing URL unavailable"
+            >
+              <span>Original listing unavailable</span>
+            </button>
           )}
         </div>
       </div>

@@ -33,7 +33,13 @@ INTERN_KEYWORDS_REGEX = re.compile(
 )
 
 INDIA_LOCATION_KEYWORDS = [
-    "india", "bengaluru", "bangalore", "hyderabad", "pune", "mumbai", "delhi", "gurgaon", "gurugram", "noida", "chennai", "remote", "anywhere", "apac", "global", "flexible"
+    "india", "bengaluru", "bangalore", "hyderabad", "pune", "mumbai", "delhi", "gurgaon", "gurugram", "noida", "chennai", "kolkata", "ahmedabad", "maharashtra", "karnataka", "telangana", "tamil nadu", "apac"
+]
+GLOBAL_SCOPE_KEYWORDS = [
+    "worldwide", "anywhere", "global remote", "remote - global", "remote, global", "remote (worldwide)", "remote worldwide", "work from anywhere"
+]
+NON_INDIA_RESTRICTIONS = [
+    "us only", "usa only", "united states only", "americas only", "emea only", "uk only", "canada only", "must reside in", "u.s. only"
 ]
 
 
@@ -44,13 +50,19 @@ def is_internship_role(title: str, description: str = "", commitment: str = "") 
 
 
 def is_india_or_remote(location_text: str, is_remote: bool = False) -> bool:
-    """Check if location string or flag indicates eligibility for Indian or remote students."""
-    if is_remote:
-        return True
+    """Check if location string indicates confirmed eligibility for Indian students.
+    Never infer global/India eligibility from generic remote work without affirmative geographic evidence.
+    """
     if not location_text:
+        return False
+    loc_lower = location_text.lower().strip()
+    if any(k in loc_lower for k in NON_INDIA_RESTRICTIONS):
+        return False
+    if any(k in loc_lower for k in INDIA_LOCATION_KEYWORDS):
         return True
-    loc_lower = location_text.lower()
-    return any(k in loc_lower for k in INDIA_LOCATION_KEYWORDS)
+    if any(k in loc_lower for k in GLOBAL_SCOPE_KEYWORDS):
+        return True
+    return False
 
 
 # ---------------------------------------------------------------------------

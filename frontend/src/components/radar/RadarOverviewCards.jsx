@@ -31,10 +31,10 @@ export default function RadarOverviewCards({
             <Target size={18} strokeWidth={1.8} color="var(--brand)" />
             <div>
               <div style={{ fontWeight: 600, fontSize: '14px' }}>
-                Complete your Academic Profile for Deterministic Eligibility
+                Complete your Candidate Profile in Resume Studio
               </div>
               <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                Set your academic year and target graduation year to filter verified eligible internships.
+                Update your academic qualifications, skills, and graduation cohort in Resume Studio to unlock deterministic eligibility.
               </div>
             </div>
           </div>
@@ -52,7 +52,7 @@ export default function RadarOverviewCards({
               cursor: 'pointer',
             }}
           >
-            Update Profile
+            Manage in Resume Studio
           </button>
         </div>
       )}

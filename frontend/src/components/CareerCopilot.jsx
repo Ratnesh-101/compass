@@ -1,36 +1,17 @@
 import React, { useState } from 'react'
 import InternshipRadar from './InternshipRadar'
 import ApplicationCenter from './career/ApplicationCenter'
-import RadarProfileModal from './radar/RadarProfileModal'
 import DarkModeToggle from './DarkModeToggle'
-import { updateRadarProfile } from '../api/radarApi.js'
 
 const ResumeStudio = React.lazy(() => import('./career/ResumeStudio'))
 
 export default function CareerCopilot({ isDarkMode, onToggleDarkMode }) {
   const [activeSubTab, setActiveSubTab] = useState('radar') // 'radar' | 'resumes' | 'applications'
-  const [showProfileModal, setShowProfileModal] = useState(false)
   const [profileRefreshTrigger, setProfileRefreshTrigger] = useState(0)
   const [notification, setNotification] = useState(null)
 
-  const handleProfileSave = async (newProfile) => {
-    // 1. Authenticated API save request
-    const updated = await updateRadarProfile(newProfile)
-    return updated
-  }
-
-  const handleProfileUpdated = () => {
-    // 2. Immediately close modal
-    setShowProfileModal(false)
-    // 3. Return user to the Internship Radar view
-    setActiveSubTab('radar')
-    // 4. Show success notification
-    setNotification({
-      type: 'info',
-      message: 'Profile saved! Refreshing your internship matches…',
-    })
-    // 5. Trigger asynchronous recommendation refresh
-    setProfileRefreshTrigger(prev => prev + 1)
+  const handleNavigateToResumeStudio = () => {
+    setActiveSubTab('resumes')
   }
 
   const handleRefreshComplete = () => {
@@ -129,7 +110,8 @@ export default function CareerCopilot({ isDarkMode, onToggleDarkMode }) {
           <button
             type="button"
             className="btn-secondary"
-            onClick={() => setShowProfileModal(true)}
+            onClick={handleNavigateToResumeStudio}
+            title="Manage candidate profile and master resume in Resume Studio"
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -281,7 +263,8 @@ export default function CareerCopilot({ isDarkMode, onToggleDarkMode }) {
             refreshTrigger={profileRefreshTrigger}
             onRefreshComplete={handleRefreshComplete}
             onRefreshError={handleRefreshError}
-            onOpenProfile={() => setShowProfileModal(true)}
+            onNavigateToResumeStudio={handleNavigateToResumeStudio}
+            onOpenProfile={handleNavigateToResumeStudio}
           />
         )}
         {activeSubTab === 'resumes' && (
@@ -291,16 +274,6 @@ export default function CareerCopilot({ isDarkMode, onToggleDarkMode }) {
         )}
         {activeSubTab === 'applications' && <ApplicationCenter />}
       </div>
-
-      {/* Candidate Profile Modal */}
-      {showProfileModal && (
-        <RadarProfileModal
-          isOpen={showProfileModal}
-          onClose={() => setShowProfileModal(false)}
-          onSave={handleProfileSave}
-          onProfileUpdated={handleProfileUpdated}
-        />
-      )}
     </div>
   )
 }

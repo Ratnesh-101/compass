@@ -73,19 +73,32 @@ def infer_category(title: str) -> str:
     return "swe"
 
 
-def infer_employer_type(company_name: str, category: str = "general", source_name: str = "") -> str:
-    """Classifies an employer into one of the 6 canonical categories."""
-    cn = company_name.lower()
-    sn = source_name.lower()
-    if any(k in cn or k in sn for k in ["research", "iisc", "tifr", "csir", "iit", "iiit", "nasi", "insa", "iasc", "laboratory", "fellowship"]):
+def infer_employer_type(company_name: str, category: str = "general", source_name: str = "") -> Optional[str]:
+    """Classifies an employer into one of the canonical categories only when reliable evidence exists.
+    Otherwise returns None to avoid inventing classifications.
+    """
+    if not company_name:
+        return None
+    cn = company_name.lower().strip()
+    sn = source_name.lower().strip()
+
+    if any(k in cn or k in sn for k in ["research", "iisc", "tifr", "csir", "iit", "iiit", "nasi", "insa", "iasc", "laboratory", "fellowship", "cern", "inria", "max planck"]):
         return EmployerType.RESEARCH
-    if any(k in cn or k in sn for k in ["aicte", "gov", "ministry", "nic", "niti", "national informatics", "digital india"]):
+    if any(k in cn or k in sn for k in ["aicte", "gov", "ministry", "nic", "niti", "national informatics", "digital india", "drdo", "isro", "public sector"]):
         return EmployerType.GOVERNMENT
-    if any(k in cn or k in sn for k in ["gsoc", "lfx", "open source", "foss", "linux foundation", "mlh"]):
+    if any(k in cn or k in sn for k in ["gsoc", "lfx", "open source", "foss", "linux foundation", "mlh", "apache", "mozilla"]):
         return EmployerType.OPEN_SOURCE
-    if any(k in cn for k in ["google", "microsoft", "amazon", "nvidia", "meta", "apple", "adobe", "oracle", "cisco", "ibm", "salesforce"]):
+    enterprise_known = [
+        "google", "microsoft", "amazon", "nvidia", "meta", "apple", "adobe", "oracle", "cisco", "ibm",
+        "salesforce", "intel", "uber", "goldman sachs", "jpmorgan", "morgan stanley", "samsung", "atlassian",
+        "qualcomm", "walmart", "accenture", "tcs", "infosys", "wipro", "cognizant", "deloitte"
+    ]
+    if any(k in cn for k in enterprise_known):
         return EmployerType.ENTERPRISE
-    return EmployerType.STARTUP
+    if any(k in sn or k in cn for k in ["y combinator", "techstars", "sequoia", "accel", "seed", "series a", "series b", "early-stage", "startup"]):
+        return EmployerType.STARTUP
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -167,7 +180,8 @@ def _process_table_block(
         category = infer_category(role_clean)
         emp_type = infer_employer_type(comp_clean, category, source_name)
         work_arr = "remote" if "remote" in raw_location.lower() else "onsite"
-        is_india = "india" in raw_location.lower() or work_arr == "remote"
+        from backend.services.radar_ats_adapters import is_india_or_remote
+        is_india = is_india_or_remote(raw_location, is_remote=(work_arr == "remote"))
 
         out.append({
             "company_name": comp_clean,

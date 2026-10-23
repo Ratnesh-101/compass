@@ -160,7 +160,13 @@ async def upsert_master_resume(user_id: str, content: ResumeContent, title: str 
                 r["validation_status"] = status_val
                 r["validation_report"] = report_dict
                 r["updated_at"] = datetime.now(timezone.utc)
-                return _parse_resume_row(r, is_persisted=False)
+                result = _parse_resume_row(r, is_persisted=False)
+                try:
+                    from backend.memory.radar import sync_candidate_profile_from_master
+                    await sync_candidate_profile_from_master(user_id, content)
+                except Exception as e:
+                    logger.debug(f"Candidate profile sync omitted: {e}")
+                return result
         _resume_id_seq += 1
         record = {
             "id": _resume_id_seq,
@@ -176,7 +182,13 @@ async def upsert_master_resume(user_id: str, content: ResumeContent, title: str 
             "updated_at": datetime.now(timezone.utc),
         }
         _in_memory_resumes[_resume_id_seq] = record
-        return _parse_resume_row(record, is_persisted=False)
+        result = _parse_resume_row(record, is_persisted=False)
+        try:
+            from backend.memory.radar import sync_candidate_profile_from_master
+            await sync_candidate_profile_from_master(user_id, content)
+        except Exception as e:
+            logger.debug(f"Candidate profile sync omitted: {e}")
+        return result
 
     async with pool.acquire() as conn:
         from backend.services.career_resume import validate_resume_against_master
@@ -220,7 +232,13 @@ async def upsert_master_resume(user_id: str, content: ResumeContent, title: str 
                 status_val,
                 json.dumps(report_dict),
             )
-        return _parse_resume_row(dict(row), is_persisted=True)
+        result = _parse_resume_row(dict(row), is_persisted=True)
+        try:
+            from backend.memory.radar import sync_candidate_profile_from_master
+            await sync_candidate_profile_from_master(user_id, content)
+        except Exception as e:
+            logger.debug(f"Candidate profile sync omitted: {e}")
+        return result
 
 
 async def create_tailored_resume(

@@ -138,6 +138,16 @@ export async function fetchApplications() {
   return res.json()
 }
 
+export async function fetchOpportunityDetail(id) {
+  await ensureSession()
+  const res = await fetch(`${API_BASE}/api/opportunities/${id}`, {
+    headers: getAuthHeaders(),
+    credentials: 'include',
+  })
+  if (!res.ok) throw new Error(`Failed to fetch opportunity details: HTTP ${res.status}`)
+  return res.json()
+}
+
 export async function updateApplication(id, payload) {
   const res = await fetch(`${API_BASE}/api/opportunities/${id}/application`, {
     method: 'POST',

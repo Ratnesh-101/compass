@@ -69,6 +69,14 @@ def compute_is_verified_within_24h(
 
 def _enrich_opportunity(opp: OpportunityOut, profile: Optional[UserOpportunityProfileIn]) -> OpportunityOut:
     """Enriches an opportunity with predictive cycle estimates and personal eligibility."""
+    # Sanitize malformed values at boundary
+    if opp.compensation and any(k in str(opp.compensation).lower() for k in ("nan", "null", "undefined")):
+        opp.compensation = None
+    if opp.location and str(opp.location).lower() in ("nan", "null", "undefined", "none"):
+        opp.location = None
+    if opp.description and str(opp.description).lower() in ("nan", "null", "undefined", "none"):
+        opp.description = None
+
     # Compute historical prediction
     opp.prediction = estimate_recruitment_cycle(opp.cycles)
 

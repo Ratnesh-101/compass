@@ -65,8 +65,8 @@ def evaluate_eligibility(
     if profile is None:
         return (
             EligibilityClassification.INSUFFICIENT_INFORMATION,
-            "Complete your profile (academic year, graduation year, degree, CGPA) to see verified eligibility.",
-            [{"field": "profile", "status": "missing", "detail": "No student profile configured"}]
+            "No candidate profile found. Complete your profile in Resume Studio to evaluate verified eligibility.",
+            [{"field": "profile", "status": "missing", "detail": "Candidate profile not configured in Resume Studio."}]
         )
 
     reqs: Optional[OpportunityRequirementsOut] = opportunity.requirements
@@ -381,9 +381,9 @@ def evaluate_eligibility(
     unknown_reasons = [r for r in reasons if r.get("status") == "unknown"]
     if unknown_reasons or reqs.has_conflicting_requirements:
         unknown_fields = [u["field"] for u in unknown_reasons]
-        explanation = f"Potentially eligible: Aligns with profile, but requires verification of: {', '.join(unknown_fields)}."
+        explanation = f"Possible match: Aligns with profile, but requires verification of: {', '.join(unknown_fields)}."
         return (EligibilityClassification.POTENTIAL_MATCH, explanation, reasons)
 
     # 3. All known mandatory requirements verified & passed
-    explanation = "Confirmed eligible: Your degree, academic cohort, CGPA, and authorization satisfy all mandatory requirements."
+    explanation = "Confirmed eligible (Strong match): Your degree, academic cohort, CGPA, and authorization satisfy all mandatory requirements."
     return (EligibilityClassification.ELIGIBLE, explanation, reasons)

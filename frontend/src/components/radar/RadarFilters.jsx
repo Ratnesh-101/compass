@@ -244,7 +244,7 @@ export default function RadarFilters({
           <button
             type="button"
             onClick={onOpenProfile}
-            title="Configure academic degree, year, and preferences"
+            title="Manage candidate profile in Resume Studio"
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -260,7 +260,7 @@ export default function RadarFilters({
             }}
           >
             <Settings size={15} strokeWidth={1.8} />
-            <span>Profile</span>
+            <span>Candidate Profile</span>
           </button>
 
           <button

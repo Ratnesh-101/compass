@@ -772,37 +772,168 @@ async def add_status_history(
         )
 
 
+def derive_profile_from_master_resume(content: Any) -> Optional[UserOpportunityProfileIn]:
+    """Extracts candidate profile directly from ResumeContent maintained by Resume Studio."""
+    if not content:
+        return None
+
+    if isinstance(content, dict):
+        if "content" in content and isinstance(content["content"], (dict, object)):
+            content = content["content"]
+        if isinstance(content, dict):
+            edu_list = content.get("education", []) or []
+            skills = list(content.get("skills", []) or [])
+            location = str(content.get("location", "") or "").strip()
+        else:
+            edu_list = getattr(content, "education", []) or []
+            skills = list(getattr(content, "skills", []) or [])
+            location = str(getattr(content, "location", "") or "").strip()
+    else:
+        edu_list = getattr(content, "education", []) or []
+        skills = list(getattr(content, "skills", []) or [])
+        location = str(getattr(content, "location", "") or "").strip()
+
+    # If no education and no skills -> candidate profile has not been configured in Resume Studio
+    if not edu_list and not skills:
+        return None
+
+    first_edu = edu_list[0] if edu_list else None
+    grade_str = ""
+    if isinstance(first_edu, dict):
+        degree = first_edu.get("degree")
+        specialization = first_edu.get("field_of_study")
+        university = first_edu.get("institution")
+        grad_year = first_edu.get("end_year")
+        if first_edu.get("cgpa_or_grade"):
+            grade_str = str(first_edu.get("cgpa_or_grade")).strip()
+    elif first_edu:
+        degree = getattr(first_edu, "degree", None)
+        specialization = getattr(first_edu, "field_of_study", None)
+        university = getattr(first_edu, "institution", None)
+        grad_year = getattr(first_edu, "end_year", None)
+        if getattr(first_edu, "cgpa_or_grade", None):
+            grade_str = str(first_edu.cgpa_or_grade).strip()
+    else:
+        degree = specialization = university = grad_year = None
+
+    # Parse CGPA from cgpa_or_grade if available
+    cgpa = None
+    cgpa_scale = 10.0
+    if grade_str:
+        import re
+        m = re.search(r"(\d+(?:\.\d+)?)\s*(?:/\s*(\d+(?:\.\d+)?))?", grade_str)
+        if m:
+            try:
+                cgpa = float(m.group(1))
+                if m.group(2):
+                    cgpa_scale = float(m.group(2))
+            except ValueError:
+                pass
+
+    country = "India" if "india" in location.lower() else ("USA" if any(u in location.lower() for u in ("usa", "united states", "wa", "ca", "ny", "tx")) else "India")
+
+    return UserOpportunityProfileIn(
+        degree=degree,
+        degree_specialization=specialization,
+        university=university,
+        academic_year=None,
+        grad_year=grad_year,
+        cgpa=cgpa,
+        cgpa_scale=cgpa_scale,
+        active_backlogs=0,
+        country_of_study=country,
+        country_of_residence=country,
+        skills=skills,
+    )
+
+
+async def sync_candidate_profile_from_master(user_id: str, content: Any) -> None:
+    """Synchronizes candidate profile updates from Resume Studio into radar storage."""
+    derived = derive_profile_from_master_resume(content)
+    if not derived:
+        return
+    existing = await get_user_opportunity_profile(user_id)
+    if existing:
+        if derived.degree:
+            existing.degree = derived.degree
+        if derived.university:
+            existing.university = derived.university
+        if derived.degree_specialization:
+            existing.degree_specialization = derived.degree_specialization
+        if derived.grad_year:
+            existing.grad_year = derived.grad_year
+        if derived.skills:
+            existing.skills = derived.skills
+        if derived.cgpa is not None:
+            existing.cgpa = derived.cgpa
+            existing.cgpa_scale = derived.cgpa_scale
+        await upsert_user_opportunity_profile(user_id, existing)
+    else:
+        await upsert_user_opportunity_profile(user_id, derived)
+
+
 async def get_user_opportunity_profile(user_id: str) -> Optional[UserOpportunityProfileIn]:
     pool = await get_pool()
+    existing_profile = None
+
     if not pool:
         data = _in_memory_user_profiles.get(user_id)
-        return UserOpportunityProfileIn(**data) if data else None
+        if data:
+            existing_profile = UserOpportunityProfileIn(**data)
+    else:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT * FROM user_opportunity_profiles WHERE user_id = $1", user_id)
+            if row:
+                existing_profile = UserOpportunityProfileIn(
+                    degree=row["degree"],
+                    degree_specialization=row["degree_specialization"],
+                    university=row["university"],
+                    academic_year=row["academic_year"],
+                    grad_month=row["grad_month"],
+                    grad_year=row["grad_year"],
+                    cgpa=float(row["cgpa"]) if row.get("cgpa") is not None else None,
+                    cgpa_scale=float(row["cgpa_scale"]) if row.get("cgpa_scale") is not None else 10.0,
+                    active_backlogs=row.get("active_backlogs", 0) if row.get("active_backlogs") is not None else 0,
+                    work_authorization=row.get("work_authorization") or "India",
+                    requires_sponsorship=bool(row.get("requires_sponsorship", False)),
+                    country_of_study=row["country_of_study"] or "India",
+                    country_of_residence=row["country_of_residence"] or "India",
+                    preferred_locations=row["preferred_locations"] or ["India", "Remote"],
+                    preferred_work_arrangements=row["preferred_work_arrangements"] or ["remote", "hybrid", "onsite"],
+                    preferred_roles=row["preferred_roles"] or [],
+                    skills=row["skills"] or [],
+                    min_compensation=row["min_compensation"],
+                    resume_url=row["resume_url"],
+                )
 
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT * FROM user_opportunity_profiles WHERE user_id = $1", user_id)
-        if not row:
-            return None
-        return UserOpportunityProfileIn(
-            degree=row["degree"],
-            degree_specialization=row["degree_specialization"],
-            university=row["university"],
-            academic_year=row["academic_year"],
-            grad_month=row["grad_month"],
-            grad_year=row["grad_year"],
-            cgpa=float(row["cgpa"]) if row.get("cgpa") is not None else None,
-            cgpa_scale=float(row["cgpa_scale"]) if row.get("cgpa_scale") is not None else 10.0,
-            active_backlogs=row.get("active_backlogs", 0) if row.get("active_backlogs") is not None else 0,
-            work_authorization=row.get("work_authorization") or "India",
-            requires_sponsorship=bool(row.get("requires_sponsorship", False)),
-            country_of_study=row["country_of_study"] or "India",
-            country_of_residence=row["country_of_residence"] or "India",
-            preferred_locations=row["preferred_locations"] or ["India", "Remote"],
-            preferred_work_arrangements=row["preferred_work_arrangements"] or ["remote", "hybrid", "onsite"],
-            preferred_roles=row["preferred_roles"] or [],
-            skills=row["skills"] or [],
-            min_compensation=row["min_compensation"],
-            resume_url=row["resume_url"],
-        )
+    # Bridge with Resume Studio: Check candidate's master resume
+    try:
+        from backend.memory.career import get_master_resume
+        master = await get_master_resume(user_id)
+    except Exception:
+        master = None
+
+    if master and master.content:
+        derived = derive_profile_from_master_resume(master.content)
+        if derived:
+            if not existing_profile:
+                return derived
+            if not existing_profile.degree and derived.degree:
+                existing_profile.degree = derived.degree
+            if not existing_profile.university and derived.university:
+                existing_profile.university = derived.university
+            if not existing_profile.degree_specialization and derived.degree_specialization:
+                existing_profile.degree_specialization = derived.degree_specialization
+            if not existing_profile.grad_year and derived.grad_year:
+                existing_profile.grad_year = derived.grad_year
+            if not existing_profile.skills and derived.skills:
+                existing_profile.skills = derived.skills
+            if existing_profile.cgpa is None and derived.cgpa is not None:
+                existing_profile.cgpa = derived.cgpa
+                existing_profile.cgpa_scale = derived.cgpa_scale
+            return existing_profile
+
+    return existing_profile
 
 
 async def upsert_user_opportunity_profile(user_id: str, p: UserOpportunityProfileIn) -> None:

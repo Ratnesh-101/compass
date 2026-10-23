@@ -4,7 +4,6 @@ import RadarOverviewCards from './radar/RadarOverviewCards'
 import RadarFilters from './radar/RadarFilters'
 import RadarOpportunityCard from './radar/RadarOpportunityCard'
 import RadarDetailModal from './radar/RadarDetailModal'
-import RadarProfileModal from './radar/RadarProfileModal'
 
 const ApplicationWorkspaceModal = React.lazy(() => import('./career/ApplicationWorkspaceModal'))
 import {
@@ -19,7 +18,6 @@ import {
   unsaveOpportunity,
   updateApplication,
   fetchRadarProfile,
-  updateRadarProfile,
   triggerRadarSync,
   verifyOpportunity,
 } from '../api/radarApi'
@@ -29,7 +27,9 @@ export default function InternshipRadar({
   onRefreshComplete,
   onRefreshError,
   onOpenProfile,
+  onNavigateToResumeStudio,
 } = {}) {
+  const handleGoToResumeStudio = onNavigateToResumeStudio || onOpenProfile
   const [activeTab, setActiveTab] = useState('recommended')
   const [opportunities, setOpportunities] = useState([])
   const [stats, setStats] = useState(null)
@@ -52,7 +52,6 @@ export default function InternshipRadar({
 
   const [selectedDetailOpp, setSelectedDetailOpp] = useState(null)
   const [activeWorkspaceOpp, setActiveWorkspaceOpp] = useState(null)
-  const [showProfileModal, setShowProfileModal] = useState(false)
 
   // Load analytics & profile
   const loadMetadata = useCallback(async () => {
@@ -295,16 +294,6 @@ export default function InternshipRadar({
     }
   }
 
-  // Save Academic Profile (modal in InternshipRadar)
-  const handleSaveProfile = async newProfile => {
-    const updated = await updateRadarProfile(newProfile)
-    setProfile(updated)
-    setShowProfileModal(false)
-    // Run background refresh asynchronously without blocking modal close
-    handleBackgroundRefresh()
-    return updated
-  }
-
   return (
     <div
       style={{
@@ -345,7 +334,7 @@ export default function InternshipRadar({
       <RadarOverviewCards
         stats={stats}
         profile={profile}
-        onOpenProfile={onOpenProfile || (() => setShowProfileModal(true))}
+        onOpenProfile={handleGoToResumeStudio}
         onSelectTab={setActiveTab}
       />
 
@@ -363,7 +352,7 @@ export default function InternshipRadar({
         onToggleIndiaOnly={() => setIndiaOnly(prev => !prev)}
         workArrangement={workArrangement}
         onWorkArrangementChange={setWorkArrangement}
-        onOpenProfile={onOpenProfile || (() => setShowProfileModal(true))}
+        onOpenProfile={handleGoToResumeStudio}
         onSync={handleSyncSources}
         isSyncing={isSyncing}
       />
@@ -442,44 +431,185 @@ export default function InternshipRadar({
           </button>
         </div>
       ) : opportunities.length === 0 ? (
-        <div
-          style={{
-            padding: '48px 24px',
-            textAlign: 'center',
-            borderRadius: 'var(--radius-card, 8px)',
-            background: 'var(--bg-card)',
-            border: '1px dashed var(--border)',
-          }}
-        >
-          <Radar size={36} strokeWidth={1.5} color="var(--text-muted)" style={{ margin: '0 auto 12px auto' }} />
-          <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 6px 0' }}>
-            No opportunities found in this view
-          </h3>
-          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', maxWidth: '440px', margin: '0 auto 16px auto' }}>
-            {activeTab === 'watchlist'
-              ? 'You have not saved any opportunities to your watchlist yet. Click the star icon on any card to monitor it.'
-              : activeTab === 'applications'
-              ? 'No applications tracked yet. Set application states to manage your interview timeline.'
-              : 'Try broadening your search query, turning off filters, or syncing with discovery providers.'}
-          </p>
-          <button
-            type="button"
-            onClick={handleSyncSources}
-            disabled={isSyncing}
+        activeTab === 'recommended' && (!profile || profile.has_profile === false || (!profile.degree_level && (!profile.skills || profile.skills.length === 0) && !profile.grad_year)) ? (
+          <div
             style={{
-              padding: '8px 18px',
-              borderRadius: 'var(--radius-btn, 6px)',
-              background: 'var(--brand)',
-              color: 'var(--accent-text, #1b1a17)',
-              border: 'none',
-              fontWeight: 600,
-              fontSize: '13px',
-              cursor: 'pointer',
+              padding: '48px 24px',
+              textAlign: 'center',
+              borderRadius: 'var(--radius-card, 8px)',
+              background: 'var(--bg-card)',
+              border: '1px dashed var(--border)',
             }}
           >
-            {isSyncing ? 'Syncing Sources…' : 'Trigger Discovery Sync'}
-          </button>
-        </div>
+            <Radar size={36} strokeWidth={1.5} color="var(--brand)" style={{ margin: '0 auto 12px auto' }} />
+            <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 6px 0' }}>
+              Candidate Profile Required for Recommendations
+            </h3>
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', maxWidth: '480px', margin: '0 auto 20px auto', lineHeight: 1.5 }}>
+              Career Copilot evaluates internship eligibility and match fit against the verified candidate profile maintained in Resume Studio. Upload or build your resume in Resume Studio to unlock personalized match scoring.
+            </p>
+            {handleGoToResumeStudio && (
+              <button
+                type="button"
+                onClick={handleGoToResumeStudio}
+                style={{
+                  padding: '9px 20px',
+                  borderRadius: 'var(--radius-btn, 6px)',
+                  background: 'var(--brand)',
+                  color: 'var(--accent-text, #1b1a17)',
+                  border: 'none',
+                  fontWeight: 600,
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                }}
+              >
+                Go to Resume Studio
+              </button>
+            )}
+          </div>
+        ) : (searchQuery.trim() || selectedCategory || selectedEmployerType || workArrangement) ? (
+          <div
+            style={{
+              padding: '48px 24px',
+              textAlign: 'center',
+              borderRadius: 'var(--radius-card, 8px)',
+              background: 'var(--bg-card)',
+              border: '1px dashed var(--border)',
+            }}
+          >
+            <Radar size={36} strokeWidth={1.5} color="var(--text-muted)" style={{ margin: '0 auto 12px auto' }} />
+            <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 6px 0' }}>
+              No opportunities match your current filters
+            </h3>
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', maxWidth: '440px', margin: '0 auto 16px auto' }}>
+              We could not find any postings matching your search query or selected criteria. Try adjusting or clearing your filters.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setSearchQuery('')
+                setSelectedCategory('')
+                setSelectedEmployerType('')
+                setWorkArrangement('')
+              }}
+              style={{
+                padding: '8px 18px',
+                borderRadius: 'var(--radius-btn, 6px)',
+                background: 'var(--bg-card)',
+                color: 'var(--text-primary)',
+                border: '1px solid var(--border)',
+                fontWeight: 600,
+                fontSize: '13px',
+                cursor: 'pointer',
+              }}
+            >
+              Reset Filters
+            </button>
+          </div>
+        ) : activeTab === 'watchlist' ? (
+          <div
+            style={{
+              padding: '48px 24px',
+              textAlign: 'center',
+              borderRadius: 'var(--radius-card, 8px)',
+              background: 'var(--bg-card)',
+              border: '1px dashed var(--border)',
+            }}
+          >
+            <Radar size={36} strokeWidth={1.5} color="var(--text-muted)" style={{ margin: '0 auto 12px auto' }} />
+            <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 6px 0' }}>
+              Your watchlist is empty
+            </h3>
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', maxWidth: '440px', margin: '0 auto 16px auto' }}>
+              You have not bookmarked any opportunities yet. Click the bookmark icon on any card to monitor its hiring cycle and deadlines.
+            </p>
+            <button
+              type="button"
+              onClick={() => setActiveTab('open')}
+              style={{
+                padding: '8px 18px',
+                borderRadius: 'var(--radius-btn, 6px)',
+                background: 'var(--brand)',
+                color: 'var(--accent-text, #1b1a17)',
+                border: 'none',
+                fontWeight: 600,
+                fontSize: '13px',
+                cursor: 'pointer',
+              }}
+            >
+              Browse Open Opportunities
+            </button>
+          </div>
+        ) : activeTab === 'applications' ? (
+          <div
+            style={{
+              padding: '48px 24px',
+              textAlign: 'center',
+              borderRadius: 'var(--radius-card, 8px)',
+              background: 'var(--bg-card)',
+              border: '1px dashed var(--border)',
+            }}
+          >
+            <Radar size={36} strokeWidth={1.5} color="var(--text-muted)" style={{ margin: '0 auto 12px auto' }} />
+            <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 6px 0' }}>
+              No applications tracked yet
+            </h3>
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', maxWidth: '440px', margin: '0 auto 16px auto' }}>
+              Track applications through preparation, submission, and interviews to stay organized across active cycles.
+            </p>
+            <button
+              type="button"
+              onClick={() => setActiveTab('recommended')}
+              style={{
+                padding: '8px 18px',
+                borderRadius: 'var(--radius-btn, 6px)',
+                background: 'var(--brand)',
+                color: 'var(--accent-text, #1b1a17)',
+                border: 'none',
+                fontWeight: 600,
+                fontSize: '13px',
+                cursor: 'pointer',
+              }}
+            >
+              Explore Recommendations
+            </button>
+          </div>
+        ) : (
+          <div
+            style={{
+              padding: '48px 24px',
+              textAlign: 'center',
+              borderRadius: 'var(--radius-card, 8px)',
+              background: 'var(--bg-card)',
+              border: '1px dashed var(--border)',
+            }}
+          >
+            <Radar size={36} strokeWidth={1.5} color="var(--text-muted)" style={{ margin: '0 auto 12px auto' }} />
+            <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 6px 0' }}>
+              No opportunities found in this view
+            </h3>
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', maxWidth: '440px', margin: '0 auto 16px auto' }}>
+              Try broadening your criteria or triggering a discovery sync with verified sources.
+            </p>
+            <button
+              type="button"
+              onClick={handleSyncSources}
+              disabled={isSyncing}
+              style={{
+                padding: '8px 18px',
+                borderRadius: 'var(--radius-btn, 6px)',
+                background: 'var(--brand)',
+                color: 'var(--accent-text, #1b1a17)',
+                border: 'none',
+                fontWeight: 600,
+                fontSize: '13px',
+                cursor: isSyncing ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {isSyncing ? 'Syncing Sources…' : 'Trigger Discovery Sync'}
+            </button>
+          </div>
+        )
       ) : (
         <>
           <div
@@ -551,6 +681,7 @@ export default function InternshipRadar({
           onVerify={handleVerifyOpportunity}
           isVerifying={isVerifying}
           onApply={setActiveWorkspaceOpp}
+          onNavigateToResumeStudio={handleGoToResumeStudio}
         />
       )}
 
@@ -568,17 +699,6 @@ export default function InternshipRadar({
             }}
           />
         </React.Suspense>
-      )}
-
-      {/* Academic Profile Modal */}
-      {showProfileModal && (
-        <RadarProfileModal
-          isOpen={showProfileModal}
-          profile={profile}
-          onClose={() => setShowProfileModal(false)}
-          onSave={handleSaveProfile}
-          isSaving={false}
-        />
       )}
     </div>
   )

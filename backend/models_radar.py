@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Any, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ---------------------------------------------------------------------------
@@ -154,11 +154,11 @@ class OpportunityOut(BaseModel):
     company_name: str
     normalized_company: str
     role_title: str
-    employer_type: str = EmployerType.ENTERPRISE  # startup, research, government, sme, open_source, enterprise
-    opportunity_type: str  # internship, fellowship, research, externship, co-op
-    category: str  # ai_ml, swe, backend, data, research, cloud, open_source, general
+    employer_type: Optional[str] = None  # startup, research, government, sme, open_source, enterprise, or None if unverified
+    opportunity_type: str = "internship"  # internship, fellowship, research, externship, co-op
+    category: Optional[str] = None  # ai_ml, swe, backend, data, research, cloud, open_source, general
     location: Optional[str] = None
-    work_arrangement: str = "unknown"  # remote, onsite, hybrid, unknown
+    work_arrangement: Optional[str] = None  # remote, onsite, hybrid, unknown
     country: str = "India"
     is_india_eligible: bool = True
     compensation: Optional[str] = None
@@ -172,6 +172,37 @@ class OpportunityOut(BaseModel):
     last_verified_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+    @field_validator(
+        "location",
+        "compensation",
+        "duration",
+        "work_arrangement",
+        "category",
+        "official_application_url",
+        "description",
+        "employer_type",
+        "verification_evidence",
+        mode="before",
+    )
+    @classmethod
+    def sanitize_optional_strings(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        v_str = str(v).strip()
+        if not v_str or v_str.lower() in ("nan", "none", "null", "undefined", "n/a"):
+            return None
+        return v_str
+
+    @field_validator("company_name", "role_title", mode="before")
+    @classmethod
+    def sanitize_required_strings(cls, v: Any) -> str:
+        if v is None:
+            return ""
+        v_str = str(v).strip()
+        if v_str.lower() in ("nan", "none", "null", "undefined"):
+            return ""
+        return v_str
 
     # Evidence-based verification metadata
     verification_evidence: Optional[str] = None

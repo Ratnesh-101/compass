@@ -84,7 +84,10 @@ async def setup_career_copilot_environment():
     import backend.memory.radar as radar_mem
     from backend.memory.db import get_pool
     radar_mem._db_pool_available = True
-    pool = await get_pool()
+    try:
+        pool = await get_pool()
+    except Exception:
+        pool = None
     if pool:
         try:
             async with pool.acquire() as conn:
