@@ -198,3 +198,95 @@ def test_cli_triage(monkeypatch):
     assert "THINK" in result.stdout
     assert "VERDICT" in result.stdout
     assert "Feasibility Triage Artifact" in result.stdout
+
+
+def test_cli_log_sends_content_contract(monkeypatch):
+    """Regression test: verify `compass log` sends 'content' to satisfy backend contract."""
+    from cli import assistant_cli
+
+    captured_payload = {}
+
+    def mock_post_capture(path: str, data: dict) -> dict:
+        if "/api/log" in path:
+            captured_payload.update(data)
+            return {"status": "ok", "message": "Memory logged successfully"}
+        return {}
+
+    monkeypatch.setattr(assistant_cli, "_post", mock_post_capture)
+    result = runner.invoke(app, ["log", "Test contract payload", "--domain", "code", "--tags", "test,contract"])
+    assert result.exit_code == 0
+    assert "content" in captured_payload
+    assert captured_payload["content"] == "Test contract payload"
+    assert captured_payload["summary"] == "Test contract payload"
+    assert captured_payload["tags"] == ["test", "contract"]
+
+
+def test_cli_agent_runner_passes_auth_headers(monkeypatch):
+    """Regression test: verify run_interactive_agent_session passes Authorization Bearer token."""
+    from cli.cli_agent_runner import run_interactive_agent_session
+    from unittest.mock import MagicMock
+
+    called_kwargs = {}
+
+    class MockStreamContext:
+        def __init__(self, *args, **kwargs):
+            called_kwargs.update(kwargs)
+        def __enter__(self):
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            resp.iter_text.return_value = ['data: {"type": "done", "content": "{\\"tools_used\\": [], \\"total_steps\\": 1}"}\n']
+            return resp
+        def __exit__(self, *args):
+            pass
+
+    monkeypatch.setattr("httpx.stream", lambda *args, **kwargs: MockStreamContext(*args, **kwargs))
+
+    run_interactive_agent_session(
+        api_base="http://127.0.0.1:8000",
+        auth_token="test-secret-token",
+        goal="Test goal",
+    )
+
+    headers = called_kwargs.get("headers", {})
+    assert headers.get("Authorization") == "Bearer test-secret-token"
+
+
+def test_cli_agent_inspection_commands_pass_auth_headers(monkeypatch):
+    """Regression test: verify agent-activity, agent-stats, agent-runs send auth headers."""
+    import httpx
+    from unittest.mock import MagicMock
+
+    captured_headers = []
+
+    def mock_httpx_get(url: str, *args, **kwargs):
+        headers = kwargs.get("headers", {})
+        captured_headers.append((url, headers))
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        if "activity" in url:
+            mock_resp.json.return_value = {"activity": []}
+        elif "critique-stats" in url:
+            mock_resp.json.return_value = {"total_critique_passes": 0}
+        elif "runs" in url:
+            mock_resp.json.return_value = {"runs": []}
+        elif "proactive-briefing" in url:
+            mock_resp.json.return_value = {"briefing": "All clear"}
+        return mock_resp
+
+    monkeypatch.setattr(httpx, "get", mock_httpx_get)
+
+    res1 = runner.invoke(app, ["agent-activity"])
+    assert res1.exit_code == 0
+    assert any("Authorization" in h and "Bearer" in h["Authorization"] for _, h in captured_headers if "activity" in _)
+
+    res2 = runner.invoke(app, ["agent-stats"])
+    assert res2.exit_code == 0
+    assert any("Authorization" in h and "Bearer" in h["Authorization"] for _, h in captured_headers if "critique-stats" in _)
+
+    res3 = runner.invoke(app, ["agent-runs"])
+    assert res3.exit_code == 0
+    assert any("Authorization" in h and "Bearer" in h["Authorization"] for _, h in captured_headers if "runs" in _)
+
+    res4 = runner.invoke(app, ["agent-briefing"])
+    assert res4.exit_code == 0
+    assert any("Authorization" in h and "Bearer" in h["Authorization"] for _, h in captured_headers if "proactive-briefing" in _)

@@ -303,9 +303,9 @@ async def get_frontend_tasks(
     include_demo: bool = Query(True),
 ):
     """Public frontend endpoint matching frontend/src/api/client.js format with per-account isolation."""
+    ident = _get_current_identity(request)
+    user_id = ident.id if ident else _get_or_create_user_id(request)
     try:
-        ident = _get_current_identity(request)
-        user_id = ident.id if ident else _get_or_create_user_id(request)
         pool = await get_pool()
         async with pool.acquire() as conn:
             raw_tasks = await structured.list_tasks(conn, domain=domain, user_id=user_id)
@@ -319,6 +319,8 @@ async def get_frontend_tasks(
                 proj_name = t.get("project", {}).get("name", "General") if t.get("project") else "General"
                 result.append(build_frontend_task(t, proj_name=proj_name))
             return result
+    except HTTPException:
+        raise
     except Exception as e:
         logger.warning(f"Error fetching frontend tasks from DB: {e}")
         return []

@@ -39,6 +39,7 @@ async def test_health_check(client: AsyncClient):
     "path",
     [
         "/tasks",
+        "/api/tasks",
         "/projects",
         "/dashboard",
         "/memory/timeline",
@@ -111,3 +112,25 @@ async def test_specialist_dispatch_endpoint_deleted_returns_404(client: AsyncCli
     """POST /api/specialist/dispatch was completely removed and returns 404."""
     resp = await client.post("/api/specialist/dispatch", json={"capability": "memory", "user_goal": "test"})
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_api_tasks_invalid_token_returns_401(client: AsyncClient):
+    """GET /api/tasks with invalid Bearer token must return HTTP 401."""
+    resp = await client.get("/api/tasks", headers={"Authorization": "Bearer invalid-token-12345"})
+    assert resp.status_code == 401
+    assert "detail" in resp.json()
+
+
+@pytest.mark.asyncio
+async def test_log_memory_request_schema():
+    """Verify LogMemoryRequest accepts content or summary interchangeably."""
+    from backend.models import LogMemoryRequest
+
+    req1 = LogMemoryRequest(summary="Memory with summary only", domain="code")
+    assert req1.content == "Memory with summary only"
+    assert req1.summary == "Memory with summary only"
+
+    req2 = LogMemoryRequest(content="Memory with content only", domain="hackathon")
+    assert req2.content == "Memory with content only"
+    assert req2.summary == "Memory with content only"

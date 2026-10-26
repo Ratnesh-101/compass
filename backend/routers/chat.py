@@ -473,7 +473,7 @@ async def log_memory_entry(req: LogMemoryRequest, request: Request, _rl: None = 
     from backend.services.embeddings import get_embedding
     from backend.memory import structured
 
-    text = (req.content or "").strip()
+    text = (req.content or req.summary or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="Missing memory content")
 

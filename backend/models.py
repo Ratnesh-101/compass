@@ -6,7 +6,7 @@ Shared request and response schemas matching docs/api_contract.md.
 
 from datetime import date
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ChatRequest(BaseModel):
@@ -48,10 +48,21 @@ class PublicChatResponse(BaseModel):
 
 
 class LogMemoryRequest(BaseModel):
-    content: str
+    content: Optional[str] = None
+    summary: Optional[str] = None
     domain: Optional[str] = "general"
     project: Optional[str] = None
     tags: Optional[List[str]] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def resolve_content(cls, values: Any) -> Any:
+        if isinstance(values, dict):
+            if not values.get("content") and values.get("summary"):
+                values["content"] = values["summary"]
+            elif not values.get("summary") and values.get("content"):
+                values["summary"] = values["content"]
+        return values
 
 
 

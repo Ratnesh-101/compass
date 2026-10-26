@@ -349,11 +349,13 @@ def log(
     tags: Optional[str] = typer.Option(None, "--tags", "-t", help="Comma-separated tags"),
 ):
     """📝 Log a memory entry (code context, coursework note, etc.)."""
+    tags_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
     payload = {
+        "content": summary,
         "summary": summary,
         "domain": domain,
         "project": project,
-        "tags": tags,
+        "tags": tags_list,
     }
     result = _post("/api/log", payload)
 
@@ -530,7 +532,7 @@ def agent_undo(
 def agent_activity(limit: int = typer.Option(15, "--limit", "-n", help="Number of entries to show")):
     """📋 View recent agent mutations from the audit log with per-item IDs for undo."""
     try:
-        resp = httpx.get(f"{API_BASE}/api/agent/activity?limit={limit}", timeout=15.0)
+        resp = httpx.get(f"{API_BASE}/api/agent/activity?limit={limit}", headers=_headers(), timeout=15.0)
         resp.raise_for_status()
         entries = resp.json().get("activity", [])
         render_agent_activity_table(entries)
@@ -542,7 +544,7 @@ def agent_activity(limit: int = typer.Option(15, "--limit", "-n", help="Number o
 def agent_stats():
     """⚖️ Surface real self-critique pass effectiveness metrics."""
     try:
-        resp = httpx.get(f"{API_BASE}/api/agent/critique-stats", timeout=15.0)
+        resp = httpx.get(f"{API_BASE}/api/agent/critique-stats", headers=_headers(), timeout=15.0)
         resp.raise_for_status()
         render_agent_stats_view(resp.json())
     except Exception as e:
@@ -559,7 +561,7 @@ def agent_runs(
         url = f"{API_BASE}/api/agent/runs?limit={limit}"
         if conversation_id:
             url += f"&conversation_id={conversation_id}"
-        resp = httpx.get(url, timeout=15.0)
+        resp = httpx.get(url, headers=_headers(), timeout=15.0)
         resp.raise_for_status()
         render_agent_runs_table(resp.json().get("runs", []))
     except Exception as e:
@@ -570,7 +572,7 @@ def agent_runs(
 def agent_briefing():
     """🌅 Inspect the latest autonomous overnight proactive briefing."""
     try:
-        resp = httpx.get(f"{API_BASE}/api/agent/proactive-briefing", timeout=15.0)
+        resp = httpx.get(f"{API_BASE}/api/agent/proactive-briefing", headers=_headers(), timeout=15.0)
         resp.raise_for_status()
         render_briefing_panel(resp.json())
     except Exception as e:

@@ -37,6 +37,7 @@ def run_interactive_agent_session(
 
     pending_actions: List[Dict[str, Any]] = []
     run_id: Optional[str] = None
+    auth_headers = {"Authorization": f"Bearer {auth_token}"} if auth_token else {}
 
     try:
         with httpx.stream(
@@ -49,6 +50,7 @@ def run_interactive_agent_session(
                 "confirmed_actions": [],
                 "conversation_id": conversation_id,
             },
+            headers=auth_headers,
             timeout=120.0,
         ) as response:
             response.raise_for_status()
@@ -172,6 +174,7 @@ def run_interactive_agent_session(
                             "action": "reject",
                             "feedback": feedback,
                         },
+                        headers=auth_headers,
                         timeout=120.0,
                     ) as resp:
                         resp.raise_for_status()
