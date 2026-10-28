@@ -6,6 +6,7 @@ All model IDs, database URLs, and auth tokens are configured here.
 """
 
 import json
+import logging
 import os
 from functools import lru_cache
 from typing import Any
@@ -66,6 +67,10 @@ class Settings(BaseSettings):
     GLOBAL_DAILY_MODEL_CALL_CAP: int = 1000
     GLOBAL_DAILY_MINT_CAP: int = 200
     COMPASS_KILL_SWITCH_ACTIVE: bool = False
+    # Per-identity daily Tavily credit limits (env: TAVILY_DAILY_GUEST_CREDITS / TAVILY_DAILY_USER_CREDITS).
+    # Values < 1 or non-integers fall back to the default with a warning; the cap can never be disabled.
+    TAVILY_DAILY_GUEST_CREDITS: int = 25
+    TAVILY_DAILY_USER_CREDITS: int = 30
 
     # --- Pinned Authority Domains & Event Prefixes ---
     PINNED_TIER_1_DOMAINS: list[str] = [
@@ -282,6 +287,26 @@ class Settings(BaseSettings):
         "https://compass-frontend.vercel.app",
         "https://compass.nebius.app",
     ]
+
+    @field_validator("TAVILY_DAILY_GUEST_CREDITS", "TAVILY_DAILY_USER_CREDITS", mode="before")
+    @classmethod
+    def parse_tavily_daily_credits(cls, v: Any, info: Any) -> int:
+        default = cls.model_fields[info.field_name].default
+        try:
+            if isinstance(v, bool):
+                raise ValueError("bool is not an integer")
+            if isinstance(v, float) and not v.is_integer():
+                raise ValueError("non-integer")
+            parsed = int(str(v).strip()) if isinstance(v, str) else int(v)
+            if parsed < 1:
+                raise ValueError("must be >= 1")
+            return parsed
+        except (TypeError, ValueError):
+            logging.getLogger("compass.config").warning(
+                "Invalid %s=%r (must be an integer >= 1); falling back to default %d",
+                info.field_name, v, default,
+            )
+            return default
 
     @field_validator("ENABLE_DEMO_SEEDING", mode="before")
     @classmethod

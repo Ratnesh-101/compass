@@ -123,17 +123,18 @@ async def test_extract_settles_run_credits_against_real_usage(stub):
 # --------------------------------------------------------------------------- per-identity daily
 
 
-async def test_guest_stops_at_daily_guest_limit(stub):
+async def test_guest_stops_at_daily_guest_limit(stub, monkeypatch):
+    monkeypatch.setattr(get_settings(), "TAVILY_DAILY_GUEST_CREDITS", 8)
     guest = _uid("guest")
     with caller(guest, guest=True):
-        for _ in range(budgets.MAX_DAILY_GUEST_TAVILY_CREDITS):
+        for _ in range(8):
             await tavily_service.search("q")
         with pytest.raises(HTTPException) as exc:
             await tavily_service.search("q")
     assert exc.value.status_code == 429
     assert exc.value.detail["code"] == "tavily_budget_exceeded"
     assert int(exc.value.headers["Retry-After"]) >= 1
-    assert stub.search_calls == budgets.MAX_DAILY_GUEST_TAVILY_CREDITS
+    assert stub.search_calls == 8
 
 
 async def test_user_stops_at_daily_user_limit(stub):
@@ -155,10 +156,11 @@ async def test_admin_is_not_limited_per_identity(stub):
     assert stub.search_calls == budgets.MAX_DAILY_USER_TAVILY_CREDITS + 5
 
 
-async def test_one_identity_does_not_block_another(stub):
+async def test_one_identity_does_not_block_another(stub, monkeypatch):
+    monkeypatch.setattr(get_settings(), "TAVILY_DAILY_GUEST_CREDITS", 8)
     first, second = _uid("guest"), _uid("guest")
     with caller(first, guest=True):
-        for _ in range(budgets.MAX_DAILY_GUEST_TAVILY_CREDITS):
+        for _ in range(8):
             await tavily_service.search("q")
         with pytest.raises(HTTPException):
             await tavily_service.search("q")
@@ -201,6 +203,49 @@ async def test_identity_query_error_fails_open_with_warning(stub, monkeypatch, c
             await tavily_service.search("q")
     assert stub.search_calls == 1
     assert any("daily Tavily budget" in r.getMessage() and r.levelname == "WARNING" for r in caplog.records)
+
+
+async def test_default_guest_cap_is_25_and_user_cap_is_30(stub, monkeypatch):
+    from backend.config import Settings
+
+    monkeypatch.delenv("TAVILY_DAILY_GUEST_CREDITS", raising=False)
+    monkeypatch.delenv("TAVILY_DAILY_USER_CREDITS", raising=False)
+    defaults = Settings(_env_file=None)
+    assert defaults.TAVILY_DAILY_GUEST_CREDITS == 25
+    assert defaults.TAVILY_DAILY_USER_CREDITS == 30
+    assert budgets.MAX_DAILY_GUEST_TAVILY_CREDITS == 25
+    with caller(_uid("guest"), guest=True):
+        for _ in range(25):
+            await tavily_service.search("q")
+        with pytest.raises(HTTPException) as exc:
+            await tavily_service.search("q")
+    assert "25 credits" in exc.value.detail["message"]
+    assert stub.search_calls == 25
+
+
+@pytest.mark.parametrize("bad", ["0", "-3", "abc", "2.5", ""])
+def test_invalid_daily_credit_env_falls_back_to_default_with_warning(monkeypatch, caplog, bad):
+    from backend.config import Settings
+
+    monkeypatch.setenv("TAVILY_DAILY_GUEST_CREDITS", bad)
+    monkeypatch.setenv("TAVILY_DAILY_USER_CREDITS", bad)
+    with caplog.at_level("WARNING", logger="compass.config"):
+        s = Settings(_env_file=None)
+    assert s.TAVILY_DAILY_GUEST_CREDITS == 25
+    assert s.TAVILY_DAILY_USER_CREDITS == 30
+    assert any("TAVILY_DAILY_GUEST_CREDITS" in r.getMessage() for r in caplog.records)
+
+
+def test_valid_daily_credit_env_is_honoured(monkeypatch):
+    from backend.config import Settings
+
+    monkeypatch.setenv("TAVILY_DAILY_GUEST_CREDITS", "12")
+    assert Settings(_env_file=None).TAVILY_DAILY_GUEST_CREDITS == 12
+
+
+async def test_live_setting_below_one_cannot_disable_cap(stub, monkeypatch):
+    monkeypatch.setattr(get_settings(), "TAVILY_DAILY_GUEST_CREDITS", 0)
+    assert budgets._daily_tavily_limit(True) == 25
 
 
 # --------------------------------------------------------------------------- recording / global
@@ -250,6 +295,7 @@ async def test_kill_switch_blocks_before_spending(stub, monkeypatch):
 
 
 async def test_research_pipeline_returns_capped_result_not_exception(stub, monkeypatch):
+    monkeypatch.setattr(get_settings(), "TAVILY_DAILY_GUEST_CREDITS", 8)
     async def fake_decompose(query):
         return ["alpha query", "beta query"]
 
@@ -258,7 +304,7 @@ async def test_research_pipeline_returns_capped_result_not_exception(stub, monke
     monkeypatch.setattr(tavily_pipeline, "tavily_available", lambda: True)
     guest = _uid("guest")
     with caller(guest, guest=True):
-        for _ in range(budgets.MAX_DAILY_GUEST_TAVILY_CREDITS):
+        for _ in range(8):
             await tavily_service.search("q")
         result = await tavily_pipeline.run_tavily_research("some capped research query")
     assert result["capped"] is True
@@ -266,11 +312,12 @@ async def test_research_pipeline_returns_capped_result_not_exception(stub, monke
     assert "capped" in result["summary"].lower()
 
 
-async def test_search_web_skill_returns_failure_dict_when_capped(stub):
+async def test_search_web_skill_returns_failure_dict_when_capped(stub, monkeypatch):
     from backend.skills import handle_search_web
 
+    monkeypatch.setattr(get_settings(), "TAVILY_DAILY_GUEST_CREDITS", 8)
     with caller(_uid("guest"), guest=True):
-        for _ in range(budgets.MAX_DAILY_GUEST_TAVILY_CREDITS):
+        for _ in range(8):
             await tavily_service.search("q")
         res = await handle_search_web({"query": "anything"}, pool=None)
     assert res["success"] is False

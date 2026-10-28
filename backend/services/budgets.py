@@ -25,8 +25,10 @@ MAX_RUN_TAVILY_CREDITS = 6
 # Per-Day Budgets
 MAX_DAILY_USER_MODEL_CALLS = 150
 MAX_DAILY_GUEST_MODEL_CALLS = 40
+# Documented defaults; enforcement reads the live Settings values
+# (TAVILY_DAILY_USER_CREDITS / TAVILY_DAILY_GUEST_CREDITS), which fall back to these.
 MAX_DAILY_USER_TAVILY_CREDITS = 30
-MAX_DAILY_GUEST_TAVILY_CREDITS = 8
+MAX_DAILY_GUEST_TAVILY_CREDITS = 25
 
 
 class BudgetExceededError(Exception):
@@ -104,7 +106,14 @@ def _seconds_until_utc_midnight() -> int:
 
 
 def _daily_tavily_limit(is_guest: bool) -> int:
-    return MAX_DAILY_GUEST_TAVILY_CREDITS if is_guest else MAX_DAILY_USER_TAVILY_CREDITS
+    """Live per-identity daily limit from settings; invalid values fall back to the default (never disabled)."""
+    default = MAX_DAILY_GUEST_TAVILY_CREDITS if is_guest else MAX_DAILY_USER_TAVILY_CREDITS
+    name = "TAVILY_DAILY_GUEST_CREDITS" if is_guest else "TAVILY_DAILY_USER_CREDITS"
+    value = getattr(_get_budget_settings(), name, default)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        logger.warning("Invalid %s=%r; using default %d", name, value, default)
+        return default
+    return value
 
 
 def _daily_identity_exceeded(is_guest: bool, limit: int) -> HTTPException:

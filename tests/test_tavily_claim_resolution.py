@@ -774,6 +774,6 @@ def test_tavily_usage_cap_constants():
     assert settings.GLOBAL_DAILY_TAVILY_CREDIT_CAP == 100
     assert MAX_RUN_TAVILY_CREDITS == 6
     assert MAX_DAILY_USER_TAVILY_CREDITS == 30
-    assert MAX_DAILY_GUEST_TAVILY_CREDITS == 8
+    assert MAX_DAILY_GUEST_TAVILY_CREDITS == 25
 
 
