@@ -651,7 +651,7 @@ async def update_career_application(app_id: int, user_id: str, updates: Dict[str
                 submission_payload = COALESCE($7::jsonb, submission_payload),
                 submission_result = COALESCE($8::jsonb, submission_result),
                 batch_id = COALESCE($9, batch_id),
-                approved_at = COALESCE($10, approved_at),
+                approved_at = CASE WHEN $15::boolean THEN NULL ELSE COALESCE($10, approved_at) END,
                 submitted_at = COALESCE($11, submitted_at),
                 target_deadline = COALESCE($12, target_deadline),
                 private_notes = COALESCE($13, private_notes),
@@ -674,6 +674,7 @@ async def update_career_application(app_id: int, user_id: str, updates: Dict[str
             updates.get("target_deadline"),
             updates.get("private_notes"),
             updates.get("cover_letter"),
+            "approved_at" in updates and updates["approved_at"] is None,
         )
         return _parse_app_row(dict(row), is_persisted=True) if row else None
 

@@ -13,12 +13,15 @@ import logging
 from typing import Any, Dict, Optional
 
 from backend.memory.career import (
+    claim_application_batch_for_submission,
     create_tailored_resume,
+    finish_application_batch,
     get_application_batch,
     get_career_application_by_id,
     get_master_resume,
     get_or_create_career_application,
     list_career_applications,
+    release_application_batch_claim,
     update_career_application,
     upsert_master_resume,
 )
@@ -34,7 +37,12 @@ from backend.services.career_resume import (
     draft_truthful_cover_letter,
     tailor_resume_for_opportunity,
 )
-from backend.services.career_submission import execute_batch_submission
+from backend.services.career_submission import (
+    compute_batch_content_hash,
+    execute_batch_submission,
+    get_batch_lock,
+    verify_batch_approval_token,
+)
 from backend.skills.registry import register_skill
 
 logger = logging.getLogger("compass.skills.career")
@@ -49,9 +57,13 @@ async def handle_tailor_resume(args: Dict[str, Any], pool: Any = None) -> Dict[s
 
     opp = None
     if opp_id:
-        opp = await get_opportunity_by_id(int(opp_id), user_id)
+        try:
+            opp_id_int = int(opp_id)
+        except (TypeError, ValueError):
+            return {"success": False, "error": f"Invalid opportunity_id '{opp_id}': must be a number."}
+        opp = await get_opportunity_by_id(opp_id_int, user_id)
     elif target_comp:
-        opps, _ = await get_all_opportunities(search=target_comp, page=1, page_size=1)
+        opps, _ = await get_all_opportunities(user_id=user_id, search=target_comp, page=1, page_size=1)
         if opps:
             opp = opps[0]
 
@@ -170,8 +182,51 @@ async def handle_submit_approved_application_batch(args: Dict[str, Any], pool: A
         }
 
     pref_method = args.get("preferred_method")
-    method_enum = SubmissionMethod(pref_method) if pref_method else SubmissionMethod.MANUAL_HANDOFF
-    results = await execute_batch_submission(user_id, batch, method_enum)
+    try:
+        method_enum = SubmissionMethod(pref_method) if pref_method else SubmissionMethod.MANUAL_HANDOFF
+    except ValueError:
+        valid = ", ".join(m.value for m in SubmissionMethod)
+        return {"success": False, "error": f"Invalid preferred_method '{pref_method}'. Valid values: {valid}."}
+
+    lock = get_batch_lock(batch_id)
+    if lock.locked():
+        return {"success": False, "error": "Concurrent submission rejected: A submission is already running for this batch."}
+
+    async with lock:
+        # Same atomic claim, content-hash and token checks as the HTTP submit route
+        claimed = await claim_application_batch_for_submission(batch_id, user_id)
+        if not claimed:
+            return {
+                "success": False,
+                "error": "Submission rejected: this batch is already processing or is no longer in APPROVED status.",
+            }
+        try:
+            apps_data = []
+            for aid in batch.get("application_ids", []):
+                app_rec = await get_career_application_by_id(aid, user_id)
+                if app_rec:
+                    apps_data.append(app_rec.model_dump())
+            token = batch.get("approval_token")
+            if not token:
+                await release_application_batch_claim(batch_id, user_id, "APPROVED")
+                return {"success": False, "error": "Submission blocked: missing approval token. Batch must be re-approved."}
+            is_valid, reason = verify_batch_approval_token(
+                token, user_id, batch_id, compute_batch_content_hash(apps_data)
+            )
+            if not is_valid:
+                await release_application_batch_claim(batch_id, user_id, "APPROVED")
+                return {"success": False, "error": f"Submission blocked: {reason}"}
+
+            results = await execute_batch_submission(user_id, batch, method_enum)
+            await finish_application_batch(batch_id, user_id, [r.model_dump() for r in results])
+        except Exception:
+            logger.exception("Unhandled error executing batch submission %s", batch_id)
+            await finish_application_batch(batch_id, user_id, [{
+                "application_id": 0,
+                "status": "FAILED",
+                "message": "Submission execution failed unexpectedly.",
+            }])
+            return {"success": False, "error": "Submission execution failed. Please try again later."}
 
     summary_lines = [
         f"✅ **Batch Submission Complete (ID: {batch_id})**",
@@ -228,9 +283,13 @@ async def handle_draft_cover_letter(args: Dict[str, Any], pool: Any = None) -> D
 
     opp = None
     if opp_id:
-        opp = await get_opportunity_by_id(int(opp_id), user_id)
+        try:
+            opp_id_int = int(opp_id)
+        except (TypeError, ValueError):
+            return {"success": False, "error": f"Invalid opportunity_id '{opp_id}': must be a number."}
+        opp = await get_opportunity_by_id(opp_id_int, user_id)
     elif target_comp:
-        opps, _ = await get_all_opportunities(search=target_comp, page=1, page_size=1)
+        opps, _ = await get_all_opportunities(user_id=user_id, search=target_comp, page=1, page_size=1)
         if opps:
             opp = opps[0]
 

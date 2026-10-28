@@ -6,6 +6,7 @@ and Application Center (application states, batch review, explicit approval, sub
 """
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
@@ -173,7 +174,7 @@ class SaveResumeRequest(BaseModel):
 
 
 class ResumeParseUploadRequest(BaseModel):
-    raw_text: str
+    raw_text: str = Field(max_length=200000)
 
 
 class CoverLetterOut(BaseModel):
@@ -221,9 +222,16 @@ class UpdateApplicationStatusRequest(BaseModel):
     status: Optional[CareerApplicationStatus] = None
     submission_method: Optional[SubmissionMethod] = None
     form_answers: Optional[Dict[str, Any]] = None
-    cover_letter: Optional[str] = None
+    cover_letter: Optional[str] = Field(default=None, max_length=50000)
     target_deadline: Optional[date] = None
-    private_notes: Optional[str] = None
+    private_notes: Optional[str] = Field(default=None, max_length=20000)
+
+    @field_validator("form_answers")
+    @classmethod
+    def cap_form_answers(cls, v: Any) -> Any:
+        if v is not None and len(json.dumps(v, default=str)) > 100000:
+            raise ValueError("form_answers is too large")
+        return v
 
     @field_validator("status", mode="before")
     @classmethod
@@ -433,9 +441,9 @@ class HandoffKitOut(BaseModel):
 
 
 class AddSkillRequest(BaseModel):
-    skill: str
-    category: str = "verified"  # "verified" or "learning"
-    evidence_note: Optional[str] = None
-    evidence_url: Optional[str] = None
+    skill: str = Field(max_length=200)
+    category: str = Field(default="verified", max_length=20)  # "verified" or "learning"
+    evidence_note: Optional[str] = Field(default=None, max_length=5000)
+    evidence_url: Optional[str] = Field(default=None, max_length=2000)
 
 

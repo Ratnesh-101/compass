@@ -383,7 +383,7 @@ async def ingest_external_profile_endpoint(body: ExternalProfileImportRequest, r
 async def analyze_opportunity_job_endpoint(
     opportunity_id: int,
     request: Request,
-    custom_desc: Optional[str] = Query(None),
+    custom_desc: Optional[str] = Query(None, max_length=20000),
 ):
     """
     Analyzes job description requirements (mandatory, preferred, responsibilities, eligibility)
@@ -931,6 +931,11 @@ async def update_application_endpoint(app_id: int, body: UpdateApplicationStatus
                     detail=f"Invalid status transition from '{curr_st}' to '{new_st}'. Allowed transitions: {sorted(list(allowed))}.",
                 )
             updates["status"] = new_st
+            if (
+                curr_st == CareerApplicationStatus.APPROVED_FOR_SUBMISSION.value
+                and new_st == CareerApplicationStatus.READY_FOR_APPROVAL.value
+            ):
+                updates["approved_at"] = None  # approval revoked: clear the stale timestamp
 
             if new_st == CareerApplicationStatus.SUBMITTED.value:
                 updates["submitted_at"] = datetime.now(timezone.utc)
@@ -990,8 +995,9 @@ async def get_application_handoff_kit_endpoint(app_id: int, request: Request):
         CareerApplicationStatus.PREPARING.value,
         CareerApplicationStatus.READY_FOR_REVIEW.value,
         CareerApplicationStatus.READY_FOR_APPROVAL.value,
-        CareerApplicationStatus.APPROVED_FOR_SUBMISSION.value,
     }
+    # APPROVED_FOR_SUBMISSION is deliberately excluded: opening the kit (a GET) must never
+    # revoke an explicit approval or invalidate the approved batch.
     curr_st = app.status.value if hasattr(app.status, "value") else str(app.status)
     if curr_st in pre_states:
         app = await update_career_application(app.id, user_id, {
@@ -1154,20 +1160,30 @@ async def add_skill_deliberate_endpoint(body: AddSkillRequest, request: Request)
         master = await upsert_master_resume(user_id, build_default_master_from_profile(profile), "Master Resume")
 
     content = master.content
+    existing_skill = next((s for s in content.skills if s.lower() == skill_clean.lower()), None)
+    existing_learning = next((s for s in content.learning_skills if s.lower() == skill_clean.lower()), None)
     if body.category == "verified":
         if not (body.evidence_note or "").strip() and not (body.evidence_url or "").strip():
             raise HTTPException(
                 status_code=400,
                 detail="Verified skills require evidence: please provide an evidence note or link demonstrating implementation.",
             )
-        if skill_clean not in content.skills:
-            content.skills.append(skill_clean)
-            if body.evidence_note:
-                content.evidence_notes[skill_clean] = body.evidence_note.strip()
-            if body.evidence_url:
-                content.relevant_links.append(f"{skill_clean}: {body.evidence_url.strip()}")
-            # Remove from learning list if present
-            content.learning_skills = [s for s in content.learning_skills if s.lower() != skill_clean.lower()]
+        canonical = existing_skill or skill_clean
+        changed = existing_skill is None or existing_learning is not None
+        if existing_skill is None:
+            content.skills.append(canonical)
+        if body.evidence_note and body.evidence_note.strip():
+            note = body.evidence_note.strip()
+            changed = changed or content.evidence_notes.get(canonical) != note
+            content.evidence_notes[canonical] = note
+        if body.evidence_url and body.evidence_url.strip():
+            link = f"{canonical}: {body.evidence_url.strip()}"
+            if link not in content.relevant_links:
+                content.relevant_links.append(link)
+                changed = True
+        # Remove from learning list if present (a verified add upgrades it)
+        content.learning_skills = [s for s in content.learning_skills if s.lower() != skill_clean.lower()]
+        if changed:
             await update_resume(master.id, user_id, {"content": content.model_dump()})
         return {
             "status": "added_verified",
@@ -1177,7 +1193,7 @@ async def add_skill_deliberate_endpoint(body: AddSkillRequest, request: Request)
         }
     else:
         # Category learning: saved separately, never exported to resume
-        if skill_clean not in content.learning_skills:
+        if existing_learning is None and existing_skill is None:
             content.learning_skills.append(skill_clean)
             await update_resume(master.id, user_id, {"content": content.model_dump()})
         return {
