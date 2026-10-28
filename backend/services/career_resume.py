@@ -541,9 +541,9 @@ def _extract_techs_from_text(text: str) -> List[str]:
 
 PROJECT_TITLE_SEPARATORS = (" — ", " – ", " | ", " - ")
 _PROJECT_HEADER_DASH_RE = re.compile(r"\s[-–—]\s")
-_EDU_SEGMENT_RE = re.compile(r"\s*\|\s*|\s+[-–—]\s+")
-_EDU_YEAR_RE = re.compile(r"\b(?:19|20)\d\d\s*(?:[-–—~]|\bto\b)\s*(?:(?:19|20)\d\d|present)\b|\b(?:19|20)\d\d\b", re.IGNORECASE)
-_EDU_GPA_RE = re.compile(r"(?:CGPA|GPA|Grade)[\s:]*[0-9.]+(?:/[0-9.]+)?%?", re.IGNORECASE)
+_EDU_SEGMENT_RE = re.compile(r"\s?\|\s?|\s[-–—]\s")
+_EDU_YEAR_RE = re.compile(r"\b(?:19|20)\d\d\s{0,8}(?:[-–—~]|\bto\b)\s{0,8}(?:(?:19|20)\d\d|present)\b|\b(?:19|20)\d\d\b", re.IGNORECASE)
+_EDU_GPA_RE = re.compile(r"(?:CGPA|GPA|Grade)[\s:]{0,8}[0-9.]+(?:/[0-9.]+)?%?", re.IGNORECASE)
 _EDU_INSTITUTION_TERMS = ("university", "institute", "college", "school", "academy")
 _EDU_DEGREE_TERMS = ("b.tech", "b.e.", "b.s.", "bs", "bachelor", "master", "m.tech", "ph.d", "b.sc", "m.sc", "mba", "diploma")
 
@@ -563,6 +563,8 @@ def _split_project_header(header: str) -> Optional[Tuple[str, str]]:
 def _split_education_line(line: str) -> Tuple[str, str]:
     """Return (institution, degree) from an education line without using year-range hyphens."""
     stripped = _EDU_YEAR_RE.sub(" ", _EDU_GPA_RE.sub(" ", line))
+    stripped = re.sub(r"\s+", " ", stripped)
+
 
     def _has_term(part: str, terms: Tuple[str, ...]) -> bool:
         low = part.lower()

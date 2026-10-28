@@ -52,3 +52,29 @@ Standalone Project Title
     assert p.title == "Standalone Project Title"
     assert p.description != "Project implementation"
     assert p.description == ""
+
+
+def _timed_parse(text):
+    import time
+
+    start = time.perf_counter()
+    parsed = parse_uploaded_resume_text(text)
+    return parsed, time.perf_counter() - start
+
+
+def test_education_long_whitespace_run_is_linear():
+    text = "Education\nB.Tech " + " " * 300000 + "Fictional Institute of Technology 2022 - 2026"
+    parsed, elapsed = _timed_parse(text)
+    print(f"ELAPSED whitespace {elapsed:.3f}s")
+    assert elapsed < 2
+    assert len(parsed.education) == 1
+    assert "Fictional Institute of Technology" in parsed.education[0].institution
+
+
+def test_education_many_pipes_is_linear():
+    text = "Education\nB.Tech Fictional Institute of Technology " + "| " * 300000 + "2022 - 2026"
+    parsed, elapsed = _timed_parse(text)
+    print(f"ELAPSED pipes {elapsed:.3f}s")
+    assert elapsed < 2
+    assert len(parsed.education) == 1
+    assert "Fictional Institute of Technology" in parsed.education[0].institution
