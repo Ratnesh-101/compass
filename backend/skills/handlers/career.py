@@ -121,7 +121,12 @@ async def handle_prepare_application(args: Dict[str, Any], pool: Any = None) -> 
     if not opp_id:
         return {"success": False, "error": "opportunity_id is required."}
 
-    opp = await get_opportunity_by_id(int(opp_id), user_id)
+    try:
+        opp_id_int = int(opp_id)
+    except (TypeError, ValueError):
+        return {"success": False, "error": f"Invalid opportunity_id '{opp_id}': must be a number."}
+
+    opp = await get_opportunity_by_id(opp_id_int, user_id)
     if not opp:
         return {"success": False, "error": f"Opportunity #{opp_id} not found."}
 

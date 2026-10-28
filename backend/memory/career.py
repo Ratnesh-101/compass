@@ -653,9 +653,9 @@ async def update_career_application(app_id: int, user_id: str, updates: Dict[str
                 batch_id = COALESCE($9, batch_id),
                 approved_at = CASE WHEN $15::boolean THEN NULL ELSE COALESCE($10, approved_at) END,
                 submitted_at = COALESCE($11, submitted_at),
-                target_deadline = COALESCE($12, target_deadline),
-                private_notes = COALESCE($13, private_notes),
-                cover_letter = COALESCE($14, cover_letter),
+                target_deadline = CASE WHEN $16::boolean THEN NULL ELSE COALESCE($12, target_deadline) END,
+                private_notes = CASE WHEN $17::boolean THEN NULL ELSE COALESCE($13, private_notes) END,
+                cover_letter = CASE WHEN $18::boolean THEN NULL ELSE COALESCE($14, cover_letter) END,
                 updated_at = now()
             WHERE id = $1 AND user_id = $2
             RETURNING *;
@@ -675,6 +675,10 @@ async def update_career_application(app_id: int, user_id: str, updates: Dict[str
             updates.get("private_notes"),
             updates.get("cover_letter"),
             "approved_at" in updates and updates["approved_at"] is None,
+            # An explicit None clears the field; an absent key leaves it unchanged.
+            "target_deadline" in updates and updates["target_deadline"] is None,
+            "private_notes" in updates and updates["private_notes"] is None,
+            "cover_letter" in updates and updates["cover_letter"] is None,
         )
         return _parse_app_row(dict(row), is_persisted=True) if row else None
 
