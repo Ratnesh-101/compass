@@ -29,6 +29,7 @@ import backend.orchestrator as orchestrator
 from backend.router import TOOLS, message_needs_tools
 from backend.router_helpers import (
     is_greeting_intent,
+    is_long_form_request,
     is_schedule_or_agent_intent,
     is_tavily_verification_intent,
     is_pending_action_confirm,
@@ -174,6 +175,8 @@ async def generate_chat_events(
     _settings = get_settings()
     conv_id = req.conversation_id or str(uuid.uuid4())
     message = req.message.strip()
+    req_tone = getattr(req, "tone", None)
+    effective_tone = "detailed" if (req_tone == "balanced" and is_long_form_request(message)) else req_tone
     yield ": ping\n\n"
 
     specialist_id = req.get_specialist_id() if hasattr(req, "get_specialist_id") else None
@@ -319,7 +322,7 @@ async def generate_chat_events(
         sys_prompt = build_persona_system_prompt(
             profile_facts=profile_facts if isinstance(profile_facts, dict) else None,
             extra_context=extra,
-            tone=getattr(req, "tone", None),
+            tone=effective_tone,
             parked_thoughts=parked_items if isinstance(parked_items, list) and parked_items else None,
             conv_mode=getattr(req, "mode", None),
         )
@@ -364,7 +367,7 @@ async def generate_chat_events(
                 guest_id=guest_id,
                 history=history_items if history_items else None,
                 memory_context=memory_context if memory_context else None,
-                tone=getattr(req, "tone", None),
+                tone=effective_tone,
                 persist=False,
                 target_message_id=target_msg_id,
                 target_message_content=target_msg_content,
@@ -432,7 +435,7 @@ async def generate_chat_events(
 
         logger.info("Serving chat stream request with model=%s", _settings.ROUTER_MODEL)
         max_synth_budget = int(getattr(_settings, "MAX_SYNTHESIS_TOKENS", 8192))
-        clean_tone = getattr(req, "tone", None)
+        clean_tone = effective_tone
         hard_capped_tone = clean_tone in ("brief", "balanced")
         if clean_tone == "brief":
             stream_max_tokens = 90
@@ -468,7 +471,7 @@ async def generate_chat_events(
                 history=history_items if history_items else None,
                 memory_context=memory_context if memory_context else None,
                 persist=False,
-                tone=getattr(req, "tone", None),
+                tone=effective_tone,
                 conv_mode=getattr(req, "mode", None),
             )
             response_text = result.get("response", "")
@@ -657,7 +660,7 @@ async def generate_chat_events(
                 pre_routed_args=pre_routed_args,
                 target_message_id=target_msg_id,
                 target_message_content=target_msg_content,
-                tone=getattr(req, "tone", None),
+                tone=effective_tone,
                 conv_mode=getattr(req, "mode", None),
             )
             response_text = result.get("response", "")
@@ -724,7 +727,7 @@ async def generate_chat_events(
                 history=history_items if history_items else None,
                 memory_context=memory_context if memory_context else None,
                 persist=False,
-                tone=getattr(req, "tone", None),
+                tone=effective_tone,
                 conv_mode=getattr(req, "mode", None),
             )
             response_text = result.get("response", "")

@@ -585,6 +585,21 @@ _TOOL_KEYWORDS_REGEX = re.compile(
 )
 
 
+LONG_FORM_CUES = (
+    "hour-by-hour", "hour by hour", "step-by-step", "step by step", "detailed", "in detail",
+    "in depth", "in-depth", "comprehensive", "full plan", "a plan for", "give me a plan",
+    "concrete plan", "roadmap for", "outline", "checklist", "as a table", "in a table",
+    "with a table", "table of", "write a ", "draft a ", "essay", "walk me through", "compare",
+    "pros and cons", "migration plan", "action plan", "timeline for", "schedule for the",
+)
+
+
+def is_long_form_request(message: str) -> bool:
+    """Return True when the message asks for a long structured deliverable (plan, table, outline...)."""
+    lowered = (message or "").lower()
+    return any(cue in lowered for cue in LONG_FORM_CUES)
+
+
 def message_needs_tools(message: str) -> bool:
     """Determine whether a user message requires tool registry evaluation.
     Uses whole-word matching to avoid false positives (e.g. 'pr' in 'protocol', 'git' in 'digital').

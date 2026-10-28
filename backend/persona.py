@@ -75,7 +75,7 @@ BEHAVIOR:
 # Tone Validation & System Instructions (Brief / Balanced / Exploratory)
 # ============================================================================
 
-VALID_TONES = {"brief", "balanced", "exploratory"}
+VALID_TONES = {"brief", "balanced", "exploratory", "detailed"}
 
 TONE_INSTRUCTIONS: Dict[str, str] = {
     "brief": (
@@ -86,6 +86,13 @@ TONE_INSTRUCTIONS: Dict[str, str] = {
     "balanced": (
         "Provide a balanced, well-rounded response (2-4 clear sentences, roughly 60-100 words). "
         "Balance brevity with helpful context and next steps."
+    ),
+    "detailed": (
+        "[TONE CONSTRAINT]: The user asked for a detailed, structured deliverable. "
+        "Give a complete, well-organized answer (headings and short lists, at most one table with every row "
+        "on one line and several items in a cell separated by <br>), about 300-600 words, concrete and specific, "
+        "covering every part of the request in the order asked. "
+        "Never stop mid-sentence or leave a list or table unfinished."
     ),
     "exploratory": (
         "[TONE CONSTRAINT]: You have more room to think out loud, explore ideas, and wander a bit. "
