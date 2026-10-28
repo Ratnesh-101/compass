@@ -3,7 +3,7 @@
 - **Owner (agent):** sonnet
 - **Branch / worktree:** `agent/sonnet/ownership-helper-tests`
 - **Base commit:** `49e68cd`
-- **Status:** dispatched
+- **Status:** accepted
 
 ## Objective
 `backend/services/ownership.py` (`scope_owner`, `owns_task`, `require_task_access`) guards every route and
@@ -35,3 +35,11 @@ Add focused unit tests that pin its contract.
 bash <runtests script> <worktree> tests/test_ownership_helpers.py -q
 python -m ruff check tests/test_ownership_helpers.py
 ```
+
+## Result
+- Commit: `c036214` on `agent/sonnet/ownership-helper-tests` (base `49e68cd`)
+- Orchestrator verification: diff vs base is `tests/test_ownership_helpers.py` only; `31 passed`; `ruff` clean;
+  mutation check (made `owns_task` case-sensitive) -> `3 failed, 28 passed`, source restored.
+- Deviations: none against the contract. Worker noted `scope_owner("   ")` returns `""` (not `None`); pinned as-is.
+  Follow-up worth considering: a whitespace-only owner is falsy-but-not-None, so treat it explicitly in `scope_owner`.
+- Verdict: accepted.

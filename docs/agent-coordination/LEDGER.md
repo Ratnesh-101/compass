@@ -6,7 +6,7 @@ orchestrator's own verification run.
 
 | Task | Title | Agent | Branch | Base | Allowed files | Status | Commit | Verified by orchestrator |
 |---|---|---|---|---|---|---|---|---|
-| P-001 | Unit tests for task-ownership helpers | sonnet | `agent/sonnet/ownership-helper-tests` | `49e68cd` | `tests/test_ownership_helpers.py` | dispatched | — | — |
+| P-001 | Unit tests for task-ownership helpers | sonnet | `agent/sonnet/ownership-helper-tests` | `49e68cd` | `tests/test_ownership_helpers.py` | accepted | `c036214` | yes: diff = allowed file only; 31 passed; ruff clean; 3 tests fail when the helper is deliberately broken |
 | P-002 | Node tests for deadline classifier | gemini | `agent/gemini/deadline-classifier-tests` | `49e68cd` | `frontend/tests/deadlineClassifier.test.mjs` | dispatched | — | — |
 
 ## Active worktrees (scratch, safe to delete when the task is accepted or rejected)
