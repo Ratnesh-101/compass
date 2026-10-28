@@ -42,24 +42,7 @@ export default function App() {
   const [showTelemetryModal, setShowTelemetryModal] = useState(false)
   const [showMigrationModal, setShowMigrationModal] = useState(false)
   const [guestConversationsCount, setGuestConversationsCount] = useState(0)
-  const [currentUser, setCurrentUser] = useState(() => {
-    try {
-      const savedEmail = localStorage.getItem('compass_user_email') || localStorage.getItem('compass_user_id')
-      if (savedEmail && savedEmail.includes('@')) {
-        const clean = savedEmail.trim().toLowerCase()
-        return {
-          authenticated: true,
-          user_id: clean,
-          email: clean,
-          name: clean.split('@')[0].replace('.', ' ').replace(/\b\w/g, c => c.toUpperCase()),
-          calendar: { connected: false, mode: 'demo', is_simulated: true },
-        }
-      }
-    } catch {
-      /* ignore localStorage access error */
-    }
-    return null
-  })
+  const [currentUser, setCurrentUser] = useState(null)
   const [showAuthModal, setShowAuthModal] = useState(false)
   const [messages, setMessages] = useState([
     {
@@ -248,20 +231,20 @@ export default function App() {
 
   const handleUserChanged = useCallback(async (newEmail) => {
     if (newEmail) {
-      const clean = newEmail.trim().toLowerCase()
       const u = await fetchCurrentUser()
       if (u && (u.authenticated || u.email)) {
         setCurrentUser(u)
+        checkMigration()
       } else {
-        setCurrentUser({
-          authenticated: true,
-          user_id: clean,
-          email: clean,
-          name: clean.split('@')[0].replace('.', ' ').replace(/\b\w/g, c => c.toUpperCase()),
-          calendar: { connected: false, mode: 'demo', is_simulated: true },
-        })
+        // The server did not confirm a session: never fabricate a signed-in user.
+        try {
+          localStorage.removeItem('compass_user_email')
+          localStorage.removeItem('compass_user_id')
+        } catch {
+          /* ignore localStorage access error */
+        }
+        setCurrentUser(null)
       }
-      checkMigration()
     } else {
       setCurrentUser({ authenticated: false, email: '' })
       try {
@@ -337,17 +320,12 @@ export default function App() {
         setCurrentUser(u)
         checkMigration()
       } else {
-        const savedEmail = localStorage.getItem('compass_user_email') || localStorage.getItem('compass_user_id')
-        if (savedEmail && savedEmail.includes('@')) {
-          const clean = savedEmail.trim().toLowerCase()
-          setCurrentUser({
-            authenticated: true,
-            user_id: clean,
-            email: clean,
-            name: clean.split('@')[0].replace('.', ' ').replace(/\b\w/g, c => c.toUpperCase()),
-            calendar: { connected: false, mode: 'demo', is_simulated: true },
-          })
-          checkMigration()
+        // Server did not confirm a session: drop any stale local identity.
+        try {
+          localStorage.removeItem('compass_user_email')
+          localStorage.removeItem('compass_user_id')
+        } catch {
+          /* ignore localStorage access error */
         }
       }
     })

@@ -59,10 +59,7 @@ export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged 
       setSuccessMsg(`Signed in as ${cleanEmail}`)
       setEmailInput('')
     } catch {
-      setCurrentUserId(cleanEmail)
-      if (onUserChanged) onUserChanged(cleanEmail)
-      setSuccessMsg(`Switched local identity to ${cleanEmail}`)
-      setEmailInput('')
+      setError('Email sign-in is not available on this server. Please sign in with Google instead.')
     } finally {
       setLoading(false)
     }
