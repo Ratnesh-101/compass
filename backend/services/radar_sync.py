@@ -352,9 +352,9 @@ async def run_radar_sync(source_filter: Optional[str] = None, dry_run: bool = Fa
                                     description=j_opp.get("description"),
                                     last_verified_at=datetime.now(timezone.utc),
                                     verification_evidence=j_opp.get("verification_evidence"),
-                                    employer_identity_verified=True,
-                                    official_source_confirmed=True,
-                                    application_url_checked=True,
+                                    employer_identity_verified=j_opp.get("employer_identity_verified", False),
+                                    official_source_confirmed=j_opp.get("official_source_confirmed", False),
+                                    application_url_checked=j_opp.get("application_url_checked", False),
                                     posted_at=posting_dt,
                                     posted_at_precision=j_opp.get("posted_at_precision") or ("exact" if posting_dt else "unknown"),
                                 )
@@ -368,8 +368,10 @@ async def run_radar_sync(source_filter: Optional[str] = None, dry_run: bool = Fa
                                     source_name=j_opp["source_name"],
                                     source_type=j_opp["source_type"],
                                     source_url=j_opp["source_url"],
-                                    source_authority=j_opp.get("source_authority", "tier_1"),
-                                    verification_result="verified",
+                                    source_authority=j_opp.get("source_authority", "tier_2"),
+                                    verification_result=(
+                                        "verified" if j_opp.get("official_source_confirmed") else "discovered"
+                                    ),
                                 )
                                 records_updated += 1
                             except Exception as j_err:

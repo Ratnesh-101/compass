@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from backend.dependencies import _get_or_create_user_id, _get_current_identity
+from backend.dependencies import Identity, _get_or_create_user_id, _get_current_identity, rate_limit, require_identity
 from backend.memory.radar import (
     add_status_history,
     delete_user_saved_opportunity,
@@ -367,12 +367,32 @@ async def list_sources_endpoint():
     return get_source_inventory()
 
 
-@router.post("/{opportunity_id}/verify")
-async def recheck_opportunity_status_endpoint(opportunity_id: int):
-    """Perform real-time official source verification on a single opportunity."""
+VERIFY_COOLDOWN_SECONDS = 600
+
+
+@router.post("/{opportunity_id}/verify", dependencies=[Depends(rate_limit)])
+async def recheck_opportunity_status_endpoint(opportunity_id: int, ident: Identity = Depends(require_identity)):
+    """Perform real-time official source verification on a single opportunity.
+
+    Requires a signed-in or guest identity and is rate limited. A recently verified opportunity returns
+    its stored result instead of spending another Tavily credit and outbound fetch.
+    """
     opp = await get_opportunity_by_id(opportunity_id)
     if not opp:
         raise HTTPException(status_code=404, detail="Opportunity not found")
+
+    last_checked = getattr(opp, "last_verified_at", None)
+    if last_checked is not None:
+        checked_at = last_checked if last_checked.tzinfo else last_checked.replace(tzinfo=timezone.utc)
+        if (datetime.now(timezone.utc) - checked_at).total_seconds() < VERIFY_COOLDOWN_SECONDS:
+            return {
+                "opportunity_id": opportunity_id,
+                "previous_status": opp.current_status,
+                "current_status": opp.current_status,
+                "evidence": "Verified within the last 10 minutes; showing the stored result.",
+                "last_verified_at": checked_at.isoformat(),
+                "cached": True,
+            }
 
     target_url = opp.official_application_url or opp.canonical_url
     new_status, evidence, verified_at = await verify_opportunity_status(target_url, opp.current_status)

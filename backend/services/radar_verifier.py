@@ -14,6 +14,7 @@ Guarantees:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import urllib.parse
@@ -22,6 +23,7 @@ from typing import Any, Dict, Optional, Tuple
 import httpx
 
 from backend.models_radar import OpportunityStatus
+from backend.services.security import is_safe_redirect, is_safe_url
 from backend.services.tavily import (
     extract as tavily_extract,
     fence_web_content,
@@ -67,11 +69,17 @@ def is_official_domain(url: str) -> bool:
     if not url:
         return False
     try:
-        netloc = urllib.parse.urlparse(url.strip()).netloc.lower()
-        if any(ats in netloc for ats in OFFICIAL_ATS_DOMAINS):
+        host = (urllib.parse.urlparse(url.strip()).hostname or "").lower().rstrip(".")
+        if not host:
+            return False
+        if any(_matches_host(host, ats) for ats in OFFICIAL_ATS_DOMAINS):
             return True
-        if any(netloc.endswith(suffix) or suffix in netloc for suffix in OFFICIAL_INSTITUTIONAL_SUFFIXES):
-            return True
+        for suffix in OFFICIAL_INSTITUTIONAL_SUFFIXES:
+            if suffix.startswith("."):
+                if host.endswith(suffix):
+                    return True
+            elif _matches_host(host, suffix):
+                return True
     except Exception:
         pass
     return False
@@ -97,6 +105,10 @@ GENERIC_CAREERS_PATHS = {
 
 def _matches_host(netloc: str, domain: str) -> bool:
     return netloc == domain or netloc.endswith("." + domain)
+
+
+REDIRECT_STATUSES = (301, 302, 303, 307, 308)
+MAX_VERIFY_REDIRECTS = 3
 
 
 def is_specific_ats_job_url(url: str) -> bool:
@@ -188,6 +200,15 @@ async def verify_opportunity_status(
             now,
         )
 
+    # The SSRF check resolves DNS, so keep it off the event loop.
+    url_is_safe, unsafe_reason = await asyncio.to_thread(is_safe_url, application_url)
+    if not url_is_safe:
+        return (
+            current_status,
+            f"Verification failed with error: application URL was not fetched ({unsafe_reason}). Retaining current status.",
+            now,
+        )
+
     official_source = is_official_domain(application_url)
     specific_ats = is_specific_ats_job_url(application_url)
     generic_url = is_generic_careers_or_homepage(application_url)
@@ -209,11 +230,38 @@ async def verify_opportunity_status(
     # Step 2: Fallback to direct HTTP fetch if Tavily unavailable or empty
     if not content_text:
         try:
-            async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
-                resp = await client.get(
-                    application_url,
-                    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) CompassInternshipRadar/1.0"}
-                )
+            async with httpx.AsyncClient(timeout=8.0, follow_redirects=False) as client:
+                fetch_url = application_url
+                resp = None
+                for _hop in range(MAX_VERIFY_REDIRECTS + 1):
+                    resp = await client.get(
+                        fetch_url,
+                        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) CompassInternshipRadar/1.0"}
+                    )
+                    location = resp.headers.get("location") if resp.status_code in REDIRECT_STATUSES else None
+                    if not location:
+                        break
+                    redirect_ok, next_url, redirect_reason = await asyncio.to_thread(
+                        is_safe_redirect, fetch_url, location
+                    )
+                    if not redirect_ok:
+                        return (
+                            current_status,
+                            f"Verification stopped: {redirect_reason}. Retaining current status.",
+                            now,
+                        )
+                    fetch_url = next_url
+                else:
+                    return (
+                        current_status,
+                        "Verification stopped: too many redirects. Retaining current status.",
+                        now,
+                    )
+                if fetch_url != application_url:
+                    # Judge the page we landed on, not the URL we were given.
+                    official_source = official_source and is_official_domain(fetch_url)
+                    specific_ats = is_specific_ats_job_url(fetch_url)
+                    generic_url = is_generic_careers_or_homepage(fetch_url)
                 if resp.status_code == 404 or resp.status_code == 410:
                     return (
                         OpportunityStatus.CLOSED_CONFIRMED,
@@ -269,6 +317,13 @@ async def verify_opportunity_status(
             return (
                 target_status,
                 f"Reachable official portal (HTTP 200 via {verification_method}), but URL is a generic directory/portal without specific vacancy proof. Retained as {target_status}.",
+                now,
+            )
+        if not official_source:
+            # An "Apply" button on an arbitrary domain is not proof of an official, open vacancy.
+            return (
+                OpportunityStatus.NEEDS_VERIFICATION,
+                f"Found submission trigger '{found_open_match}' via {verification_method}, but the page is not on a recognized official domain. Requires verification.",
                 now,
             )
         return (
