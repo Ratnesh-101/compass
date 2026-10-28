@@ -90,6 +90,29 @@ function formatIntelDate(isoString) {
   }
 }
 
+function formatBriefDateOnly(isoString) {
+  if (!isoString) return ''
+  try {
+    const d = new Date(isoString)
+    if (isNaN(d.getTime())) return ''
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    return `${d.getDate()} ${monthNames[d.getMonth()]}`
+  } catch {
+    return ''
+  }
+}
+
+function formatAttemptTime(isoString) {
+  if (!isoString) return ''
+  try {
+    const d = new Date(isoString)
+    if (isNaN(d.getTime())) return ''
+    return `Last attempt ${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+  } catch {
+    return ''
+  }
+}
+
 function cleanOldBriefText(text) {
   if (!text) return ''
   let t = String(text)
@@ -188,6 +211,7 @@ export default function ApplicationWorkspaceModal({
   const [companyIntel, setCompanyIntel] = useState(null)
   const [loadingIntel, setLoadingIntel] = useState(false)
   const [intelError, setIntelError] = useState(null)
+  const [lastAttemptTime, setLastAttemptTime] = useState(null)
   const [sourcesExpanded, setSourcesExpanded] = useState(false)
   const [highlightedSourceId, setHighlightedSourceId] = useState(null)
   const [refreshCooldownNotice, setRefreshCooldownNotice] = useState('')
@@ -209,8 +233,7 @@ export default function ApplicationWorkspaceModal({
       const now = Date.now()
       const elapsed = (now - lastIntelRefreshTimeRef.current) / 1000
       if (elapsed < 30) {
-        const remaining = Math.ceil(30 - elapsed)
-        setRefreshCooldownNotice(`Please wait ${remaining}s before refreshing again.`)
+        setRefreshCooldownNotice('Please wait a few seconds before refreshing again')
         setTimeout(() => setRefreshCooldownNotice(''), 3000)
         return
       }
@@ -224,10 +247,15 @@ export default function ApplicationWorkspaceModal({
     try {
       const intel = await fetchCompanyIntel(opportunity.id, isRefresh)
       setCompanyIntel(intel)
+      if (intel?.status === 'error' || intel?.error) {
+        setIntelError(intel.error || "We couldn't generate company intel right now. Please try again.")
+        setLastAttemptTime(new Date().toISOString())
+      }
     } catch (err) {
       console.warn('Could not load company intelligence:', err)
+      setLastAttemptTime(new Date().toISOString())
       if (!companyIntelRef.current) {
-        setIntelError('Could not load company intelligence. Please try again.')
+        setIntelError("We couldn't generate company intel right now. Please try again.")
       } else {
         showNotification('Could not refresh intelligence report. Please try again.', 'error')
       }
@@ -922,10 +950,18 @@ export default function ApplicationWorkspaceModal({
               {/* TAB: Company Intel Brief */}
               {activeTab === 'company_intel' && (() => {
                 const isOldBrief = companyIntel && !('summary' in companyIntel) && Boolean(companyIntel.strategic_insights || companyIntel.technical_pain_points)
+                const isError = Boolean(companyIntel?.status === 'error' || companyIntel?.error || intelError)
                 const isEmptyInfo = Boolean(
-                  companyIntel?.message ||
-                  (companyIntel && !isOldBrief && !companyIntel.summary && (!companyIntel.priorities || companyIntel.priorities.length === 0))
+                  !isError && (
+                    companyIntel?.status === 'empty' ||
+                    Boolean(companyIntel?.message && (!companyIntel.summary || companyIntel.summary === '')) ||
+                    (companyIntel && !isOldBrief && !companyIntel.summary && (!companyIntel.priorities || companyIntel.priorities.length === 0))
+                  )
                 )
+                const isReady = Boolean(
+                  companyIntel && !isError && !isEmptyInfo && !isOldBrief && (Boolean(companyIntel.summary) || (Array.isArray(companyIntel.priorities) && companyIntel.priorities.length > 0))
+                )
+                const isShowingOlderBrief = Boolean(companyIntel?.showing_older_brief || companyIntel?.refresh_failed)
 
                 const sections = [
                   {
@@ -993,10 +1029,10 @@ export default function ApplicationWorkspaceModal({
                           Company intel for {opportunity.company_name}
                         </h3>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', fontSize: '12px', color: 'var(--text-secondary)' }}>
-                          {companyIntel?.generated_at && (
+                          {isReady && companyIntel?.generated_at && (
                             <span>{formatIntelDate(companyIntel.generated_at)}</span>
                           )}
-                          {companyIntel?.confidence && (
+                          {isReady && companyIntel?.confidence && (
                             <span
                               style={{
                                 padding: '2px 8px',
@@ -1012,6 +1048,9 @@ export default function ApplicationWorkspaceModal({
                               {companyIntel.confidence} confidence
                             </span>
                           )}
+                          {isError && !isShowingOlderBrief && lastAttemptTime && (
+                            <span>{formatAttemptTime(lastAttemptTime)}</span>
+                          )}
                           {refreshCooldownNotice && (
                             <span style={{ color: 'var(--brand)', fontSize: '11px', fontWeight: 600 }}>
                               {refreshCooldownNotice}
@@ -1024,7 +1063,7 @@ export default function ApplicationWorkspaceModal({
                           ref={refreshBtnRef}
                           type="button"
                           onClick={() => loadCompanyIntelData(true)}
-                          disabled={loadingIntel}
+                          disabled={loadingIntel || Boolean(refreshCooldownNotice)}
                           className="radar-card-btn radar-card-btn-secondary"
                           aria-label="Refresh company intelligence"
                         >
@@ -1036,8 +1075,28 @@ export default function ApplicationWorkspaceModal({
 
                     {/* Accessible Live Announcement */}
                     <div className="sr-only" aria-live="polite">
-                      {loadingIntel ? 'Updating company intelligence report...' : companyIntel ? 'Company intelligence report ready.' : ''}
+                      {loadingIntel ? 'Updating company intelligence report...' : isReady ? 'Company intelligence report ready.' : ''}
                     </div>
+
+                    {/* Notification banner when showing older brief after failed refresh */}
+                    {isShowingOlderBrief && companyIntel?.generated_at && (
+                      <div
+                        style={{
+                          padding: '10px 14px',
+                          borderRadius: '6px',
+                          background: 'var(--bg-app)',
+                          border: '1px solid var(--border)',
+                          fontSize: '12px',
+                          color: 'var(--text-secondary)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                        }}
+                      >
+                        <AlertCircle size={14} style={{ color: 'var(--brand)', flexShrink: 0 }} aria-hidden="true" />
+                        <span>Latest refresh failed. Showing the brief from {formatBriefDateOnly(companyIntel.generated_at)}.</span>
+                      </div>
+                    )}
 
                     {/* Loading Skeleton */}
                     {loadingIntel ? (
@@ -1078,7 +1137,7 @@ export default function ApplicationWorkspaceModal({
                         </div>
                         <div style={{ height: '38px', background: 'var(--bg-app)', border: '1px solid var(--border)', borderRadius: '6px' }} />
                       </div>
-                    ) : intelError ? (
+                    ) : isError && !isShowingOlderBrief ? (
                       /* Error State */
                       <div
                         style={{
@@ -1089,19 +1148,11 @@ export default function ApplicationWorkspaceModal({
                           textAlign: 'center',
                         }}
                       >
-                        <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: 'var(--text-secondary)' }}>
-                          {intelError}
+                        <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-secondary)' }}>
+                          {companyIntel?.error || intelError || "We couldn't generate company intel right now. Please try again with Refresh Intel."}
                         </p>
-                        <button
-                          type="button"
-                          onClick={() => loadCompanyIntelData(true)}
-                          className="radar-card-btn radar-card-btn-secondary"
-                          style={{ margin: '0 auto' }}
-                        >
-                          Try again
-                        </button>
                       </div>
-                    ) : isEmptyInfo ? (
+                    ) : isEmptyInfo && !isShowingOlderBrief ? (
                       /* Empty / Not enough info state */
                       <div
                         style={{
@@ -1112,17 +1163,9 @@ export default function ApplicationWorkspaceModal({
                           textAlign: 'center',
                         }}
                       >
-                        <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: 'var(--text-secondary)' }}>
-                          {companyIntel?.message || 'We could not find enough reliable information about this company.'}
+                        <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-secondary)' }}>
+                          {companyIntel?.message || 'We could not find enough reliable information about this company. You can try refreshing intel.'}
                         </p>
-                        <button
-                          type="button"
-                          onClick={() => loadCompanyIntelData(true)}
-                          className="radar-card-btn radar-card-btn-secondary"
-                          style={{ margin: '0 auto' }}
-                        >
-                          Try again
-                        </button>
                       </div>
                     ) : isOldBrief ? (
                       /* Old Brief Fallback */

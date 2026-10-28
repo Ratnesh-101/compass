@@ -437,10 +437,14 @@ async def get_company_intel_endpoint(
         logger.error("Failed to generate company intel brief for opp %s: %s", opportunity_id, exc, exc_info=True)
         cached = winning_features.get_cached_company_intel(opportunity_id)
         if cached:
-            return cached
-        raise HTTPException(
-            status_code=503,
-            detail="Company intelligence is temporarily unavailable. Please try again shortly.",
+            cached_copy = dict(cached)
+            cached_copy["refresh_failed"] = True
+            cached_copy["showing_older_brief"] = True
+            return cached_copy
+        return winning_features._build_error_intel(
+            opp.company_name,
+            opp.role_title,
+            error="We couldn't generate company intel right now. Please try again.",
         )
 
 

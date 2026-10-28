@@ -88,7 +88,18 @@ async def test_company_intel_24h_cache_zero_tavily_calls():
             ]
         }
 
-    with patch("backend.services.tavily_research.execute_deep_research", side_effect=fake_deep_research):
+    mock_summary = {
+        "status": "ready",
+        "summary": "Nebius scales GPU clusters for AI workloads.",
+        "priorities": [{"point": "Scaling GPU clusters for AI workloads.", "source": 1}],
+        "role_context": [],
+        "challenges": [{"point": "Scaling GPU clusters for AI workloads.", "source": 1}],
+        "talking_points": [],
+        "confidence": "high",
+    }
+
+    with patch("backend.services.tavily_research.execute_deep_research", side_effect=fake_deep_research), \
+         patch("backend.services.winning_features._summarize_with_model", AsyncMock(return_value=mock_summary)):
         # 1st call: Cache miss -> calls Tavily
         res1 = await generate_company_intel_brief(opp)
         assert tavily_calls[0] == 1

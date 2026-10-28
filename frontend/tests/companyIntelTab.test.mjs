@@ -40,8 +40,10 @@ test('Frontend 11-15: Static contract audit of Company Intel Tab in ApplicationW
 
   // 5. Loading skeleton, error, and empty states
   assert.ok(code.includes('aria-busy="true"'), 'Loading skeleton must designate aria-busy')
-  assert.ok(code.includes('Try again'), 'Error and empty states must provide a Try again button')
+  assert.ok(code.includes('Refresh Intel'), 'Single retry action must be provided via Refresh Intel button in header')
+  assert.ok(!code.includes('Try again'), 'Duplicate Try again buttons must be removed from empty and error boxes')
   assert.ok(code.includes('We could not find enough reliable information about this company.'), 'Empty state message must match spec')
+  assert.ok(code.includes("We couldn't generate company intel right now. Please try again with Refresh Intel."), 'Error state guidance message must match spec')
 
   // 6. Old brief fallback notice
   assert.ok(

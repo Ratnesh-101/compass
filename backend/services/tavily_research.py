@@ -151,11 +151,18 @@ async def execute_deep_research(
     )
 
     all_raw_items: List[Dict[str, Any]] = []
+    subquery_errors: List[Exception] = []
     for item in results_by_subquery:
         if isinstance(item, dict):
             all_raw_items.extend(item.get("results", []))
         elif isinstance(item, Exception):
+            subquery_errors.append(item)
             logger.warning(f"Subquery search error in deep research: {item}")
+
+    if not all_raw_items and subquery_errors:
+        first_err = subquery_errors[0]
+        logger.error(f"All Tavily research subqueries failed: {first_err}")
+        raise RuntimeError(f"Tavily search provider failed: {first_err}") from first_err
 
     # Deduplicate by normalized URL
     seen_urls = set()
