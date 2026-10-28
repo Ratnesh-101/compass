@@ -397,8 +397,9 @@ async def recheck_opportunity_status_endpoint(opportunity_id: int, ident: Identi
     target_url = opp.official_application_url or opp.canonical_url
     new_status, evidence, verified_at = await verify_opportunity_status(target_url, opp.current_status)
 
+    # Always persist last_verified_at so the cooldown holds even when status is unchanged.
+    await update_opportunity_status(opportunity_id, new_status, verified_at)
     if new_status != opp.current_status:
-        await update_opportunity_status(opportunity_id, new_status, verified_at)
         await add_status_history(
             opportunity_id=opportunity_id,
             prev_status=opp.current_status,

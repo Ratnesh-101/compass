@@ -105,7 +105,7 @@ def analyze_job_and_match(
     if not req_skills:
         common_tech = ["Python", "JavaScript", "React", "Node.js", "PostgreSQL", "FastAPI", "Docker", "Git", "SQL", "C++", "Java", "AWS", "PyTorch"]
         for tech in common_tech:
-            if re.search(r"\b" + re.escape(tech) + r"\b", full_text, re.IGNORECASE):
+            if re.search(r"(?<![A-Za-z0-9_])" + re.escape(tech) + r"(?![A-Za-z0-9_])", full_text, re.IGNORECASE):
                 req_skills.add(tech)
 
     skills_list = sorted(list(req_skills))

@@ -586,6 +586,8 @@ async def get_all_opportunities(
     search: Optional[str] = None,
     india_only: bool = False,
     verified_only: bool = False,
+    saved_only: bool = False,
+    applied_only: bool = False,
     page: int = 1,
     page_size: int = 25,
 ) -> Tuple[List[OpportunityOut], int]:
@@ -614,6 +616,10 @@ async def get_all_opportunities(
                 opp_copy["is_saved"] = bool(user_state.get("is_saved", False))
                 opp_copy["application_status"] = user_state.get("application_status")
                 opp_copy["private_notes"] = user_state.get("private_notes")
+            if saved_only and not opp_copy.get("is_saved"):
+                continue
+            if applied_only and not opp_copy.get("application_status"):
+                continue
             out_models.append(
                 _parse_row_to_opportunity(opp_copy, opp_copy.get("sources", []), opp_copy.get("cycles", []))
             )
@@ -638,6 +644,10 @@ async def get_all_opportunities(
         conditions.append(f"o.work_arrangement = ${len(args)}")
     if india_only:
         conditions.append("o.is_india_eligible IS TRUE")
+    if saved_only:
+        conditions.append("uo.is_saved IS TRUE")
+    if applied_only:
+        conditions.append("(uo.application_status IS NOT NULL AND uo.application_status <> '')")
     if search:
         args.append(f"%{search.strip().lower()}%")
         conditions.append(f"(LOWER(o.company_name) LIKE ${len(args)} OR LOWER(o.role_title) LIKE ${len(args)})")
@@ -721,6 +731,7 @@ async def get_opportunity_by_id(opportunity_id: int, user_id: Optional[str] = No
            uo.personal_deadline, uo.private_notes,
            r.eligible_degree_types, r.eligible_academic_years, r.eligible_graduation_years,
            r.eligible_countries, r.work_auth_required, r.sponsorship_available, r.required_skills,
+           r.preferred_skills, r.gpa_scale, r.no_active_backlogs, r.has_conflicting_requirements,
            r.min_gpa, r.other_mandatory_requirements, r.unknown_requirements
     FROM opportunities o
     LEFT JOIN user_opportunities uo ON o.id = uo.opportunity_id AND uo.user_id = $2
@@ -1027,9 +1038,21 @@ async def delete_user_saved_opportunity(user_id: str, opportunity_id: int) -> No
     await upsert_user_saved_opportunity(user_id, opportunity_id, is_saved=False)
 
 
+async def _get_all_user_opportunities(user_id: str, **filters: bool) -> List[OpportunityOut]:
+    """Page through every row matching the SQL-side user filters (no truncation)."""
+    page_size = 100
+    collected: List[OpportunityOut] = []
+    page = 1
+    while True:
+        opps, total = await get_all_opportunities(user_id=user_id, page=page, page_size=page_size, **filters)
+        collected.extend(opps)
+        if not opps or len(collected) >= total or len(opps) < page_size:
+            return collected
+        page += 1
+
+
 async def get_user_saved_opportunities(user_id: str) -> List[OpportunityOut]:
-    opps, _ = await get_all_opportunities(user_id=user_id, page=1, page_size=100)
-    return [o for o in opps if o.is_saved]
+    return await _get_all_user_opportunities(user_id, saved_only=True)
 
 
 async def upsert_user_application_status(
@@ -1069,8 +1092,7 @@ async def upsert_user_application_status(
 
 
 async def get_user_application_tracking(user_id: str) -> List[OpportunityOut]:
-    opps, _ = await get_all_opportunities(user_id=user_id, page=1, page_size=100)
-    return [o for o in opps if o.application_status]
+    return await _get_all_user_opportunities(user_id, applied_only=True)
 
 
 async def get_radar_overview_stats(user_id: str) -> Dict[str, Any]:

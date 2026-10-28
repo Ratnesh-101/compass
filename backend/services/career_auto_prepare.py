@@ -27,6 +27,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from fastapi import HTTPException
 
 from backend.models_career import CareerApplicationStatus
+from backend.models_radar import EligibilityClassification
+from backend.services.radar_eligibility import evaluate_eligibility
 from backend.services.career_resume import tailor_resume_for_opportunity, draft_truthful_cover_letter
 
 logger = logging.getLogger("compass.services.career_auto_prepare")
@@ -176,9 +178,8 @@ async def execute_auto_prepare_for_user(user_id: str) -> Dict[str, Any]:
     eligible_opps = []
     for opp in saved_opps:
         # Check eligibility
-        eligibility = getattr(opp, "eligibility", None)
-        status_val = getattr(eligibility, "status", None) if eligibility else None
-        if status_val == "ELIGIBLE" or (opp.requirements and opp.requirements.required_skills):
+        status_val, _, _ = evaluate_eligibility(opp, profile)
+        if status_val == EligibilityClassification.ELIGIBLE:
             eligible_opps.append(opp)
         if len(eligible_opps) >= 3:
             break
