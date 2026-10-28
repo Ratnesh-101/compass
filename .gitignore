@@ -60,3 +60,7 @@ scripts/query_prod_rows.py
 scripts/test_styles.py
 # Build & Output
 brag-output/
+uv.lock
+compass-patches/
+screenshots/
+artifacts/scratch/
