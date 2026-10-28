@@ -90,7 +90,7 @@ test('Site reload filter: dummy demo data is purged, preserving only genuine use
   assert.equal(activeTasks[0].title, 'My Custom User Task: Prepare slide deck')
 })
 
-test('fetchTasks on network failure returns empty array, never dummy fallback tasks', async () => {
+test('fetchTasks on network failure returns null (not an empty list), never dummy fallback tasks', async () => {
   // Global fetch rejection mock
   const originalFetch = globalThis.fetch
   globalThis.fetch = async () => {
@@ -99,8 +99,7 @@ test('fetchTasks on network failure returns empty array, never dummy fallback ta
 
   try {
     const tasks = await fetchTasks('all')
-    assert.ok(Array.isArray(tasks))
-    assert.equal(tasks.length, 0, 'Must return 0 tasks on error instead of dummy fallback tasks')
+    assert.equal(tasks, null, 'Must signal failure with null so callers keep the current view, never dummy fallback tasks')
   } finally {
     globalThis.fetch = originalFetch
   }

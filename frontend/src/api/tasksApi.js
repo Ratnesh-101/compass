@@ -5,7 +5,9 @@ import { API_BASE, getAuthHeaders, fetchWithGuestRetry } from './baseClient.js'
 /**
  * Fetch synchronized task list from Neon PostgreSQL with per-account isolation.
  * Accepts an optional domain string to issue a genuine server-side filtered request.
- * Returns empty array if database is empty or if request fails (zero dummy tasks by default).
+ * Returns an empty array when the database is genuinely empty, and null when the request
+ * fails (non-OK status, timeout, network error or malformed payload) so callers can keep
+ * the current view instead of wiping it.
  */
 export async function fetchTasks(domain, options = {}) {
   try {
@@ -29,16 +31,16 @@ export async function fetchTasks(domain, options = {}) {
     clearTimeout(timeoutId)
 
     if (!res.ok) {
-      return []
+      return null
     }
 
     const data = await res.json()
     if (Array.isArray(data)) {
       return data
     }
-    return []
+    return null
   } catch {
-    return []
+    return null
   }
 }
 

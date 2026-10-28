@@ -23,6 +23,7 @@ import {
   fetchMigrationStatus,
 } from './api/client'
 import { isDemoTask } from './utils/demoConstants'
+import { haveTasksChanged } from './utils/taskDiff'
 
 export default function App() {
   const [tasks, setTasks] = useState([])
@@ -144,6 +145,13 @@ export default function App() {
   const tasksRef = useRef([])
   tasksRef.current = tasks
 
+  // Latest selected domain, so long-lived polling intervals never use a stale closure value
+  const selectedDomainRef = useRef(selectedDomain)
+  selectedDomainRef.current = selectedDomain
+
+  // Monotonic request counter so out-of-order task responses can be discarded
+  const loadSeqRef = useRef(0)
+
   // Refresh usage stats from the backend (public endpoint, no auth required)
   const refreshUsage = useCallback(async () => {
     const stats = await fetchUsageSummary()
@@ -159,10 +167,12 @@ export default function App() {
   // ?domain=<X> query param every time selectedDomain changes, instead of
   // client-side array filtering on stale data.
   const loadTasks = useCallback(async (domain, overrideDemoActive) => {
+    const requestSeq = ++loadSeqRef.current
     try {
       const demoActive = overrideDemoActive !== undefined ? overrideDemoActive : isDemoActiveRef.current
       const incomingTasks = await fetchTasks(domain, { include_demo: demoActive })
-      if (!Array.isArray(incomingTasks)) return
+      // null signals a failed fetch: keep the current view. Stale responses are ignored.
+      if (!Array.isArray(incomingTasks) || requestSeq !== loadSeqRef.current) return
 
       // Client-side filter to guarantee zero dummy data on reload even if backend delete is in flight
       const activeTasks = demoActive
@@ -170,19 +180,15 @@ export default function App() {
         : incomingTasks.filter((t) => !isDemoTask(t))
 
       const currentTasks = tasksRef.current
-      const hasLengthChanged = activeTasks.length !== currentTasks.length
-      const hasContentChanged = activeTasks.some((task, i) => {
-        const cur = currentTasks[i]
-        return !cur || cur.id !== task.id || cur.title !== task.title || cur.countdown !== task.countdown
-      })
-      if (hasLengthChanged || hasContentChanged) {
+      const hasChanged = haveTasksChanged(currentTasks, activeTasks)
+      if (hasChanged) {
         setTasks(activeTasks)
       }
       if (!domain || domain === 'all') {
         setAllTasks(activeTasks)
       } else {
         fetchTasks('all', { include_demo: demoActive }).then((total) => {
-          if (Array.isArray(total)) {
+          if (Array.isArray(total) && requestSeq === loadSeqRef.current) {
             const filteredTotal = demoActive ? total : total.filter((t) => !isDemoTask(t))
             setAllTasks(filteredTotal)
           }
@@ -295,7 +301,7 @@ export default function App() {
             const wasOnline = prev.toLowerCase().includes('neon') || prev.toLowerCase().includes('live') || prev.toLowerCase().includes('connected')
             const isNowOnline = status.toLowerCase().includes('neon') || status.toLowerCase().includes('live') || status.toLowerCase().includes('connected')
             if (!wasOnline && isNowOnline) {
-              loadTasks(selectedDomain)
+              loadTasks(selectedDomainRef.current)
               refreshUsage()
             }
             return status
@@ -308,7 +314,7 @@ export default function App() {
 
     // Task Polling (Every 3000ms with Clean State Merge): uses current domain filter
     const pollTasks = () => {
-      if (isMounted) loadTasks(selectedDomain)
+      if (isMounted) loadTasks(selectedDomainRef.current)
     }
 
     // Immediate initial sync
