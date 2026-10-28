@@ -60,6 +60,9 @@ def parse_natural_due_date(text: str) -> Tuple[Optional[str], str]:
     text_lower = text.lower()
     today = _current_today()
 
+    if "day after tomorrow" in text_lower:
+        d = today + timedelta(days=2)
+        return d.isoformat(), re.sub(r"\bday\s+after\s+tomorrow\b", "", text, flags=re.IGNORECASE).strip()
     if "tomorrow" in text_lower:
         d = today + timedelta(days=1)
         return d.isoformat(), re.sub(r"\btomorrow\b", "", text, flags=re.IGNORECASE).strip()
@@ -148,11 +151,12 @@ def is_explicit_task_creation(message: str) -> bool:
     verbs = ("add", "create", "new", "set", "schedule", "put", "track")
     nouns = ("deadline", "task", "todo", "reminder")
     for v in verbs:
-        v_idx = msg.find(v)
-        if v_idx != -1:
+        # Whole-word verb ("address"/"upset" must not match add/set); "track my tasks" is a query.
+        v_rx = rf"\b{v}\b" if v != "track" else r"\btrack\b(?!\s+(?:my|all|the|our)\b)"
+        m_v = re.search(v_rx, msg)
+        if m_v:
             for n in nouns:
-                n_idx = msg.find(n, v_idx + len(v))
-                if n_idx != -1:
+                if msg.find(n, m_v.end()) != -1:
                     return True
 
     return False
@@ -474,7 +478,7 @@ def _extract_task_creation_args(message: str) -> dict:
             r"\b(?:at\s+)?(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?\s*(?:am|pm)?\b",
             r"\b(?:at\s+)?(?:1[0-2]|0?[1-9])\s*(?:am|pm)\b",
             r"\b(?:at\s+)?(?:midnight|noon)\b",
-            r"^\s*(?:on|at|due|by|in)\s+",
+            r"^\s*(?:on|at|due|by|in|for)\s+",
             r"\s+(?:on|at|due|by|in)\s*$",
         ]
         for p in patterns:
@@ -485,7 +489,7 @@ def _extract_task_creation_args(message: str) -> dict:
     if not title and "remind me to " in msg_lower:
         idx = msg_lower.find("remind me to ") + len("remind me to ")
         rest = msg[idx:]
-        m_split = re.split(r"\b(?:by|on|at|due|before|in|tomorrow|today|yesterday|next\s+[a-z]+|this\s+[a-z]+)\b", rest, flags=re.IGNORECASE)
+        m_split = re.split(r"\b(?:by|on|at|due|before|in\s+(?:\d+|a|an|one|two|three|the\s+(?:morning|afternoon|evening))|tomorrow|today|yesterday|next\s+[a-z]+|this\s+[a-z]+)\b", rest, flags=re.IGNORECASE)
         title = m_split[0].strip(" .!?:;'\"")
 
     # Strategy D: Prefix removal for standard forms:
@@ -984,7 +988,8 @@ def is_schedule_or_agent_intent(message: str) -> bool:
 PERSONAL_SCOPE_TRIGGERS = (
     "my ", "mine", "i have", "i need", "assigned to me", "show my", "list my",
     "what should i", "my task", "my tasks", "my deadline", "my deadlines",
-    "work on first", "my coursework", "my hackathon", "tracked", "what do i"
+    "work on first", "my coursework", "my hackathon", "tracked", "what do i",
+    "homework", "assignment", "exam", "quiz", "lecture", "essay",
 )
 
 PUBLIC_EVENT_INDICATORS = (
