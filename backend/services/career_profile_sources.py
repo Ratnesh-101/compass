@@ -27,6 +27,19 @@ from backend.models_career import (
 logger = logging.getLogger("compass.services.career_profile_sources")
 
 
+_MONTHS = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?"
+_DATE_OR_DURATION_RE = re.compile(
+    rf"\b{_MONTHS}\s+(?:19|20)\d\d\b|\b(?:19|20)\d\d\s*[-–—]\s*(?:(?:19|20)\d\d|present)\b"
+    r"|\b\d+\s*(?:yrs?|mos?|years?|months?)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_date_or_duration_line(line: str) -> bool:
+    """True for LinkedIn date-range/duration lines like 'Jan 2020 - Present · 3 yrs 5 mos'."""
+    return bool(_DATE_OR_DURATION_RE.search(line))
+
+
 def parse_pasted_linkedin_text(raw_text: str) -> Tuple[ResumeContent, List[str]]:
     """
     Parses candidate-pasted LinkedIn profile sections without web scraping.
@@ -90,6 +103,8 @@ def parse_pasted_linkedin_text(raw_text: str) -> Tuple[ResumeContent, List[str]]
                     )
                 )
         elif current_section == "experience":
+            if _is_date_or_duration_line(line):
+                continue
             if "·" in line or "-" in line or " at " in line_low:
                 parts = re.split(r"[·\-]|\bat\b", line, maxsplit=1)
                 part_a = parts[0].strip()

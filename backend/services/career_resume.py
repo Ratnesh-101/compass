@@ -109,7 +109,7 @@ def validate_resume_against_master(
     master_proj_titles = {p.title.strip().lower() for p in master.projects}
     for proj in tailored.projects:
         p_title_norm = proj.title.strip().lower()
-        if master_proj_titles and p_title_norm not in master_proj_titles:
+        if p_title_norm not in master_proj_titles:
             unsupported.append(f"Project '{proj.title}' does not originate from verified master projects.")
         else:
             # Check technologies in project
@@ -238,6 +238,11 @@ def tailor_resume_for_opportunity(
         experience=master.experience,
         achievements=master.achievements,
         certifications=master.certifications,
+        internships=master.internships,
+        awards=master.awards,
+        hackathons=master.hackathons,
+        publications=master.publications,
+        leadership_and_volunteering=master.leadership_and_volunteering,
     )
 
     report = validate_resume_against_master(tailored_content, master, opportunity)
@@ -351,6 +356,7 @@ def generate_resume_html(
         """
 
     achieve_items = "".join([f"<li>{html.escape(a)}</li>" for a in c.achievements]) if c.achievements else ""
+    cert_items = "".join([f"<li>{html.escape(a)}</li>" for a in c.certifications]) if c.certifications else ""
 
     contact_parts = []
     if c.email:
@@ -445,6 +451,8 @@ def generate_resume_html(
     {f'<h2>Experience</h2>{exp_items}' if exp_items else ''}
 
     {f'<h2>Achievements</h2><ul>{achieve_items}</ul>' if achieve_items else ''}
+
+    {f'<h2>Certifications</h2><ul>{cert_items}</ul>' if cert_items else ''}
 </body>
 </html>
 """
@@ -775,7 +783,7 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
                     current_exp.highlights.append(bullet_txt)
                 elif target_list:
                     target_list[-1].highlights.append(bullet_txt)
-            elif current_exp and current_exp.highlights and (line_clean[0].islower() or not has_dates or not has_role_kw):
+            elif current_exp and current_exp.highlights and (line_clean[0].islower() or (not has_dates and not has_role_kw)):
                 current_exp.highlights[-1] = f"{current_exp.highlights[-1]} {_clean_bullet(line_clean)}".strip()
             else:
                 role = "Intern" if is_intern else "Software Engineer"
@@ -1237,6 +1245,11 @@ def generate_resume_docx(
         add_section_header("Honors & Achievements")
         for ach in all_achieve:
             doc.add_paragraph(ach, style="List Bullet")
+
+    if c.certifications:
+        add_section_header("Certifications")
+        for cert in c.certifications:
+            doc.add_paragraph(cert, style="List Bullet")
 
     bio = io.BytesIO()
     doc.save(bio)

@@ -95,6 +95,37 @@ def _build_success_result(
     )
 
 
+def _extract_pdf_with_pdfplumber(file_bytes: bytes, filename: str) -> ResumeParseResult:
+    """Fallback PDF extraction when only pdfplumber is installed (pypdf missing)."""
+    try:
+        import pdfplumber
+
+        chunks: List[str] = []
+        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+            total_pages = len(pdf.pages)
+            for page in pdf.pages:
+                text = page.extract_text() or ""
+                if text.strip():
+                    chunks.append(text.strip())
+        full_text = "\n\n".join(chunks).strip()
+        if not full_text:
+            return ResumeParseResult(
+                success=False,
+                filename=filename,
+                file_type=".pdf",
+                page_count=total_pages,
+                error_message="PDF contains no extractable text. Please ensure the file contains selectable text.",
+            )
+        return _build_success_result(filename=filename, file_type=".pdf", full_text=full_text, page_count=total_pages)
+    except Exception as e:
+        return ResumeParseResult(
+            success=False,
+            filename=filename,
+            file_type=".pdf",
+            error_message=f"Unexpected error parsing PDF file: {e}",
+        )
+
+
 def extract_resume_from_file_bytes(
     file_bytes: bytes,
     filename: str,
@@ -222,8 +253,11 @@ def extract_resume_from_file_bytes(
                 error_message="PDF parser (pypdf) is not installed in the environment.",
             )
 
-        import pypdf
-        import pypdf.errors
+        try:
+            import pypdf
+            import pypdf.errors
+        except ImportError:
+            return _extract_pdf_with_pdfplumber(file_bytes, filename)
 
         try:
             stream = io.BytesIO(file_bytes)
