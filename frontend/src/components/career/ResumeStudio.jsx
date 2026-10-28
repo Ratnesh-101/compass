@@ -177,6 +177,8 @@ export default function ResumeStudio() {
         setSelectedResume(updated)
         populateForm(updated)
       }
+      const list = await fetchResumes()
+      setResumesList(list)
       setSaveSuccess(true)
       alert(`✓ Repository "${repo.repo_name}" imported into Master Profile projects!`)
     } catch (err) {
@@ -199,6 +201,8 @@ export default function ResumeStudio() {
         setSelectedResume(updated)
         populateForm(updated)
       }
+      const list = await fetchResumes()
+      setResumesList(list)
       setSaveSuccess(true)
       alert(`✓ Added ${skills.length} verified technologies to Master Profile!`)
     } catch (err) {
@@ -912,6 +916,23 @@ export default function ResumeStudio() {
                   }}
                 >
                   📋 Copy to Clipboard
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSave}
+                  disabled={saving}
+                  style={{
+                    background: 'var(--primary, #2563eb)',
+                    color: '#ffffff',
+                    border: 'none',
+                    padding: '8px 16px',
+                    borderRadius: '8px',
+                    fontSize: '13px',
+                    fontWeight: '700',
+                    cursor: saving ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {saving ? 'Saving...' : '💾 Save Cover Letter'}
                 </button>
               </div>
             </div>

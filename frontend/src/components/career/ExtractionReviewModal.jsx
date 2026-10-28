@@ -9,10 +9,17 @@ export default function ExtractionReviewModal({
 }) {
   const [content, setContent] = useState(null)
   const [activeTab, setActiveTab] = useState('contact') // contact | skills | education | projects | additional
+  const [skillsText, setSkillsText] = useState('')
+  const [awardsText, setAwardsText] = useState('')
+  const [certificationsText, setCertificationsText] = useState('')
 
   useEffect(() => {
     if (parseResult?.extracted_content) {
-      setContent(JSON.parse(JSON.stringify(parseResult.extracted_content)))
+      const extracted = JSON.parse(JSON.stringify(parseResult.extracted_content))
+      setContent(extracted)
+      setSkillsText((extracted.skills || []).join(', '))
+      setAwardsText((extracted.awards || []).join('\n'))
+      setCertificationsText((extracted.certifications || []).join('\n'))
     }
   }, [parseResult])
 
@@ -24,9 +31,38 @@ export default function ExtractionReviewModal({
   const conflicts = diag.field_conflicts || []
   const confidence = diag.field_confidence?.overall || 0.85
 
+  const handleSkillsBlur = () => {
+    setContent(prev => ({
+      ...prev,
+      skills: skillsText.split(',').map((s) => s.trim()).filter(Boolean),
+    }))
+  }
+
+  const handleAwardsBlur = () => {
+    setContent(prev => ({
+      ...prev,
+      awards: awardsText.split('\n').map((s) => s.trim()).filter(Boolean),
+    }))
+  }
+
+  const handleCertificationsBlur = () => {
+    setContent(prev => ({
+      ...prev,
+      certifications: certificationsText.split('\n').map((s) => s.trim()).filter(Boolean),
+    }))
+  }
+
   const handleCommit = (target = 'master') => {
     if (onCommit) {
-      onCommit(content, diag.original_document_id, target)
+      const finalContent = {
+        ...content,
+        skills: skillsText.split(',').map((s) => s.trim()).filter(Boolean),
+        awards: awardsText.split('\n').map((s) => s.trim()).filter(Boolean),
+        ...(content.certifications !== undefined
+          ? { certifications: certificationsText.split('\n').map((s) => s.trim()).filter(Boolean) }
+          : {}),
+      }
+      onCommit(finalContent, diag.original_document_id, target)
     }
   }
 
@@ -239,18 +275,14 @@ export default function ExtractionReviewModal({
                 Technical Skills (comma-separated)
               </label>
               <textarea
-                value={(content.skills || []).join(', ')}
-                onChange={(e) =>
-                  setContent({
-                    ...content,
-                    skills: e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
-                  })
-                }
+                value={skillsText}
+                onChange={(e) => setSkillsText(e.target.value)}
+                onBlur={handleSkillsBlur}
                 rows={5}
                 style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)' }}
               />
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '12px' }}>
-                {(content.skills || []).map((s, idx) => (
+                {(skillsText ? skillsText.split(',').map((s) => s.trim()).filter(Boolean) : (content.skills || [])).map((s, idx) => (
                   <span
                     key={idx}
                     style={{
@@ -381,8 +413,9 @@ export default function ExtractionReviewModal({
                   Awards & Achievements
                 </label>
                 <textarea
-                  value={(content.awards || []).join('\n')}
-                  onChange={(e) => setContent({ ...content, awards: e.target.value.split('\n').filter(Boolean) })}
+                  value={awardsText}
+                  onChange={(e) => setAwardsText(e.target.value)}
+                  onBlur={handleAwardsBlur}
                   rows={3}
                   style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid var(--border)' }}
                 />
@@ -393,8 +426,9 @@ export default function ExtractionReviewModal({
                     Certificates & Licenses
                   </label>
                   <textarea
-                    value={(content.certifications || []).join('\n')}
-                    onChange={(e) => setContent({ ...content, certifications: e.target.value.split('\n').filter(Boolean) })}
+                    value={certificationsText}
+                    onChange={(e) => setCertificationsText(e.target.value)}
+                    onBlur={handleCertificationsBlur}
                     rows={2}
                     style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid var(--border)' }}
                   />

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   fetchApplications,
   updateApplication,
@@ -15,7 +15,7 @@ import ReturnSubmissionPrompt from './ReturnSubmissionPrompt'
 import CoverLetterModal from './CoverLetterModal'
 import { cleanOpportunity } from '../../utils/jobCardCleaner'
 
-export default function ApplicationCenter() {
+export default function ApplicationCenter({ onNavigateToResumeStudio }) {
   const [applications, setApplications] = useState([])
   const [selectedAppIds, setSelectedAppIds] = useState(new Set())
   const [currentBatch, setCurrentBatch] = useState(null)
@@ -61,12 +61,29 @@ export default function ApplicationCenter() {
     })
   }
 
+  const visibleApps = useMemo(() => {
+    return applications.filter(a => {
+      if (statusFilter === 'ALL') return true
+      if (statusFilter === 'HANDOFF_READY') return a.status === 'HANDOFF_KIT_READY'
+      if (statusFilter === 'NEEDS_REVIEW') return ['READY_FOR_REVIEW', 'READY_FOR_APPROVAL', 'PREPARING'].includes(a.status)
+      if (statusFilter === 'APPROVED') return a.status === 'APPROVED_FOR_SUBMISSION'
+      if (statusFilter === 'SUBMITTED') return ['SUBMITTED', 'MANUAL_SUBMISSION_REQUIRED'].includes(a.status)
+      if (statusFilter === 'INTERVIEWS') return ['INTERVIEW', 'OFFER_RECEIVED'].includes(a.status)
+      return true
+    })
+  }, [applications, statusFilter])
+
   const handleSelectAll = () => {
-    if (selectedAppIds.size === applications.length) {
-      setSelectedAppIds(new Set())
-    } else {
-      setSelectedAppIds(new Set(applications.map(a => a.id)))
-    }
+    setSelectedAppIds(prev => {
+      const next = new Set(prev)
+      const allSelected = visibleApps.length > 0 && visibleApps.every(a => next.has(a.id))
+      if (allSelected) {
+        visibleApps.forEach(a => next.delete(a.id))
+      } else {
+        visibleApps.forEach(a => next.add(a.id))
+      }
+      return next
+    })
   }
 
   const handlePrepareBatchReview = async () => {
@@ -304,7 +321,7 @@ export default function ApplicationCenter() {
                   <th style={{ padding: '12px 16px', width: '36px' }}>
                     <input
                       type="checkbox"
-                      checked={selectedAppIds.size === applications.length && applications.length > 0}
+                      checked={visibleApps.length > 0 && visibleApps.every(a => selectedAppIds.has(a.id))}
                       onChange={handleSelectAll}
                     />
                   </th>
@@ -318,17 +335,7 @@ export default function ApplicationCenter() {
                 </tr>
               </thead>
               <tbody>
-                {applications
-                  .filter(a => {
-                    if (statusFilter === 'ALL') return true
-                    if (statusFilter === 'HANDOFF_READY') return a.status === 'HANDOFF_KIT_READY'
-                    if (statusFilter === 'NEEDS_REVIEW') return ['READY_FOR_REVIEW', 'READY_FOR_APPROVAL', 'PREPARING'].includes(a.status)
-                    if (statusFilter === 'APPROVED') return a.status === 'APPROVED_FOR_SUBMISSION'
-                    if (statusFilter === 'SUBMITTED') return ['SUBMITTED', 'MANUAL_SUBMISSION_REQUIRED'].includes(a.status)
-                    if (statusFilter === 'INTERVIEWS') return ['INTERVIEW', 'OFFER_RECEIVED'].includes(a.status)
-                    return true
-                  })
-                  .map((app) => {
+                {visibleApps.map((app) => {
                     const isSelected = selectedAppIds.has(app.id)
                     const opp = app.opportunity || {}
                     const cleanedOpp = cleanOpportunity(opp)
@@ -361,7 +368,7 @@ export default function ApplicationCenter() {
                               <span>⚠️ Missing: {app.missing_fields.join(', ')}</span>
                               <button
                                 type="button"
-                                onClick={() => window.dispatchEvent(new window.CustomEvent('navigate', { detail: '/resume-studio' }))}
+                                onClick={() => onNavigateToResumeStudio?.()}
                                 style={{
                                   background: 'transparent',
                                   border: 'none',
@@ -539,6 +546,7 @@ export default function ApplicationCenter() {
         onClose={() => setActiveDrawerApp(null)}
         applicationId={activeDrawerApp?.id}
         opportunity={activeDrawerApp?.opportunity}
+        onNavigateToResumeStudio={onNavigateToResumeStudio}
         onMarkApplied={async () => {
           await loadData()
           setActiveDrawerApp(null)

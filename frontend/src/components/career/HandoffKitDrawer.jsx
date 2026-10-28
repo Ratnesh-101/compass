@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react'
-import { downloadAuthedFile, openAuthedHtml } from '../../api/baseClient.js'
+import { downloadAuthedFile, openAuthedHtml, getAuthHeaders } from '../../api/baseClient.js'
 
 export default function HandoffKitDrawer({
   isOpen,
   onClose,
   applicationId,
   opportunity,
+  onNavigateToResumeStudio,
   onMarkApplied: _onMarkApplied,
 }) {
   const [kit, setKit] = useState(null)
@@ -27,7 +28,8 @@ export default function HandoffKitDrawer({
     async function loadKit() {
       try {
         const res = await fetch(`/api/career/applications/${applicationId}/handoff-kit`, {
-          headers: { 'Accept': 'application/json' },
+          headers: getAuthHeaders({ 'Accept': 'application/json' }),
+          credentials: 'include',
         })
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}))
@@ -299,7 +301,7 @@ export default function HandoffKitDrawer({
                         ) : (
                           <button
                             type="button"
-                            onClick={() => window.dispatchEvent(new window.CustomEvent('navigate', { detail: '/radar?tab=profile' }))}
+                            onClick={() => onNavigateToResumeStudio?.()}
                             style={{
                               padding: '2px 8px',
                               borderRadius: '4px',

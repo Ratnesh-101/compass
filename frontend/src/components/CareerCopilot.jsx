@@ -272,7 +272,9 @@ export default function CareerCopilot({ isDarkMode, onToggleDarkMode }) {
             <ResumeStudio />
           </React.Suspense>
         )}
-        {activeSubTab === 'applications' && <ApplicationCenter />}
+        {activeSubTab === 'applications' && (
+          <ApplicationCenter onNavigateToResumeStudio={handleNavigateToResumeStudio} />
+        )}
       </div>
     </div>
   )
