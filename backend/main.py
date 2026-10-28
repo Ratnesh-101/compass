@@ -277,9 +277,9 @@ from backend.services.rate_limiter import enforce_company_intel_guard
     include_in_schema=False,
     dependencies=[Depends(enforce_company_intel_guard)],
 )
-async def company_intel_alias(opportunity_id: int, request: Request):
+async def company_intel_alias(opportunity_id: int, request: Request, refresh: bool = False):
     from backend.routers.career import get_company_intel_endpoint
-    return await get_company_intel_endpoint(opportunity_id, request)
+    return await get_company_intel_endpoint(opportunity_id, request, refresh=refresh)
 
 @app.get(
     "/opportunities/{opportunity_id}/job-analysis",

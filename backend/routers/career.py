@@ -405,7 +405,11 @@ async def analyze_opportunity_job_endpoint(
     "/opportunities/{opportunity_id}/company-intel",
     dependencies=[Depends(enforce_company_intel_guard)],
 )
-async def get_company_intel_endpoint(opportunity_id: int, request: Request):
+async def get_company_intel_endpoint(
+    opportunity_id: int,
+    request: Request,
+    refresh: bool = Query(default=False),
+):
     """
     Generates a strategic intelligence brief for a specific opportunity.
     Used in the Application Workspace to help candidates tailor their application.
@@ -415,8 +419,20 @@ async def get_company_intel_endpoint(opportunity_id: int, request: Request):
     if not opp:
         raise HTTPException(status_code=404, detail="Opportunity not found")
 
-    brief = await winning_features.generate_company_intel_brief(opp)
-    return brief
+    try:
+        brief = await winning_features.generate_company_intel_brief(opp, force_refresh=refresh)
+        return brief
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to generate company intel brief for opp %s: %s", opportunity_id, exc, exc_info=True)
+        cached = winning_features.get_cached_company_intel(opportunity_id)
+        if cached:
+            return cached
+        raise HTTPException(
+            status_code=503,
+            detail="Company intelligence is temporarily unavailable. Please try again shortly.",
+        )
 
 
 

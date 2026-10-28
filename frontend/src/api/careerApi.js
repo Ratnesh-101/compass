@@ -257,9 +257,12 @@ export async function setApplicationCoverLetter(appId, coverLetter) {
   return res.json()
 }
 
-export async function fetchCompanyIntel(opportunityId) {
+export async function fetchCompanyIntel(opportunityId, refresh = false) {
   await ensureSession()
-  const res = await fetch(`${API_BASE}/opportunities/${opportunityId}/company-intel`, {
+  const url = refresh
+    ? `${API_BASE}/opportunities/${opportunityId}/company-intel?refresh=true`
+    : `${API_BASE}/opportunities/${opportunityId}/company-intel`
+  const res = await fetch(url, {
     headers: getAuthHeaders(),
     credentials: 'include',
   })
