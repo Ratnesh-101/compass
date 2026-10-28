@@ -315,28 +315,26 @@ async def test_profile_facts_api_endpoints(client: AsyncClient, auth_headers: di
 
 @pytest.mark.asyncio
 async def test_persona_phrases_api_endpoint(client: AsyncClient, auth_headers: dict):
-    """Verify GET /api/persona/phrases requires auth and returns all phrase pools."""
-    # 1. No token -> 401/403
-    resp_no_token = await client.get("/api/persona/phrases")
-    assert resp_no_token.status_code in (401, 403)
-
-    # 2. Wrong token -> 401/403
-    wrong_headers = {"Authorization": "Bearer bad_token_999"}
-    resp_wrong = await client.get("/api/persona/phrases", headers=wrong_headers)
-    assert resp_wrong.status_code in (401, 403)
-
-    # 3. Valid token -> 200 with all phrase pools
-    resp_valid = await client.get("/api/persona/phrases", headers=auth_headers)
-    assert resp_valid.status_code == 200
-    data = resp_valid.json()
-    for pool in [
+    """GET /api/persona/phrases is public (static greeting pools, no auth needed)."""
+    pools = [
         "starting_phrases",
         "exploring_phrases",
         "returning_phrases",
         "mid_chat_phrases",
         "closing_phrases",
-    ]:
-        assert pool in data
+    ]
+
+    # 1. No token (browsers hold only a guest token / session) -> 200
+    resp_no_token = await client.get("/api/persona/phrases")
+    assert resp_no_token.status_code == 200
+    # 2. Valid token still works and returns the same payload
+    resp_valid = await client.get("/api/persona/phrases", headers=auth_headers)
+    assert resp_valid.status_code == 200
+    assert resp_valid.json() == resp_no_token.json()
+
+    data = resp_no_token.json()
+    assert set(data) == set(pools)
+    for pool in pools:
         assert isinstance(data[pool], list)
         assert len(data[pool]) > 0
 

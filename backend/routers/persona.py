@@ -6,9 +6,8 @@ Exposes canonical signature phrase pools as a single source of truth for clients
 
 from typing import Dict, List
 import logging
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
-from backend.dependencies import verify_token
 from backend.persona import (
     STARTING_PHRASES,
     EXPLORING_PHRASES,
@@ -23,10 +22,12 @@ router = APIRouter(prefix="/api/persona", tags=["persona"])
 
 
 @router.get("/phrases")
-async def get_persona_phrases(
-    _token: str = Depends(verify_token),
-) -> Dict[str, List[str]]:
-    """Retrieve canonical signature phrase pools for thinking partner UI."""
+async def get_persona_phrases() -> Dict[str, List[str]]:
+    """Retrieve canonical signature phrase pools for thinking partner UI.
+
+    Public (no auth): the pools are static, non-sensitive greeting strings and
+    browsers only hold a guest token or user session, not the shared AUTH_TOKEN.
+    """
     return {
         "starting_phrases": STARTING_PHRASES,
         "exploring_phrases": EXPLORING_PHRASES,
