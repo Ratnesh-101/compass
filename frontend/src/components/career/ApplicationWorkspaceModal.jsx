@@ -41,6 +41,7 @@ import {
   inspectDraftConflict,
 } from '../../utils/workspaceDraft'
 import ValidationReportCard from './ValidationReportCard'
+import { getSafeHttpUrl } from '../../utils/safeUrl.js'
 
 const STATUS_LABELS = {
   discovered: 'Discovered',
@@ -1301,7 +1302,9 @@ export default function ApplicationWorkspaceModal({
                                   listStyle: 'none',
                                 }}
                               >
-                                {companyIntel.sources.map((src) => (
+                                {companyIntel.sources.map((src) => {
+                                  const safeUrl = getSafeHttpUrl(src.url)
+                                  return (
                                   <li
                                     key={src.id}
                                     id={`intel-source-${src.id}`}
@@ -1318,25 +1321,33 @@ export default function ApplicationWorkspaceModal({
                                     }}
                                   >
                                     <span style={{ fontWeight: 700, color: 'var(--brand)', flexShrink: 0 }}>[{src.id}]</span>
-                                    <a
-                                      href={src.url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      aria-label={`Source ${src.id}: ${src.title} on ${src.domain} (opens in new tab)`}
-                                      style={{
-                                        color: 'var(--text-primary)',
-                                        textDecoration: 'none',
-                                        wordBreak: 'break-word',
-                                      }}
-                                      onMouseEnter={(e) => (e.currentTarget.style.textDecoration = 'underline')}
-                                      onMouseLeave={(e) => (e.currentTarget.style.textDecoration = 'none')}
-                                    >
-                                      <span>{src.title}</span>
-                                      {src.domain && <span style={{ color: 'var(--text-muted)', marginLeft: '6px' }}>({src.domain})</span>}
-                                      <ExternalLink size={11} style={{ marginLeft: '4px', verticalAlign: 'middle', display: 'inline-block' }} aria-hidden="true" />
-                                    </a>
+                                    {safeUrl ? (
+                                      <a
+                                        href={safeUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        aria-label={`Source ${src.id}: ${src.title} on ${src.domain} (opens in new tab)`}
+                                        style={{
+                                          color: 'var(--text-primary)',
+                                          textDecoration: 'none',
+                                          wordBreak: 'break-word',
+                                        }}
+                                        onMouseEnter={(e) => (e.currentTarget.style.textDecoration = 'underline')}
+                                        onMouseLeave={(e) => (e.currentTarget.style.textDecoration = 'none')}
+                                      >
+                                        <span>{src.title}</span>
+                                        {src.domain && <span style={{ color: 'var(--text-muted)', marginLeft: '6px' }}>({src.domain})</span>}
+                                        <ExternalLink size={11} style={{ marginLeft: '4px', verticalAlign: 'middle', display: 'inline-block' }} aria-hidden="true" />
+                                      </a>
+                                    ) : (
+                                      <span style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>
+                                        <span>{src.title}</span>
+                                        {src.domain && <span style={{ color: 'var(--text-muted)', marginLeft: '6px' }}>({src.domain})</span>}
+                                      </span>
+                                    )}
                                   </li>
-                                ))}
+                                  )
+                                })}
                               </ul>
                             )}
                           </div>

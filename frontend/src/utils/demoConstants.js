@@ -40,9 +40,9 @@ export function isDemoTask(t) {
   if (taskIdStr.startsWith('demo-') || taskIdStr.startsWith('mock-') || taskIdStr.startsWith('sim-')) {
     return true
   }
-  if (Array.isArray(t.tags) && t.tags.includes('demo')) return true
+  // Only the seeder's own URL scheme counts; arbitrary URLs such as https://demoday.example.com do not
   const trustedUrl = String(t.trusted_event_url || '').toLowerCase()
-  if (trustedUrl.includes('demo')) return true
+  if (trustedUrl.startsWith('compass://demo-persona/')) return true
   if (t.notes && String(t.notes).toLowerCase().includes('demo persona')) return true
   if (t.title && DEMO_TASK_TITLES.has(String(t.title).trim())) return true
   return false

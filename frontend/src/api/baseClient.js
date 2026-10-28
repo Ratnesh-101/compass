@@ -161,7 +161,18 @@ export function setGuestSession(guestId, guestToken) {
   }
 }
 
-export async function initGuestSession() {
+let inflightGuestSession = null
+
+export function initGuestSession() {
+  if (!inflightGuestSession) {
+    inflightGuestSession = runGuestSessionInit().finally(() => {
+      inflightGuestSession = null
+    })
+  }
+  return inflightGuestSession
+}
+
+async function runGuestSessionInit() {
   try {
     const existingToken = getGuestToken()
     const res = await fetch(`${API_BASE}/api/guest/session`, {
