@@ -94,7 +94,7 @@ export default function ChatInputBar({
   const handleSubmit = (e) => {
     e.preventDefault()
     if (!input.trim() || isInputDisabled) return
-    onSend(input.trim(), activeSpecialist ? activeSpecialist.id : null)
+    onSend(input.trim(), null, activeSpecialist ? activeSpecialist.id : null)
   }
 
   // Close picker when clicking outside

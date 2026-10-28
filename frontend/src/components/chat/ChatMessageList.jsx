@@ -244,7 +244,7 @@ export default function ChatMessageList({
                                   type="button"
                                   onClick={() => {
                                     if (onRetry) {
-                                      onRetry(idx, msg.retryPrompt)
+                                      onRetry(idx, msg.retryPrompt, msg.retrySpecialistId)
                                     } else if (onSendMessage) {
                                       onSendMessage(msg.retryPrompt)
                                     }
@@ -324,7 +324,7 @@ export default function ChatMessageList({
                           </button>
                         </div>
                       )}
-                      {(msg.data?.pending_action || msg.pending_action) && (
+                      {(msg.data?.pending_action || msg.pending_action) && isLatest && !isStreaming && !isTyping && (
                         <div
                           className="chat-pending-action-card"
                           role="region"

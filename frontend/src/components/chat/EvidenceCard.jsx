@@ -1,4 +1,5 @@
 import React from 'react'
+import { getSafeHttpUrl } from '../../utils/safeUrl.js'
 
 /**
  * EvidenceCard — Renders verifiable source claims, domain authority tiers,
@@ -138,7 +139,7 @@ export default function EvidenceCard({ evidence }) {
           const tierBadge = getTierBadge(item)
           const quote = item.display_quote || item.exact_quote || item.verbatim_quote || item.evidence
           const localDeadline = item.local_deadline_ist
-          const sUrl = item.source_url || item.url
+          const sUrl = getSafeHttpUrl(item.source_url || item.url)
 
           return (
             <div

@@ -351,6 +351,7 @@ export default function ChatPanel({
               error: errMsg,
               canRetry: true,
               retryPrompt: text,
+              retrySpecialistId: specialistIdToUse,
               thought: receivedThought || null,
             },
           ])
@@ -379,16 +380,17 @@ export default function ChatPanel({
           error: err?.message || "I encountered an issue connecting to Compass. Please verify the service is running and try again.",
           canRetry: true,
           retryPrompt: text,
+          retrySpecialistId: specialistIdToUse,
           thought: receivedThought || null,
         },
       ])
     }
   }
 
-  const handleRetry = (msgIndex, retryPrompt) => {
+  const handleRetry = (msgIndex, retryPrompt, retrySpecialistId = null) => {
     // Remove the failed assistant message at msgIndex, preserving original user prompt
     setMessages(prev => prev.filter((_, idx) => idx !== msgIndex))
-    handleSend(retryPrompt, null, null, true)
+    handleSend(retryPrompt, null, retrySpecialistId, true)
   }
 
   const handleSendRef = useRef(handleSend)
@@ -405,6 +407,7 @@ export default function ChatPanel({
   }, [initialPrompt, onClearInitialPrompt])
 
   const handleNewChat = () => {
+    activeRequestIdRef.current += 1 // invalidate any in-flight stream
     if (activeAbortControllerRef.current) {
       activeAbortControllerRef.current.abort()
       activeAbortControllerRef.current = null
@@ -427,6 +430,7 @@ export default function ChatPanel({
   }
 
   const handleSelectPastChat = async (pastConvId) => {
+    activeRequestIdRef.current += 1 // invalidate any in-flight stream
     if (activeAbortControllerRef.current) {
       activeAbortControllerRef.current.abort()
       activeAbortControllerRef.current = null
