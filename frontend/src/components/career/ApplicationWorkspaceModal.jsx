@@ -386,7 +386,12 @@ export default function ApplicationWorkspaceModal({
         setApplication(prev => ({ ...prev, resume_id: tailored.id, resume: tailored }))
       }
       setChecklist(prev => ({ ...prev, resumeTailored: true }))
-      showNotification('Tailored resume snapshot created and validated against your master profile!')
+      const verified = tailored?.validation_report?.status && tailored.validation_report.status !== 'NOT ENOUGH DATA'
+      if (verified) {
+        showNotification('Tailored resume snapshot created and validated against your master profile!')
+      } else {
+        showNotification('Tailored resume snapshot created. Add more details to your master profile to enable verification.')
+      }
     } catch (err) {
       setError(err.message || 'Failed to tailor resume')
     } finally {
