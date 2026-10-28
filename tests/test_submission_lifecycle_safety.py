@@ -19,6 +19,7 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 from unittest.mock import AsyncMock, patch
 import httpx
+import uuid
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -225,7 +226,8 @@ async def test_scenario_6_db_fails_after_external_submission():
 # ---------------------------------------------------------------------------
 @pytest.mark.asyncio
 async def test_scenario_7_worker_crashes_holding_claim():
-    user = "s7_user"
+    # Unique user per run: a stale SUBMISSION_OUTCOME_UNKNOWN row from a prior run must not be re-approved.
+    user = f"s7_user_{uuid.uuid4().hex[:8]}"
     opp_id = await upsert_opportunity("S7 Corp", "Dev", "https://s7.corp/jobs/7")
     app_rec = await get_or_create_career_application(user, opp_id)
     batch_id = await create_application_batch(user, [app_rec.id])

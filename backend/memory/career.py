@@ -741,18 +741,40 @@ async def get_application_batch(batch_id: str, user_id: str) -> Optional[Dict[st
         return None
 
 
+APPROVABLE_BATCH_STATUSES = ("DRAFT", "APPROVED")
+# Applications past these statuses (submitted, withdrawn, rejected, ...) must never be
+# reset to APPROVED_FOR_SUBMISSION by a batch approval.
+PRE_SUBMISSION_APPLICATION_STATUSES = (
+    "SAVED",
+    "DISCOVERED",
+    "ELIGIBILITY_CHECKED",
+    "PREPARING",
+    "ELIGIBILITY_REVIEW",
+    "NEEDS_INFORMATION",
+    "RESUME_DRAFT",
+    "RESUME_VALIDATION_FAILED",
+    "READY_FOR_REVIEW",
+    "READY_FOR_APPROVAL",
+    "APPROVED_FOR_SUBMISSION",
+    "HANDOFF_KIT_READY",
+    "MANUAL_SUBMISSION_REQUIRED",
+)
+
+
 async def approve_application_batch(batch_id: str, user_id: str, token: str) -> bool:
+    """Approve a DRAFT/APPROVED batch. Returns False if missing, foreign, or not approvable."""
     pool = await get_pool()
     now_ts = datetime.now(timezone.utc)
     if not pool:
         b = _in_memory_batches.get(batch_id)
-        if b and b["user_id"] == user_id:
+        if b and b["user_id"] == user_id and b.get("status") in APPROVABLE_BATCH_STATUSES:
             b["status"] = "APPROVED"
             b["approval_token"] = token
             b["approved_at"] = now_ts
             b["updated_at"] = now_ts
             for aid in b["application_ids"]:
-                if aid in _in_memory_applications and _in_memory_applications[aid]["user_id"] == user_id:
+                rec = _in_memory_applications.get(aid)
+                if rec and rec["user_id"] == user_id and rec.get("status") in PRE_SUBMISSION_APPLICATION_STATUSES:
                     _in_memory_applications[aid]["status"] = CareerApplicationStatus.APPROVED_FOR_SUBMISSION.value
                     _in_memory_applications[aid]["approved_at"] = now_ts
                     _in_memory_applications[aid]["updated_at"] = now_ts
@@ -767,12 +789,13 @@ async def approve_application_batch(batch_id: str, user_id: str, token: str) -> 
                 approval_token = $3,
                 approved_at = now(),
                 updated_at = now()
-            WHERE id = $1 AND user_id = $2
+            WHERE id = $1 AND user_id = $2 AND status = ANY($4::text[])
             RETURNING application_ids;
             """,
             batch_id,
             user_id,
             token,
+            list(APPROVABLE_BATCH_STATUSES),
         )
         if not batch_row:
             return False
@@ -784,10 +807,11 @@ async def approve_application_batch(batch_id: str, user_id: str, token: str) -> 
                 status = 'APPROVED_FOR_SUBMISSION',
                 approved_at = now(),
                 updated_at = now()
-            WHERE id = ANY($1::int[]) AND user_id = $2
+            WHERE id = ANY($1::int[]) AND user_id = $2 AND status = ANY($3::text[])
             """,
             app_ids,
             user_id,
+            list(PRE_SUBMISSION_APPLICATION_STATUSES),
         )
         return True
 

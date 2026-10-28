@@ -27,6 +27,7 @@ from backend.services.career_file_parser import extract_resume_from_file_bytes, 
 
 from backend.dependencies import _get_current_identity, _get_or_create_user_id
 from backend.memory.career import (
+    APPROVABLE_BATCH_STATUSES,
     approve_application_batch,
     create_application_batch,
     create_tailored_resume,
@@ -73,6 +74,7 @@ from backend.models_career import (
     ResumeValidationReport,
     ResumeValidationStatus,
     SaveResumeRequest,
+    SetCoverLetterRequest,
     SubmissionAdapterCapability,
     SubmissionMethod,
     TailorResumeRequest,
@@ -186,6 +188,13 @@ async def tailor_resume_endpoint(body: TailorResumeRequest, request: Request):
         validation_report=report,
         validation_status=status,
     )
+
+
+@router.get("/resumes/original-documents", response_model=List[OriginalResumeDocument])
+async def list_original_resume_documents_endpoint(request: Request):
+    """Retrieve all preserved original uploaded resume documents for the candidate."""
+    user_id = _get_or_create_user_id(request)
+    return await list_original_resume_documents(user_id)
 
 
 @router.get("/resumes/{resume_id}", response_model=ResumeOut)
@@ -513,13 +522,6 @@ async def commit_extracted_resume_endpoint(
         )
 
 
-@router.get("/resumes/original-documents", response_model=List[OriginalResumeDocument])
-async def list_original_resume_documents_endpoint(request: Request):
-    """Retrieve all preserved original uploaded resume documents for the candidate."""
-    user_id = _get_or_create_user_id(request)
-    return await list_original_resume_documents(user_id)
-
-
 @router.post("/cover-letters/draft", response_model=CoverLetterOut)
 async def draft_cover_letter_endpoint(body: DraftCoverLetterRequest, request: Request):
     """
@@ -574,25 +576,28 @@ async def track_external_application_endpoint(
     """
     user_id = _get_or_create_user_id(request)
 
+    opp = await get_opportunity_by_id(opportunity_id, user_id)
+    if not opp:
+        raise HTTPException(status_code=404, detail="Opportunity not found")
+
     # 1. Ensure the application record exists
     from backend.memory.career import get_or_create_career_application
     app = await get_or_create_career_application(user_id, opportunity_id)
 
-    # 2. Transition status to SUBMITTED and record timestamp
-    from datetime import datetime, timezone
-    updates = {
-        "status": CareerApplicationStatus.SUBMITTED.value,
-        "submitted_at": datetime.now(timezone.utc),
-        "submission_method": SubmissionMethod.MANUAL_HANDOFF.value, # Default for external
-    }
+    # 2. Transition status to SUBMITTED and record timestamp (idempotent when already submitted)
+    if not _is_already_submitted(app):
+        _ensure_can_mark_submitted(app)
+        updates = {
+            "status": CareerApplicationStatus.SUBMITTED.value,
+            "submitted_at": datetime.now(timezone.utc),
+            "submission_method": SubmissionMethod.MANUAL_HANDOFF.value, # Default for external
+        }
+        app = await update_career_application(app.id, user_id, updates)
 
-    app = await update_career_application(app.id, user_id, updates)
-
-    # 3. Log the external event
-    await log_application_event(app.id, "EXTERNAL_SUBMISSION", {"source": source})
+        # 3. Log the external event
+        await log_application_event(app.id, "EXTERNAL_SUBMISSION", {"source": source})
 
     # 4. Enrich response
-    opp = await get_opportunity_by_id(opportunity_id, user_id)
     app.opportunity = opp
     resume = await get_resume_by_id(app.resume_id, user_id) if app.resume_id else None
     app.resume = resume
@@ -687,10 +692,10 @@ async def prepare_application_endpoint(request: Request, opportunity_id: Optiona
             validation_report=report,
             validation_status=val_status,
         )
-        app = await update_career_application(app.id, user_id, {
-            "resume_id": tailored.id,
-            "status": CareerApplicationStatus.READY_FOR_REVIEW.value,
-        })
+        resume_updates: Dict[str, Any] = {"resume_id": tailored.id}
+        if app.status in _PRE_REVIEW_STATUSES:
+            resume_updates["status"] = CareerApplicationStatus.READY_FOR_REVIEW.value
+        app = await update_career_application(app.id, user_id, resume_updates)
         app.resume = tailored
 
     # Draft truthful cover letter if not present
@@ -740,10 +745,10 @@ async def get_application_endpoint(app_id: int, request: Request):
 
 
 @router.post("/applications/{app_id}/cover-letter", response_model=CareerApplicationOut)
-async def set_application_cover_letter_endpoint(app_id: int, body: Dict[str, Any], request: Request):
+async def set_application_cover_letter_endpoint(app_id: int, body: SetCoverLetterRequest, request: Request):
     """Attach or update the cover letter for a career application."""
     user_id = _get_or_create_user_id(request)
-    cover_letter = body.get("cover_letter", "")
+    cover_letter = body.cover_letter
     app = await update_career_application(app_id, user_id, {"cover_letter": cover_letter})
     if not app:
         raise HTTPException(status_code=404, detail="Application not found")
@@ -855,6 +860,50 @@ ALLOWED_STATUS_TRANSITIONS: Dict[str, Set[str]] = {
         CareerApplicationStatus.CLOSED.value,
         CareerApplicationStatus.SAVED.value,
     },
+}
+
+
+# Statuses from which an application cannot be (re-)marked as submitted: it has already
+# progressed beyond submission or been closed out.
+_POST_SUBMISSION_STATUSES: Set[str] = {
+    CareerApplicationStatus.ASSESSMENT_RECEIVED.value,
+    CareerApplicationStatus.INTERVIEW.value,
+    CareerApplicationStatus.OFFER_RECEIVED.value,
+    CareerApplicationStatus.REJECTED.value,
+    CareerApplicationStatus.WITHDRAWN.value,
+    CareerApplicationStatus.CLOSED.value,
+}
+
+
+def _status_value(app: CareerApplicationOut) -> str:
+    return app.status.value if hasattr(app.status, "value") else str(app.status)
+
+
+def _is_already_submitted(app: CareerApplicationOut) -> bool:
+    return _status_value(app) == CareerApplicationStatus.SUBMITTED.value
+
+
+def _ensure_can_mark_submitted(app: CareerApplicationOut) -> None:
+    """Reject marking SUBMITTED when the transition table forbids it for a progressed application."""
+    curr_st = _status_value(app)
+    allowed = ALLOWED_STATUS_TRANSITIONS.get(curr_st, set())
+    if curr_st in _POST_SUBMISSION_STATUSES and CareerApplicationStatus.SUBMITTED.value not in allowed:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot mark application as submitted from status '{curr_st}'.",
+        )
+
+
+# Statuses at or before which a freshly attached resume may move an application to READY_FOR_REVIEW.
+_PRE_REVIEW_STATUSES = {
+    CareerApplicationStatus.SAVED,
+    CareerApplicationStatus.DISCOVERED,
+    CareerApplicationStatus.ELIGIBILITY_CHECKED,
+    CareerApplicationStatus.PREPARING,
+    CareerApplicationStatus.ELIGIBILITY_REVIEW,
+    CareerApplicationStatus.NEEDS_INFORMATION,
+    CareerApplicationStatus.RESUME_DRAFT,
+    CareerApplicationStatus.RESUME_VALIDATION_FAILED,
 }
 
 
@@ -1064,6 +1113,12 @@ async def mark_application_applied_endpoint(app_id: int, request: Request):
     if not app:
         raise HTTPException(status_code=404, detail="Application not found")
 
+    opp = await get_opportunity_by_id(app.opportunity_id, user_id)
+    if _is_already_submitted(app):
+        app.opportunity = opp
+        return app
+    _ensure_can_mark_submitted(app)
+
     now = datetime.now(timezone.utc)
     follow_up = date.today() + timedelta(days=14)
 
@@ -1077,7 +1132,6 @@ async def mark_application_applied_endpoint(app_id: int, request: Request):
         "follow_up_reminder": str(follow_up),
     })
 
-    opp = await get_opportunity_by_id(app.opportunity_id, user_id)
     updated.opportunity = opp
     return updated
 
@@ -1174,11 +1228,18 @@ async def prepare_batch_endpoint(body: BatchPrepareRequest, request: Request):
         raise HTTPException(status_code=400, detail="At least one opportunity is required for a batch")
 
     from backend.memory.career import get_or_create_career_application
+    opps_by_id = {}
+    for opp_id in body.opportunity_ids:
+        found = await get_opportunity_by_id(opp_id, user_id)
+        if not found:
+            raise HTTPException(status_code=404, detail=f"Opportunity {opp_id} not found")
+        opps_by_id[opp_id] = found
+
     app_ids = []
     apps_list = []
     for opp_id in body.opportunity_ids:
         app = await get_or_create_career_application(user_id, opp_id)
-        opp = await get_opportunity_by_id(opp_id, user_id)
+        opp = opps_by_id[opp_id]
         resume = await get_resume_by_id(app.resume_id, user_id) if app.resume_id else None
         app.opportunity = opp
         app.resume = resume
@@ -1244,6 +1305,12 @@ async def approve_batch_endpoint(batch_id: str, body: BatchApproveRequest, reque
     if not batch:
         raise HTTPException(status_code=404, detail="Batch not found or unauthorized")
 
+    if batch.get("status") not in APPROVABLE_BATCH_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Batch cannot be approved from status '{batch.get('status')}'.",
+        )
+
     if not body.attestation_confirmed or not body.work_auth_confirmed or not body.legal_statements_accepted:
         raise HTTPException(
             status_code=400,
@@ -1268,7 +1335,8 @@ async def approve_batch_endpoint(batch_id: str, body: BatchApproveRequest, reque
 
     ok = await approve_application_batch(batch_id, user_id, approval_token)
     if not ok:
-        raise HTTPException(status_code=404, detail="Batch not found or unauthorized")
+        # Batch existed above; it changed state concurrently and is no longer approvable.
+        raise HTTPException(status_code=409, detail="Batch is no longer in an approvable state.")
 
     return {
         "status": "APPROVED",
@@ -1359,13 +1427,13 @@ async def submit_batch_endpoint(batch_id: str, body: BatchSubmitRequest, request
         except HTTPException:
             raise
         except Exception as e:
-            logger.error("Unhandled error executing batch submission %s: %s", batch_id, e)
+            logger.exception("Unhandled error executing batch submission %s: %s", batch_id, e)
             await finish_application_batch(batch_id, user_id, [{
                 "application_id": 0,
                 "status": "FAILED",
-                "message": f"Submission crashed: {e}",
+                "message": "Submission execution failed unexpectedly.",
             }])
-            raise HTTPException(status_code=500, detail=f"Submission execution failed: {e}")
+            raise HTTPException(status_code=500, detail="Submission execution failed. Please try again later.")
 
     success_cnt = sum(1 for r in results if r.status in {"SUBMITTED", "APPROVED"})
     manual_cnt = sum(1 for r in results if r.status == CareerApplicationStatus.MANUAL_SUBMISSION_REQUIRED.value)

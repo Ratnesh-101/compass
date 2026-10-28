@@ -237,8 +237,21 @@ class UpdateApplicationStatusRequest(BaseModel):
         return v
 
 
+MAX_BATCH_OPPORTUNITIES = 50
+MAX_COVER_LETTER_CHARS = 20000
+
+
 class BatchPrepareRequest(BaseModel):
-    opportunity_ids: List[int]
+    opportunity_ids: List[int] = Field(max_length=MAX_BATCH_OPPORTUNITIES)
+
+    @field_validator("opportunity_ids")
+    @classmethod
+    def _dedupe_opportunity_ids(cls, v: List[int]) -> List[int]:
+        return list(dict.fromkeys(v))
+
+
+class SetCoverLetterRequest(BaseModel):
+    cover_letter: str = Field(max_length=MAX_COVER_LETTER_CHARS)
 
 
 class BatchReviewOut(BaseModel):
