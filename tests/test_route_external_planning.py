@@ -120,23 +120,42 @@ async def test_guard_uses_router_model_first_with_budget_and_long_timeout():
 
 
 @pytest.mark.asyncio
-async def test_guard_appends_style_rule_without_mutating_original_messages():
-    from backend.router import DIRECT_ANSWER_STYLE_RULE, route_message
+async def test_guard_uses_clean_prompt_without_router_prompt_or_memory():
+    from backend.router import DIRECT_ANSWER_SYSTEM_PROMPT, route_message
 
     client = _guard_client([_hijack(), _text_response("plan")])
     with patch("backend.router.get_openai_client", return_value=client):
-        await route_message(PLAN_48H)
+        await route_message(PLAN_48H, memory_context="secret memory block")
     calls = client.chat.completions.create.await_args_list
     first_msgs = calls[0].kwargs["messages"]
     plain_msgs = calls[1].kwargs["messages"]
-    assert plain_msgs[0]["role"] == "system"
-    assert plain_msgs[0]["content"].endswith(DIRECT_ANSWER_STYLE_RULE)
-    assert "Never stop mid-sentence" in plain_msgs[0]["content"]
-    # The original list and dicts (reused by retries) are untouched.
-    assert plain_msgs is not first_msgs
-    assert first_msgs[0]["role"] == "system"
-    assert "Never stop mid-sentence" not in first_msgs[0]["content"]
-    assert plain_msgs[1:] == first_msgs[1:]
+    assert plain_msgs == [
+        {"role": "system", "content": DIRECT_ANSWER_SYSTEM_PROMPT},
+        {"role": "user", "content": PLAN_48H},
+    ]
+    assert "WORKSPACE MEMORY" in first_msgs[0]["content"]
+    joined = " ".join(m["content"] for m in plain_msgs)
+    assert "WORKSPACE MEMORY" not in joined
+    assert "secret memory block" not in joined
+    assert first_msgs[0]["content"] not in joined
+    assert calls[1].kwargs["temperature"] == 0.5
+    assert calls[1].kwargs["stream"] is False
+
+
+@pytest.mark.asyncio
+async def test_guard_trims_history_to_last_four_user_assistant_items():
+    from backend.router import route_message
+
+    history = [{"role": "system", "content": "sys"}, {"role": "tool", "content": "t"}, {"bad": 1}]
+    history += [{"role": "user" if i % 2 == 0 else "assistant", "content": f"m{i}" + "x" * 2000} for i in range(6)]
+    client = _guard_client([_hijack(), _text_response("plan")])
+    with patch("backend.router.get_openai_client", return_value=client):
+        await route_message(PLAN_48H, history=history)
+    plain_msgs = client.chat.completions.create.await_args_list[1].kwargs["messages"]
+    assert len(plain_msgs) == 6
+    assert [m["content"][:2] for m in plain_msgs[1:5]] == ["m2", "m3", "m4", "m5"]
+    assert all(len(m["content"]) <= 1500 for m in plain_msgs[1:5])
+    assert plain_msgs[-1] == {"role": "user", "content": PLAN_48H}
 
 
 @pytest.mark.asyncio
@@ -253,3 +272,63 @@ async def test_main_loop_empty_stop_reply_keeps_budget():
     assert result == (None, None, "hello there")
     calls = client.chat.completions.create.await_args_list
     assert calls[1].kwargs["max_tokens"] == 1024
+
+
+def _empty_completion():
+    return _text_response("", "stop")
+
+
+@pytest.mark.asyncio
+async def test_empty_router_completion_on_external_prompt_uses_direct_answer():
+    from backend.router import route_message
+
+    client = _guard_client([_empty_completion(), _empty_completion(), _text_response("direct plan")])
+    with patch("backend.router.get_openai_client", return_value=client):
+        result = await route_message(PLAN_48H)
+    assert result == (None, None, "direct plan")
+    assert client.chat.completions.create.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_empty_choices_on_external_prompt_uses_direct_answer():
+    from backend.router import route_message
+
+    no_choices = SimpleNamespace(choices=[], usage=None)
+    client = _guard_client([no_choices, no_choices, _text_response("direct plan")])
+    with patch("backend.router.get_openai_client", return_value=client):
+        result = await route_message(PLAN_48H)
+    assert result == (None, None, "direct plan")
+
+
+@pytest.mark.asyncio
+async def test_raising_router_on_external_prompt_uses_direct_answer():
+    from backend.router import route_message
+
+    client = _guard_client([RuntimeError("a"), RuntimeError("b"), _text_response("direct plan")])
+    with patch("backend.router.get_openai_client", return_value=client):
+        result = await route_message(PLAN_48H)
+    assert result == (None, None, "direct plan")
+
+
+@pytest.mark.asyncio
+async def test_empty_router_completion_on_personal_prompt_unchanged():
+    from backend.router import route_message
+
+    msg = "What should I work on first today?"
+    client = _guard_client([_empty_completion(), _empty_completion()])
+    with patch("backend.router.get_openai_client", return_value=client):
+        result = await route_message(msg)
+    assert result == _fallback_route(msg, None)
+    assert client.chat.completions.create.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_raising_router_on_personal_prompt_unchanged():
+    from backend.router import route_message
+
+    msg = "What should I work on first today?"
+    client = _guard_client([RuntimeError("a"), RuntimeError("b")])
+    with patch("backend.router.get_openai_client", return_value=client):
+        result = await route_message(msg)
+    assert result == _fallback_route(msg, None)
+    assert client.chat.completions.create.await_count == 2

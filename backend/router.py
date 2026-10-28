@@ -45,11 +45,16 @@ TOOLS = TOOL_DEFINITIONS
 DIRECT_ANSWER_MAX_TOKENS = 3000
 DIRECT_ANSWER_TIMEOUT_S = 60.0
 DIRECT_ANSWER_MIN_USEFUL_CHARS = 600
-DIRECT_ANSWER_STYLE_RULE = (
-    " For this request: answer completely and concisely (about 500 words), direct answer first, "
-    "with headings and short lists. Use at most one table, keep every table row on one line and "
-    "separate several items in a cell with <br>. Never stop mid-sentence or leave a list or table unfinished."
+DIRECT_ANSWER_SYSTEM_PROMPT = (
+    "You are Compass, an expert planning and engineering copilot for students, developers and hackathon teams. "
+    "The user describes a project, event or technical question. Answer it directly and completely: put the "
+    "concrete answer first, use headings and short lists, give specific times, steps and trade-offs where asked, "
+    "name the main risks and what to cut when asked, and keep it to about 500 words. Use at most one table; keep "
+    "every table row on one line and separate several items in a cell with <br>. Never stop mid-sentence or leave "
+    "a list or table unfinished. Do not ask clarifying questions unless the request cannot be answered without one."
 )
+DIRECT_ANSWER_HISTORY_ITEMS = 4
+DIRECT_ANSWER_HISTORY_CHARS = 1500
 DIRECT_ANSWER_CUT_NOTE = "\n\n_(The answer was cut short — ask me to continue.)_"
 RETRY_MAX_TOKENS_CAP = 4096
 
@@ -77,6 +82,76 @@ def get_openai_client() -> AsyncOpenAI:
         )
         _cached_openai_client = client
     return client
+
+
+async def _answer_external_project_request(
+    client: Any, message: str, history: Optional[list[dict[str, str]]]
+) -> Optional[str]:
+    """Answer a user-described project/planning request with a short, focused prompt.
+
+    Deliberately avoids the router's tool-oriented system prompt and memory context.
+    Returns None when every model fails or only produces a short truncated reply.
+    """
+    from backend.services.usage import record_usage
+
+    recent = [
+        {"role": h["role"], "content": h["content"][:DIRECT_ANSWER_HISTORY_CHARS]}
+        for h in (history or [])
+        if isinstance(h, dict) and h.get("role") in ("user", "assistant") and isinstance(h.get("content"), str)
+    ][-DIRECT_ANSWER_HISTORY_ITEMS:]
+    answer_messages: Any = [
+        {"role": "system", "content": DIRECT_ANSWER_SYSTEM_PROMPT},
+        *recent,
+        {"role": "user", "content": message},
+    ]
+    try:
+        answer_client = client.with_options(timeout=DIRECT_ANSWER_TIMEOUT_S, max_retries=0)
+    except (AttributeError, TypeError):
+        answer_client = client
+    for answer_model in (settings.ROUTER_MODEL, settings.SKILL_MODEL):
+        try:
+            response: Any = await answer_client.chat.completions.create(
+                model=answer_model,
+                messages=answer_messages,
+                max_tokens=DIRECT_ANSWER_MAX_TOKENS,
+                temperature=0.5,
+                stream=False,
+            )
+        except Exception as err:
+            logger.warning("Direct project answer failed on %s (%s)", answer_model, type(err).__name__)
+            continue
+        usage = getattr(response, "usage", None)
+        record_usage(
+            answer_model,
+            usage.prompt_tokens if usage else max(len(message.split()) * 2, 64),
+            usage.completion_tokens if usage else 50,
+        )
+        choices = getattr(response, "choices", None)
+        msg = getattr(choices[0], "message", None) if choices else None
+        reply = (getattr(msg, "content", "") or "").strip() if msg else ""
+        was_cut = getattr(choices[0], "finish_reason", None) == "length" if choices else False
+        if reply and was_cut:
+            if len(reply) < DIRECT_ANSWER_MIN_USEFUL_CHARS:
+                logger.warning(
+                    "Direct project answer from %s was truncated (%d chars); trying next model",
+                    answer_model,
+                    len(reply),
+                )
+                continue
+            return reply + DIRECT_ANSWER_CUT_NOTE
+        if reply:
+            return reply
+        logger.warning("Direct project answer from %s was empty", answer_model)
+    return None
+
+
+async def _external_answer_or_none(
+    client: Any, message: str, history: Optional[list[dict[str, str]]]
+) -> Optional[str]:
+    """Direct answer for external-project requests only; None for everything else."""
+    if not is_external_project_request(message):
+        return None
+    return await _answer_external_project_request(client, message, history)
 
 
 async def route_message(
@@ -204,6 +279,9 @@ async def route_message(
                 if attempt < max_router_attempts and not is_explicit_add_task:
                     logger.warning("Router received empty choices on attempt %d; retrying once", attempt)
                     continue
+                direct = await _external_answer_or_none(client, message, history)
+                if direct:
+                    return None, None, direct
                 return _fallback_route(message, history)
 
             choice = choices[0]
@@ -242,51 +320,9 @@ async def route_message(
 
                 if func_name == "query_tasks" and is_external_project_request(message):
                     # The model hijacked a general project-planning question; answer it directly.
-                    plain_kwargs = {k: v for k, v in call_kwargs.items() if k not in ("tools", "tool_choice")}
-                    plain_kwargs["max_tokens"] = DIRECT_ANSWER_MAX_TOKENS
-                    # Copy, never mutate: `messages` is reused by retries.
-                    if messages and isinstance(messages[0], dict) and messages[0].get("role") == "system":
-                        first_msg = {**messages[0], "content": f"{messages[0].get('content') or ''}{DIRECT_ANSWER_STYLE_RULE}"}
-                        plain_kwargs["messages"] = [first_msg, *messages[1:]]
-                    else:
-                        plain_kwargs["messages"] = [
-                            {"role": "system", "content": DIRECT_ANSWER_STYLE_RULE.strip()},
-                            *messages,
-                        ]
-                    try:
-                        answer_client = client.with_options(timeout=DIRECT_ANSWER_TIMEOUT_S, max_retries=0)
-                    except (AttributeError, TypeError):
-                        answer_client = client
-                    for answer_model in (settings.ROUTER_MODEL, settings.SKILL_MODEL):
-                        try:
-                            plain_response: Any = await answer_client.chat.completions.create(
-                                **{**plain_kwargs, "model": answer_model}
-                            )
-                        except Exception as plain_err:
-                            logger.warning("Direct project answer failed on %s (%s)", answer_model, type(plain_err).__name__)
-                            continue
-                        plain_usage = getattr(plain_response, "usage", None)
-                        record_usage(
-                            answer_model,
-                            plain_usage.prompt_tokens if plain_usage else p_tok,
-                            plain_usage.completion_tokens if plain_usage else c_tok,
-                        )
-                        plain_choices = getattr(plain_response, "choices", None)
-                        plain_msg = getattr(plain_choices[0], "message", None) if plain_choices else None
-                        plain_reply = (getattr(plain_msg, "content", "") or "").strip() if plain_msg else ""
-                        was_cut = getattr(plain_choices[0], "finish_reason", None) == "length" if plain_choices else False
-                        if plain_reply and was_cut:
-                            if len(plain_reply) < DIRECT_ANSWER_MIN_USEFUL_CHARS:
-                                logger.warning(
-                                    "Direct project answer from %s was truncated (%d chars); trying next model",
-                                    answer_model,
-                                    len(plain_reply),
-                                )
-                                continue
-                            return None, None, plain_reply + DIRECT_ANSWER_CUT_NOTE
-                        if plain_reply:
-                            return None, None, plain_reply
-                        logger.warning("Direct project answer from %s was empty", answer_model)
+                    reply = await _answer_external_project_request(client, message, history)
+                    if reply:
+                        return None, None, reply
                     return _fallback_route(message, history)
 
                 logger.info(f"Router invoked tool: {func_name} with args: {args}")
@@ -310,6 +346,9 @@ async def route_message(
                         return None, None, "How can I help you today? I'm here to help you manage tasks, coursework, and deadlines."
                     if is_schedule_or_agent_intent(message):
                         return "agent", {"goal": message}, ""
+                    direct = await _external_answer_or_none(client, message, history)
+                    if direct:
+                        return None, None, direct
                     return _fallback_route(message, history)
 
                 return None, None, reply
@@ -324,6 +363,9 @@ async def route_message(
                 return "add_task", _extract_task_creation_args(message), ""
             if is_schedule_or_agent_intent(message):
                 return "agent", {"goal": message}, ""
+            direct = await _external_answer_or_none(client, message, history)
+            if direct:
+                return None, None, direct
             return _fallback_route(message, history)
 
     return _fallback_route(message, history)
