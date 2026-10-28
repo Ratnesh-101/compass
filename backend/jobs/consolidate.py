@@ -248,6 +248,13 @@ async def deduplicate_vectors(
 # Task 3: Thread Archival & Summarization
 # ---------------------------------------------------------------------------
 
+# Constant SQL fragments; _conversation_owner_expr only ever returns one of these.
+_OWNER_EXPR_BOTH = "COALESCE(c.user_id, c.guest_id)"
+_OWNER_EXPR_USER = "c.user_id"
+_OWNER_EXPR_GUEST = "c.guest_id"
+_OWNER_EXPR_NONE = "NULL::text"
+
+
 async def _conversation_owner_expr(conn: asyncpg.Connection) -> str:
     """SQL expression for a conversation's owner; the owner columns are added lazily by the app at startup."""
     cols = {
@@ -256,8 +263,13 @@ async def _conversation_owner_expr(conn: asyncpg.Connection) -> str:
             "SELECT column_name FROM information_schema.columns WHERE table_name = 'conversations'"
         )
     }
-    present = [f"c.{name}" for name in ("user_id", "guest_id") if name in cols]
-    return f"COALESCE({', '.join(present)})" if present else "NULL::text"
+    if {"user_id", "guest_id"} <= cols:
+        return _OWNER_EXPR_BOTH
+    if "user_id" in cols:
+        return _OWNER_EXPR_USER
+    if "guest_id" in cols:
+        return _OWNER_EXPR_GUEST
+    return _OWNER_EXPR_NONE
 
 
 async def archive_stale_threads(
@@ -283,7 +295,7 @@ async def archive_stale_threads(
         HAVING COUNT(m.id) > 0
         ORDER BY c.last_active_at ASC
         LIMIT 5
-        """,
+        """,  # nosec B608 - owner_expr is a constant fragment from _conversation_owner_expr
         cutoff
     )
 
