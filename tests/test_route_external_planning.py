@@ -100,8 +100,11 @@ def _hijack():
     return _tool_response("query_tasks", '{"intent": "roadmap"}')
 
 
+LONG_REPLY = "Hour 0-4: scaffold the app. " * 30  # well over 600 chars
+
+
 @pytest.mark.asyncio
-async def test_guard_uses_skill_model_big_budget_and_long_timeout():
+async def test_guard_uses_router_model_first_with_budget_and_long_timeout():
     from backend.router import route_message
     from backend.config import get_settings
 
@@ -111,13 +114,33 @@ async def test_guard_uses_skill_model_big_budget_and_long_timeout():
         result = await route_message(PLAN_48H)
     assert result == (None, None, "plan")
     kwargs = client.chat.completions.create.await_args_list[1].kwargs
-    assert kwargs["model"] == settings.SKILL_MODEL
-    assert kwargs["max_tokens"] == 3500
+    assert kwargs["model"] == settings.ROUTER_MODEL
+    assert kwargs["max_tokens"] == 3000
     client.with_options.assert_called_with(timeout=60.0, max_retries=0)
 
 
 @pytest.mark.asyncio
-async def test_guard_empty_primary_falls_back_to_router_model():
+async def test_guard_appends_style_rule_without_mutating_original_messages():
+    from backend.router import DIRECT_ANSWER_STYLE_RULE, route_message
+
+    client = _guard_client([_hijack(), _text_response("plan")])
+    with patch("backend.router.get_openai_client", return_value=client):
+        await route_message(PLAN_48H)
+    calls = client.chat.completions.create.await_args_list
+    first_msgs = calls[0].kwargs["messages"]
+    plain_msgs = calls[1].kwargs["messages"]
+    assert plain_msgs[0]["role"] == "system"
+    assert plain_msgs[0]["content"].endswith(DIRECT_ANSWER_STYLE_RULE)
+    assert "Never stop mid-sentence" in plain_msgs[0]["content"]
+    # The original list and dicts (reused by retries) are untouched.
+    assert plain_msgs is not first_msgs
+    assert first_msgs[0]["role"] == "system"
+    assert "Never stop mid-sentence" not in first_msgs[0]["content"]
+    assert plain_msgs[1:] == first_msgs[1:]
+
+
+@pytest.mark.asyncio
+async def test_guard_empty_primary_falls_back_to_skill_model():
     from backend.router import route_message
     from backend.config import get_settings
 
@@ -128,13 +151,13 @@ async def test_guard_empty_primary_falls_back_to_router_model():
     assert result == (None, None, "fallback plan")
     calls = client.chat.completions.create.await_args_list
     assert len(calls) == 3
-    assert calls[2].kwargs["model"] == settings.ROUTER_MODEL
-    assert calls[2].kwargs["max_tokens"] == 3500
+    assert calls[2].kwargs["model"] == settings.SKILL_MODEL
+    assert calls[2].kwargs["max_tokens"] == 3000
     assert "tools" not in calls[2].kwargs
 
 
 @pytest.mark.asyncio
-async def test_guard_raising_primary_falls_back_to_router_model():
+async def test_guard_raising_primary_falls_back_to_second_model():
     from backend.router import route_message
 
     client = _guard_client([_hijack(), RuntimeError("boom"), _text_response("fallback plan")])
@@ -156,13 +179,54 @@ async def test_guard_both_empty_uses_fallback_route_with_at_most_three_calls():
 
 
 @pytest.mark.asyncio
-async def test_guard_length_truncated_reply_is_returned_without_retry():
+async def test_guard_short_length_capped_reply_tries_next_model():
     from backend.router import route_message
+    from backend.config import get_settings
 
-    client = _guard_client([_hijack(), _text_response("partial plan", "length")])
+    settings = get_settings()
+    heading = "# 48-Hour Hackathon Hour-by-Hour Plan"
+    client = _guard_client([_hijack(), _text_response(heading, "length"), _text_response("full plan")])
     with patch("backend.router.get_openai_client", return_value=client):
         result = await route_message(PLAN_48H)
-    assert result == (None, None, "partial plan")
+    assert result == (None, None, "full plan")
+    calls = client.chat.completions.create.await_args_list
+    assert len(calls) == 3
+    assert calls[2].kwargs["model"] == settings.SKILL_MODEL
+
+
+@pytest.mark.asyncio
+async def test_guard_long_length_capped_reply_is_returned_with_cut_note_and_no_retry():
+    from backend.router import DIRECT_ANSWER_CUT_NOTE, route_message
+
+    assert len(LONG_REPLY.strip()) >= 600
+    client = _guard_client([_hijack(), _text_response(LONG_REPLY, "length")])
+    with patch("backend.router.get_openai_client", return_value=client):
+        result = await route_message(PLAN_48H)
+    assert result == (None, None, LONG_REPLY.strip() + DIRECT_ANSWER_CUT_NOTE)
+    assert DIRECT_ANSWER_CUT_NOTE == "\n\n_(The answer was cut short \u2014 ask me to continue.)_"
+    assert client.chat.completions.create.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_guard_both_short_length_capped_uses_fallback_route_after_two_calls():
+    from backend.router import route_message
+
+    client = _guard_client([_hijack(), _text_response("# Heading", "length"), _text_response("# Other", "length")])
+    with patch("backend.router.get_openai_client", return_value=client):
+        result = await route_message(PLAN_48H)
+    assert result == _fallback_route(PLAN_48H, None)
+    # 1 routing call + exactly 2 tool-free calls.
+    assert client.chat.completions.create.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_guard_normal_stop_reply_is_returned_unchanged():
+    from backend.router import route_message
+
+    client = _guard_client([_hijack(), _text_response(LONG_REPLY, "stop")])
+    with patch("backend.router.get_openai_client", return_value=client):
+        result = await route_message(PLAN_48H)
+    assert result == (None, None, LONG_REPLY.strip())
     assert client.chat.completions.create.await_count == 2
 
 

@@ -42,8 +42,15 @@ settings = get_settings()
 TOOLS = TOOL_DEFINITIONS
 
 # Long planning answers need room: reasoning models can burn a small budget on hidden thinking.
-DIRECT_ANSWER_MAX_TOKENS = 3500
+DIRECT_ANSWER_MAX_TOKENS = 3000
 DIRECT_ANSWER_TIMEOUT_S = 60.0
+DIRECT_ANSWER_MIN_USEFUL_CHARS = 600
+DIRECT_ANSWER_STYLE_RULE = (
+    " For this request: answer completely and concisely (about 500 words), direct answer first, "
+    "with headings and short lists. Use at most one table, keep every table row on one line and "
+    "separate several items in a cell with <br>. Never stop mid-sentence or leave a list or table unfinished."
+)
+DIRECT_ANSWER_CUT_NOTE = "\n\n_(The answer was cut short — ask me to continue.)_"
 RETRY_MAX_TOKENS_CAP = 4096
 
 
@@ -237,11 +244,20 @@ async def route_message(
                     # The model hijacked a general project-planning question; answer it directly.
                     plain_kwargs = {k: v for k, v in call_kwargs.items() if k not in ("tools", "tool_choice")}
                     plain_kwargs["max_tokens"] = DIRECT_ANSWER_MAX_TOKENS
+                    # Copy, never mutate: `messages` is reused by retries.
+                    if messages and isinstance(messages[0], dict) and messages[0].get("role") == "system":
+                        first_msg = {**messages[0], "content": f"{messages[0].get('content') or ''}{DIRECT_ANSWER_STYLE_RULE}"}
+                        plain_kwargs["messages"] = [first_msg, *messages[1:]]
+                    else:
+                        plain_kwargs["messages"] = [
+                            {"role": "system", "content": DIRECT_ANSWER_STYLE_RULE.strip()},
+                            *messages,
+                        ]
                     try:
                         answer_client = client.with_options(timeout=DIRECT_ANSWER_TIMEOUT_S, max_retries=0)
                     except (AttributeError, TypeError):
                         answer_client = client
-                    for answer_model in (settings.SKILL_MODEL, settings.ROUTER_MODEL):
+                    for answer_model in (settings.ROUTER_MODEL, settings.SKILL_MODEL):
                         try:
                             plain_response: Any = await answer_client.chat.completions.create(
                                 **{**plain_kwargs, "model": answer_model}
@@ -258,6 +274,16 @@ async def route_message(
                         plain_choices = getattr(plain_response, "choices", None)
                         plain_msg = getattr(plain_choices[0], "message", None) if plain_choices else None
                         plain_reply = (getattr(plain_msg, "content", "") or "").strip() if plain_msg else ""
+                        was_cut = getattr(plain_choices[0], "finish_reason", None) == "length" if plain_choices else False
+                        if plain_reply and was_cut:
+                            if len(plain_reply) < DIRECT_ANSWER_MIN_USEFUL_CHARS:
+                                logger.warning(
+                                    "Direct project answer from %s was truncated (%d chars); trying next model",
+                                    answer_model,
+                                    len(plain_reply),
+                                )
+                                continue
+                            return None, None, plain_reply + DIRECT_ANSWER_CUT_NOTE
                         if plain_reply:
                             return None, None, plain_reply
                         logger.warning("Direct project answer from %s was empty", answer_model)
