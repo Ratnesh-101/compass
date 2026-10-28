@@ -84,6 +84,7 @@ export function sanitizeModesMarker(text) {
 export async function streamQueryFromAssistant(prompt, conversationId, { onToken, onThought, onStatus, onComplete, onError, tone = null, mode = null, specialistId = null, targetMessageId = null, targetMessageContent = null, signal = null } = {}) {
   let fullResponse = ''
   let reader = null
+  let streamResult = null
   try {
     const body = { message: prompt }
     if (conversationId) {
@@ -218,21 +219,7 @@ export async function streamQueryFromAssistant(prompt, conversationId, { onToken
       throw emptyErr
     }
 
-    if (onComplete) {
-      await onComplete({
-        response: fullResponse,
-        conversation_id: lastConvId,
-        skill_used: lastSkill,
-        tasks: lastTasks,
-        evidence: lastEvidence,
-        is_truncated: lastIsTruncated,
-        verifiable: lastVerifiable,
-        pending_action: lastPendingAction,
-        can_undo: lastCanUndo,
-        data: lastData,
-      })
-    }
-    return {
+    streamResult = {
       response: fullResponse,
       conversation_id: lastConvId,
       skill_used: lastSkill,
@@ -262,6 +249,17 @@ export async function streamQueryFromAssistant(prompt, conversationId, { onToken
       }
     }
   }
+
+  // Run onComplete outside the stream try/catch: a handler failure after a successful
+  // stream must not be reported to onError as a stream failure.
+  if (streamResult && onComplete) {
+    try {
+      await onComplete(streamResult)
+    } catch (completeErr) {
+      console.error('[Compass] onComplete handler failed after successful stream:', completeErr)
+    }
+  }
+  return streamResult
 }
 
 

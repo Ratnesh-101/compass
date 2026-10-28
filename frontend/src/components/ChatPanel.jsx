@@ -173,6 +173,13 @@ export default function ChatPanel({
     }
   }, [])
 
+  const clearStreamTimer = () => {
+    if (streamTimerRef.current) {
+      clearInterval(streamTimerRef.current)
+      streamTimerRef.current = null
+    }
+  }
+
   const streamAssistantResponse = (fullText) => {
     setIsStreaming(true)
     setStreamingText('')
@@ -350,12 +357,8 @@ export default function ChatPanel({
                 can_undo: doneData?.can_undo,
               },
             }])
-          } else if (onSendMessage) {
-            const reply = await onSendMessage(text, tone, specialistIdToUse)
-            if (reply) {
-              streamAssistantResponse(reply)
-            }
           }
+          // A completed stream with an empty reply is a normal outcome: never re-send the prompt
           if (doneData?.conversation_id && setConversationId) {
             setConversationId(doneData.conversation_id)
           }
@@ -447,6 +450,7 @@ export default function ChatPanel({
       activeAbortControllerRef.current.abort()
       activeAbortControllerRef.current = null
     }
+    clearStreamTimer()
     setIsStreaming(false)
     setStreamingText('')
     setStreamingThought('')
@@ -468,6 +472,7 @@ export default function ChatPanel({
       activeAbortControllerRef.current.abort()
       activeAbortControllerRef.current = null
     }
+    clearStreamTimer()
     setIsStreaming(false)
     setStreamingText('')
     setStreamingThought('')

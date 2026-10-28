@@ -439,6 +439,12 @@ export default function Dashboard({
 
       try {
         await updateTask(taskId, { status: newStatus })
+        // Server now holds the new status; drop the override so it cannot mask later server data
+        setOptimisticOverrides((prev) => {
+          const next = { ...prev }
+          delete next[taskId]
+          return next
+        })
         if (onTasksUpdated) {
           onTasksUpdated()
         }
