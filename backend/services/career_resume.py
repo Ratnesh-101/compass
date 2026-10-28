@@ -539,6 +539,72 @@ def _extract_techs_from_text(text: str) -> List[str]:
     return found
 
 
+PROJECT_TITLE_SEPARATORS = (" — ", " – ", " | ", " - ")
+_PROJECT_HEADER_DASH_RE = re.compile(r"\s[-–—]\s")
+_EDU_SEGMENT_RE = re.compile(r"\s*\|\s*|\s+[-–—]\s+")
+_EDU_YEAR_RE = re.compile(r"\b(?:19|20)\d\d\s*(?:[-–—~]|\bto\b)\s*(?:(?:19|20)\d\d|present)\b|\b(?:19|20)\d\d\b", re.IGNORECASE)
+_EDU_GPA_RE = re.compile(r"(?:CGPA|GPA|Grade)[\s:]*[0-9.]+(?:/[0-9.]+)?%?", re.IGNORECASE)
+_EDU_INSTITUTION_TERMS = ("university", "institute", "college", "school", "academy")
+_EDU_DEGREE_TERMS = ("b.tech", "b.e.", "b.s.", "bs", "bachelor", "master", "m.tech", "ph.d", "b.sc", "m.sc", "mba", "diploma")
+
+
+def _split_project_header(header: str) -> Optional[Tuple[str, str]]:
+    """Split a project header at its first spaced dash into (title, description)."""
+    match = _PROJECT_HEADER_DASH_RE.search(header)
+    if not match:
+        return None
+    title = header[: match.start()].strip()
+    description = header[match.end():].strip()
+    if not title or not description:
+        return None
+    return title, description
+
+
+def _split_education_line(line: str) -> Tuple[str, str]:
+    """Return (institution, degree) from an education line without using year-range hyphens."""
+    stripped = _EDU_YEAR_RE.sub(" ", _EDU_GPA_RE.sub(" ", line))
+
+    def _has_term(part: str, terms: Tuple[str, ...]) -> bool:
+        low = part.lower()
+        return any(re.search(r"(?<![a-z0-9])" + re.escape(t), low) for t in terms)
+
+    # Dashes and pipes separate segments; commas separate parts within a segment.
+    segments: List[List[str]] = []
+    for segment in _EDU_SEGMENT_RE.split(stripped):
+        parts = [p.strip(" 	*•-–—.;") for p in segment.split(",")]
+        parts = [p for p in parts if p]
+        if parts:
+            segments.append(parts)
+    if not segments:
+        return line.strip(), ""
+
+    institution: Optional[str] = None
+    degree: Optional[str] = None
+    used: Set[Tuple[int, int]] = set()
+    for seg_idx, parts in enumerate(segments):
+        for part_idx, part in enumerate(parts):
+            if institution is None and _has_term(part, _EDU_INSTITUTION_TERMS):
+                # Trailing plain parts in the same segment belong to the name ("University of X, Berkeley").
+                end = part_idx + 1
+                while end < len(parts) and not _has_term(parts[end], _EDU_DEGREE_TERMS + _EDU_INSTITUTION_TERMS):
+                    end += 1
+                institution = ", ".join(parts[part_idx:end])
+                used.update((seg_idx, i) for i in range(part_idx, end))
+    for seg_idx, parts in enumerate(segments):
+        for part_idx, part in enumerate(parts):
+            if degree is None and (seg_idx, part_idx) not in used and _has_term(part, _EDU_DEGREE_TERMS):
+                degree = part
+                used.add((seg_idx, part_idx))
+
+    flat = [(si, pi, part) for si, parts in enumerate(segments) for pi, part in enumerate(parts)]
+    if institution is None:
+        institution = flat[0][2]
+        used.add((flat[0][0], flat[0][1]))
+    if degree is None:
+        degree = ", ".join(part for si, pi, part in flat if (si, pi) not in used)
+    return institution, degree
+
+
 def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
     """
     Parses unformatted or markdown text from an uploaded resume without hallucination.
@@ -747,9 +813,8 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
 
         elif current_section == "education":
             if any(term in line_low for term in ("b.tech", "b.e.", "bs", "bachelor", "master", "m.tech", "ph.d", "university", "institute", "college", "school")):
-                inst = line_clean.split("-")[0].strip() if "-" in line_clean else line_clean
-                deg = line_clean.split("-")[1].strip() if "-" in line_clean else "Undergraduate Degree"
-                
+                inst, deg = _split_education_line(line_clean)
+
                 year_match = re.findall(r"\b(20\d\d)\b", line_clean)
                 start_yr = int(year_match[0]) if len(year_match) > 1 else None
                 end_yr = int(year_match[-1]) if year_match else None
@@ -854,7 +919,7 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
                     else:
                         projects[-1].description = f"{projects[-1].description} {bullet_txt}"
                 continue
-            elif current_project and current_project.highlights and (line_clean[0].islower() or (not has_dates and not any(sep in line_clean for sep in [" — ", " – ", " | "]))):
+            elif current_project and current_project.highlights and (line_clean[0].islower() or (not has_dates and not any(sep in line_clean for sep in PROJECT_TITLE_SEPARATORS))):
                 continuation_txt = _clean_bullet(line_clean)
                 current_project.highlights[-1] = f"{current_project.highlights[-1]} {continuation_txt}".strip()
                 current_project.description = f"{current_project.description} {continuation_txt}".strip()
@@ -868,9 +933,14 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
             p_title = line_clean
             p_title = re.sub(r"[\s\t|]+(?:(?:\d{1,2}/\d{4}|\b\d{4})\s*(?:[-–—~]|\bto\b)\s*(?:\d{1,2}/\d{4}|\b\d{4}|present))\s*$", "", p_title, flags=re.IGNORECASE).strip()
 
+            p_desc = ""
+            title_split = _split_project_header(p_title)
+            if title_split:
+                p_title, p_desc = title_split
+
             current_project = ResumeProjectItem(
                 title=p_title.strip(" *•-–—"),
-                description="",
+                description=p_desc,
                 technologies=_extract_techs_from_text(line_clean),
                 evidence_classification="SOURCE_DOCUMENT",
             )
@@ -918,11 +988,6 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
             clean_pub = _clean_bullet(line_clean)
             if clean_pub and len(clean_pub) < 200 and clean_pub not in publications:
                 publications.append(clean_pub)
-
-    # Post-processing: ensure projects have fallback descriptions
-    for p in projects:
-        if not p.description:
-            p.description = "Project implementation"
 
     # Merge multiline certifications if needed (e.g. "Oracle Cloud Infrastructure" + "Certified Data Science Professional")
     consolidated_certs: List[str] = []
