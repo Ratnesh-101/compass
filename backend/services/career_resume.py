@@ -102,7 +102,7 @@ def validate_resume_against_master(
                 if s_norm in req_skills:
                     alignments.append(f"Emphasized verified skill '{skill}' required by {opportunity.company_name}.")
 
-    if not unsupported:
+    if tailored.skills and not unsupported:
         passed.append(f"Skills: All {len(tailored.skills)} listed skills verified against master profile.")
 
     # 4. Factual integrity check on projects
