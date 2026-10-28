@@ -217,19 +217,10 @@ def test_parse_markdown_table():
 async def test_verifier_detects_closed_notice(monkeypatch):
     from backend.services import radar_verifier
 
-    class MockResp:
-        status_code = 200
-        text = "Thank you for your interest. Applications have closed for the Summer 2026 session."
+    async def fake(url, *args, **kwargs):
+        return (200, "Thank you for your interest. Applications have closed for the Summer 2026 session.", {}, url)
 
-    class MockClient:
-        async def __aenter__(self):
-            return self
-        async def __aexit__(self, *args):
-            pass
-        async def get(self, *args, **kwargs):
-            return MockResp()
-
-    monkeypatch.setattr(radar_verifier.httpx, "AsyncClient", lambda *args, **kwargs: MockClient())
+    monkeypatch.setattr(radar_verifier, "safe_http_get_with_url", fake)
     monkeypatch.setattr(radar_verifier, "tavily_available", lambda: False)
 
     status, evidence, _ = await verify_opportunity_status("https://example.com/jobs/closed-job")

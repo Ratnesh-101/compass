@@ -9,6 +9,7 @@ No test here touches the real network or real DNS.
 
 import asyncio
 import socket
+import time
 
 import httpx
 import pytest
@@ -22,9 +23,13 @@ HOST = "jobs.rebind-example.test"
 APPLY_PAGE = "<html><body><h1>Software Intern</h1><a>Apply now</a></body></html>"
 
 
-def _addrinfo(ip):
-    family = socket.AF_INET6 if ":" in ip else socket.AF_INET
-    return [(family, socket.SOCK_STREAM, 6, "", (ip, 443))]
+def _addrinfo(ips):
+    """One getaddrinfo answer; `ips` is a single address or a list of addresses (returned in order)."""
+    ips = [ips] if isinstance(ips, str) else ips
+    return [
+        (socket.AF_INET6 if ":" in ip else socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 443))
+        for ip in ips
+    ]
 
 
 class FakeDns:
@@ -65,6 +70,8 @@ class FakeSend:
     async def _send(self, request):
         self.requests.append(request)
         status, text, headers = self.responses.pop(0)
+        if isinstance(status, Exception):
+            raise status
         return httpx.Response(status, text=text, headers=headers, request=request)
 
 
@@ -278,3 +285,93 @@ async def test_verifier_confirms_a_specific_posting_through_the_pinned_fetch(mon
 
     assert send.requests[0].url.host == "52.20.0.10"
     assert status == OpportunityStatus.OPEN_CONFIRMED
+
+
+# ---------------------------------------------------------------------------
+# Multiple resolved addresses: try each pinned address in order
+# ---------------------------------------------------------------------------
+
+IPV6_PUBLIC = "2606:2800:220:1:248:1893:25c8:1946"
+
+
+@pytest.mark.asyncio
+async def test_unreachable_first_address_falls_back_to_the_next_pinned_address(monkeypatch):
+    dns = FakeDns(monkeypatch, [[IPV6_PUBLIC, PUBLIC_IP], [IPV6_PUBLIC, PUBLIC_IP]])
+    send = FakeSend(monkeypatch, [(httpx.ConnectError("refused"), "", {}), (200, APPLY_PAGE, {})])
+
+    status, text, _headers, final_url = await security.safe_http_get_with_url(f"https://{HOST}/job")
+
+    assert status == 200 and "Apply now" in text
+    assert [r.url.host for r in send.requests] == [IPV6_PUBLIC, PUBLIC_IP]
+    assert all(r.headers["Host"] == HOST for r in send.requests)
+    assert all(r.extensions["sni_hostname"] == HOST.encode("ascii") for r in send.requests)
+    assert dns.loop_calls == 1
+    assert final_url == f"https://{HOST}/job"
+
+
+@pytest.mark.asyncio
+async def test_all_addresses_failing_raises_the_last_connection_error(monkeypatch):
+    FakeDns(monkeypatch, [[PUBLIC_IP, PUBLIC_IP_2]])
+    send = FakeSend(
+        monkeypatch,
+        [(httpx.ConnectError("first refused"), "", {}), (httpx.ConnectTimeout("second timed out"), "", {})],
+    )
+
+    with pytest.raises(httpx.ConnectTimeout, match="second timed out"):
+        await security.safe_http_get_with_url(f"https://{HOST}/job")
+
+    assert [r.url.host for r in send.requests] == [PUBLIC_IP, PUBLIC_IP_2]
+
+
+@pytest.mark.asyncio
+async def test_mixed_public_and_private_addresses_are_rejected_without_connecting(monkeypatch):
+    FakeDns(monkeypatch, [[PUBLIC_IP, PUBLIC_IP_2], [PUBLIC_IP, "10.0.0.7"]])
+    send = FakeSend(monkeypatch, [(200, APPLY_PAGE, {})])
+
+    with pytest.raises(ValueError, match="non-global"):
+        await security.safe_http_get_with_url(f"https://{HOST}/job")
+
+    assert send.requests == []
+
+
+@pytest.mark.asyncio
+async def test_non_connection_errors_do_not_trigger_fallback(monkeypatch):
+    FakeDns(monkeypatch, [[PUBLIC_IP, PUBLIC_IP_2]])
+    send = FakeSend(monkeypatch, [(httpx.ReadTimeout("slow"), "", {}), (200, APPLY_PAGE, {})])
+
+    with pytest.raises(httpx.ReadTimeout):
+        await security.safe_http_get_with_url(f"https://{HOST}/job")
+
+    assert len(send.requests) == 1
+
+
+# ---------------------------------------------------------------------------
+# The event loop stays responsive while the blocking SSRF resolver runs
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_event_loop_stays_responsive_during_slow_ssrf_resolution(monkeypatch):
+    def slow_is_safe_url(url):
+        time.sleep(0.2)
+        return True, ""
+
+    monkeypatch.setattr(security, "is_safe_url", slow_is_safe_url)
+    FakeDns(monkeypatch, [PUBLIC_IP])
+    FakeSend(monkeypatch, [(200, APPLY_PAGE, {})])
+
+    ticks = 0
+
+    async def ticker():
+        nonlocal ticks
+        while True:
+            await asyncio.sleep(0.01)
+            ticks += 1
+
+    task = asyncio.create_task(ticker())
+    try:
+        await security.safe_http_get_with_url(f"https://{HOST}/job")
+    finally:
+        task.cancel()
+
+    # A blocked loop would allow ~0 ticks over the 0.2s resolver call.
+    assert ticks >= 5

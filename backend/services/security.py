@@ -174,6 +174,53 @@ async def safe_http_get(
     return status, text, resp_headers
 
 
+async def _resolve_global_ips(loop: asyncio.AbstractEventLoop, hostname: str, port: int) -> List[str]:
+    """Resolve once; return every resolved address, rejecting the request if ANY is non-global."""
+    try:
+        addr_info = await loop.getaddrinfo(hostname, port, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM)
+    except socket.gaierror as e:
+        raise ValueError(f"Could not resolve hostname '{hostname}': {e}")
+    if not addr_info:
+        raise ValueError(f"Could not resolve hostname '{hostname}'")
+
+    ips: List[str] = []
+    for item in addr_info:
+        resolved_ip = str(item[4][0])
+        if _is_ip_blocked(ipaddress.ip_address(resolved_ip)):
+            raise ValueError(f"DNS rebinding blocked: '{hostname}' resolved to non-global IP '{resolved_ip}'")
+        if resolved_ip not in ips:
+            ips.append(resolved_ip)
+    return ips
+
+
+async def _send_pinned(
+    ips: List[str],
+    parsed: urllib.parse.SplitResult,
+    hostname: str,
+    port: int,
+    req_headers: dict,
+    timeout: float,
+) -> httpx.Response:
+    """Try each pinned address in order (same SNI, verify=True); raise the last connection error."""
+    path_query = (parsed.path or "/") + (f"?{parsed.query}" if parsed.query else "")
+    extensions: Dict[str, Any] = {}
+    if parsed.scheme == "https":
+        extensions["sni_hostname"] = hostname.encode("ascii")
+
+    last_error: Optional[Exception] = None
+    for ip in ips:
+        target_ip = f"[{ip}]" if ":" in ip else ip
+        pinned_target = f"{parsed.scheme}://{target_ip}:{port}{path_query}"
+        try:
+            async with httpx.AsyncClient(timeout=timeout, verify=True, follow_redirects=False) as client:
+                req = client.build_request("GET", pinned_target, headers=req_headers, extensions=extensions)
+                return await client.send(req)
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            last_error = e
+    assert last_error is not None
+    raise last_error
+
+
 async def safe_http_get_with_url(
     url: str,
     max_redirects: int = 3,
@@ -182,8 +229,10 @@ async def safe_http_get_with_url(
 ) -> Tuple[int, str, dict, str]:
     """Execute an outbound HTTP GET with strict SSRF validation and DNS rebinding protection.
 
-    Pins the connection to the pre-validated IP so DNS cannot change between check and fetch.
-    Uses non-blocking loop.getaddrinfo, keeps TLS verification ON, and passes sni_hostname.
+    Resolves once, requires EVERY resolved address to be global, then connects to the pinned
+    addresses in order until one succeeds, so DNS cannot change between check and fetch and an
+    unreachable first address (e.g. IPv6) does not prevent reaching a later one. TLS verification
+    stays ON and the SNI hostname is passed.
     Returns (status_code, text, response_headers, final_url) where final_url is the URL of
     the last hop after following validated redirects.
     """
@@ -191,7 +240,8 @@ async def safe_http_get_with_url(
     loop = asyncio.get_running_loop()
 
     for hop in range(max_redirects + 1):
-        safe, reason = is_safe_url(current_url)
+        # is_safe_url does blocking DNS; keep it off the event loop.
+        safe, reason = await asyncio.to_thread(is_safe_url, current_url)
         if not safe:
             raise ValueError(f"SSRF blocked on hop {hop}: {reason}")
 
@@ -199,46 +249,23 @@ async def safe_http_get_with_url(
         hostname = (parsed.hostname or "").strip()
         port = parsed.port or (443 if parsed.scheme == "https" else 80)
 
-        # Non-blocking async DNS resolution to pre-validated IP
-        try:
-            addr_info = await loop.getaddrinfo(hostname, port, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM)
-            if not addr_info:
-                raise ValueError(f"Could not resolve hostname '{hostname}'")
-            resolved_ip = addr_info[0][4][0]
-            ip_obj = ipaddress.ip_address(resolved_ip)
-            if _is_ip_blocked(ip_obj):
-                raise ValueError(f"DNS rebinding blocked: '{hostname}' resolved to non-global IP '{resolved_ip}'")
-        except socket.gaierror as e:
-            raise ValueError(f"Could not resolve hostname '{hostname}': {e}")
+        ips = await _resolve_global_ips(loop, hostname, port)
 
         req_headers = dict(headers or {})
         req_headers["Host"] = hostname
 
-        path_query = (parsed.path or "/") + (f"?{parsed.query}" if parsed.query else "")
+        resp = await _send_pinned(ips, parsed, hostname, port, req_headers, timeout)
 
-        # Pinned-IP transport: connect directly to resolved_ip with TLS SNI verification
-        resolved_ip_str = str(resolved_ip)
-        target_ip = f"[{resolved_ip_str}]" if ":" in resolved_ip_str else resolved_ip_str
-        pinned_target = f"{parsed.scheme}://{target_ip}:{port}{path_query}"
-
-        async with httpx.AsyncClient(timeout=timeout, verify=True, follow_redirects=False) as client:
-            extensions: Dict[str, Any] = {}
-            if parsed.scheme == "https":
-                extensions["sni_hostname"] = hostname.encode("ascii")
-
-            req = client.build_request("GET", pinned_target, headers=req_headers, extensions=extensions)
-            resp = await client.send(req)
-
-            if resp.status_code in (301, 302, 303, 307, 308):
-                loc = resp.headers.get("location")
-                if not loc:
-                    return resp.status_code, resp.text, dict(resp.headers), current_url
-                redir_safe, next_url, redir_err = is_safe_redirect(current_url, loc)
-                if not redir_safe:
-                    raise ValueError(f"SSRF redirect blocked: {redir_err}")
-                current_url = next_url
-                continue
-            return resp.status_code, resp.text, dict(resp.headers), current_url
+        if resp.status_code in (301, 302, 303, 307, 308):
+            loc = resp.headers.get("location")
+            if not loc:
+                return resp.status_code, resp.text, dict(resp.headers), current_url
+            redir_safe, next_url, redir_err = await asyncio.to_thread(is_safe_redirect, current_url, loc)
+            if not redir_safe:
+                raise ValueError(f"SSRF redirect blocked: {redir_err}")
+            current_url = next_url
+            continue
+        return resp.status_code, resp.text, dict(resp.headers), current_url
 
     raise ValueError(f"Too many redirects ({max_redirects})")
 
