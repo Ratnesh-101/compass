@@ -34,6 +34,16 @@ def _select_candidate(message: str, task_ids: list) -> Optional[int]:
         return int(reply)
     return None
 
+
+def _disambiguation_prompt(count: int) -> str:
+    """Return the clarification prompt tailored to the number of candidates."""
+    if count == 1:
+        return "Reply with 1, or 'Cancel'."
+    if count == 2:
+        return "Which one? Reply with 1 or 2, or 'Cancel'."
+    return "Which one? Reply with 1, 2 or 3, or 'Cancel'."
+
+
 from backend.orchestrator_helpers import (
     PRIORITY_MAP,
     STATUS_MAP,
@@ -275,7 +285,7 @@ async def handle_message(
                         task_ids = active_action.get("task_ids") or []
                         selected_id = _select_candidate(message, task_ids)
                         if selected_id is None:
-                            needs_reply = "Which one? Reply with 1, 2 or 3, or 'Cancel'."
+                            needs_reply = _disambiguation_prompt(len(task_ids))
                         else:
                             async with conn.transaction():
                                 claimed = await resolve_chat_pending_action(conn, active_action["id"], "executed")
