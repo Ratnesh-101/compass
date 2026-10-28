@@ -19,6 +19,21 @@ from backend.services.ownership import scope_owner
 
 logger = logging.getLogger("compass.agents.specialist")
 
+SPECIALIST_COMPLETENESS_RULE = (
+    " Answer every part of the user's question in the order it was asked, putting the direct answer first. "
+    "Be complete but concise (about 400-600 words). "
+    "Use at most one table, and never leave a table, list or code block unfinished."
+)
+SPECIALIST_CONTINUE_PROMPT = (
+    "Continue exactly where you stopped and finish the answer concisely. "
+    "Do not repeat anything you already wrote."
+)
+SPECIALIST_CUT_SHORT_NOTE = "\n\n_(The answer was cut short — ask me to continue.)_"
+# A non-streaming 2000-token completion must be able to finish inside one read timeout,
+# and a single retry keeps the worst case bounded (about 2 x 45 s) instead of 3 x 25 s of repeated timeouts.
+SPECIALIST_REQUEST_TIMEOUT_S = 45.0
+SPECIALIST_MAX_RETRIES = 1
+
 
 # ---------------------------------------------------------------------------
 # Structured Request / Response Schemas
@@ -48,6 +63,42 @@ class SpecialistResult(BaseModel):
 # ---------------------------------------------------------------------------
 # Specialist Response LLM Synthesis Helper
 # ---------------------------------------------------------------------------
+
+async def _continue_truncated_answer(
+    client: Any,
+    model: str,
+    base_messages: List[Dict[str, str]],
+    partial: str,
+    extract: Any,
+    clean: Any,
+) -> str:
+    """Make ONE continuation call for an answer cut off by the token cap."""
+    try:
+        resp = await client.chat.completions.create(
+            model=model,
+            messages=base_messages + [
+                {"role": "assistant", "content": partial},
+                {"role": "user", "content": SPECIALIST_CONTINUE_PROMPT},
+            ],
+            max_tokens=800,
+            temperature=0.5,
+            stream=False,
+        )
+        raw = await extract(resp)
+        extra = clean(raw).strip() if raw else ""
+        choices = getattr(resp, "choices", None) or []
+        finish_reason = getattr(choices[0], "finish_reason", None) if choices else None
+    except Exception as e:
+        logger.warning(f"[_continue_truncated_answer] continuation failed: {e}")
+        return partial + SPECIALIST_CUT_SHORT_NOTE
+
+    joined = partial
+    if extra:
+        joined = partial + ("" if partial[-1].isspace() else " ") + extra
+    if finish_reason == "length":
+        joined += SPECIALIST_CUT_SHORT_NOTE
+    return joined
+
 
 async def _synthesize_specialist_response(
     capability: str,
@@ -96,6 +147,8 @@ async def _synthesize_specialist_response(
             f"You are Compass's {capability.title()} Specialist Agent. Answer the user's query specifically using the retrieved domain context."
         )
 
+        system_prompt += SPECIALIST_COMPLETENESS_RULE
+
         findings_str = json.dumps(raw_findings, default=str)[:3500]
         user_prompt = (
             f"USER QUERY: {user_goal}\n\n"
@@ -106,22 +159,32 @@ async def _synthesize_specialist_response(
         client = AsyncOpenAI(
             api_key=settings.NEBIUS_API_KEY,
             base_url=settings.NEBIUS_BASE_URL,
-            timeout=25.0,
+            timeout=SPECIALIST_REQUEST_TIMEOUT_S,
+            max_retries=SPECIALIST_MAX_RETRIES,
         )
+        base_messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
         resp = await client.chat.completions.create(
             model=settings.ROUTER_MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            max_tokens=1000,
+            messages=base_messages,
+            max_tokens=2000,
             temperature=0.5,
             stream=False,
         )
         raw_content = await _extract_content_from_response(resp)
         content = _clean_synthesis_text(raw_content) if raw_content else ""
         if content and content.strip():
-            return content.strip()
+            content = content.strip()
+            choices = getattr(resp, "choices", None) or []
+            finish_reason = getattr(choices[0], "finish_reason", None) if choices else None
+            if finish_reason == "length":
+                content = await _continue_truncated_answer(
+                    client, settings.ROUTER_MODEL, base_messages, content,
+                    _extract_content_from_response, _clean_synthesis_text,
+                )
+            return content
     except Exception as e:
         logger.warning(f"[_synthesize_specialist_response] LLM call failed for {capability}: {e}")
 
