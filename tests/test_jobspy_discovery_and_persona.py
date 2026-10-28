@@ -525,7 +525,7 @@ async def test_consolidate_radar_failure_reflected_in_final_status():
         with patch("asyncpg.connect") as mock_conn:
             mock_c = AsyncMock()
             mock_conn.return_value = mock_c
-            mock_c.fetchval.return_value = 0
+            mock_c.fetchval.return_value = True  # advisory lock acquired
             mock_c.fetch.return_value = []
             with patch("backend.jobs.consolidate.register_vector"):
                 res = await run_consolidation(dry_run=False)

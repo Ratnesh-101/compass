@@ -134,8 +134,9 @@ async def trigger_consolidation(
             stale_thread_days=req.stale_thread_days,
             dry_run=req.dry_run,
         )
+        report_status = report.get("status")
         return ConsolidateResponse(
-            status="ok",
+            status="ok" if report_status in (None, "completed") else str(report_status),
             dry_run=req.dry_run,
             overdue_tasks_flagged=report.get("overdue_tasks_flagged", 0),
             duplicate_chunks_merged=report.get("duplicate_chunks_merged", 0),

@@ -217,12 +217,27 @@ async def record_guest_mint(guest_id: str, client_ip: str, pool: Any = None) -> 
         logger.warning(f"Failed to record guest mint in DB: {e}")
 
 
-async def prune_expired_guests(retention_days: int = 30, pool: Any = None) -> int:
-    """Purge expired guest sessions, guest mint logs, and orphaned conversations."""
+async def prune_expired_guests(retention_days: int = 30, pool: Any = None, dry_run: bool = False) -> int:
+    """Purge expired guest sessions, guest mint logs, and orphaned conversations (count only when dry_run)."""
     try:
         p = pool or await get_pool()
         if p:
             async with p.acquire() as conn:
+                if dry_run:
+                    interval = str(retention_days)
+                    mint_rows = await conn.fetchval(
+                        "SELECT COUNT(*) FROM guest_mint_log WHERE created_at < now() - ($1 || ' days')::interval",
+                        interval,
+                    )
+                    conv_rows = await conn.fetchval(
+                        """
+                        SELECT COUNT(*) FROM conversations
+                        WHERE (user_id LIKE 'guest_%' OR user_id IS NULL)
+                          AND last_active_at < now() - ($1 || ' days')::interval
+                        """,
+                        interval,
+                    )
+                    return int(mint_rows or 0) + int(conv_rows or 0)
                 res1 = await conn.execute(
                     "DELETE FROM guest_mint_log WHERE created_at < now() - ($1 || ' days')::interval",
                     str(retention_days),

@@ -257,12 +257,17 @@ async def enforce_mint_rate_limit(request: Request) -> None:
         )
 
 
-async def cleanup_stale_rate_limit_buckets(older_than_hours: int = 24) -> int:
-    """Purge expired rate limit buckets to prevent table bloat."""
+async def cleanup_stale_rate_limit_buckets(older_than_hours: int = 24, dry_run: bool = False) -> int:
+    """Purge expired rate limit buckets to prevent table bloat (count only when dry_run)."""
     try:
         pool = await get_pool()
         if pool:
             async with pool.acquire() as conn:
+                if dry_run:
+                    return int(await conn.fetchval(
+                        "SELECT COUNT(*) FROM rate_limit_buckets WHERE last_updated < now() - ($1 || ' hours')::interval",
+                        str(older_than_hours),
+                    ) or 0)
                 res = await conn.execute(
                     "DELETE FROM rate_limit_buckets WHERE last_updated < now() - ($1 || ' hours')::interval",
                     str(older_than_hours),
