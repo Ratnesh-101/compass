@@ -1014,6 +1014,36 @@ def should_route_to_query_tasks(message: str) -> bool:
     return has_task_terms and has_personal
 
 
+PERSONAL_TRACKED_CUES = (
+    "my task", "my tasks", "my deadline", "my deadlines", "my schedule", "my todo",
+    "my list", "my plate", "my coursework", "my hackathon tasks",
+    "what should i work on", "what should i do today", "what should i tackle",
+    "work on first", "start with", "overdue", "tracked", "show my", "list my",
+    "prioritize my", "plan my day", "plan my week", "this week's tasks",
+)
+
+EXTERNAL_PROJECT_CUES = (
+    "we want to build", "we're building", "we are building", "i want to build",
+    "i'm building", "i am building", "our project", "our team", "our app",
+    "team of", "my project", "hour-by-hour", "for a hackathon", "for my hackathon",
+    "hackathon project", "tech stack", "architecture", "should i use", "should we use",
+    "pitch", "recommend", "tradeoff", "trade-off", "compare", " vs ",
+    "how do i build", "how should we", "help me write", "mvp",
+)
+
+
+def is_external_project_request(message: str) -> bool:
+    """Return True for a general planning/advice/writing request about a project the user describes.
+
+    Such a request has at least one external-project cue and no cue that it is about the
+    user's own tracked tasks. Plain substring checks only (no regexes).
+    """
+    msg_l = message.lower()
+    if any(cue in msg_l for cue in PERSONAL_TRACKED_CUES):
+        return False
+    return any(cue in msg_l for cue in EXTERNAL_PROJECT_CUES)
+
+
 def _fallback_route(
     message: str,
     history: Optional[list[dict[str, str]]] = None,
@@ -1171,7 +1201,7 @@ def _fallback_route(
     if is_public and not has_personal:
         return "search_web", {"query": message}, ""
 
-    if not (is_public and not has_personal):
+    if not (is_public and not has_personal) and not is_external_project_request(message):
         if history:
             for h in reversed(history):
                 content = h.get("content", "")

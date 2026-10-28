@@ -33,6 +33,7 @@ from backend.router_helpers import (
     extract_verification_target,
     resolve_verification_claim_and_entity,
     _fallback_route,
+    is_external_project_request,
 )
 
 logger = logging.getLogger("compass.router")
@@ -138,6 +139,8 @@ async def route_message(
         f"you MUST call the add_task tool with properly extracted fields. "
         f"When the user asks what to work on first right now, asks what task to start with, asks for a daily roadmap, or asks to prioritize deadlines/tasks, "
         f"call the query_tasks tool with intent='roadmap' to identify and prioritize active deliverables. "
+        f"Only call query_tasks for the user's OWN tracked tasks and deadlines. "
+        f"When the user asks you to plan a project, event or build that they describe in the message (for example a hackathon plan), answer directly with a concrete, structured plan (headings, hour/phase breakdown, risks, what to cut) instead of calling a tool. "
         f"When the user asks whether their overall workload is achievable or feasible, whether they have enough hours/capacity, what to drop, or asks for a workload feasibility review, "
         f"call the assess_feasibility tool with extracted days and hours_per_day. "
         f"For direct factual questions and acronym queries, state the canonical full form clearly (e.g. for RISC, 'Reduced Instruction Set Computer') and keep definitions concise (under 80 words) without sprawling essays unless the user asks for a deep dive. "
@@ -223,6 +226,23 @@ async def route_message(
                         args["time_str"] = extracted["time_str"]
                     if not args.get("title"):
                         return None, None, "What would you like to name this task? Please provide a title or description."
+
+                if func_name == "query_tasks" and is_external_project_request(message):
+                    # The model hijacked a general project-planning question; answer it directly.
+                    plain_kwargs = {k: v for k, v in call_kwargs.items() if k not in ("tools", "tool_choice")}
+                    plain_response: Any = await client.chat.completions.create(**plain_kwargs)
+                    plain_usage = getattr(plain_response, "usage", None)
+                    record_usage(
+                        settings.ROUTER_MODEL,
+                        plain_usage.prompt_tokens if plain_usage else p_tok,
+                        plain_usage.completion_tokens if plain_usage else c_tok,
+                    )
+                    plain_choices = getattr(plain_response, "choices", None)
+                    plain_msg = getattr(plain_choices[0], "message", None) if plain_choices else None
+                    plain_reply = (getattr(plain_msg, "content", "") or "").strip() if plain_msg else ""
+                    if not plain_reply:
+                        return _fallback_route(message, history)
+                    return None, None, plain_reply
 
                 logger.info(f"Router invoked tool: {func_name} with args: {args}")
                 return func_name, args, ""
