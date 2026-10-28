@@ -190,6 +190,8 @@ export default function ChatMessageList({
               const hasModes = msg.role === 'assistant' && typeof msg.text === 'string' && msg.text.includes('[[modes]]')
               const isLatest = idx === messages.length - 1
               const showModes = hasModes && isLatest && !isStreaming
+              const pendingAction = msg.data?.pending_action || msg.pending_action
+              const pendingKind = pendingAction?.action || pendingAction?.kind
 
               return (
                 <div key={idx} style={{ display: 'flex', flexDirection: 'column', alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start', gap: '8px' }}>
@@ -341,28 +343,30 @@ export default function ChatMessageList({
                           }}
                         >
                           <div style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text-primary)' }}>
-                            Confirm destructive action:
+                            {pendingKind === 'delete_task_disambiguation' ? 'Choose a task to delete:' : 'Confirm destructive action:'}
                           </div>
                           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                            <button
-                              type="button"
-                              id="btn-pending-confirm"
-                              className="btn-primary"
-                              style={{
-                                padding: '4px 14px',
-                                minHeight: '30px',
-                                fontSize: '12px',
-                                background: '#d32f2f',
-                                color: '#fff',
-                                border: 'none',
-                                borderRadius: '4px',
-                                cursor: 'pointer',
-                                fontWeight: '600',
-                              }}
-                              onClick={() => onSendMessage && onSendMessage("Confirm")}
-                            >
-                              Confirm
-                            </button>
+                            {pendingKind !== 'delete_task_disambiguation' && (
+                              <button
+                                type="button"
+                                id="btn-pending-confirm"
+                                className="btn-primary"
+                                style={{
+                                  padding: '4px 14px',
+                                  minHeight: '30px',
+                                  fontSize: '12px',
+                                  background: '#d32f2f',
+                                  color: '#fff',
+                                  border: 'none',
+                                  borderRadius: '4px',
+                                  cursor: 'pointer',
+                                  fontWeight: '600',
+                                }}
+                                onClick={() => onSendMessage && onSendMessage("Confirm")}
+                              >
+                                Confirm
+                              </button>
+                            )}
                             <button
                               type="button"
                               id="btn-pending-cancel"
