@@ -30,6 +30,19 @@ _AGENT_RATE_LIMIT_MAX_REQUESTS = 10
 _agent_rate_store: dict = defaultdict(deque)  # ip -> deque of timestamps
 
 
+def _rate_limit_store_key(request: Request) -> str:
+    """Key for the in-memory sliding-window pre-check.
+
+    Verified identities (user or guest) are keyed per identity so that many users behind one
+    shared proxy hop do not share a single window; only anonymous callers fall back to the
+    client-IP key. Persistent per-IP limits are handled by enforce_rate_limit.
+    """
+    ident = _get_current_identity(request)
+    if ident and ident.id and (ident.user_id or ident.guest_id):
+        return f"identity:{ident.id}"
+    return get_client_ip(request)
+
+
 # ---------------------------------------------------------------------------
 # Rate Limiter Dependencies (Shared Store backed by DB with in-memory fallback)
 # ---------------------------------------------------------------------------
@@ -37,9 +50,9 @@ async def rate_limit(request: Request) -> None:
     """Shared rate limiter: 30 requests/min per client IP and per identity on chat/log endpoints.
     Returns HTTP 429 Too Many Requests with Retry-After header when exceeded.
     """
-    client_ip = get_client_ip(request)
+    store_key = _rate_limit_store_key(request)
     now = time.monotonic()
-    timestamps = _rate_store[client_ip]
+    timestamps = _rate_store[store_key]
     while timestamps and (now - timestamps[0]) > _RATE_LIMIT_WINDOW_SECONDS:
         timestamps.popleft()
     if len(timestamps) >= _RATE_LIMIT_MAX_REQUESTS:
@@ -59,9 +72,9 @@ async def agent_rate_limit(request: Request) -> None:
     """Shared rate limiter for agent runs: 10 requests/min per client IP and per identity.
     Returns HTTP 429 Too Many Requests with Retry-After header when exceeded.
     """
-    client_ip = get_client_ip(request)
+    store_key = _rate_limit_store_key(request)
     now = time.monotonic()
-    timestamps = _agent_rate_store[client_ip]
+    timestamps = _agent_rate_store[store_key]
     while timestamps and (now - timestamps[0]) > _AGENT_RATE_LIMIT_WINDOW_SECONDS:
         timestamps.popleft()
     if len(timestamps) >= _AGENT_RATE_LIMIT_MAX_REQUESTS:

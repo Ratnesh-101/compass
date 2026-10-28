@@ -99,9 +99,13 @@ async def check_daily_identity_budget(
     user_id: Optional[str] = None,
     guest_id: Optional[str] = None,
 ) -> None:
-    """Check identity's daily consumption against per-day limits.
-    
-    Raises HTTPException(429) if daily threshold is reached.
+    """Check the GLOBAL daily Tavily credit sum against a per-identity-type threshold.
+
+    NOTE: tavily_usage_log has no identity column, so this sums credits for ALL identities
+    and compares against the guest/user limit; it is not a true per-identity check. It is
+    currently unused by production code. Fails open on DB errors (advisory check).
+
+    Raises HTTPException(429) if the threshold is reached.
     """
     is_guest = bool(not user_id or (guest_id and not user_id))
     max_model_calls = MAX_DAILY_GUEST_MODEL_CALLS if is_guest else MAX_DAILY_USER_MODEL_CALLS
@@ -129,12 +133,23 @@ async def check_daily_identity_budget(
     except HTTPException:
         raise
     except Exception as e:
-        logger.debug(f"Could not verify daily budget against DB: {e}")
+        logger.warning("Could not verify daily budget against DB: %s", e)
 
 
 def _get_budget_settings():
     from backend.config import get_settings
     return get_settings()
+
+
+def _fail_closed_in_production(settings: Any, what: str, exc: Exception) -> None:
+    """Global abuse caps fail closed (503) in production when the DB check errors; fail open elsewhere."""
+    logger.warning("%s check failed: [%s] %s", what, type(exc).__name__, exc)
+    if settings.is_production():
+        raise HTTPException(
+            status_code=503,
+            detail=f"Service temporarily unavailable: {what} could not be verified.",
+            headers={"Retry-After": "5"},
+        ) from exc
 
 
 async def check_global_spend_cap(pool: Any = None) -> None:
@@ -166,7 +181,7 @@ async def check_global_spend_cap(pool: Any = None) -> None:
     except HTTPException:
         raise
     except Exception as e:
-        logger.debug(f"Global spend cap check skipped: {e}")
+        _fail_closed_in_production(settings, "global spend cap", e)
 
 
 async def check_global_mint_cap(pool: Any = None) -> None:
@@ -199,7 +214,7 @@ async def check_global_mint_cap(pool: Any = None) -> None:
     except HTTPException:
         raise
     except Exception as e:
-        logger.debug(f"Global mint cap check DB error: {e}")
+        _fail_closed_in_production(settings, "global mint cap", e)
 
 
 async def record_guest_mint(guest_id: str, client_ip: str, pool: Any = None) -> None:

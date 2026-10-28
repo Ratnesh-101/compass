@@ -17,7 +17,7 @@ from typing import Optional, Tuple
 from fastapi import HTTPException, Request
 
 from backend.memory.db import get_pool
-from backend.services.security import get_client_ip, is_valid_ip
+from backend.services.security import get_client_ip
 
 logger = logging.getLogger("compass.rate_limiter")
 
@@ -71,6 +71,17 @@ async def _consume_token(
             async with pool.acquire() as conn:
                 async with conn.transaction():
                     await conn.execute("SET LOCAL lock_timeout = '2000ms';")
+                    # Ensure the row exists (full bucket) so FOR UPDATE always has a row to lock;
+                    # otherwise concurrent first requests would both see a missing row and a full bucket.
+                    await conn.execute(
+                        """
+                        INSERT INTO rate_limit_buckets (key, tokens, last_updated)
+                        VALUES ($1, $2, now())
+                        ON CONFLICT (key) DO NOTHING
+                        """,
+                        key,
+                        capacity,
+                    )
                     row = await conn.fetchrow(
                         """
                         SELECT tokens, EXTRACT(EPOCH FROM (now() - last_updated)) AS elapsed
@@ -232,20 +243,9 @@ async def enforce_mint_rate_limit(request: Request) -> None:
     capacity = float(hourly_limit)
     refill_rate = capacity / 3600.0
 
-    # Extract client IP using the rightmost X-Forwarded-For entry appended by the trusted reverse proxy
-    # (Render/Cloudflare). This prevents spoofed leftmost headers from bypassing the bucket while
-    # ensuring legitimate distinct users behind Render don't share the internal proxy container IP.
-    xff = request.headers.get("x-forwarded-for")
-    client_ip = None
-    if xff and xff.strip():
-        parts = [p.strip() for p in xff.split(",") if p.strip()]
-        if parts:
-            rightmost = parts[-1]
-            if is_valid_ip(rightmost):
-                client_ip = rightmost
-
-    if not client_ip:
-        client_ip = (request.client.host if request.client else None) or "unknown"
+    # Resolve the client IP with the same trusted logic as the rest of the app (edge signature,
+    # configured proxy hops / CIDRs); never trust raw X-Forwarded-For entries directly.
+    client_ip = get_client_ip(request) or "unknown"
 
     mint_key = f"mint:ip:{client_ip}"
     allowed, retry_after = await _consume_token(mint_key, capacity=capacity, refill_rate_per_sec=refill_rate)
@@ -472,8 +472,9 @@ def check_identity_daily_cap(
     if is_admin:
         return True, 0
 
-    from datetime import date, datetime, timezone
-    today_str = date.today().isoformat()
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    today_str = now.date().isoformat()
     if today_str not in _DAILY_ACTION_USAGE:
         _DAILY_ACTION_USAGE.clear()
         _DAILY_ACTION_USAGE[today_str] = {}
@@ -481,7 +482,6 @@ def check_identity_daily_cap(
     key = f"{identity_id}:{action}"
     current = _DAILY_ACTION_USAGE[today_str].get(key, 0)
     if current >= cap:
-        now = datetime.now(timezone.utc)
         midnight = now.replace(hour=23, minute=59, second=59, microsecond=999999)
         retry_after = max(1, int((midnight - now).total_seconds()))
         return False, retry_after
