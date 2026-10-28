@@ -41,6 +41,11 @@ settings = get_settings()
 
 TOOLS = TOOL_DEFINITIONS
 
+# Long planning answers need room: reasoning models can burn a small budget on hidden thinking.
+DIRECT_ANSWER_MAX_TOKENS = 3500
+DIRECT_ANSWER_TIMEOUT_S = 60.0
+RETRY_MAX_TOKENS_CAP = 4096
+
 
 import openai
 
@@ -166,12 +171,13 @@ async def route_message(
     is_explicit_add_task = is_task_mutation_request(message) or is_explicit_task_creation(message)
 
     max_router_attempts = 2
+    router_max_tokens = 1024
     for attempt in range(1, max_router_attempts + 1):
         try:
             call_kwargs: dict[str, Any] = {
                 "model": settings.ROUTER_MODEL,
                 "messages": messages,
-                "max_tokens": 1024,
+                "max_tokens": router_max_tokens,
                 "stream": False,
             }
             if tools:
@@ -230,19 +236,32 @@ async def route_message(
                 if func_name == "query_tasks" and is_external_project_request(message):
                     # The model hijacked a general project-planning question; answer it directly.
                     plain_kwargs = {k: v for k, v in call_kwargs.items() if k not in ("tools", "tool_choice")}
-                    plain_response: Any = await client.chat.completions.create(**plain_kwargs)
-                    plain_usage = getattr(plain_response, "usage", None)
-                    record_usage(
-                        settings.ROUTER_MODEL,
-                        plain_usage.prompt_tokens if plain_usage else p_tok,
-                        plain_usage.completion_tokens if plain_usage else c_tok,
-                    )
-                    plain_choices = getattr(plain_response, "choices", None)
-                    plain_msg = getattr(plain_choices[0], "message", None) if plain_choices else None
-                    plain_reply = (getattr(plain_msg, "content", "") or "").strip() if plain_msg else ""
-                    if not plain_reply:
-                        return _fallback_route(message, history)
-                    return None, None, plain_reply
+                    plain_kwargs["max_tokens"] = DIRECT_ANSWER_MAX_TOKENS
+                    try:
+                        answer_client = client.with_options(timeout=DIRECT_ANSWER_TIMEOUT_S, max_retries=0)
+                    except (AttributeError, TypeError):
+                        answer_client = client
+                    for answer_model in (settings.SKILL_MODEL, settings.ROUTER_MODEL):
+                        try:
+                            plain_response: Any = await answer_client.chat.completions.create(
+                                **{**plain_kwargs, "model": answer_model}
+                            )
+                        except Exception as plain_err:
+                            logger.warning("Direct project answer failed on %s (%s)", answer_model, type(plain_err).__name__)
+                            continue
+                        plain_usage = getattr(plain_response, "usage", None)
+                        record_usage(
+                            answer_model,
+                            plain_usage.prompt_tokens if plain_usage else p_tok,
+                            plain_usage.completion_tokens if plain_usage else c_tok,
+                        )
+                        plain_choices = getattr(plain_response, "choices", None)
+                        plain_msg = getattr(plain_choices[0], "message", None) if plain_choices else None
+                        plain_reply = (getattr(plain_msg, "content", "") or "").strip() if plain_msg else ""
+                        if plain_reply:
+                            return None, None, plain_reply
+                        logger.warning("Direct project answer from %s was empty", answer_model)
+                    return _fallback_route(message, history)
 
                 logger.info(f"Router invoked tool: {func_name} with args: {args}")
                 return func_name, args, ""
@@ -258,6 +277,8 @@ async def route_message(
                 if not reply:
                     if attempt < max_router_attempts and not is_greeting_intent(message) and not is_schedule_or_agent_intent(message):
                         logger.warning("Router received empty completion content on attempt %d; retrying once", attempt)
+                        if getattr(choice, "finish_reason", None) == "length":
+                            router_max_tokens = min(router_max_tokens * 3, RETRY_MAX_TOKENS_CAP)
                         continue
                     if is_greeting_intent(message):
                         return None, None, "How can I help you today? I'm here to help you manage tasks, coursework, and deadlines."
