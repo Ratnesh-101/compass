@@ -742,10 +742,8 @@ async def test_adapter_browser_assisted_prefill_kit():
 @pytest.mark.asyncio
 async def test_verifier_handles_404_closed_requisition():
     """Official application page returning 404/410 transitions status to CLOSED_CONFIRMED."""
-    with patch("httpx.AsyncClient.get") as mock_get:
-        mock_resp = AsyncMock()
-        mock_resp.status_code = 404
-        mock_get.return_value = mock_resp
+    with patch("backend.services.radar_verifier.safe_http_get_with_url", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = (404, "", {}, "https://company.com/expired-job")
 
         status, evidence, _ = await verify_opportunity_status(
             "https://company.com/expired-job",
@@ -758,7 +756,7 @@ async def test_verifier_handles_404_closed_requisition():
 @pytest.mark.asyncio
 async def test_verifier_connection_timeout_retains_status():
     """Verification timeout retains existing status without fabrication."""
-    with patch("httpx.AsyncClient.get", side_effect=Exception("ReadTimeout")):
+    with patch("backend.services.radar_verifier.safe_http_get_with_url", new_callable=AsyncMock, side_effect=Exception("ReadTimeout")):
         status, evidence, _ = await verify_opportunity_status(
             "https://slow-portal.com/job",
             current_status=OpportunityStatus.DISCOVERED,
@@ -1013,7 +1011,7 @@ async def test_tavily_rate_limit_and_quota_exhaustion_never_promotes_open():
     """When Tavily quota is exhausted or rate limited, system handles gracefully without status fabrication."""
     with patch("backend.services.radar_verifier.tavily_available", return_value=True):
         with patch("backend.services.radar_verifier.tavily_extract", side_effect=Exception("HTTP 429: Monthly credit limit exceeded")):
-            with patch("httpx.AsyncClient.get", side_effect=Exception("ConnectionRefused")):
+            with patch("backend.services.radar_verifier.safe_http_get_with_url", new_callable=AsyncMock, side_effect=Exception("ConnectionRefused")):
                 status, evidence, _ = await verify_opportunity_status(
                     "https://portal.example.com/job",
                     current_status=OpportunityStatus.DISCOVERED,

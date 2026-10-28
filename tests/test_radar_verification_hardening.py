@@ -20,9 +20,19 @@ from backend.services.radar_verifier import is_official_domain, verify_opportuni
 APPLY_PAGE = "<html><body><h1>Software Intern</h1><a>Apply now</a></body></html>"
 
 
-def _page(status_code=200, text=APPLY_PAGE, location=None):
-    headers = {"location": location} if location else {}
-    return MagicMock(status_code=status_code, text=text, headers=headers)
+FETCH = "backend.services.radar_verifier.safe_http_get_with_url"
+
+
+def _page(status_code=200, text=APPLY_PAGE, final_url="https://example.com/final"):
+    """Result tuple of safe_http_get_with_url: (status, text, headers, final_url)."""
+    return (status_code, text, {}, final_url)
+
+
+def _echo_page(status_code=200, text=APPLY_PAGE):
+    """Fetch stub that lands on the URL it was asked for (no redirect)."""
+    async def fetch(url, *args, **kwargs):
+        return (status_code, text, {}, url)
+    return fetch
 
 
 # ---------------------------------------------------------------------------
@@ -66,7 +76,7 @@ def test_real_official_domains_still_match(url):
 @pytest.mark.asyncio
 async def test_apply_button_on_an_unrecognized_domain_is_not_open_confirmed():
     with patch("backend.services.radar_verifier.tavily_available", return_value=False), \
-         patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=_page()):
+         patch(FETCH, side_effect=_echo_page()):
         status, evidence, _ = await verify_opportunity_status(
             "https://random-blog.example.com/posts/1", OpportunityStatus.DISCOVERED
         )
@@ -77,7 +87,7 @@ async def test_apply_button_on_an_unrecognized_domain_is_not_open_confirmed():
 @pytest.mark.asyncio
 async def test_apply_button_on_an_official_specific_posting_is_open_confirmed():
     with patch("backend.services.radar_verifier.tavily_available", return_value=False), \
-         patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=_page()):
+         patch(FETCH, side_effect=_echo_page()):
         status, _, _ = await verify_opportunity_status(
             "https://boards.greenhouse.io/acme/jobs/12345", OpportunityStatus.DISCOVERED
         )
@@ -86,12 +96,9 @@ async def test_apply_button_on_an_official_specific_posting_is_open_confirmed():
 
 @pytest.mark.asyncio
 async def test_redirect_to_a_generic_page_is_judged_on_the_landing_page():
-    responses = [
-        _page(302, "", location="https://boards.greenhouse.io/acme"),
-        _page(200, APPLY_PAGE),
-    ]
+    landed = _page(200, APPLY_PAGE, final_url="https://boards.greenhouse.io/acme")
     with patch("backend.services.radar_verifier.tavily_available", return_value=False), \
-         patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=responses):
+         patch(FETCH, new_callable=AsyncMock, return_value=landed):
         status, _, _ = await verify_opportunity_status(
             "https://boards.greenhouse.io/acme/jobs/12345", OpportunityStatus.DISCOVERED
         )
@@ -100,9 +107,11 @@ async def test_redirect_to_a_generic_page_is_judged_on_the_landing_page():
 
 @pytest.mark.asyncio
 async def test_redirect_to_an_internal_address_is_blocked():
-    mock_get = AsyncMock(side_effect=[_page(302, "", location="http://169.254.169.254/latest/meta-data")])
+    mock_get = AsyncMock(side_effect=ValueError(
+        "SSRF redirect blocked: Redirect destination rejected: Access to non-global IP address '169.254.169.254' is forbidden."
+    ))
     with patch("backend.services.radar_verifier.tavily_available", return_value=False), \
-         patch("httpx.AsyncClient.get", mock_get):
+         patch(FETCH, mock_get):
         status, evidence, _ = await verify_opportunity_status(
             "https://boards.greenhouse.io/acme/jobs/12345", OpportunityStatus.NEEDS_VERIFICATION
         )
@@ -115,7 +124,7 @@ async def test_redirect_to_an_internal_address_is_blocked():
 async def test_internal_application_url_is_never_fetched():
     mock_get = AsyncMock(return_value=_page())
     with patch("backend.services.radar_verifier.tavily_available", return_value=False), \
-         patch("httpx.AsyncClient.get", mock_get):
+         patch(FETCH, mock_get):
         status, evidence, _ = await verify_opportunity_status(
             "http://169.254.169.254/latest/meta-data", OpportunityStatus.NEEDS_VERIFICATION
         )
@@ -127,7 +136,7 @@ async def test_internal_application_url_is_never_fetched():
 @pytest.mark.asyncio
 async def test_connection_failure_still_retains_status():
     with patch("backend.services.radar_verifier.tavily_available", return_value=False), \
-         patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=httpx.ConnectTimeout("timed out")):
+         patch(FETCH, new_callable=AsyncMock, side_effect=httpx.ConnectTimeout("timed out")):
         status, _, _ = await verify_opportunity_status(
             "https://boards.greenhouse.io/acme/jobs/12345", OpportunityStatus.NEEDS_VERIFICATION
         )

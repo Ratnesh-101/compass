@@ -20,10 +20,10 @@ import re
 import urllib.parse
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
-import httpx
+import httpx  # noqa: F401  (kept so tests can patch radar_verifier.httpx)
 
 from backend.models_radar import OpportunityStatus
-from backend.services.security import is_safe_redirect, is_safe_url
+from backend.services.security import is_safe_url, safe_http_get_with_url
 from backend.services.tavily import (
     extract as tavily_extract,
     fence_web_content,
@@ -107,8 +107,9 @@ def _matches_host(netloc: str, domain: str) -> bool:
     return netloc == domain or netloc.endswith("." + domain)
 
 
-REDIRECT_STATUSES = (301, 302, 303, 307, 308)
 MAX_VERIFY_REDIRECTS = 3
+VERIFY_TIMEOUT_SECONDS = 8.0
+VERIFY_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) CompassInternshipRadar/1.0"}
 
 
 def is_specific_ats_job_url(url: str) -> bool:
@@ -230,52 +231,21 @@ async def verify_opportunity_status(
     # Step 2: Fallback to direct HTTP fetch if Tavily unavailable or empty
     if not content_text:
         try:
-            async with httpx.AsyncClient(timeout=8.0, follow_redirects=False) as client:
-                fetch_url = application_url
-                resp = None
-                for _hop in range(MAX_VERIFY_REDIRECTS + 1):
-                    resp = await client.get(
-                        fetch_url,
-                        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) CompassInternshipRadar/1.0"}
-                    )
-                    location = resp.headers.get("location") if resp.status_code in REDIRECT_STATUSES else None
-                    if not location:
-                        break
-                    redirect_ok, next_url, redirect_reason = await asyncio.to_thread(
-                        is_safe_redirect, fetch_url, location
-                    )
-                    if not redirect_ok:
-                        return (
-                            current_status,
-                            f"Verification stopped: {redirect_reason}. Retaining current status.",
-                            now,
-                        )
-                    fetch_url = next_url
-                else:
-                    return (
-                        current_status,
-                        "Verification stopped: too many redirects. Retaining current status.",
-                        now,
-                    )
-                if fetch_url != application_url:
-                    # Judge the page we landed on, not the URL we were given.
-                    official_source = official_source and is_official_domain(fetch_url)
-                    specific_ats = is_specific_ats_job_url(fetch_url)
-                    generic_url = is_generic_careers_or_homepage(fetch_url)
-                if resp.status_code == 404 or resp.status_code == 410:
-                    return (
-                        OpportunityStatus.CLOSED_CONFIRMED,
-                        f"Official page returned HTTP {resp.status_code} (Requisition Removed).",
-                        now,
-                    )
-                if resp.status_code >= 400:
-                    return (
-                        current_status,
-                        f"Official page returned HTTP {resp.status_code}. Status retained pending recheck.",
-                        now,
-                    )
-                content_text = resp.text
-                verification_method = "http_direct"
+            # Pinned-IP fetch: DNS is resolved once, validated, and the connection goes to that
+            # exact address, so a rebinding hostname cannot reach an internal address.
+            status_code, body, _resp_headers, fetch_url = await safe_http_get_with_url(
+                application_url,
+                max_redirects=MAX_VERIFY_REDIRECTS,
+                timeout=VERIFY_TIMEOUT_SECONDS,
+                headers=VERIFY_HEADERS,
+            )
+        except ValueError as blocked:
+            # SSRF-blocked hop, unresolved host, or too many redirects: never an exception.
+            return (
+                current_status,
+                f"Verification stopped: {str(blocked)[:200]}. Retaining current status.",
+                now,
+            )
         except Exception as err:
             logger.info(f"Direct HTTP check error for {application_url}: {err}")
             return (
@@ -283,6 +253,26 @@ async def verify_opportunity_status(
                 f"Verification connection timed out or failed: {str(err)[:100]}. Retaining current status.",
                 now,
             )
+
+        if fetch_url != application_url:
+            # Judge the page we landed on, not the URL we were given.
+            official_source = official_source and is_official_domain(fetch_url)
+            specific_ats = is_specific_ats_job_url(fetch_url)
+            generic_url = is_generic_careers_or_homepage(fetch_url)
+        if status_code in (404, 410):
+            return (
+                OpportunityStatus.CLOSED_CONFIRMED,
+                f"Official page returned HTTP {status_code} (Requisition Removed).",
+                now,
+            )
+        if status_code >= 400:
+            return (
+                current_status,
+                f"Official page returned HTTP {status_code}. Status retained pending recheck.",
+                now,
+            )
+        content_text = body
+        verification_method = "http_direct"
 
     # Step 3: Sanitize and fence untrusted text
     safe_content = fence_web_content([{"url": application_url, "content": content_text[:4000]}])

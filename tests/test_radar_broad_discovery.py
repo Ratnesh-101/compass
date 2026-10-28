@@ -57,6 +57,15 @@ from backend.memory.radar import (
     upsert_opportunity,
 )
 
+FETCH = "backend.services.radar_verifier.safe_http_get_with_url"
+
+
+def _echo_fetch(resp):
+    """safe_http_get_with_url stub: serve `resp` and land on the URL that was requested."""
+    async def fetch(url, *args, **kwargs):
+        return (resp.status_code, resp.text, {}, url)
+    return fetch
+
 
 # ===========================================================================
 # 1. Normalization & Adapter Tests
@@ -165,19 +174,12 @@ async def test_spa_javascript_page_not_falsely_invalidated(monkeypatch):
     """
     import backend.services.radar_verifier as verifier
 
-    class MockResp:
-        status_code = 200
-        text = "<html><head><title>Careers Portal</title></head><body><div id='root'></div><script src='/app.js'></script></body></html>"
+    html = "<html><head><title>Careers Portal</title></head><body><div id='root'></div><script src='/app.js'></script></body></html>"
 
-    class MockClient:
-        async def __aenter__(self):
-            return self
-        async def __aexit__(self, *args):
-            pass
-        async def get(self, *args, **kwargs):
-            return MockResp()
+    async def fake_fetch(url, *args, **kwargs):
+        return (200, html, {}, url)
 
-    monkeypatch.setattr(verifier.httpx, "AsyncClient", lambda *args, **kwargs: MockClient())
+    monkeypatch.setattr(verifier, "safe_http_get_with_url", fake_fetch)
     monkeypatch.setattr(verifier, "tavily_available", lambda: False)
 
     status, evidence, _ = await verify_opportunity_status("https://boards.greenhouse.io/mycompany/jobs/12345")
@@ -406,7 +408,7 @@ async def test_case_1_official_gov_homepage_returns_200_no_vacancy():
         text="<html><head><title>MeitY</title></head><body><h1>Ministry of Electronics and Information Technology</h1><p>Welcome to MeitY official portal.</p></body></html>"
     )
     with patch("backend.services.radar_verifier.tavily_available", return_value=False), \
-         patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp):
+         patch(FETCH, side_effect=_echo_fetch(mock_resp)):
         new_status, evidence, _ = await verify_opportunity_status("https://www.meity.gov.in/", OpportunityStatus.DISCOVERED)
         assert new_status == OpportunityStatus.NEEDS_VERIFICATION
         assert new_status != OpportunityStatus.OPEN_CONFIRMED
@@ -421,7 +423,7 @@ async def test_case_2_official_ac_research_institution_homepage_returns_200():
         text="<html><body><h1>Department of CSA - Indian Institute of Science</h1><p>Academic research, faculty directory, and publications.</p></body></html>"
     )
     with patch("backend.services.radar_verifier.tavily_available", return_value=False), \
-         patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp):
+         patch(FETCH, side_effect=_echo_fetch(mock_resp)):
         new_status, evidence, _ = await verify_opportunity_status("https://www.csa.iisc.ac.in/", OpportunityStatus.NEEDS_VERIFICATION)
         assert new_status == OpportunityStatus.NEEDS_VERIFICATION
         assert new_status != OpportunityStatus.OPEN_CONFIRMED
@@ -435,7 +437,7 @@ async def test_case_3_specific_official_ats_requisition_active():
         text="<html><body><h1>Software Engineer Intern (Summer 2026)</h1><form action='/apply'><input type='submit' value='Apply Now'/></form></body></html>"
     )
     with patch("backend.services.radar_verifier.tavily_available", return_value=False), \
-         patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp):
+         patch(FETCH, side_effect=_echo_fetch(mock_resp)):
         new_status, evidence, _ = await verify_opportunity_status("https://boards.greenhouse.io/postman/jobs/543210", OpportunityStatus.DISCOVERED)
         assert new_status == OpportunityStatus.OPEN_CONFIRMED
         assert "Verified" in evidence
@@ -446,7 +448,7 @@ async def test_case_4_specific_requisition_returns_404_or_removal():
     """4. A specific requisition returns HTTP 404/410: must transition to CLOSED_CONFIRMED."""
     mock_resp = MagicMock(status_code=404, text="The requested job posting could not be found.")
     with patch("backend.services.radar_verifier.tavily_available", return_value=False), \
-         patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp):
+         patch(FETCH, side_effect=_echo_fetch(mock_resp)):
         new_status, evidence, _ = await verify_opportunity_status("https://jobs.lever.co/sarvam/expired-job-1234", OpportunityStatus.OPEN_CONFIRMED)
         assert new_status == OpportunityStatus.CLOSED_CONFIRMED
         assert "404" in evidence or "Removed" in evidence
@@ -460,7 +462,7 @@ async def test_case_5_generic_javascript_rendered_careers_page_returns_200():
         text="<!DOCTYPE html><html><head><title>Careers</title></head><body><div id='app'></div><script src='/static/app.js'></script></body></html>"
     )
     with patch("backend.services.radar_verifier.tavily_available", return_value=False), \
-         patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp):
+         patch(FETCH, side_effect=_echo_fetch(mock_resp)):
         new_status, evidence, _ = await verify_opportunity_status("https://razorpay.com/jobs/", OpportunityStatus.DISCOVERED)
         assert new_status == OpportunityStatus.NEEDS_VERIFICATION
         assert new_status != OpportunityStatus.OPEN_CONFIRMED
@@ -475,7 +477,7 @@ async def test_case_6_annual_programme_dates_unknown_not_promoted():
         text="<html><body><h1>The Urban Learning Internship Program (TULIP)</h1><p>General programme guidelines for AICTE and MoHUA.</p></body></html>"
     )
     with patch("backend.services.radar_verifier.tavily_available", return_value=False), \
-         patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp):
+         patch(FETCH, side_effect=_echo_fetch(mock_resp)):
         new_status, evidence, _ = await verify_opportunity_status("https://internship.aicte-india.org/", OpportunityStatus.DISCOVERED)
         assert new_status == OpportunityStatus.NEEDS_VERIFICATION
         assert new_status not in (OpportunityStatus.OPEN_CONFIRMED, OpportunityStatus.UPCOMING_CONFIRMED)
@@ -485,7 +487,7 @@ async def test_case_6_annual_programme_dates_unknown_not_promoted():
 async def test_case_7_source_timeout_does_not_crash_or_falsely_promote():
     """7. A source connection timeout must not crash or falsely promote the opportunity."""
     with patch("backend.services.radar_verifier.tavily_available", return_value=False), \
-         patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=httpx.ConnectTimeout("Connection timed out after 8.0s")):
+         patch(FETCH, new_callable=AsyncMock, side_effect=httpx.ConnectTimeout("Connection timed out after 8.0s")):
         new_status, evidence, _ = await verify_opportunity_status("https://slow-site.gov.in/portal", OpportunityStatus.NEEDS_VERIFICATION)
         assert new_status == OpportunityStatus.NEEDS_VERIFICATION
         assert new_status != OpportunityStatus.OPEN_CONFIRMED
@@ -500,7 +502,7 @@ async def test_case_8_previously_verified_listing_missing_trigger_transitions_to
         text="<html><body><h1>Research Fellowship</h1><p>General overview of fellowship. Inquiries can be sent to info@example.com.</p></body></html>"
     )
     with patch("backend.services.radar_verifier.tavily_available", return_value=False), \
-         patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp):
+         patch(FETCH, side_effect=_echo_fetch(mock_resp)):
         new_status, evidence, _ = await verify_opportunity_status("https://example.org/internships/annual", OpportunityStatus.OPEN_CONFIRMED)
         assert new_status == OpportunityStatus.NEEDS_VERIFICATION
         assert new_status != OpportunityStatus.OPEN_CONFIRMED

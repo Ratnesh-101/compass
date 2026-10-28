@@ -123,7 +123,7 @@ async def client():
 def _offline_tolerant_ssrf_dns(monkeypatch):
     """Keep radar verifier tests hermetic: unresolvable hostnames are tolerated, IP literals and
     internal hostnames are still blocked by the real SSRF validator."""
-    import urllib.parse
+    import httpx
     from backend.services import radar_verifier, security
 
     real_is_safe_url = security.is_safe_url
@@ -134,17 +134,13 @@ def _offline_tolerant_ssrf_dns(monkeypatch):
             return True, ""
         return ok, reason
 
-    def tolerant_is_safe_redirect(source_url, location):
-        if not location or not isinstance(location, str):
-            return False, "", "Redirect location must be a non-empty string"
-        resolved = urllib.parse.urljoin(source_url.strip(), location.strip())
-        ok, reason = tolerant_is_safe_url(resolved)
-        if not ok:
-            return False, resolved, f"Redirect destination rejected: {reason}"
-        return True, resolved, ""
+    async def offline_fetch(url, *args, **kwargs):
+        # The verifier's pinned-IP fetch must never touch the network in tests; tests that
+        # exercise a fetch result patch `radar_verifier.safe_http_get_with_url` themselves.
+        raise httpx.ConnectError("network access is disabled in tests")
 
     monkeypatch.setattr(radar_verifier, "is_safe_url", tolerant_is_safe_url, raising=False)
-    monkeypatch.setattr(radar_verifier, "is_safe_redirect", tolerant_is_safe_redirect, raising=False)
+    monkeypatch.setattr(radar_verifier, "safe_http_get_with_url", offline_fetch, raising=False)
 
 
 @pytest.fixture

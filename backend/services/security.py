@@ -165,9 +165,27 @@ async def safe_http_get(
 ) -> Tuple[int, str, dict]:
     """Execute an outbound HTTP GET with strict SSRF validation and DNS rebinding protection.
 
+    Thin wrapper over safe_http_get_with_url that drops the final URL.
+    Returns (status_code, text, response_headers).
+    """
+    status, text, resp_headers, _final_url = await safe_http_get_with_url(
+        url, max_redirects=max_redirects, timeout=timeout, headers=headers
+    )
+    return status, text, resp_headers
+
+
+async def safe_http_get_with_url(
+    url: str,
+    max_redirects: int = 3,
+    timeout: float = 10.0,
+    headers: Optional[dict] = None,
+) -> Tuple[int, str, dict, str]:
+    """Execute an outbound HTTP GET with strict SSRF validation and DNS rebinding protection.
+
     Pins the connection to the pre-validated IP so DNS cannot change between check and fetch.
     Uses non-blocking loop.getaddrinfo, keeps TLS verification ON, and passes sni_hostname.
-    Returns (status_code, text, response_headers).
+    Returns (status_code, text, response_headers, final_url) where final_url is the URL of
+    the last hop after following validated redirects.
     """
     current_url = url
     loop = asyncio.get_running_loop()
@@ -214,13 +232,13 @@ async def safe_http_get(
             if resp.status_code in (301, 302, 303, 307, 308):
                 loc = resp.headers.get("location")
                 if not loc:
-                    return resp.status_code, resp.text, dict(resp.headers)
+                    return resp.status_code, resp.text, dict(resp.headers), current_url
                 redir_safe, next_url, redir_err = is_safe_redirect(current_url, loc)
                 if not redir_safe:
                     raise ValueError(f"SSRF redirect blocked: {redir_err}")
                 current_url = next_url
                 continue
-            return resp.status_code, resp.text, dict(resp.headers)
+            return resp.status_code, resp.text, dict(resp.headers), current_url
 
     raise ValueError(f"Too many redirects ({max_redirects})")
 
