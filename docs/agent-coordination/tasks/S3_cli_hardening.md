@@ -1,7 +1,7 @@
 # Task S3 - CLI hardening
 
-- Worktree: C:\Users\RATNES~1\AppData\Local\Temp\claude\C--Users-Ratnesh-Singh-OneDrive-Desktop-compass\d0db3863-8766-479f-b824-560e43253212\scratchpad\s3   Branch: agent/sonnet/cli-hardening   Base: d0a4c31
-- Test script: bash "C:/Users/RATNES~1/AppData/Local/Temp/claude/C--Users-Ratnesh-Singh-OneDrive-Desktop-compass/d0db3863-8766-479f-b824-560e43253212/scratchpad/runtests_w3.sh" "<worktree with forward slashes>" [pytest args]
+- Worktree: <local path>   Branch: agent/sonnet/cli-hardening   Base: d0a4c31
+- Test script: bash "<local path>" "<worktree with forward slashes>" [pytest args]
 - May edit: cli/assistant_cli.py, cli/pyproject.toml, tests/test_cli.py (and NEW tests/test_cli_hardening.py if you prefer a separate file).
 - Must NOT edit: anything else. Do NOT look at or modify the user's own checkout; their old uncommitted CLI edits are superseded except the one hunk below.
 

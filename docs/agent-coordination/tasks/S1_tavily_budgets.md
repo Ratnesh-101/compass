@@ -1,7 +1,7 @@
 # Task S1 - Enforce Tavily budgets (per-run, per-identity daily, global)
 
-- Worktree: C:\Users\RATNES~1\AppData\Local\Temp\claude\C--Users-Ratnesh-Singh-OneDrive-Desktop-compass\d0db3863-8766-479f-b824-560e43253212\scratchpad\s1   Branch: agent/sonnet/tavily-budgets   Base: d0a4c31
-- Test script: bash "C:/Users/RATNES~1/AppData/Local/Temp/claude/C--Users-Ratnesh-Singh-OneDrive-Desktop-compass/d0db3863-8766-479f-b824-560e43253212/scratchpad/runtests_w1.sh" "<worktree with forward slashes>" [pytest args]
+- Worktree: <local path>   Branch: agent/sonnet/tavily-budgets   Base: d0a4c31
+- Test script: bash "<local path>" "<worktree with forward slashes>" [pytest args]
 - May edit: backend/services/budgets.py, backend/services/usage.py, backend/services/tavily.py, backend/services/tavily_pipeline.py,
   NEW backend/services/budget_context.py, backend/main.py (ONLY to add one middleware), backend/memory/db.py, backend/memory/schema.sql,
   NEW tests/test_tavily_budget_enforcement.py (and minimal edits to existing tests that now need an identity/context to pass).

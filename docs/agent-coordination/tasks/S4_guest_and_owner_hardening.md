@@ -1,7 +1,7 @@
 # Task S4 - scope_owner and guest-token hardening
 
-- Worktree: C:\Users\RATNES~1\AppData\Local\Temp\claude\C--Users-Ratnesh-Singh-OneDrive-Desktop-compass\d0db3863-8766-479f-b824-560e43253212\scratchpad\s4   Branch: agent/sonnet/guest-and-owner-hardening   Base: d0a4c31
-- Test script: bash "C:/Users/RATNES~1/AppData/Local/Temp/claude/C--Users-Ratnesh-Singh-OneDrive-Desktop-compass/d0db3863-8766-479f-b824-560e43253212/scratchpad/runtests_w4.sh" "<worktree with forward slashes>" [pytest args]
+- Worktree: <local path>   Branch: agent/sonnet/guest-and-owner-hardening   Base: d0a4c31
+- Test script: bash "<local path>" "<worktree with forward slashes>" [pytest args]
 - May edit: backend/services/ownership.py, backend/dependencies.py, tests/test_ownership_helpers.py (created by step 0), NEW tests/test_guest_token_hardening.py,
   and existing tests only where a deliberate behavior change requires it (say which in the report).
 - Must NOT edit: anything else. Another worker (S1) adds a middleware in main.py that CALLS `_get_current_identity`; do not change that function's signature or return type.

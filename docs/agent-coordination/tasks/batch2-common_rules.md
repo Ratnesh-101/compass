@@ -4,7 +4,7 @@ You are a worker. An orchestrator (Opus) planned this task; you execute it. Foll
 
 ## Boundaries
 - Work ONLY inside your own git worktree (path in your task). Never touch any other checkout, especially
-  `C:\Users\Ratnesh Singh\OneDrive\Desktop\compass` (the user's own checkout with uncommitted work).
+  `the user's own checkout` (the user's own checkout with uncommitted work).
 - Edit ONLY the files listed under "May edit" in your task. If you believe another file must change, STOP and
   report it under OPEN ISSUES instead of editing it.
 - Never read or print `.env*` files, tokens, keys, emails or IPs. No Neon / production access. Tests run only

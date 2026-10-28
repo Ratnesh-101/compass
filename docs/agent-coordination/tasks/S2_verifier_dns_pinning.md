@@ -1,7 +1,7 @@
 # Task S2 - Pin the resolved IP in the opportunity verifier (DNS rebinding)
 
-- Worktree: C:\Users\RATNES~1\AppData\Local\Temp\claude\C--Users-Ratnesh-Singh-OneDrive-Desktop-compass\d0db3863-8766-479f-b824-560e43253212\scratchpad\s2   Branch: agent/sonnet/verifier-dns-pinning   Base: d0a4c31
-- Test script: bash "C:/Users/RATNES~1/AppData/Local/Temp/claude/C--Users-Ratnesh-Singh-OneDrive-Desktop-compass/d0db3863-8766-479f-b824-560e43253212/scratchpad/runtests_w2.sh" "<worktree with forward slashes>" [pytest args]
+- Worktree: <local path>   Branch: agent/sonnet/verifier-dns-pinning   Base: d0a4c31
+- Test script: bash "<local path>" "<worktree with forward slashes>" [pytest args]
 - May edit: backend/services/radar_verifier.py, backend/services/security.py (ONLY add a new function / small refactor of safe_http_get; keep its existing signature and behavior),
   tests/test_audit_release_readiness_p1_p2.py, tests/test_career_e2e_workflow.py, tests/test_career_profile_intelligence.py, tests/test_radar_broad_discovery.py,
   tests/test_radar_verification_hardening.py, tests/conftest.py (ONLY the autouse fixture `_offline_tolerant_ssrf_dns`), NEW tests/test_verifier_dns_pinning.py.
