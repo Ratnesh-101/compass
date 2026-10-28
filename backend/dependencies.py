@@ -18,6 +18,9 @@ from backend.services.security import get_client_ip
 
 logger = logging.getLogger(__name__)
 
+# Set once the first legacy two-part guest token is accepted, so the operator sees one warning per process.
+_legacy_guest_token_warned = False
+
 # ---------------------------------------------------------------------------
 # Rate Limiter — Sliding-window per client IP (30 requests/minute on chat)
 # ---------------------------------------------------------------------------
@@ -234,6 +237,13 @@ def verify_guest_token(token: Optional[str]) -> Optional[str]:
             return None
         expected_sig = hmac.new(secret, gid.encode("utf-8"), hashlib.sha256).hexdigest()
         if hmac.compare_digest(sig, expected_sig):
+            global _legacy_guest_token_warned
+            if not _legacy_guest_token_warned:
+                _legacy_guest_token_warned = True
+                logger.warning(
+                    "Accepted a legacy two-part guest token (<uuid>.<hmac>, no timestamp, never expires); "
+                    "legacy-format guest tokens are still in use."
+                )
             return gid
         return None
 
@@ -318,8 +328,15 @@ def _get_current_identity(request: Request) -> Optional[Identity]:
 
     guest_id_header = request.headers.get("x-guest-id")
     if guest_id_header and guest_id_header.strip():
-        # Allow x-guest-id if accompanied by a valid signed token for the identical guest ID
-        if not (verified_guest and guest_id_header.strip() == verified_guest):
+        # Allow x-guest-id if accompanied by a valid signed token for the identical guest ID.
+        # A token was presented but failed verification (expired / invalid): the caller is simply
+        # unauthenticated, so fall through (protected routes answer 401 and the client re-mints).
+        # A VALID token for another guest, or a raw id with no token at all, is impersonation -> 403.
+        token_presented = bool(
+            request.headers.get("x-guest-token") or request.cookies.get("compass_guest_token")
+        )
+        stale_token_only = token_presented and verified_guest is None
+        if not stale_token_only and not (verified_guest and guest_id_header.strip() == verified_guest):
             if not (settings.is_development() or settings.is_test()):
                 raise HTTPException(
                     status_code=403,

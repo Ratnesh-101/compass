@@ -18,12 +18,21 @@ if TYPE_CHECKING:
 
 ADMIN_OWNER = "admin"
 
+# Reserved owner that matches no real user. A non-empty but blank owner id (e.g. "   ") is
+# malformed, not "unscoped", so it must fail closed: truthy in Python guards (`if scoped_owner`)
+# and never equal to any stored user_id in SQL comparisons.
+NO_OWNER = "\x00no-owner"
+
 
 def scope_owner(user_id: Optional[str]) -> Optional[str]:
-    """Return the owner to scope SQL by, or None when the caller is unscoped (admin / internal)."""
+    """Return the owner to scope SQL by, or None when the caller is unscoped (admin / internal).
+
+    None / "" / "admin" mean unscoped. A whitespace-only id returns NO_OWNER (fail closed).
+    """
     if not user_id or user_id.strip().lower() == ADMIN_OWNER:
         return None
-    return user_id.strip()
+    stripped = user_id.strip()
+    return stripped or NO_OWNER
 
 
 def owns_task(task_owner: Optional[str], ident: "Identity") -> bool:

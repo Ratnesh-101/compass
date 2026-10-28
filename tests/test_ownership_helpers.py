@@ -25,8 +25,9 @@ from backend.services.ownership import owns_task, require_task_access, scope_own
         ("  user-1  ", "user-1"),
         ("Mixed-Case", "Mixed-Case"),
         ("administrator", "administrator"),
-        # Whitespace-only is truthy and not "admin": the code returns "" (stripped).
-        ("   ", ""),
+        # Whitespace-only is malformed, not unscoped: fail closed with the reserved owner.
+        ("   ", ownership.NO_OWNER),
+        ("\t\n", ownership.NO_OWNER),
     ],
 )
 def test_scope_owner(raw, expected):
