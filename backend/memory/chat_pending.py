@@ -213,7 +213,8 @@ async def search_active_tasks_for_delete(
 ) -> List[Dict[str, Any]]:
     """Search for non-deleted tasks matching the user's delete query.
     
-    Supports numeric ID, exact title match, and substring search.
+    Supports numeric ID, exact title match, and substring search on the
+    already-normalised target (see backend/services/delete_target.py).
     """
     clean_q = query.strip()
     if not clean_q:
@@ -235,7 +236,9 @@ async def search_active_tasks_for_delete(
         )
         return [dict(row)] if row else []
 
-    # Substring / fuzzy title search
+    # Case-insensitive title match: exact title or title containing the text.
+    # LIKE wildcards in the user text are escaped with '!' so they match literally.
+    like_q = clean_q.replace("!", "!!").replace("%", "!%").replace("_", "!_")
     rows = await conn.fetch(
         """
         SELECT id, title, domain, due_date, status, priority, user_id
@@ -244,8 +247,7 @@ async def search_active_tasks_for_delete(
           AND deleted_at IS NULL
           AND (
             LOWER(title) = LOWER($2)
-            OR LOWER(title) LIKE '%' || LOWER($2) || '%'
-            OR LOWER($2) LIKE '%' || LOWER(title) || '%'
+            OR LOWER(title) LIKE '%' || LOWER($3) || '%' ESCAPE '!'
           )
         ORDER BY
           CASE WHEN LOWER(title) = LOWER($2) THEN 0 ELSE 1 END,
@@ -254,6 +256,28 @@ async def search_active_tasks_for_delete(
         """,
         owner_identity,
         clean_q,
+        like_q,
+    )
+    return [dict(r) for r in rows]
+
+
+async def list_nearest_active_titles(
+    conn: Any,
+    owner_identity: str,
+    limit: int = 5,
+) -> List[Dict[str, Any]]:
+    """Up to ``limit`` active tasks of this owner, soonest due first (for "no match" replies)."""
+    rows = await conn.fetch(
+        """
+        SELECT id, title, domain, due_date, status, priority, user_id
+        FROM tasks
+        WHERE (user_id = $1 OR (user_id IS NULL AND $1 IS NULL))
+          AND deleted_at IS NULL
+        ORDER BY due_date ASC NULLS LAST, id ASC
+        LIMIT $2
+        """,
+        owner_identity,
+        limit,
     )
     return [dict(r) for r in rows]
 

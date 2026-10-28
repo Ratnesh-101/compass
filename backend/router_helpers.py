@@ -168,6 +168,13 @@ def is_undo_request(message: str) -> bool:
     )
 
 
+# Numbered replies to a delete-candidate list ("Please reply with the number").
+# Only meaningful for a delete_task_disambiguation pending action.
+ORDINAL_REPLIES = frozenset({
+    "2", "3", "second one", "the second one", "third one", "the third one",
+})
+
+
 def is_pending_action_confirm(message: str) -> bool:
     """Check if message is an explicit confirmation of a pending action."""
     msg = message.lower().strip().rstrip(".!?")
@@ -177,7 +184,7 @@ def is_pending_action_confirm(message: str) -> bool:
         "delete the first one", "complete the first one", "yes, delete the first one",
         "yes delete the first one", "yes please", "yeah", "yep",
     )
-    if msg in exact_matches:
+    if msg in exact_matches or msg in ORDINAL_REPLIES:
         return True
     if msg.startswith("yes,") or msg.startswith("confirm "):
         return True

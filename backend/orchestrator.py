@@ -15,6 +15,23 @@ from backend.memory.db import get_pool
 from backend.memory import structured, conversations
 
 logger = logging.getLogger("compass.orchestrator")
+_DELETE_CANDIDATE_LIMIT = 3
+_ORDINAL_INDEX = {
+    "1": 0, "first one": 0, "the first one": 0,
+    "2": 1, "second one": 1, "the second one": 1,
+    "3": 2, "third one": 2, "the third one": 2,
+}
+
+
+def _select_candidate(message: str, task_ids: list) -> Optional[int]:
+    """Pick one candidate from a numbered/ID reply; None when the reply is unclear."""
+    reply = (message or "").lower().strip().rstrip(".!?")
+    idx = _ORDINAL_INDEX.get(reply)
+    if idx is not None:
+        return task_ids[idx] if idx < len(task_ids) else None
+    if reply.isdigit() and int(reply) in task_ids:
+        return int(reply)
+    return None
 
 from backend.orchestrator_helpers import (
     PRIORITY_MAP,
@@ -224,36 +241,37 @@ async def handle_message(
             resolve_chat_pending_action,
             soft_delete_tasks,
         )
+        from backend.router_helpers import ORDINAL_REPLIES
         pool = active_pool or await get_pool()
         active_action = None
         deleted: list = []
+        needs_reply = ""
         if pool:
             async with pool.acquire() as conn:
                 active_action = await get_active_chat_pending_action(conn, owner_identity, conv_id)
                 if active_action:
                     act_type = active_action.get("action")
                     if act_type in ("delete_task", "clear_schedule"):
-                        task_ids = active_action.get("task_ids") or []
-                        deleted = await soft_delete_tasks(conn, task_ids, owner_identity)
-                        await resolve_chat_pending_action(conn, active_action["id"], "executed")
+                        if (message or "").lower().strip().rstrip(".!?") in ORDINAL_REPLIES:
+                            needs_reply = "That isn't a confirmation. Reply 'Confirm' to proceed or 'Cancel'."
+                        else:
+                            task_ids = active_action.get("task_ids") or []
+                            deleted = await soft_delete_tasks(conn, task_ids, owner_identity)
+                            await resolve_chat_pending_action(conn, active_action["id"], "executed")
                     elif act_type == "delete_task_disambiguation":
                         task_ids = active_action.get("task_ids") or []
-                        raw_msg = (message or "").lower().strip()
-                        selected_id = task_ids[0] if task_ids else None
-                        if "2" in raw_msg or "second" in raw_msg and len(task_ids) > 1:
-                            selected_id = task_ids[1]
-                        elif "3" in raw_msg or "third" in raw_msg and len(task_ids) > 2:
-                            selected_id = task_ids[2]
+                        selected_id = _select_candidate(message, task_ids)
+                        if selected_id is None:
+                            needs_reply = "Which one? Reply with 1, 2 or 3, or 'Cancel'."
                         else:
-                            for tid in task_ids:
-                                if str(tid) in raw_msg:
-                                    selected_id = tid
-                                    break
-                        if selected_id:
                             deleted = await soft_delete_tasks(conn, [selected_id], owner_identity)
-                        await resolve_chat_pending_action(conn, active_action["id"], "executed")
+                            await resolve_chat_pending_action(conn, active_action["id"], "executed")
 
-        if active_action and deleted:
+        if needs_reply:
+            resp_msg = needs_reply
+            ret_data = None
+            success = False
+        elif active_action and deleted:
             if len(deleted) == 1:
                 resp_msg = f"Deleted task '{deleted[0]['title']}'. You can undo this deletion within 10 minutes."
             else:
@@ -333,7 +351,9 @@ async def handle_message(
             create_chat_pending_action,
             search_active_tasks_for_delete,
             get_all_active_tasks_for_user,
+            list_nearest_active_titles,
         )
+        from backend.services.delete_target import normalize_delete_target
         pool = active_pool or await get_pool()
         is_clear = bool(args.get("clear_all")) if isinstance(args, dict) else False
         del_query = (args.get("query") if isinstance(args, dict) else "") or message
@@ -362,13 +382,29 @@ async def handle_message(
                         resp_msg = f"⚠️ Are you sure you want to clear all {len(all_active)} active tasks from your schedule? Please reply 'Confirm' or click Confirm below."
                         ret_data = {"pending_action": pending, "tasks": all_active}
         else:
-            matches = []
+            specific_query, is_generic = normalize_delete_target(del_query)
             if pool:
                 async with pool.acquire() as conn:
-                    matches = await search_active_tasks_for_delete(conn, owner_identity, del_query)
+                    if is_generic:
+                        matches = await get_all_active_tasks_for_user(conn, owner_identity)
+                    else:
+                        matches = await search_active_tasks_for_delete(conn, owner_identity, specific_query)
+                        raw_query = " ".join((del_query or "").lower().split())
+                        if not matches and raw_query and raw_query != specific_query:
+                            # e.g. a title like "Fix deadline bug" whose generic words were stripped
+                            matches = await search_active_tasks_for_delete(conn, owner_identity, raw_query)
                     if not matches:
-                        resp_msg = f"I couldn't find any active tasks matching '{del_query}' to delete."
-                        ret_data = {"count": 0}
+                        if is_generic:
+                            resp_msg = "You have no active tasks to delete."
+                            ret_data = {"count": 0}
+                        else:
+                            nearest = await list_nearest_active_titles(conn, owner_identity, limit=5)
+                            resp_msg = "I couldn't find an active task with that name."
+                            if nearest:
+                                resp_msg += " Your active tasks:\n" + "\n".join(
+                                    f"{i}. '{t['title']}' (ID: {t['id']})" for i, t in enumerate(nearest, 1)
+                                )
+                            ret_data = {"count": 0, "nearest": nearest}
                     elif len(matches) == 1:
                         target = matches[0]
                         pending = await create_chat_pending_action(
@@ -384,6 +420,9 @@ async def handle_message(
                         resp_msg = f"Are you sure you want to delete task '{target['title']}' (ID: {target['id']})? Please confirm to proceed or click Cancel."
                         ret_data = {"pending_action": pending, "task": target}
                     else:
+                        total = len(matches)
+                        # The numeric reply handler supports choices 1-3, so only those are offered.
+                        matches = matches[:_DELETE_CANDIDATE_LIMIT]
                         pending = await create_chat_pending_action(
                             conn,
                             action="delete_task_disambiguation",
@@ -394,10 +433,15 @@ async def handle_message(
                             conversation_id=conv_id,
                             expires_minutes=5,
                         )
-                        lines = [f"Found {len(matches)} tasks matching '{del_query}':"]
-                        for i, m in enumerate(matches[:5], 1):
+                        if is_generic:
+                            lines = [f"You have {total} active tasks. Which one do you want to delete?"]
+                        else:
+                            lines = [f"Found {total} tasks matching '{specific_query}':"]
+                        for i, m in enumerate(matches, 1):
                             lines.append(f"{i}. '{m['title']}' (ID: {m['id']})")
-                        lines.append("Please reply with the number or ID you want to delete, or click Cancel.")
+                        if total > len(matches):
+                            lines.append(f"Showing the first {len(matches)} of {total}; tell me the task's title to narrow it down.")
+                        lines.append("Please reply with the number you want to delete, or click Cancel.")
                         resp_msg = "\n".join(lines)
                         ret_data = {"pending_action": pending, "matches": matches}
 
