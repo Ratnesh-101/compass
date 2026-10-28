@@ -1,0 +1,25 @@
+name: Nightly Consolidation
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  trigger:
+    name: Trigger nightly consolidation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Call /api/agent/trigger-nightly
+        env:
+          AUTH_TOKEN: ${{ secrets.AUTH_TOKEN }}
+        run: |
+          # Render free tier may be asleep; retry while it wakes up.
+          curl --fail-with-body --silent --show-error \
+            --max-time 300 --retry 4 --retry-delay 30 --retry-all-errors \
+            -X POST \
+            -H "Authorization: Bearer ${AUTH_TOKEN}" \
+            "https://compass-backend-qryu-vcfv.onrender.com/api/agent/trigger-nightly"
