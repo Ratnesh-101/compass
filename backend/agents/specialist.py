@@ -22,7 +22,9 @@ logger = logging.getLogger("compass.agents.specialist")
 SPECIALIST_COMPLETENESS_RULE = (
     " Answer every part of the user's question in the order it was asked, putting the direct answer first. "
     "Be complete but concise (about 400-600 words). "
-    "Use at most one table, and never leave a table, list or code block unfinished."
+    "Use at most one table, and never leave a table, list or code block unfinished. "
+    "In a table never put a real line break inside a cell: keep each row on one line "
+    "and separate several items in one cell with <br>."
 )
 SPECIALIST_CONTINUE_PROMPT = (
     "Continue exactly where you stopped and finish the answer concisely. "

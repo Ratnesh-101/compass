@@ -55,6 +55,8 @@ async def test_normal_finish_makes_one_call():
     assert kwargs["max_tokens"] == 2000
     assert "Answer every part of the user's question" in kwargs["messages"][0]["content"]
     assert "never leave a table, list or code block unfinished" in kwargs["messages"][0]["content"]
+    assert "never put a real line break inside a cell" in kwargs["messages"][0]["content"]
+    assert "separate several items in one cell with <br>" in kwargs["messages"][0]["content"]
     assert result == "Full answer."
 
 
