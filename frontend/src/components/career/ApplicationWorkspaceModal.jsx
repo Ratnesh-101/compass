@@ -540,7 +540,10 @@ export default function ApplicationWorkspaceModal({
   }
 
   // Compute Match Analysis
-  const requiredSkills = opportunity?.requirements?.required_skills || []
+  const rawRequiredSkills = opportunity?.requirements?.required_skills || []
+  const requiredSkills = rawRequiredSkills.length > 0
+    ? rawRequiredSkills
+    : (jobAnalysis?.required_skills || [])
   const userSkills = resume?.content?.skills || []
   const matchedSkills = requiredSkills.filter(s =>
     userSkills.some(us => us.toLowerCase() === s.toLowerCase())
@@ -1395,22 +1398,28 @@ export default function ApplicationWorkspaceModal({
                       {opportunity.description || 'Verified opportunity description is retrieved directly from official career postings.'}
                     </p>
                     <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                      {requiredSkills.map((sk, idx) => (
-                        <span
-                          key={idx}
-                          style={{
-                            padding: '4px 10px',
-                            borderRadius: '6px',
-                            background: 'var(--bg-card)',
-                            border: '1px solid var(--border)',
-                            fontSize: '12px',
-                            fontWeight: 600,
-                            color: 'var(--text-primary)',
-                          }}
-                        >
-                          {sk}
+                      {requiredSkills.length > 0 ? (
+                        requiredSkills.map((sk, idx) => (
+                          <span
+                            key={idx}
+                            style={{
+                              padding: '4px 10px',
+                              borderRadius: '6px',
+                              background: 'var(--bg-card)',
+                              border: '1px solid var(--border)',
+                              fontSize: '12px',
+                              fontWeight: 600,
+                              color: 'var(--text-primary)',
+                            }}
+                          >
+                            {sk}
+                          </span>
+                        ))
+                      ) : (
+                        <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                          No explicit prerequisite technical skills mandated for this role.
                         </span>
-                      ))}
+                      )}
                     </div>
                   </div>
 
@@ -1432,41 +1441,73 @@ export default function ApplicationWorkspaceModal({
                       </span>
                     </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px' }}>
-                      <div style={{ padding: '12px', borderRadius: '8px', background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
-                        <div style={{ fontWeight: 700, fontSize: '12px', color: '#166534', marginBottom: '6px' }}>
-                          ✓ Verified Matching Skills ({matchedSkills.length})
-                        </div>
-                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                          {matchedSkills.length > 0 ? (
-                            matchedSkills.map((sk, i) => (
-                              <span key={i} style={{ background: '#ffffff', color: '#15803d', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, border: '1px solid #bbf7d0' }}>
-                                {sk}
-                              </span>
-                            ))
-                          ) : (
-                            <span style={{ fontSize: '12px', color: '#166534' }}>Add relevant skills to your profile to match.</span>
-                          )}
+                    {requiredSkills.length === 0 ? (
+                      <div
+                        id="factual-match-general-role"
+                        style={{
+                          padding: '14px 16px',
+                          borderRadius: '8px',
+                          background: '#f8fafc',
+                          border: '1px solid var(--border)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '12px',
+                        }}
+                      >
+                        <span style={{ fontSize: '20px' }}>📋</span>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 700, fontSize: '13px', color: 'var(--text-primary)', marginBottom: '3px' }}>
+                            General Qualification Opportunity: No Mandatory Tech Stack
+                          </div>
+                          <div style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                            This employer posting does not list strict prerequisite skills. Evaluated holistically on candidate projects, leadership, and domain alignment.
+                          </div>
                         </div>
                       </div>
+                    ) : (
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px' }}>
+                        <div style={{ padding: '12px', borderRadius: '8px', background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
+                          <div style={{ fontWeight: 700, fontSize: '12px', color: '#166534', marginBottom: '6px' }}>
+                            ✓ Verified Matching Skills ({matchedSkills.length})
+                          </div>
+                          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                            {matchedSkills.length > 0 ? (
+                              matchedSkills.map((sk, i) => (
+                                <span key={i} style={{ background: '#ffffff', color: '#15803d', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, border: '1px solid #bbf7d0' }}>
+                                  {sk}
+                                </span>
+                              ))
+                            ) : (
+                              <span style={{ fontSize: '12px', color: '#166534' }}>Add relevant skills to your profile to match.</span>
+                            )}
+                          </div>
+                        </div>
 
-                      <div style={{ padding: '12px', borderRadius: '8px', background: '#fffbeb', border: '1px solid #fde68a' }}>
-                        <div style={{ fontWeight: 700, fontSize: '12px', color: '#b45309', marginBottom: '6px' }}>
-                          ⚠️ Unverified or Missing Skills ({missingSkills.length})
-                        </div>
-                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                          {missingSkills.length > 0 ? (
-                            missingSkills.map((sk, i) => (
-                              <span key={i} style={{ background: '#ffffff', color: '#b45309', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, border: '1px solid #fde68a' }}>
-                                {sk}
-                              </span>
-                            ))
-                          ) : (
-                            <span style={{ fontSize: '12px', color: '#b45309' }}>All role requirements verified!</span>
-                          )}
-                        </div>
+                        {missingSkills.length === 0 ? (
+                          <div style={{ padding: '12px', borderRadius: '8px', background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
+                            <div style={{ fontWeight: 700, fontSize: '12px', color: '#166534', marginBottom: '6px' }}>
+                              ✓ All Role Requirements Verified! ({matchedSkills.length}/{requiredSkills.length})
+                            </div>
+                            <span style={{ fontSize: '12px', color: '#15803d' }}>
+                              100% of required skills found in your verified master profile!
+                            </span>
+                          </div>
+                        ) : (
+                          <div style={{ padding: '12px', borderRadius: '8px', background: '#fffbeb', border: '1px solid #fde68a' }}>
+                            <div style={{ fontWeight: 700, fontSize: '12px', color: '#b45309', marginBottom: '6px' }}>
+                              ⚠️ Unverified or Missing Skills ({missingSkills.length})
+                            </div>
+                            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                              {missingSkills.map((sk, i) => (
+                                <span key={i} style={{ background: '#ffffff', color: '#b45309', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, border: '1px solid #fde68a' }}>
+                                  {sk}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    </div>
+                    )}
 
                     <div style={{ marginTop: '14px', fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.5, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span>🛡️ <strong>Zero Hallucination Guarantee:</strong> Tailored resumes strictly derived from verified profile background.</span>
