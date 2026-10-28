@@ -13,13 +13,26 @@ Coordination details live in `docs/agent-coordination/` (protocol, ledger, task 
 |---|---|---|
 | Orchestrator | Claude (Opus when selected) | Planning, task decomposition, assignment, review, integration, final quality call |
 | Worker | Claude Sonnet subagents | Focused backend work, tests, bug fixes, independent review |
-| Worker | Gemini via Antigravity (`agy`) | Frontend and UI work, independent features and analysis |
+| Worker + merger | Gemini via Antigravity (`agy`) | Frontend and UI work, independent features and analysis; **executes the merges** the orchestrator has verified and queued |
 | Owner | The user | Merges, deploys, secrets, production data, anything irreversible |
 
 Operating split (the user's choice): **Opus plans, Sonnet 5.5 and Gemini execute.** In Claude Code run `/model opusplan`
 (Opus in plan mode, Sonnet when executing). Opus's output is the task files in `docs/agent-coordination/tasks/`; Sonnet
 subagents (requested explicitly with `model: sonnet`) and Gemini via `agy` implement them. Review and verification of
 worker output is done by the orchestrator, not by the worker that wrote it.
+
+Merge role (the user's choice): **Claude plans, verifies and codes; Gemini codes and performs the merges.** Gemini only runs
+`gh pr merge` for PRs the orchestrator has verified and queued in a merge request, and only exactly as queued:
+
+- A merge request lists PR numbers in order, the head commit SHA each must still have (`--match-head-commit`), the merge
+  method, and whether `--admin` is allowed (only if the user said so for that request).
+- Gemini merges one PR at a time in the listed order, stops at the first failure or SHA mismatch, and reports the literal
+  output of each command. It never merges anything not in the request and never decides on its own that a PR is ready.
+- Before queuing, the orchestrator has re-run the checks on the combined tree (see Quality gates). After the merges, the
+  orchestrator checks that `main` matches the tested tree and that `main`'s CI is green. Verification is never delegated
+  to the agent that performs the merge.
+- Headless `agy` cannot approve shell commands. Preferred setup: a narrow allow rule for `gh pr merge` in Antigravity's
+  permissions; `--dangerously-skip-permissions` only when the user explicitly authorizes it for that run.
 
 Defaults, not rules: the orchestrator picks the best worker per task. Tightly coupled work is serialized,
 not parallelized; define shared contracts (API shape, schema, component props) before splitting.
