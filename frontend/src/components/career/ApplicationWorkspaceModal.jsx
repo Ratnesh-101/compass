@@ -96,7 +96,7 @@ function cleanOldBriefText(text) {
   t = t.replace(/#{1,6}\s*/g, ' ').replace(/[*_~`]+/g, ' ')
   t = t.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, ' ')
   t = t.replace(/\[\s*\.{2,}\s*\]/g, ' ').replace(/\.{3,}/g, ' ').replace(/…/g, ' ')
-  t = t.replace(/(?i)\b\w+\s+logo\b/g, ' ').replace(/(?i)\b(?:view job|apply now|save job|report job|cookie)\b:?/g, ' ')
+  t = t.replace(/\b\w+\s+logo\b/gi, ' ').replace(/\b(?:view job|apply now|save job|report job|cookie)\b:?/gi, ' ')
   t = t.replace(/\u2014/g, '-').replace(/\u2013/g, '-')
   t = t.replace(/\s+/g, ' ').trim()
   const punct = Math.max(t.lastIndexOf('.'), t.lastIndexOf('!'), t.lastIndexOf('?'))
