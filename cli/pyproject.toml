@@ -16,3 +16,7 @@ dependencies = [
 
 [project.scripts]
 compass = "cli.assistant_cli:app"
+
+[tool.setuptools]
+package-dir = {"cli" = "."}
+packages = ["cli", "cli.commands"]

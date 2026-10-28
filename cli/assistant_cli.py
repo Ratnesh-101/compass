@@ -28,13 +28,21 @@ from __future__ import annotations
 import json
 import os
 import sys
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional
+
+
+def _configure_stdio(streams) -> None:
+    """Force UTF-8 on console streams that support it (wrappers may lack reconfigure)."""
+    for stream in streams:
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
 
 # Fix Windows console encoding before importing Rich
 if sys.platform == "win32":
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+    _configure_stdio((sys.stdout, sys.stderr))
 
 import httpx
 import typer
@@ -42,6 +50,7 @@ from dotenv import load_dotenv
 from rich import box
 from rich.console import Console
 from rich.markdown import Markdown
+from rich.markup import escape
 from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.table import Table
@@ -84,32 +93,51 @@ def _secure_file_permissions(path: Path) -> None:
         pass
 
 
+def _warn(message: str) -> None:
+    """Print a warning to stderr (usable before the Rich consoles exist)."""
+    print(f"Warning: {message}", file=sys.stderr)
+
+
+def _config_file_api_url() -> Optional[str]:
+    """Return api_url stored in the config file, warning if the file is unusable."""
+    if not CONFIG_FILE.exists():
+        return None
+    try:
+        content = CONFIG_FILE.read_text(encoding="utf-8")
+        if tomllib:
+            value = tomllib.loads(content).get("api_url")
+        else:
+            value = None
+            for line in content.splitlines():
+                line = line.strip()
+                if line.startswith("api_url"):
+                    value = line.split("=", 1)[1].strip().strip('"').strip("'")
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        # tomllib.TOMLDecodeError subclasses ValueError.
+        _warn(f"could not parse {CONFIG_FILE} ({exc}); using defaults. Re-run 'compass config --url ...' to rewrite it.")
+        return None
+    if value is not None and not isinstance(value, str):
+        _warn(f"ignoring non-string api_url in {CONFIG_FILE}")
+        return None
+    return value
+
+
 def load_config() -> str:
-    """Read API base URL from ~/.compass/config.toml, env vars, or defaults."""
-    api_url = os.getenv("COMPASS_API_URL")
+    """Read API base URL: COMPASS_API_URL env > ~/.compass/config.toml > localhost default."""
+    api_url = os.getenv("COMPASS_API_URL") or _config_file_api_url()
+    return (api_url or "http://localhost:8000").strip().rstrip("/")
 
-    if CONFIG_FILE.exists():
-        try:
-            content = CONFIG_FILE.read_text(encoding="utf-8")
-            if tomllib:
-                cfg = tomllib.loads(content)
-                api_url = api_url or cfg.get("api_url")
-            else:
-                for line in content.splitlines():
-                    line = line.strip()
-                    if line.startswith("api_url"):
-                        api_url = api_url or line.split("=", 1)[1].strip().strip('"').strip("'")
-        except Exception:
-            pass
 
-    return (api_url or os.getenv("COMPASS_API_URL") or "http://localhost:8000").strip().rstrip("/")
+def _toml_string(value: str) -> str:
+    """Encode value as a TOML basic string (JSON string escapes are valid TOML)."""
+    return json.dumps(value)
 
 
 def save_config(api_url: str) -> None:
-    """Save API base URL to ~/.compass/config.toml."""
+    """Save API base URL to ~/.compass/config.toml (properly escaped, owner-only)."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    content = f'api_url = "{api_url}"\n'
-    CONFIG_FILE.write_text(content, encoding="utf-8")
+    CONFIG_FILE.write_text(f"api_url = {_toml_string(api_url)}\n", encoding="utf-8")
+    _secure_file_permissions(CONFIG_FILE)
 
 
 def load_credentials() -> dict:
@@ -214,6 +242,12 @@ def _headers(admin: bool = False, admin_token: Optional[str] = None) -> dict:
     
     Normal commands send the caller's guest/session token.
     Admin commands send master AUTH_TOKEN only when explicitly provided.
+
+    Precedence for normal commands: saved guest token (compass login) > saved
+    session token (compass login --token) > AUTH_TOKEN / COMPASS_AUTH_TOKEN
+    from the environment (including a repo-local .env, which never overrides
+    saved credentials). There is no implicit "dev-token" fallback: with none
+    of these set the command exits non-zero.
     """
     if admin:
         token = admin_token or os.getenv("AUTH_TOKEN")
@@ -268,34 +302,48 @@ def _handle_http_error(e: httpx.HTTPStatusError):
     raise typer.Exit(1)
 
 
-def _get(path: str, params: dict | None = None, headers: dict | None = None) -> dict:
-    """Make an authenticated GET request to the backend."""
-    h = headers or _headers()
+def _request_json(send) -> dict:
+    """Run send() (an httpx call) and return JSON, exiting non-zero with a friendly message on failure."""
     try:
-        resp = httpx.get(f"{API_BASE}{path}", headers=h, params=params, timeout=30.0)
+        resp = send()
         resp.raise_for_status()
         return resp.json()
-    except (httpx.ConnectError, httpx.TimeoutException) as e:
-        console_err.print(f"[compass.error]❌ Cannot connect to backend at {API_BASE} (error: {e}). Is the server running?[/]")
-        raise typer.Exit(1)
     except httpx.HTTPStatusError as e:
         _handle_http_error(e)
         return {}
+    except httpx.HTTPError as e:
+        console_err.print(
+            f"[compass.error]❌ Cannot connect to backend at {escape(API_BASE)} "
+            f"(error: {escape(str(e) or type(e).__name__)}). Is the server running?[/]"
+        )
+        raise typer.Exit(1)
+    except ValueError as e:
+        console_err.print(f"[compass.error]❌ Backend returned an invalid JSON response: {escape(str(e))}[/]")
+        raise typer.Exit(1)
+
+
+def _get(path: str, params: dict | None = None, headers: dict | None = None) -> dict:
+    """Make an authenticated GET request to the backend."""
+    h = headers or _headers()
+    return _request_json(lambda: httpx.get(f"{API_BASE}{path}", headers=h, params=params, timeout=30.0))
 
 
 def _post(path: str, data: dict, headers: dict | None = None) -> dict:
     """Make an authenticated POST request to the backend."""
     h = headers or _headers()
+    return _request_json(lambda: httpx.post(f"{API_BASE}{path}", headers=h, json=data, timeout=30.0))
+
+
+@contextmanager
+def _command_failure(action: str) -> Iterator[None]:
+    """Turn unexpected errors into a one-line message and exit 1; never swallow typer.Exit."""
     try:
-        resp = httpx.post(f"{API_BASE}{path}", headers=h, json=data, timeout=30.0)
-        resp.raise_for_status()
-        return resp.json()
-    except (httpx.ConnectError, httpx.TimeoutException) as e:
-        console_err.print(f"[compass.error]❌ Cannot connect to backend at {API_BASE} (error: {e}). Is the server running?[/]")
+        yield
+    except typer.Exit:
+        raise
+    except Exception as e:
+        console_err.print(f"[compass.error]❌ Failed to {action}: {escape(str(e) or type(e).__name__)}[/]")
         raise typer.Exit(1)
-    except httpx.HTTPStatusError as e:
-        _handle_http_error(e)
-        return {}
 
 
 def _stream_chat(payload: dict) -> tuple[str, str | None, str | None]:
@@ -303,31 +351,32 @@ def _stream_chat(payload: dict) -> tuple[str, str | None, str | None]:
 
     Returns (full_response, conversation_id, skill_used).
     On Ctrl+C, exits cleanly with code 130 and no traceback.
-    On partial errors, preserves output and exits non-zero.
+    The chat request is never re-sent once the server may have processed it:
+    only a failure to connect (nothing reached the server) falls back to the
+    non-streaming endpoint. Non-200 replies, SSE error events and mid-stream
+    failures are surfaced once and exit non-zero.
     """
     url = f"{API_BASE}/api/chat/stream"
-    full_text = []
+    full_text: list[str] = []
     conv_id = payload.get("conversation_id")
     skill_used = None
+    try:
+        req_headers = _headers()
+    except typer.Exit:
+        # Not authenticated: _post re-checks credentials and exits non-zero with a clear message.
+        res = _post("/api/chat", payload)
+        resp_text = res.get("response", "")
+        console.print(resp_text)
+        return resp_text, res.get("conversation_id"), res.get("skill_used")
 
     try:
-        try:
-            req_headers = _headers()
-        except typer.Exit:
-            res = _post("/api/chat", payload)
-            resp_text = res.get("response", "")
-            console.print(resp_text)
-            return resp_text, res.get("conversation_id"), res.get("skill_used")
-
         with httpx.stream("POST", url, headers=req_headers, json=payload, timeout=60.0) as resp:
             if resp.status_code != 200:
                 try:
-                    res = _post("/api/chat", payload)
-                    resp_text = res.get("response", "")
-                    console.print(resp_text)
-                    return resp_text, res.get("conversation_id"), res.get("skill_used")
-                except Exception:
-                    _handle_http_error(httpx.HTTPStatusError("Stream error", request=resp.request, response=resp))
+                    resp.read()
+                except httpx.HTTPError:
+                    pass
+                _handle_http_error(httpx.HTTPStatusError("Stream error", request=resp.request, response=resp))
 
             for line in resp.iter_lines():
                 if not line or not line.startswith("data: "):
@@ -347,17 +396,9 @@ def _stream_chat(payload: dict) -> tuple[str, str | None, str | None]:
                     skill_used = ev.get("skill_used")
                 elif ev_type == "error":
                     err_msg = ev.get("message", "Unknown error")
-                    if not full_text:
-                        try:
-                            res = _post("/api/chat", payload)
-                            resp_text = res.get("response", "")
-                            console.print(resp_text)
-                            return resp_text, res.get("conversation_id"), res.get("skill_used")
-                        except Exception:
-                            pass
-                    console_err.print(f"\n[compass.error]Error: {err_msg}[/]")
                     if full_text:
                         console.print()
+                    console_err.print(f"\n[compass.error]Error: {escape(str(err_msg))}[/]")
                     raise typer.Exit(1)
 
             console.print()
@@ -373,20 +414,21 @@ def _stream_chat(payload: dict) -> tuple[str, str | None, str | None]:
             console.print()
         _handle_http_error(e)
         return "", None, None
-    except (httpx.ConnectError, httpx.TimeoutException) as e:
+    except (httpx.ConnectError, httpx.ConnectTimeout) as e:
         if not full_text:
-            try:
-                res = _post("/api/chat", payload)
-                resp_text = res.get("response", "")
-                console.print(resp_text)
-                return resp_text, res.get("conversation_id"), res.get("skill_used")
-            except typer.Exit:
-                raise
-            except Exception:
-                pass
+            # Nothing reached the server, so a single non-streaming attempt is safe.
+            res = _post("/api/chat", payload)
+            resp_text = res.get("response", "")
+            console.print(resp_text)
+            return resp_text, res.get("conversation_id"), res.get("skill_used")
+        console.print()
+        console_err.print(f"[compass.error]❌ Cannot connect to backend at {escape(API_BASE)} (error: {escape(str(e))}). Is the server running?[/]")
+        raise typer.Exit(1)
+    except httpx.HTTPError as e:
+        # Read timeout / protocol error after the request was sent: do NOT re-POST.
         if full_text:
             console.print()
-        console_err.print(f"[compass.error]❌ Cannot connect to backend at {API_BASE} (error: {e}). Is the server running?[/]")
+        console_err.print(f"[compass.error]❌ Chat stream interrupted ({escape(str(e) or type(e).__name__)}). Not retrying to avoid running the request twice.[/]")
         raise typer.Exit(1)
 
 
@@ -431,8 +473,8 @@ def login(
         console.print(f"   Token:    {_mask_token(gtok)}")
     except httpx.HTTPStatusError as e:
         _handle_http_error(e)
-    except (httpx.ConnectError, httpx.TimeoutException):
-        console_err.print(f"[compass.error]❌ Cannot connect to backend at {API_BASE}. Is the server running?[/]")
+    except httpx.HTTPError:
+        console_err.print(f"[compass.error]❌ Cannot connect to backend at {escape(API_BASE)}. Is the server running?[/]")
         raise typer.Exit(1)
 
 
@@ -484,6 +526,20 @@ def ask(
         console.print(f"[dim]({skill})[/]")
 
 
+def _task_creation_failure(result: object) -> str | None:
+    """Return a reason when a task-creation reply does not indicate success."""
+    if not isinstance(result, dict):
+        return "unexpected response from backend"
+    if result.get("error"):
+        return str(result["error"])
+    status = str(result.get("status", "")).lower()
+    if result.get("success") is False or status in {"error", "failed", "failure"}:
+        return str(result.get("message") or result.get("detail") or "backend reported failure")
+    if result.get("id") in (None, ""):
+        return "backend returned no task id"
+    return None
+
+
 @app.command()
 def add(
     title: str = typer.Argument(..., help="Task title"),
@@ -508,6 +564,10 @@ def add(
         payload["notes"] = notes
 
     result = _post("/api/tasks", payload)
+    failure = _task_creation_failure(result)
+    if failure:
+        console_err.print(f"[compass.error]❌ Task was not created: {escape(failure)}[/]")
+        raise typer.Exit(1)
     console.print("\n[compass.success]✅ Task created successfully[/]")
     console.print(f"   ID:       {result.get('id', '')}")
     console.print(f"   Title:    {result.get('title', title)}")
@@ -642,15 +702,12 @@ def admin_consolidate(
         "stale_thread_days": stale_days,
     }
 
-    try:
+    with _command_failure("run remote consolidation"):
         report = _post("/admin/consolidate", payload, headers=_headers(admin=True, admin_token=token))
         console.print("\n[compass.success]✅ Consolidation complete[/]")
         console.print(f"  • Overdue tasks flagged: [bold]{report.get('overdue_tasks_flagged', 0)}[/]")
         console.print(f"  • Duplicate pairs merged: [bold]{report.get('duplicate_chunks_merged', 0)}[/]")
         console.print(f"  • Stale conversations rolled up: [bold]{report.get('stale_conversations_rolled_up', 0)}[/]")
-    except Exception as e:
-        console_err.print(f"[compass.error]❌ Remote consolidation request failed: {e}[/]")
-        raise typer.Exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -686,40 +743,33 @@ def agent_undo(
     log_id: Optional[int] = typer.Option(None, "--log-id", "-l", help="Specific audit log entry ID to revert"),
 ):
     """Revert an agent-executed mutation using the audit log."""
-    try:
+    with _command_failure("undo"):
         data = _post("/api/agent/undo", {"run_id": run_id, "audit_log_id": log_id})
-        if data.get("status") == "ok":
-            console.print(f"[green]✅ {data.get('message')}[/]")
-            if "reverted" in data:
-                console.print(f"[dim]Reverted: {data['reverted']}[/]")
-        else:
-            console.print(f"[yellow]⚠️ {data.get('message', 'Nothing to undo')}[/]")
-    except Exception as e:
-        console_err.print(f"[compass.error]❌ Failed to undo: {e}[/]")
-        raise typer.Exit(1)
+    if isinstance(data, dict) and data.get("status") == "ok":
+        console.print(f"[green]✅ {escape(str(data.get('message')))}[/]")
+        if "reverted" in data:
+            console.print(f"[dim]Reverted: {escape(str(data['reverted']))}[/]")
+        return
+    message = data.get("message", "Nothing to undo") if isinstance(data, dict) else "Nothing to undo"
+    console_err.print(f"[yellow]⚠️ {escape(str(message))}[/]")
+    raise typer.Exit(1)
 
 
 @app.command("agent-activity")
 def agent_activity(limit: int = typer.Option(15, "--limit", "-n", help="Number of entries to show")):
     """📋 View recent agent mutations from the audit log with per-item IDs for undo."""
-    try:
-        data = _get(f"/api/agent/activity?limit={limit}")
+    with _command_failure("fetch activity"):
+        data = _get("/api/agent/activity", {"limit": limit})
         entries = data.get("activity", [])
         render_agent_activity_table(entries)
-    except Exception as e:
-        console_err.print(f"[compass.error]❌ Failed to fetch activity: {e}[/]")
-        raise typer.Exit(1)
 
 
 @app.command("agent-stats")
 def agent_stats():
     """⚖️ Surface real self-critique pass effectiveness metrics."""
-    try:
+    with _command_failure("fetch critique stats"):
         data = _get("/api/agent/critique-stats")
         render_agent_stats_view(data)
-    except Exception as e:
-        console_err.print(f"[compass.error]❌ Failed to fetch critique stats: {e}[/]")
-        raise typer.Exit(1)
 
 
 @app.command("agent-runs")
@@ -728,26 +778,20 @@ def agent_runs(
     conversation_id: Optional[str] = typer.Option(None, "--conversation-id", "-c", help="Filter runs by conversation ID"),
 ):
     """📜 List recent agent execution runs with statuses and step counts."""
-    try:
-        path = f"/api/agent/runs?limit={limit}"
-        if conversation_id:
-            path += f"&conversation_id={conversation_id}"
-        data = _get(path)
+    params: dict = {"limit": limit}
+    if conversation_id:
+        params["conversation_id"] = conversation_id
+    with _command_failure("fetch agent runs"):
+        data = _get("/api/agent/runs", params)
         render_agent_runs_table(data.get("runs", []))
-    except Exception as e:
-        console_err.print(f"[compass.error]❌ Failed to fetch agent runs: {e}[/]")
-        raise typer.Exit(1)
 
 
 @app.command("agent-briefing")
 def agent_briefing():
     """🌅 Inspect the latest autonomous overnight proactive briefing."""
-    try:
+    with _command_failure("fetch proactive briefing"):
         data = _get("/api/agent/proactive-briefing")
         render_briefing_panel(data)
-    except Exception as e:
-        console_err.print(f"[compass.error]❌ Failed to fetch proactive briefing: {e}[/]")
-        raise typer.Exit(1)
 
 
 @app.command("triage")
@@ -773,7 +817,7 @@ def triage(
 @app.command("memory")
 def view_memory():
     """🧠 View personal profile facts and preferences remembered by Compass."""
-    try:
+    with _command_failure("fetch memory facts"):
         data = _get("/api/profile/facts")
         facts = data.get("facts", {})
         if not facts:
@@ -792,15 +836,12 @@ def view_memory():
             table.add_row(k.replace("_", " ").capitalize(), str(v))
 
         console.print(table)
-    except Exception as e:
-        console_err.print(f"[compass.error]❌ Failed to fetch memory facts: {e}[/]")
-        raise typer.Exit(1)
 
 
 @app.command("parked")
 def view_parked():
     """📌 View ideas and tangents saved on the 'Park it' shelf."""
-    try:
+    with _command_failure("fetch parked thoughts"):
         data = _get("/api/parked")
         parked = data.get("parked", [])
         if not parked:
@@ -822,9 +863,6 @@ def view_parked():
             table.add_row(str(p.get("id", "")), str(p.get("text", "")), str(p.get("status", "parked")), created)
 
         console.print(table)
-    except Exception as e:
-        console_err.print(f"[compass.error]❌ Failed to fetch parked thoughts: {e}[/]")
-        raise typer.Exit(1)
 
 
 @app.command("recap")
@@ -834,18 +872,16 @@ def recap_conversation(
     """📝 Summarize decisions made, open questions, and next steps for a chat conversation."""
     cid = conversation_id
     if not cid:
-        try:
-            convs = _get("/api/conversations?limit=1").get("conversations", [])
-            if convs:
-                cid = convs[0].get("id")
-        except Exception:
-            pass
+        # An HTTP/connection failure exits non-zero here instead of looking like "no conversation".
+        convs = _get("/api/conversations", {"limit": 1}).get("conversations", [])
+        if convs:
+            cid = convs[0].get("id")
 
     if not cid:
         console.print("[compass.dim]No conversation found to recap. Start a chat first with `compass chat`.[/]")
         return
 
-    try:
+    with _command_failure("fetch conversation recap"):
         data = _post("/api/chat/recap", {"conversation_id": cid})
         recap_text = data.get("recap", "")
 
@@ -855,9 +891,6 @@ def recap_conversation(
             border_style="magenta",
             padding=(1, 2),
         ))
-    except Exception as e:
-        console_err.print(f"[compass.error]❌ Failed to fetch conversation recap: {e}[/]")
-        raise typer.Exit(1)
 
 
 # ---------------------------------------------------------------------------
