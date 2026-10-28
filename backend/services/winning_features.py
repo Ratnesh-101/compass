@@ -167,17 +167,17 @@ def clean_search_sources(
                 text = cut
             else:
                 words = text.split()
-                if words and not words[-1][-1] in ".!?":
+                if words and words[-1][-1] not in ".!?":
                     words.pop()
                 text = " ".join(words)
-                if text and not text[-1] in ".!?":
+                if text and text[-1] not in ".!?":
                     text += "."
         else:
             words = text.split()
             if len(words) > 1:
                 words.pop()
             text = " ".join(words)
-            if text and not text[-1] in ".!?":
+            if text and text[-1] not in ".!?":
                 text += "."
 
         # Check minimal content length
