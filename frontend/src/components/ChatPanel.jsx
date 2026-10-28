@@ -23,7 +23,7 @@ import ParkedThoughtsShelf from './chat/ParkedThoughtsShelf'
 import ProfileFactsShelf from './chat/ProfileFactsShelf'
 
 export default function ChatPanel({
-  messages, setMessages, conversationId, setConversationId, onSendMessage, isTyping, onChatComplete,
+  messages, setMessages, conversationId, setConversationId, isTyping, onChatComplete,
   tasks = [], backendStatus = '', initialPrompt = null, onClearInitialPrompt = null,
   onOpenMigration = null,
 }) {
@@ -178,47 +178,6 @@ export default function ChatPanel({
       clearInterval(streamTimerRef.current)
       streamTimerRef.current = null
     }
-  }
-
-  const streamAssistantResponse = (fullText) => {
-    setIsStreaming(true)
-    setStreamingText('')
-
-    const chunks = []
-    let cursor = 0
-    while (cursor < fullText.length) {
-      const nextSpace = fullText.indexOf(' ', cursor)
-      let take = 4
-      if (nextSpace !== -1 && nextSpace - cursor <= 6) {
-        take = nextSpace - cursor + 1
-      }
-      chunks.push(fullText.slice(cursor, cursor + take))
-      cursor += take
-    }
-
-    let chunkIndex = 0
-    let accumulated = ''
-
-    if (streamTimerRef.current) {
-      clearInterval(streamTimerRef.current)
-    }
-
-    streamTimerRef.current = setInterval(() => {
-      if (chunkIndex < chunks.length) {
-        accumulated += chunks[chunkIndex]
-        setStreamingText(accumulated)
-        chunkIndex++
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-      } else {
-        clearInterval(streamTimerRef.current)
-        streamTimerRef.current = null
-        setIsStreaming(false)
-        setStreamingText('')
-        isSendingRef.current = false
-        setMessages(prev => [...prev, { role: 'assistant', text: fullText }])
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-      }
-    }, 18)
   }
 
   const handleRecap = async () => {
