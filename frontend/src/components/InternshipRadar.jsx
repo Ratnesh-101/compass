@@ -766,6 +766,7 @@ export default function InternshipRadar({
               )
               loadMetadata()
             }}
+            onNavigateToResumeStudio={handleGoToResumeStudio}
           />
         </React.Suspense>
       )}

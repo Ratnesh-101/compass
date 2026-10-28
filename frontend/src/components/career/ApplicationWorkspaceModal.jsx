@@ -114,7 +114,15 @@ export default function ApplicationWorkspaceModal({
   opportunity,
   onClose,
   onApplicationUpdated,
+  onNavigateToResumeStudio,
+  onOpenProfile,
 }) {
+  const handleFixInProfile = () => {
+    if (onClose) onClose()
+    const nav = onNavigateToResumeStudio || onOpenProfile
+    if (nav) nav()
+  }
+
   const [activeTab, setActiveTab] = useState('overview') // 'overview' | 'resume' | 'cover_letter' | 'checklist' | 'handoff'
   const [application, setApplication] = useState(null)
   const [resume, setResume] = useState(null)
@@ -186,6 +194,7 @@ export default function ApplicationWorkspaceModal({
   const refreshBtnRef = useRef(null)
   const lastIntelRefreshTimeRef = useRef(0)
   const companyIntelRef = useRef(null)
+  const loadingIntelRef = useRef(false)
 
   useEffect(() => {
     companyIntelRef.current = companyIntel
@@ -194,7 +203,7 @@ export default function ApplicationWorkspaceModal({
   // Load company intelligence
   const loadCompanyIntelData = useCallback(async (isRefresh = false) => {
     if (!opportunity?.id) return
-    if (loadingIntel) return
+    if (loadingIntelRef.current) return
 
     if (isRefresh) {
       const now = Date.now()
@@ -208,6 +217,7 @@ export default function ApplicationWorkspaceModal({
       lastIntelRefreshTimeRef.current = now
     }
 
+    loadingIntelRef.current = true
     setLoadingIntel(true)
     setIntelError(null)
     setRefreshCooldownNotice('')
@@ -219,15 +229,16 @@ export default function ApplicationWorkspaceModal({
       if (!companyIntelRef.current) {
         setIntelError('Could not load company intelligence. Please try again.')
       } else {
-        setNotification('Could not refresh intelligence report. Please try again.')
+        showNotification('Could not refresh intelligence report. Please try again.', 'error')
       }
     } finally {
+      loadingIntelRef.current = false
       setLoadingIntel(false)
       if (isRefresh && refreshBtnRef.current) {
         refreshBtnRef.current.focus()
       }
     }
-  }, [opportunity?.id, loadingIntel])
+  }, [opportunity?.id])
 
   // Load or auto-prepare application on mount
   const loadWorkspaceData = useCallback(async () => {
@@ -237,7 +248,7 @@ export default function ApplicationWorkspaceModal({
     try {
       const app = await prepareApplication(opportunity.id)
       setApplication(app)
-      setAppStatus(app.status || 'preparing')
+      setAppStatus(String(app.status || 'preparing').toLowerCase())
       setPrivateNotes(app.private_notes || '')
       setTargetDeadline(app.target_deadline || '')
       setCoverLetterText(app.cover_letter || '')
@@ -251,7 +262,7 @@ export default function ApplicationWorkspaceModal({
           ...prev,
           resumeTailored: true,
           coverLetterDrafted: Boolean(app.cover_letter),
-          submittedExternally: app.status === 'submitted',
+          submittedExternally: String(app.status || '').toLowerCase() === 'submitted',
         }))
       }
 
@@ -496,22 +507,25 @@ export default function ApplicationWorkspaceModal({
 
   // Handle Status & Notes Updates
   const handleUpdateApplicationRecord = async (newStatus = appStatus) => {
-    if (!application) return
+    if (!application) return false
     setSavingStatus(true)
     setError(null)
     try {
+      const statusToSend = newStatus ? String(newStatus).toUpperCase() : undefined
       const updated = await updateApplication(application.id, {
-        status: newStatus,
+        status: statusToSend,
         private_notes: privateNotes || null,
         target_deadline: targetDeadline || null,
       })
       setApplication(updated)
-      setAppStatus(updated.status)
+      setAppStatus(String(updated.status || newStatus).toLowerCase())
       clearWorkspaceDraft(opportunity.id)
       if (onApplicationUpdated) onApplicationUpdated(updated)
-      showNotification(`Application updated: Status is now "${newStatus.toUpperCase()}"`)
+      showNotification(`Application updated: Status is now "${(statusToSend || '').toUpperCase()}"`)
+      return true
     } catch (err) {
       setError(err.message || 'Failed to update application status')
+      return false
     } finally {
       setSavingStatus(false)
     }
@@ -519,7 +533,8 @@ export default function ApplicationWorkspaceModal({
 
   // Handle External Submission Confirmation
   const handleConfirmExternalSubmission = async () => {
-    await handleUpdateApplicationRecord('submitted')
+    const success = await handleUpdateApplicationRecord('submitted')
+    if (!success) return
     setChecklist(prev => ({ ...prev, submittedExternally: true }))
     showNotification('Confirmed: Marked as submitted on employer portal.')
   }
@@ -1541,7 +1556,7 @@ export default function ApplicationWorkspaceModal({
                         </div>
                         <button
                           type="button"
-                          onClick={() => window.dispatchEvent(new window.CustomEvent('navigate', { detail: '/resume-studio' }))}
+                          onClick={handleFixInProfile}
                           style={{
                             background: 'transparent',
                             border: 'none',
@@ -2025,11 +2040,10 @@ export default function ApplicationWorkspaceModal({
                           onChange={e => setAppStatus(e.target.value)}
                           style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: '13px' }}
                         >
-                          <option value="interested">Interested</option>
                           <option value="preparing">Preparing</option>
                           <option value="ready_for_review">Ready for Review</option>
                           <option value="submitted">Applied / Submitted Externally</option>
-                          <option value="interviewing">Interviewing</option>
+                          <option value="interview">Interviewing</option>
                           <option value="offer_received">Offer Received</option>
                           <option value="rejected">Rejected</option>
                           <option value="withdrawn">Withdrawn</option>
