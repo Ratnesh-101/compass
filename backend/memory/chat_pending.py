@@ -180,6 +180,11 @@ async def undo_soft_deleted_tasks(
         WHERE (user_id = $1 OR (user_id IS NULL AND $1 IS NULL))
           AND deleted_at IS NOT NULL
           AND deleted_at >= $2
+          AND deleted_at >= (
+            SELECT max(deleted_at) FROM tasks
+            WHERE (user_id = $1 OR (user_id IS NULL AND $1 IS NULL))
+              AND deleted_at IS NOT NULL AND deleted_at >= $2
+          ) - interval '5 seconds'
         RETURNING id, title, domain, due_date, status, priority, user_id
         """,
         owner_identity,

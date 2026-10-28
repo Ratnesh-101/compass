@@ -28,6 +28,8 @@ class PublicChatRequest(BaseModel):
     domain: Optional[str] = None
     project: Optional[str] = None
     conversation_id: Optional[str] = None
+    tone: Optional[str] = None
+    mode: Optional[str] = None
     specialist_id: Optional[str] = None
     specialistId: Optional[str] = None
     target_message_id: Optional[str] = None

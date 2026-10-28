@@ -358,7 +358,7 @@ async def generate_chat_events(
 
         if (not is_mocked and is_placeholder_key) or is_schedule_or_agent_intent(message) or is_tavily_verification_intent(message) or is_safety_intent:
             result = await orchestrator.handle_message(
-                conversation_id=req.conversation_id,
+                conversation_id=conv_id,
                 message=message,
                 user_id=user_id,
                 guest_id=guest_id,
@@ -433,6 +433,7 @@ async def generate_chat_events(
         logger.info("Serving chat stream request with model=%s", _settings.ROUTER_MODEL)
         max_synth_budget = int(getattr(_settings, "MAX_SYNTHESIS_TOKENS", 8192))
         clean_tone = getattr(req, "tone", None)
+        hard_capped_tone = clean_tone in ("brief", "balanced")
         if clean_tone == "brief":
             stream_max_tokens = 90
         elif clean_tone == "balanced":
@@ -460,7 +461,7 @@ async def generate_chat_events(
         except Exception as create_err:
             logger.warning("Upstream stream creation failed: %s, falling back to orchestrator", create_err)
             result = await orchestrator.handle_message(
-                conversation_id=req.conversation_id,
+                conversation_id=conv_id,
                 message=message,
                 user_id=user_id,
                 guest_id=guest_id,
@@ -501,6 +502,7 @@ async def generate_chat_events(
                     logger.info("Client disconnected from chat SSE stream; closing upstream stream.")
                     if hasattr(stream, "aclose"):
                         await stream.aclose()
+                    _schedule_stream_persistence(conv_id, message, full_text.strip(), user_id, guest_id, "chat")
                     return
 
                 if hasattr(stream_chunk, "usage") and stream_chunk.usage:
@@ -553,7 +555,7 @@ async def generate_chat_events(
             # Bounded continuation if output token limit was reached
             continuation_attempts = 0
             max_cont_attempts = int(getattr(_settings, "MAX_CONTINUATION_ATTEMPTS", 2))
-            while last_finish_reason == "length" and not tool_call_detected and continuation_attempts < max_cont_attempts:
+            while last_finish_reason == "length" and not tool_call_detected and not hard_capped_tone and continuation_attempts < max_cont_attempts:
                 if await request.is_disconnected():
                     break
                 continuation_attempts += 1
@@ -588,6 +590,7 @@ async def generate_chat_events(
                         if await request.is_disconnected():
                             if hasattr(cont_stream, "aclose"):
                                 await cont_stream.aclose()
+                            _schedule_stream_persistence(conv_id, message, full_text.strip(), user_id, guest_id, "chat")
                             return
                         c_choices = c_chunk.choices or []
                         if c_choices:
@@ -616,6 +619,7 @@ async def generate_chat_events(
             if stream and hasattr(stream, "aclose"):
                 await stream.aclose()
             yield f"data: {json.dumps({'type': 'error', 'detail': 'An internal error occurred while processing the stream.', 'terminal': True})}\n\n"
+            _schedule_stream_persistence(conv_id, message, full_text.strip(), user_id, guest_id, "chat")
             return
 
         if tool_call_detected:
@@ -642,7 +646,7 @@ async def generate_chat_events(
                     yield f"data: {json.dumps({'type': 'status', 'stage': 'reasoning', 'label': f'Executing {pre_routed_skill}…'})}\n\n"
 
             result = await orchestrator.handle_message(
-                conversation_id=req.conversation_id,
+                conversation_id=conv_id,
                 message=message,
                 user_id=user_id,
                 guest_id=guest_id,
@@ -713,7 +717,7 @@ async def generate_chat_events(
 
         if not full_text.strip():
             result = await orchestrator.handle_message(
-                conversation_id=req.conversation_id,
+                conversation_id=conv_id,
                 message=message,
                 user_id=user_id,
                 guest_id=guest_id,

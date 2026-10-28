@@ -505,7 +505,8 @@ async def public_chat(req: PublicChatRequest, request: Request, _rl: None = Depe
         )
 
     result = await orchestrator.handle_message(
-        conversation_id=req.conversation_id, message=msg, user_id=user_id, guest_id=guest_id
+        conversation_id=req.conversation_id, message=msg, user_id=user_id, guest_id=guest_id,
+        tone=req.tone, conv_mode=req.mode,
     )
 
     return PublicChatResponse(

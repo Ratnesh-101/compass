@@ -28,7 +28,8 @@ def _select_candidate(message: str, task_ids: list) -> Optional[int]:
     reply = (message or "").lower().strip().rstrip(".!?")
     idx = _ORDINAL_INDEX.get(reply)
     if idx is not None:
-        return task_ids[idx] if idx < len(task_ids) else None
+        if idx < len(task_ids):
+            return task_ids[idx]
     if reply.isdigit() and int(reply) in task_ids:
         return int(reply)
     return None
@@ -493,8 +494,31 @@ async def handle_message(
             pool = await get_pool()
             if pool:
                 async with pool.acquire() as conn:
-                    # 1. First attempt soft-delete undo within 10 minutes
-                    restored = await undo_soft_deleted_tasks(conn, owner_identity, minutes=10)
+                    # 1. Prefer whichever action is most recent: a soft-delete or a logged add_task
+                    latest_audit = await conn.fetchrow(
+                        """
+                        SELECT id, created_at
+                        FROM agent_audit_log
+                        WHERE lower(COALESCE(args->>'user_id', approved_by, '')) = lower($1::text)
+                          AND is_reverted = FALSE
+                        ORDER BY id DESC LIMIT 1
+                        """,
+                        owner_identity,
+                    )
+                    latest_delete = await conn.fetchval(
+                        """
+                        SELECT max(deleted_at) FROM tasks
+                        WHERE (user_id = $1 OR (user_id IS NULL AND $1 IS NULL))
+                          AND deleted_at IS NOT NULL
+                          AND deleted_at >= now() - interval '10 minutes'
+                        """,
+                        owner_identity,
+                    )
+                    audit_is_newer = bool(
+                        latest_audit and (latest_delete is None or latest_audit["created_at"] > latest_delete)
+                    )
+                    if not audit_is_newer:
+                        restored = await undo_soft_deleted_tasks(conn, owner_identity, minutes=10)
                     if restored:
                         found = True
                         titles = [f"'{t['title']}'" for t in restored]
@@ -588,7 +612,7 @@ async def handle_message(
                 existing_tasks = await structured.list_tasks(conn, user_id=task_owner) if task_owner else []
                 exact_matches = [
                     t for t in existing_tasks
-                    if t["title"].strip().lower() == title.lower()
+                    if t["title"].strip().lower() == title.strip().lower()
                     and (
                         (t.get("due_date") is None and due_date is None)
                         or (t.get("due_date") == due_date)
@@ -623,7 +647,7 @@ async def handle_message(
 
                 same_name_matches = [
                     t for t in existing_tasks
-                    if t["title"].strip().lower() == title.lower()
+                    if t["title"].strip().lower() == title.strip().lower()
                     and t.get("status") != "done"
                 ]
                 if same_name_matches and not allow_different_thing and not allow_duplicate:
