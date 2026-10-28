@@ -16,6 +16,11 @@ Coordination details live in `docs/agent-coordination/` (protocol, ledger, task 
 | Worker | Gemini via Antigravity (`agy`) | Frontend and UI work, independent features and analysis |
 | Owner | The user | Merges, deploys, secrets, production data, anything irreversible |
 
+Operating split (the user's choice): **Opus plans, Sonnet 5.5 and Gemini execute.** In Claude Code run `/model opusplan`
+(Opus in plan mode, Sonnet when executing). Opus's output is the task files in `docs/agent-coordination/tasks/`; Sonnet
+subagents (requested explicitly with `model: sonnet`) and Gemini via `agy` implement them. Review and verification of
+worker output is done by the orchestrator, not by the worker that wrote it.
+
 Defaults, not rules: the orchestrator picks the best worker per task. Tightly coupled work is serialized,
 not parallelized; define shared contracts (API shape, schema, component props) before splitting.
 
