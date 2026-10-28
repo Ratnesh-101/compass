@@ -175,6 +175,23 @@ ORDINAL_REPLIES = frozenset({
 })
 
 
+# "confirm ..." / "yes, ..." / "cancel ..." / "no, ..." only count as answers to a pending
+# action when the rest is just filler ("confirm my meeting time is 3pm" is a normal request).
+_CONFIRM_TAIL = frozenset({
+    "yes", "delete", "deletion", "it", "that", "this", "the", "please", "do", "go", "ahead", "now",
+    "first", "one", "sure", "confirm", "action", "thanks", "i", "am",
+})
+_CANCEL_TAIL = frozenset({
+    "it", "that", "this", "the", "action", "delete", "deletion", "please", "now", "don't", "dont",
+    "stop", "thanks", "thank", "you", "no", "never", "mind",
+})
+
+
+def _only_words(rest: list, allowed: frozenset) -> bool:
+    words = rest[0].split() if rest else []
+    return all(w in allowed for w in words)
+
+
 def is_pending_action_confirm(message: str) -> bool:
     """Check if message is an explicit confirmation of a pending action."""
     msg = message.lower().strip().rstrip(".!?")
@@ -187,7 +204,7 @@ def is_pending_action_confirm(message: str) -> bool:
     if msg in exact_matches or msg in ORDINAL_REPLIES:
         return True
     if msg.startswith("yes,") or msg.startswith("confirm "):
-        return True
+        return _only_words(msg.replace(",", " ").split(None, 1)[1:], _CONFIRM_TAIL)
     return False
 
 
@@ -202,8 +219,20 @@ def is_pending_action_cancel(message: str) -> bool:
     if msg in exact_matches:
         return True
     if msg.startswith("cancel ") or msg.startswith("no,"):
-        return True
+        return _only_words(msg.replace(",", " ").split(None, 1)[1:], _CANCEL_TAIL)
     return False
+
+
+_POLITE_LEADS = (
+    "please ", "pls ", "can you ", "could you ", "would you ", "will you ", "go ahead and ",
+    "i want to ", "i'd like to ", "i would like to ", "i need to ",
+)
+
+
+def _looks_like_non_task_target(target: str) -> bool:
+    """"remove the bug from my code" / "drop me a summary" are not task deletions."""
+    padded = f" {target} "
+    return " from " in padded or target.startswith(("me ", "it ", "i ", "us "))
 
 
 def is_chat_delete_intent(message: str) -> Tuple[bool, bool, str]:
@@ -213,6 +242,14 @@ def is_chat_delete_intent(message: str) -> Tuple[bool, bool, str]:
     """
     msg = message.lower().strip().rstrip(".!?")
     
+    for lead in _POLITE_LEADS:
+        if msg.startswith(lead):
+            msg = msg[len(lead):].strip()
+            break
+    for tail in (" please", " for me"):
+        if msg.endswith(tail):
+            msg = msg[:-len(tail)].strip()
+
     # 1. Clear entire schedule
     clear_all_phrases = (
         "clear all my schedule", "clear my schedule", "clear schedule",
@@ -235,6 +272,8 @@ def is_chat_delete_intent(message: str) -> Tuple[bool, bool, str]:
             if remainder.endswith(" task"):
                 remainder = remainder[:-5].strip()
             target = remainder.strip("'\"").strip()
+            if _looks_like_non_task_target(target):
+                continue
             if target and target not in ("first one", "the first one", "it", "this"):
                 return True, False, target
 

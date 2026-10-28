@@ -11,7 +11,8 @@ FILLER_WORDS = frozenset({"my", "the", "a", "an", "this", "that", "please"})
 GENERIC_NOUNS = frozenset(
     {"task", "tasks", "deadline", "deadlines", "todo", "todos", "item", "items", "reminder", "reminders"}
 )
-_STRIP = FILLER_WORDS | GENERIC_NOUNS
+_POSITION_WORDS = frozenset({"last", "latest", "newest", "most", "recent"})
+_STRIP = FILLER_WORDS | GENERIC_NOUNS | _POSITION_WORDS
 _MAX_TARGET_CHARS = 200
 
 

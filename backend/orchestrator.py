@@ -42,6 +42,11 @@ from backend.orchestrator_helpers import (
 
 _parse_iso_date = parse_iso_date
 
+# Replies that only make sense for a single-task delete / disambiguation, never for clear_schedule.
+_SINGLE_TASK_REPLIES = frozenset({
+    "1", "first one", "the first one", "delete the first one", "complete the first one",
+})
+
 
 async def handle_message(
     conversation_id: Optional[str] = None,
@@ -252,20 +257,31 @@ async def handle_message(
                 if active_action:
                     act_type = active_action.get("action")
                     if act_type in ("delete_task", "clear_schedule"):
-                        if (message or "").lower().strip().rstrip(".!?") in ORDINAL_REPLIES:
+                        normalized_reply = (message or "").lower().strip().rstrip(".!?")
+                        if normalized_reply in ORDINAL_REPLIES or (
+                            act_type == "clear_schedule" and normalized_reply in _SINGLE_TASK_REPLIES
+                        ):
                             needs_reply = "That isn't a confirmation. Reply 'Confirm' to proceed or 'Cancel'."
                         else:
                             task_ids = active_action.get("task_ids") or []
-                            deleted = await soft_delete_tasks(conn, task_ids, owner_identity)
-                            await resolve_chat_pending_action(conn, active_action["id"], "executed")
+                            async with conn.transaction():
+                                claimed = await resolve_chat_pending_action(conn, active_action["id"], "executed")
+                                if claimed:
+                                    deleted = await soft_delete_tasks(conn, task_ids, owner_identity)
+                            if not claimed:
+                                active_action = None
                     elif act_type == "delete_task_disambiguation":
                         task_ids = active_action.get("task_ids") or []
                         selected_id = _select_candidate(message, task_ids)
                         if selected_id is None:
                             needs_reply = "Which one? Reply with 1, 2 or 3, or 'Cancel'."
                         else:
-                            deleted = await soft_delete_tasks(conn, [selected_id], owner_identity)
-                            await resolve_chat_pending_action(conn, active_action["id"], "executed")
+                            async with conn.transaction():
+                                claimed = await resolve_chat_pending_action(conn, active_action["id"], "executed")
+                                if claimed:
+                                    deleted = await soft_delete_tasks(conn, [selected_id], owner_identity)
+                            if not claimed:
+                                active_action = None
 
         if needs_reply:
             resp_msg = needs_reply
@@ -357,6 +373,7 @@ async def handle_message(
         pool = active_pool or await get_pool()
         is_clear = bool(args.get("clear_all")) if isinstance(args, dict) else False
         del_query = (args.get("query") if isinstance(args, dict) else "") or message
+        resp_msg = "I can't delete tasks right now because the database is unavailable."
         ret_data = None
         success = True
 
@@ -567,7 +584,8 @@ async def handle_message(
         try:
             pool = await get_pool()
             async with pool.acquire() as conn:
-                existing_tasks = await structured.list_tasks(conn, user_id=user_id)
+                task_owner = user_id or guest_id
+                existing_tasks = await structured.list_tasks(conn, user_id=task_owner) if task_owner else []
                 exact_matches = [
                     t for t in existing_tasks
                     if t["title"].strip().lower() == title.lower()
@@ -586,7 +604,7 @@ async def handle_message(
                         f"I can inspect your schedules to see when you have free slots or help you rebalance your tasks."
                     )
                     try:
-                        real_cid = await conversations.get_or_create_conversation(conn, conv_id, user_id=user_id)
+                        real_cid = await conversations.get_or_create_conversation(conn, conv_id, user_id=user_id, guest_id=guest_id)
                         await conversations.add_message(conn, real_cid, role="user", content=message)
                         await conversations.add_message(conn, real_cid, role="assistant", content=resp, skill_called="add_task")
                         conv_id = real_cid
@@ -616,13 +634,14 @@ async def handle_message(
                         task_record = await structured.update_task(
                             conn,
                             ex["id"],
+                            owner_id=task_owner,
                             due_date=due_date,
                             priority=priority,
                             notes=notes or ex.get("notes"),
                         )
                         resp = f"Shifted existing deadline '{ex['title']}' from {old_d} to {new_d}."
                         try:
-                            real_cid = await conversations.get_or_create_conversation(conn, conv_id, user_id=user_id)
+                            real_cid = await conversations.get_or_create_conversation(conn, conv_id, user_id=user_id, guest_id=guest_id)
                             await conversations.add_message(conn, real_cid, role="user", content=message)
                             await conversations.add_message(conn, real_cid, role="assistant", content=resp, skill_called="add_task")
                             conv_id = real_cid
@@ -645,7 +664,7 @@ async def handle_message(
                             f"I can also look into your schedules to find an optimal slot without clashes."
                         )
                         try:
-                            real_cid = await conversations.get_or_create_conversation(conn, conv_id, user_id=user_id)
+                            real_cid = await conversations.get_or_create_conversation(conn, conv_id, user_id=user_id, guest_id=guest_id)
                             await conversations.add_message(conn, real_cid, role="user", content=message)
                             await conversations.add_message(conn, real_cid, role="assistant", content=resp, skill_called="add_task")
                             conv_id = real_cid
@@ -681,7 +700,7 @@ async def handle_message(
                     status=status,
                     priority=priority,
                     notes=notes,
-                    user_id=user_id,
+                    user_id=task_owner,
                 )
         except Exception as e:
             logger.error(f"add_task failed — database unavailable: {e}", exc_info=True)
@@ -747,7 +766,7 @@ async def handle_message(
                 pool = await get_pool()
                 if pool:
                     async with pool.acquire() as conn:
-                        real_cid = await conversations.get_or_create_conversation(conn, conv_id, user_id=user_id)
+                        real_cid = await conversations.get_or_create_conversation(conn, conv_id, user_id=user_id, guest_id=guest_id)
                         await conversations.add_message(conn, real_cid, role="user", content=message)
                         await conversations.add_message(conn, real_cid, role="assistant", content=summary, skill_called="add_task", verifiable=False)
                         conv_id = real_cid
@@ -865,7 +884,7 @@ async def handle_message(
             try:
                 pool = await get_pool()
                 async with pool.acquire() as conn:
-                    real_cid = await conversations.get_or_create_conversation(conn, conv_id)
+                    real_cid = await conversations.get_or_create_conversation(conn, conv_id, user_id=user_id, guest_id=guest_id)
                     await conversations.add_message(conn, real_cid, role="user", content=message)
                     await conversations.add_message(
                         conn, real_cid, role="assistant",

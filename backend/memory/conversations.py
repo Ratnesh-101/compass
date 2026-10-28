@@ -440,6 +440,8 @@ async def get_cross_conversation_memory(
     guest_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Retrieve messages and decisions from prior conversations for cross-session recall."""
+    if not user_id and not guest_id:
+        return []
     try:
         cid = None
         if exclude_conversation_id:
@@ -456,7 +458,6 @@ async def get_cross_conversation_memory(
               AND (
                   ($2::text IS NOT NULL AND c.user_id = $2)
                   OR ($3::text IS NOT NULL AND c.guest_id = $3 AND c.user_id IS NULL)
-                  OR ($2::text IS NULL AND $3::text IS NULL)
               )
             ORDER BY m.created_at DESC
             LIMIT $4

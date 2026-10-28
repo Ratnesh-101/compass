@@ -141,21 +141,23 @@ async def soft_delete_tasks(
     # Log to agent audit log
     for t in deleted_tasks:
         try:
-            await conn.execute(
-                """
-                INSERT INTO agent_audit_log (
-                    run_id, tool, affected_id, action, previous_state, new_state, user_id, timestamp
+            # Savepoint: a failed audit insert must not abort the caller's transaction.
+            async with conn.transaction():
+                await conn.execute(
+                    """
+                    INSERT INTO agent_audit_log (
+                        run_id, tool, affected_id, action, previous_state, new_state, user_id, timestamp
+                    )
+                    VALUES ($1, 'delete_task', $2, 'soft_delete', $3::jsonb, $4::jsonb, $5, now())
+                    """,
+                    f"chat-delete-{t['id']}",
+                    t["id"],
+                    json.dumps({"status": t.get("status"), "deleted_at": None}),
+                    json.dumps({"status": t.get("status"), "deleted_at": t["deleted_at"].isoformat() if t.get("deleted_at") else None}),
+                    owner_identity,
                 )
-                VALUES ($1, 'delete_task', $2, 'soft_delete', $3::jsonb, $4::jsonb, $5, now())
-                """,
-                f"chat-delete-{t['id']}",
-                t["id"],
-                json.dumps({"status": t.get("status"), "deleted_at": None}),
-                json.dumps({"status": t.get("status"), "deleted_at": t["deleted_at"].isoformat() if t.get("deleted_at") else None}),
-                owner_identity,
-            )
         except Exception as e:
-            logger.debug("Failed to record agent_audit_log for task %s: %e", t["id"], e)
+            logger.debug("Failed to record agent_audit_log for task %s: %s", t["id"], e)
             
     return deleted_tasks
 
@@ -201,7 +203,7 @@ async def undo_soft_deleted_tasks(
                 owner_identity,
             )
         except Exception as e:
-            logger.debug("Failed to record agent_audit_log for restored task %s: %e", t["id"], e)
+            logger.debug("Failed to record agent_audit_log for restored task %s: %s", t["id"], e)
             
     return restored
 
