@@ -127,8 +127,7 @@ async def test_neg_delete_task_dependency(client: AsyncClient):
     """User B cannot remove dependencies from User A's task."""
     user_b = f"bob_{uuid.uuid4().hex[:6]}@example.com"
     res = await client.delete("/api/tasks/99999/dependencies/88888", headers=_auth(user_b))
-    assert res.status_code == 200
-    assert res.json().get("deleted") is False
+    assert res.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -478,8 +477,12 @@ async def test_neg_post_agent_undo(client: AsyncClient):
 @pytest.mark.asyncio
 @pytest.mark.route("GET /api/calendar/availability")
 async def test_neg_get_calendar_availability(client: AsyncClient):
-    """Availability query returns structured availability payload."""
-    res = await client.get("/api/calendar/availability?start_date=2026-01-01&end_date=2026-01-02")
+    """Anonymous availability queries are rejected; a signed-in user gets the structured payload."""
+    window = "start_date=2026-01-01&end_date=2026-01-02"
+    anonymous = await client.get(f"/api/calendar/availability?{window}")
+    assert anonymous.status_code == 401
+
+    res = await client.get(f"/api/calendar/availability?{window}", headers=_auth(f"cal_{uuid.uuid4().hex[:6]}@example.com"))
     assert res.status_code == 200
     assert "available_intervals" in res.json().get("data", {}) or "response" in res.json()
 

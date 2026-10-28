@@ -18,8 +18,12 @@ async def handle_get_calendar_availability(args: Dict[str, Any], pool: Any) -> D
     from backend.services.scheduler import get_available_windows
     from backend.memory.structured import get_scheduling_preferences
 
+    from backend.services.ownership import scope_owner
+
     start_str = args.get("start_date")
     end_str = args.get("end_date")
+    user_id = args.get("user_id")
+    scoped_owner = scope_owner(user_id)
 
     now = datetime.now(timezone.utc)
     if start_str:
@@ -38,13 +42,15 @@ async def handle_get_calendar_availability(args: Dict[str, Any], pool: Any) -> D
     else:
         end_dt = start_dt + timedelta(days=7)
 
-    busy = await get_calendar_freebusy(start_dt, end_dt, pool=pool)
+    busy = await get_calendar_freebusy(
+        start_dt, end_dt, pool=pool, user_id=user_id or "default_user", task_user_id=scoped_owner
+    )
 
     prefs: Dict[str, Any] = {"work_start_time": "09:00:00", "work_end_time": "18:00:00", "work_days": [1, 2, 3, 4, 5], "buffer_minutes": 15}
     if pool is not None:
         try:
             async with pool.acquire() as conn:
-                prefs = await get_scheduling_preferences(conn)
+                prefs = await get_scheduling_preferences(conn, user_id=user_id or "default_user")
         except Exception:
             pass
 
@@ -89,9 +95,13 @@ async def handle_propose_schedule(args: Dict[str, Any], pool: Any) -> Dict[str, 
     from backend.services.calendar import get_calendar_freebusy
     from backend.services.scheduler import get_available_windows, allocate_task_slots
 
+    from backend.services.ownership import scope_owner
+
     target_date_str = args.get("target_date")
     domain = args.get("domain")
     task_ids = args.get("task_ids")
+    user_id = args.get("user_id")
+    scoped_owner = scope_owner(user_id)
 
     now = datetime.now(timezone.utc)
     if target_date_str:
@@ -108,18 +118,19 @@ async def handle_propose_schedule(args: Dict[str, Any], pool: Any) -> Dict[str, 
     prefs: Dict[str, Any] = {"work_start_time": "09:00:00", "work_end_time": "18:00:00", "work_days": [1, 2, 3, 4, 5], "buffer_minutes": 15}
 
     if pool is not None:
-        user_id = args.get("user_id")
         async with pool.acquire() as conn:
-            prefs = await get_scheduling_preferences(conn)
+            prefs = await get_scheduling_preferences(conn, user_id=user_id or "default_user")
             dep_map = await get_all_dependencies_map(conn)
             if task_ids:
-                all_tasks = await list_tasks(conn, domain=domain, user_id=user_id)
+                all_tasks = await list_tasks(conn, domain=domain, user_id=scoped_owner)
                 id_set = set(task_ids)
                 tasks = [t for t in all_tasks if t["id"] in id_set]
             else:
-                tasks = await list_tasks(conn, domain=domain, status="open", user_id=user_id)
+                tasks = await list_tasks(conn, domain=domain, status="open", user_id=scoped_owner)
 
-    busy = await get_calendar_freebusy(start_dt, end_dt, pool=pool)
+    busy = await get_calendar_freebusy(
+        start_dt, end_dt, pool=pool, user_id=user_id or "default_user", task_user_id=scoped_owner
+    )
     raw_buf = prefs.get("buffer_minutes", 15)
     buffer_minutes = int(raw_buf) if isinstance(raw_buf, (int, str)) else 15
     free_windows = get_available_windows(
@@ -166,8 +177,11 @@ async def handle_commit_schedule(args: Dict[str, Any], pool: Any) -> Dict[str, A
     """Commit approved time slots to tasks and synchronize to Google Calendar."""
     from backend.memory.structured import get_task, update_task
     from backend.services.calendar import link_calendar_event
+    from backend.services.ownership import scope_owner
     from backend.services.scheduler import _ensure_utc
 
+    user_id = args.get("user_id")
+    scoped_owner = scope_owner(user_id)
     assignments = args.get("assignments") or []
     rationale = args.get("rationale") or "Schedule committed by Compass Agent."
 
@@ -176,6 +190,7 @@ async def handle_commit_schedule(args: Dict[str, Any], pool: Any) -> Dict[str, A
 
     committed_results: List[Dict[str, Any]] = []
     previous_states: List[Dict[str, Any]] = []
+    rejected_task_ids: List[Any] = []
 
     if pool is not None:
         async with pool.acquire() as conn:
@@ -187,6 +202,9 @@ async def handle_commit_schedule(args: Dict[str, Any], pool: Any) -> Dict[str, A
                     continue
 
                 prev = await get_task(conn, t_id)
+                if scoped_owner and (not prev or (prev.get("user_id") or "").lower() != scoped_owner.lower()):
+                    rejected_task_ids.append(t_id)
+                    continue
                 if prev:
                     p_start = prev.get("scheduled_start")
                     p_end = prev.get("scheduled_end")
@@ -202,6 +220,7 @@ async def handle_commit_schedule(args: Dict[str, Any], pool: Any) -> Dict[str, A
                 updated = await update_task(
                     conn,
                     t_id,
+                    owner_id=scoped_owner,
                     scheduled_start=s_start_dt,
                     scheduled_end=s_end_dt,
                 )
@@ -212,6 +231,7 @@ async def handle_commit_schedule(args: Dict[str, Any], pool: Any) -> Dict[str, A
                         end_dt=s_end_dt,
                         title=updated["title"],
                         pool=pool,
+                        user_id=user_id or "default_user",
                     )
                     committed_results.append({
                         "task_id": t_id,
@@ -233,6 +253,7 @@ async def handle_commit_schedule(args: Dict[str, Any], pool: Any) -> Dict[str, A
             "committed_count": len(committed_results),
             "committed_tasks": committed_results,
             "previous_states": previous_states,
+            "rejected_task_ids": rejected_task_ids,
             "rationale": rationale,
         },
     }
@@ -245,8 +266,12 @@ async def handle_detect_schedule_conflicts(args: Dict[str, Any], pool: Any) -> D
     from backend.services.calendar import get_calendar_freebusy
     from backend.services.scheduler import detect_schedule_conflicts
 
+    from backend.services.ownership import scope_owner
+
     start_date = args.get("start_date")
     end_date = args.get("end_date")
+    user_id = args.get("user_id")
+    scoped_owner = scope_owner(user_id)
     now = datetime.now(timezone.utc)
 
     if start_date:
@@ -269,13 +294,15 @@ async def handle_detect_schedule_conflicts(args: Dict[str, Any], pool: Any) -> D
     dep_map: Dict[int, List[int]] = {}
     if pool is not None:
         async with pool.acquire() as conn:
-            tasks = await list_tasks(conn)
+            tasks = await list_tasks(conn, user_id=scoped_owner)
             dep_map = await get_all_dependencies_map(conn)
 
     # External busy intervals
     ext_events: List[Dict[str, Any]] = []
     if pool is not None:
-        all_busy = await get_calendar_freebusy(s_dt, e_dt, pool=pool)
+        all_busy = await get_calendar_freebusy(
+            s_dt, e_dt, pool=pool, user_id=user_id or "default_user", task_user_id=scoped_owner
+        )
         ext_events = [b for b in all_busy if b.get("source") != "compass_task"]
 
     conflicts = detect_schedule_conflicts(

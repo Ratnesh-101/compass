@@ -95,90 +95,116 @@ async def agent_run(req: AgentRequest, request: Request):
 
 @router.post("/confirm")
 async def agent_confirm(req: AgentConfirmRequest, request: Request):
-    """Execute previously confirmed state-mutating actions from an agent run with proposal verification, replay protection, and admin audit logging."""
+    """Execute previously confirmed state-mutating actions from an agent run.
+
+    The run's registered pending actions are claimed atomically: ownership, the confirmation TTL,
+    single use and argument integrity are enforced, and the STORED arguments are executed, never
+    client-supplied ones. Admin overrides are audit-logged before execution.
+    """
     from backend.agent import execute_confirmed_actions, get_agent_run, save_agent_run
+    from backend.agent_pending import PendingClaimError, claim_run_actions, mark_action_executed, mark_action_failed
 
     ident = _dependencies._get_current_identity(request)
     if not ident:
         raise HTTPException(status_code=401, detail="Authentication required")
 
     pool = await get_pool()
-    actions = getattr(req, "actions", [])
+    actions = getattr(req, "actions", None) or []
     run_id = getattr(req, "run_id", None)
     caller = ident.id
     is_admin = ident.is_admin
     audit_record_ids: list[int] = []
+    claimed_action_ids: list[str] = []
 
-    if run_id:
-        existing_run = await get_agent_run(pool, run_id)
-        if not existing_run:
-            if actions:
-                raise HTTPException(status_code=404, detail=f"Agent run '{run_id}' not found.")
-        else:
-            pending = existing_run.get("pending_actions") or []
-            if not pending:
+    if not run_id:
+        raise HTTPException(status_code=400, detail="run_id is required to confirm actions.")
+    if not pool:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    existing_run = await get_agent_run(pool, run_id)
+    if not existing_run:
+        raise HTTPException(status_code=404, detail=f"Agent run '{run_id}' not found.")
+
+    pending = existing_run.get("pending_actions") or []
+    if not pending:
+        raise HTTPException(
+            status_code=400,
+            detail="No pending unconfirmed actions found for this agent run (replay rejected).",
+        )
+
+    try:
+        claimed = await claim_run_actions(pool, run_id, ident, actions or None)
+        actions = [{"tool": c["tool"], "args": c["args"]} for c in claimed]
+        claimed_action_ids = [c["action_id"] for c in claimed]
+    except PendingClaimError as claim_err:
+        if not (is_admin and claim_err.unregistered):
+            raise HTTPException(status_code=claim_err.status_code, detail=claim_err.detail) from claim_err
+        # Admin override on a legacy run that predates pending_actions registration.
+        pending_tools = {p.get("tool") for p in pending if isinstance(p, dict)}
+        for a in actions:
+            if a.get("tool") not in pending_tools:
                 raise HTTPException(
                     status_code=400,
-                    detail="No pending unconfirmed actions found for this agent run (replay rejected).",
-                )
-            if actions:
-                pending_tools = {p.get("tool"): p.get("args") for p in pending if isinstance(p, dict)}
-                for a in actions:
-                    tool_name = a.get("tool")
-                    if tool_name not in pending_tools:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"Action '{tool_name}' does not match any pending proposal for run '{run_id}'.",
+                    detail=f"Action '{a.get('tool')}' does not match any pending proposal for run '{run_id}'.",
+                ) from claim_err
+        actions = actions or pending
+
+    # Write+commit admin-override audit row BEFORE executing action; abort if write fails
+    if is_admin:
+        try:
+            logger.warning("SECURITY AUDIT: Admin override invoked for run %s by %s", run_id, caller)
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    for a in actions:
+                        aid = await conn.fetchval(
+                            """
+                            INSERT INTO agent_audit_log (run_id, tool, args, approved_by, status, new_state)
+                            VALUES ($1, $2, $3::jsonb, 'admin_override', 'pending_execution', '{"status": "pending_execution"}'::jsonb)
+                            RETURNING id
+                            """,
+                            run_id,
+                            a.get("tool", "unknown"),
+                            json.dumps(a.get("args") or {}),
                         )
-            else:
-                actions = pending
+                        audit_record_ids.append(aid)
+        except Exception as log_err:
+            logger.error("Failed to record admin override in agent_audit_log: %s", log_err)
+            for aid in claimed_action_ids:
+                await mark_action_failed(pool, aid, "audit log failure")
+            raise HTTPException(
+                status_code=500,
+                detail="Security audit log failure: admin override action aborted.",
+            ) from log_err
 
-            # Write+commit admin-override audit row BEFORE executing action; abort if write fails
-            audit_record_ids = []
-            if is_admin and pool:
-                try:
-                    logger.warning("SECURITY AUDIT: Admin override invoked for run %s by %s", run_id, caller)
-                    async with pool.acquire() as conn:
-                        async with conn.transaction():
-                            for a in actions:
-                                aid = await conn.fetchval(
-                                    """
-                                    INSERT INTO agent_audit_log (run_id, tool, args, approved_by, status, new_state)
-                                    VALUES ($1, $2, $3::jsonb, 'admin_override', 'pending_execution', '{"status": "pending_execution"}'::jsonb)
-                                    RETURNING id
-                                    """,
-                                    run_id,
-                                    a.get("tool", "unknown"),
-                                    json.dumps(a.get("args") or {}),
-                                )
-                                audit_record_ids.append(aid)
-                except Exception as log_err:
-                    logger.error("Failed to record admin override in agent_audit_log: %s", log_err)
-                    raise HTTPException(
-                        status_code=500,
-                        detail="Security audit log failure: admin override action aborted.",
-                    ) from log_err
-
-            try:
-                await save_agent_run(
-                    pool,
-                    run_id,
-                    existing_run.get("goal", ""),
-                    "completed",
-                    existing_run.get("steps", []),
-                    existing_run.get("messages", []),
-                    pending_actions=[],
-                    conversation_id=existing_run.get("conversation_id"),
-                )
-            except Exception as e:
-                logger.warning(f"Could not clear pending actions on run {run_id}: {e}")
+    try:
+        await save_agent_run(
+            pool,
+            run_id,
+            existing_run.get("goal", ""),
+            "completed",
+            existing_run.get("steps", []),
+            existing_run.get("messages", []),
+            pending_actions=[],
+            conversation_id=existing_run.get("conversation_id"),
+        )
+    except Exception as e:
+        logger.warning(f"Could not clear pending actions on run {run_id}: {e}")
 
     results = await execute_confirmed_actions(
         actions, pool, run_id=run_id, approved_by="admin_override" if is_admin else "user", user_id=caller
     )
 
+    for aid, res in zip(claimed_action_ids, results):
+        try:
+            if res.get("status") == "error":
+                await mark_action_failed(pool, aid, str(res.get("message", "")))
+            else:
+                await mark_action_executed(pool, aid)
+        except Exception as mark_err:
+            logger.warning("Could not finalize pending action %s: %s", aid, mark_err)
+
     # Record post-execution outcome in audit log
-    if is_admin and pool and audit_record_ids:
+    if is_admin and audit_record_ids:
         try:
             async with pool.acquire() as conn:
                 async with conn.transaction():
@@ -217,7 +243,10 @@ async def agent_undo(req: AgentUndoRequest, request: Request):
             if audit_log_id:
                 row = await conn.fetchrow("SELECT * FROM agent_audit_log WHERE id = $1", audit_log_id)
             elif req.run_id:
-                row = await conn.fetchrow("SELECT * FROM agent_audit_log WHERE run_id = $1 ORDER BY id DESC LIMIT 1", req.run_id)
+                row = await conn.fetchrow(
+                    "SELECT * FROM agent_audit_log WHERE run_id = $1 AND is_reverted = FALSE ORDER BY id DESC LIMIT 1",
+                    req.run_id,
+                )
             else:
                 row = None
             if row:
@@ -232,7 +261,10 @@ async def agent_undo(req: AgentUndoRequest, request: Request):
                 if owner and owner.lower() != caller.lower() and approved_by != "admin_override":
                     raise HTTPException(status_code=403, detail="Forbidden: You do not have permission to undo another user's action.")
 
-    result = await undo_last_agent_action(pool, run_id=req.run_id, audit_log_id=audit_log_id)
+    # Scope the undo itself to the caller so an empty request can never revert someone else's action.
+    result = await undo_last_agent_action(
+        pool, run_id=req.run_id, audit_log_id=audit_log_id, owner_id=None if is_admin else caller
+    )
     return result
 
 

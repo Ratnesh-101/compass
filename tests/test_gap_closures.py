@@ -229,12 +229,13 @@ async def test_agent_confirm_and_undo_auth_enforcement(client: AsyncClient, auth
     assert resp_nightly_unauth.status_code == 401
 
     # 2. Authenticated requests must succeed (200 OK)
+    # An authenticated confirm for a run that does not exist is a 404, never a silent success.
     resp_confirm_auth = await client.post(
         "/api/agent/confirm",
         headers=auth_headers,
         json={"actions": [], "run_id": "test_auth_confirm"},
     )
-    assert resp_confirm_auth.status_code == 200
+    assert resp_confirm_auth.status_code == 404
 
     resp_undo_auth = await client.post(
         "/api/agent/undo",

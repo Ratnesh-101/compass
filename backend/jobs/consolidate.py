@@ -208,11 +208,14 @@ async def deduplicate_vectors(
             SELECT id, source, embedding
             FROM memory_chunks b
             WHERE b.id > a.id
+              AND b.user_id IS NOT DISTINCT FROM a.user_id
+              AND COALESCE(b.source, '') NOT LIKE 'archive/%'
               AND (a.embedding <=> b.embedding) < $1
             ORDER BY b.embedding <=> a.embedding ASC
             LIMIT 1
         ) b
         WHERE a.created_at > now() - interval '30 days'
+          AND COALESCE(a.source, '') NOT LIKE 'archive/%'
         ORDER BY similarity DESC
         """,
         max_distance
@@ -245,6 +248,30 @@ async def deduplicate_vectors(
 # Task 3: Thread Archival & Summarization
 # ---------------------------------------------------------------------------
 
+# Constant SQL fragments; _conversation_owner_expr only ever returns one of these.
+_OWNER_EXPR_BOTH = "COALESCE(c.user_id, c.guest_id)"
+_OWNER_EXPR_USER = "c.user_id"
+_OWNER_EXPR_GUEST = "c.guest_id"
+_OWNER_EXPR_NONE = "NULL::text"
+
+
+async def _conversation_owner_expr(conn: asyncpg.Connection) -> str:
+    """SQL expression for a conversation's owner; the owner columns are added lazily by the app at startup."""
+    cols = {
+        r["column_name"]
+        for r in await conn.fetch(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'conversations'"
+        )
+    }
+    if {"user_id", "guest_id"} <= cols:
+        return _OWNER_EXPR_BOTH
+    if "user_id" in cols:
+        return _OWNER_EXPR_USER
+    if "guest_id" in cols:
+        return _OWNER_EXPR_GUEST
+    return _OWNER_EXPR_NONE
+
+
 async def archive_stale_threads(
     conn: asyncpg.Connection,
     client,
@@ -253,18 +280,22 @@ async def archive_stale_threads(
 ) -> int:
     """Condense conversations inactive for > stale_days into summarized memory chunks."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=stale_days)
+    owner_expr = await _conversation_owner_expr(conn)
 
     stale_convs = await conn.fetch(
-        """
-        SELECT c.id, c.started_at, c.last_active_at, COUNT(m.id) AS msg_count
+        f"""
+        SELECT c.id, c.started_at, c.last_active_at, COUNT(m.id) AS msg_count, {owner_expr} AS owner_id
         FROM conversations c
         LEFT JOIN messages m ON m.conversation_id = c.id
         WHERE c.last_active_at < $1
+          AND NOT EXISTS (
+              SELECT 1 FROM memory_chunks mc WHERE mc.source = 'archive/conversation/' || c.id::text
+          )
         GROUP BY c.id
         HAVING COUNT(m.id) > 0
         ORDER BY c.last_active_at ASC
         LIMIT 5
-        """,
+        """,  # nosec B608 - owner_expr is a constant fragment from _conversation_owner_expr
         cutoff
     )
 
@@ -306,15 +337,16 @@ async def archive_stale_threads(
 
         await conn.execute(
             """
-            INSERT INTO memory_chunks (domain, project_id, content, embedding, source, tags)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO memory_chunks (domain, project_id, content, embedding, source, tags, user_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             """,
             "general",
             None,
             summary,
             emb,
             archive_source,
-            ["archived", "conversation_summary", f"conv_{cid}"]
+            ["archived", "conversation_summary", f"conv_{cid}"],
+            c["owner_id"],
         )
         archived_count += 1
         logger.info(f"       ✅ Created consolidated memory chunk for {cid}.")
@@ -432,6 +464,9 @@ async def check_slipped_schedules(conn: asyncpg.Connection, pool: Any = None, dr
 # Main Orchestrator
 # ---------------------------------------------------------------------------
 
+CONSOLIDATION_LOCK_KEY = 7_283_461_902
+
+
 async def run_consolidation(
     similarity_threshold: float = 0.95,
     stale_thread_days: int = 7,
@@ -457,6 +492,12 @@ async def run_consolidation(
     conn = await asyncpg.connect(settings.DATABASE_URL)
     await register_vector(conn)
 
+    # Single-flight: a cron run and an on-demand /admin/consolidate call must never overlap.
+    if not await conn.fetchval("SELECT pg_try_advisory_lock($1)", CONSOLIDATION_LOCK_KEY):
+        await conn.close()
+        logger.warning("Consolidation already running; skipping this invocation.")
+        return {"status": "skipped", "reason": "already_running"}
+
     try:
         overdue_count = await flag_overdue_tasks(conn, dry_run=dry_run)
         pruned_count = await deduplicate_vectors(conn, threshold=similarity_threshold, dry_run=dry_run)
@@ -467,8 +508,10 @@ async def run_consolidation(
         # Cleanup stale rate limit buckets and expired guest sessions
         from backend.services.rate_limiter import cleanup_stale_rate_limit_buckets
         from backend.services.budgets import prune_expired_guests
-        stale_buckets = await cleanup_stale_rate_limit_buckets(older_than_hours=24)
-        pruned_guests = await prune_expired_guests(retention_days=int(getattr(settings, "GUEST_RETENTION_DAYS", 30)), pool=pool)
+        stale_buckets = await cleanup_stale_rate_limit_buckets(older_than_hours=24, dry_run=dry_run)
+        pruned_guests = await prune_expired_guests(
+            retention_days=int(getattr(settings, "GUEST_RETENTION_DAYS", 30)), pool=pool, dry_run=dry_run
+        )
 
         # Permanent purge of soft-deleted tasks older than 24h & expired chat pending actions
         purged_tasks = await purge_soft_deleted_tasks(conn, older_than_hours=24, dry_run=dry_run)

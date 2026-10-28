@@ -99,7 +99,7 @@ async def verify_and_claim_action(
                     )
                 elif run_id:
                     row = await conn.fetchrow(
-                        "SELECT * FROM pending_actions WHERE run_id = $1 AND status = 'pending' ORDER BY id DESC LIMIT 1 FOR UPDATE",
+                        "SELECT * FROM pending_actions WHERE run_id = $1 AND status = 'pending' ORDER BY created_at DESC LIMIT 1 FOR UPDATE",
                         run_id,
                     )
                 else:
@@ -109,7 +109,7 @@ async def verify_and_claim_action(
                     # Check if action was already claimed or executed
                     if run_id:
                         prev = await conn.fetchrow(
-                            "SELECT status FROM pending_actions WHERE run_id = $1 ORDER BY id DESC LIMIT 1",
+                            "SELECT status FROM pending_actions WHERE run_id = $1 ORDER BY created_at DESC LIMIT 1",
                             run_id,
                         )
                         if prev and prev["status"] in ("claimed", "executed"):
@@ -177,6 +177,98 @@ async def verify_and_claim_action(
     except Exception as e:
         logger.exception("Error verifying pending action: %s", e)
         return False, f"Internal error during action verification: {e}", None
+
+
+class PendingClaimError(Exception):
+    """Raised when a run's pending actions cannot be claimed; carries an HTTP-style status code."""
+
+    def __init__(self, status_code: int, detail: str, unregistered: bool = False) -> None:
+        super().__init__(detail)
+        self.status_code = status_code
+        self.detail = detail
+        self.unregistered = unregistered
+
+
+async def claim_run_actions(
+    pool: Any,
+    run_id: str,
+    caller_identity: "Identity",
+    requested: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    """Atomically claim the pending actions of a run for the authenticated caller.
+
+    Enforces owner binding, the confirmation TTL, single use and args integrity. Returns the
+    STORED actions ({action_id, tool, args}) to execute, never the client-supplied args.
+    Raises PendingClaimError (403 foreign owner, 400 tampered/unknown, 409 replay or unregistered,
+    410 expired) when the claim is refused.
+    """
+    is_admin = bool(getattr(caller_identity, "is_admin", False))
+    caller = (getattr(caller_identity, "id", None) or "").strip().lower()
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            rows = await conn.fetch(
+                "SELECT * FROM pending_actions WHERE run_id = $1 ORDER BY created_at ASC, action_id ASC FOR UPDATE",
+                run_id,
+            )
+            if not rows:
+                raise PendingClaimError(
+                    409, "No registered pending proposal for this run; re-run the agent.", unregistered=True
+                )
+
+            if not is_admin and any((r["owner_identity"] or "").strip().lower() != caller for r in rows):
+                logger.warning("Ownership mismatch confirming run %s by %s", run_id, caller)
+                raise PendingClaimError(403, "Forbidden: this run belongs to another identity.")
+
+            now_utc = datetime.now(timezone.utc)
+            open_rows = [r for r in rows if r["status"] == "pending"]
+            live_rows = [r for r in open_rows if not r["expires_at"] or r["expires_at"] >= now_utc]
+            if not open_rows:
+                if any(r["status"] in ("claimed", "executed") for r in rows):
+                    raise PendingClaimError(409, "Action has already been claimed or executed (replay rejected).")
+                raise PendingClaimError(409, "No pending actions remain for this run.")
+            if not live_rows:
+                await conn.execute(
+                    "UPDATE pending_actions SET status = 'expired' WHERE run_id = $1 AND status = 'pending'",
+                    run_id,
+                )
+                raise PendingClaimError(410, "Action expired: confirmation window timed out.")
+
+            selected: List[Any] = []
+            if requested:
+                remaining = list(live_rows)
+                for item in requested:
+                    tool = item.get("tool")
+                    item_hash = compute_args_hash(item.get("args") or {})
+                    match = next(
+                        (r for r in remaining if r["tool"] == tool and r["args_hash"] == item_hash),
+                        None,
+                    )
+                    if match is None:
+                        raise PendingClaimError(
+                            400,
+                            f"Action '{tool}' does not match any pending proposal for run '{run_id}' "
+                            "(tampered or unknown arguments rejected).",
+                        )
+                    remaining.remove(match)
+                    selected.append(match)
+            else:
+                selected = live_rows
+
+            claimed: List[Dict[str, Any]] = []
+            for r in selected:
+                updated = await conn.fetchval(
+                    "UPDATE pending_actions SET status = 'claimed' WHERE action_id = $1 AND status = 'pending' "
+                    "RETURNING action_id",
+                    r["action_id"],
+                )
+                if not updated:
+                    raise PendingClaimError(409, "Action was claimed concurrently by another worker.")
+                orig = r["original_args"]
+                if isinstance(orig, str):
+                    orig = json.loads(orig)
+                claimed.append({"action_id": r["action_id"], "tool": r["tool"], "args": dict(orig or {})})
+            return claimed
 
 
 async def mark_action_executed(pool: Any, action_id: str) -> bool:
@@ -266,7 +358,7 @@ async def wait_for_pending_action(
                     )
                     if row:
                         status = row["status"]
-                        action = "approve" if status == "executed" else "reject"
+                        action = "approve" if status in ("claimed", "executed") else "reject"
                         return action, ""
             except Exception as e:
                 logger.debug("Polling pending_actions encountered error: %s", e)
