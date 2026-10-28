@@ -74,6 +74,21 @@ def check_intel_tavily_budget(cost: int = 1) -> bool:
     return True
 
 
+INTEL_MAX_SUBQUERIES = 3
+
+
+def _http_url_or_empty(value: Any) -> str:
+    """Return the URL only when it is an absolute http(s) URL, otherwise an empty string."""
+    from urllib.parse import urlparse
+
+    url = str(value or "").strip()
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return ""
+    return url if parsed.scheme in ("http", "https") and parsed.netloc else ""
+
+
 STOPWORDS: Set[str] = {
     "the", "and", "that", "this", "with", "from", "have", "been", "will",
     "they", "their", "them", "what", "which", "about", "role", "team",
@@ -109,7 +124,7 @@ def clean_search_sources(
     for c in citations:
         raw_title = str(c.get("title") or "")
         raw_text = str(c.get("snippet") or c.get("content") or "")
-        url = str(c.get("url") or "")
+        url = _http_url_or_empty(c.get("url"))  # javascript:, data: and malformed URLs are blanked, never linked
         domain = str(c.get("domain") or "")
 
         # 1. Strip HTML tags and entities
@@ -468,8 +483,13 @@ async def generate_company_intel_brief(
                     logger.info("Refresh cooldown active for opportunity %s; returning cached brief", opportunity.id)
                     return cached
 
-        # 2. Enforce daily Tavily sub-budget (30 credits/day)
-        if not check_intel_tavily_budget(cost=1):
+        # 2. Enforce daily Tavily sub-budget (30 credits/day), charged per search sub-query actually run
+        research_topic = (
+            f"Current strategic goals, recent technical milestones, and core engineering "
+            f"challenges for {company} specifically regarding {role} roles in {opportunity.location or 'their primary locations'}."
+        )
+        search_cost = max(1, len(tavily_research.decompose_query(research_topic, max_subqueries=INTEL_MAX_SUBQUERIES)))
+        if not check_intel_tavily_budget(cost=search_cost):
             logger.warning("Daily company intel Tavily budget (%d credits) exceeded", MAX_DAILY_INTEL_TAVILY_CREDITS)
             raise HTTPException(
                 status_code=429,
@@ -480,14 +500,10 @@ async def generate_company_intel_brief(
                 headers={"Retry-After": "86400"},
             )
 
-        # 3. Research query construction and Tavily search
-        research_topic = (
-            f"Current strategic goals, recent technical milestones, and core engineering "
-            f"challenges for {company} specifically regarding {role} roles in {opportunity.location or 'their primary locations'}."
-        )
-
+        # 3. Tavily search over the same sub-queries that were charged above
         research_result = await tavily_research.execute_deep_research(
             topic=research_topic,
+            max_subqueries=INTEL_MAX_SUBQUERIES,
             search_depth="basic",
         )
         raw_citations = research_result.get("citations", [])

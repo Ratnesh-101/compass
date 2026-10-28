@@ -169,7 +169,7 @@ async def run_agent(
             accumulated_steps.append(obs_step)
             pending_confirmations.clear()
             if pool:
-                await save_agent_run(pool, run_id, goal, "running", accumulated_steps, messages, pending_confirmations, conversation_id=conversation_id)
+                await save_agent_run(pool, run_id, goal, "running", accumulated_steps, messages, pending_confirmations, conversation_id=conversation_id, user_id=user_id)
 
         elif action == "approve" and pending_confirmations:
             step_num += 1
@@ -221,7 +221,7 @@ async def run_agent(
                 tools_used.append(a.get("tool", ""))
             pending_confirmations.clear()
             if pool:
-                await save_agent_run(pool, run_id, goal, "running", accumulated_steps, messages, pending_confirmations, conversation_id=conversation_id)
+                await save_agent_run(pool, run_id, goal, "running", accumulated_steps, messages, pending_confirmations, conversation_id=conversation_id, user_id=user_id)
 
     elif existing_run and existing_run.get("status") == "paused":
         return
@@ -250,7 +250,7 @@ async def run_agent(
             {"role": "user", "content": user_content},
         ]
         if pool:
-            await save_agent_run(pool, run_id, goal, "running", accumulated_steps, messages, pending_confirmations, conversation_id=conversation_id)
+            await save_agent_run(pool, run_id, goal, "running", accumulated_steps, messages, pending_confirmations, conversation_id=conversation_id, user_id=user_id)
 
     for iteration in range(max_steps):
         step_start = time.perf_counter()
@@ -433,6 +433,7 @@ async def run_agent(
                                 pool, run_id, goal, "paused",
                                 accumulated_steps, messages, pending_confirmations,
                                 conversation_id=conversation_id,
+                                user_id=user_id,
                             )
 
                         if wait_for_confirmation:
@@ -451,7 +452,8 @@ async def run_agent(
                                         pool, run_id, goal, "expired",
                                         accumulated_steps, messages, pending_confirmations,
                                         conversation_id=conversation_id,
-                                    )
+                                user_id=user_id,
+                            )
                                 step_num += 1
                                 timeout_step = AgentStep(
                                     type="done",
@@ -499,7 +501,7 @@ async def run_agent(
                                 accumulated_steps.append(rej_step)
                                 pending_confirmations.clear()
                                 if pool:
-                                    await save_agent_run(pool, run_id, goal, "running", accumulated_steps, messages, pending_confirmations, conversation_id=conversation_id)
+                                    await save_agent_run(pool, run_id, goal, "running", accumulated_steps, messages, pending_confirmations, conversation_id=conversation_id, user_id=user_id)
                                 continue
                             else:
                                 confirmed_set.add(action_key)
@@ -665,7 +667,7 @@ async def run_agent(
     accumulated_steps.append(done_step)
 
     if pool:
-        await save_agent_run(pool, run_id, goal, "completed", accumulated_steps, messages, pending_confirmations, conversation_id=conversation_id)
+        await save_agent_run(pool, run_id, goal, "completed", accumulated_steps, messages, pending_confirmations, conversation_id=conversation_id, user_id=user_id)
 
 
 __all__ = [

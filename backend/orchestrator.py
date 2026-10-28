@@ -90,10 +90,12 @@ async def handle_message(
                     """
                     SELECT goal, status
                     FROM agent_runs
+                    WHERE user_id = $1
                     ORDER BY created_at DESC
                     LIMIT 3
-                    """
-                )
+                    """,
+                    user_id,
+                ) if user_id else []
 
                 sections = []
                 try:
@@ -425,7 +427,7 @@ async def handle_message(
         from backend.memory.chat_pending import undo_soft_deleted_tasks
         restored: list = []
         found = False
-        reverted_title = "task"
+        audit_id_to_undo = None
         try:
             pool = await get_pool()
             if pool:
@@ -438,53 +440,33 @@ async def handle_message(
                         resp_msg = f"Restored {len(restored)} task(s): {', '.join(titles)}."
                         ret_data = {"restored_tasks": restored}
                     else:
-                        # 2. Fall back to agent_audit_log undo
+                        # 2. Fall back to the caller's latest agent_audit_log action (owner-scoped)
                         row = await conn.fetchrow(
                             """
-                            SELECT id, tool, affected_id, new_state, previous_state 
-                            FROM agent_audit_log 
-                            WHERE approved_by = $1
-                              AND is_reverted = FALSE 
+                            SELECT id
+                            FROM agent_audit_log
+                            WHERE lower(COALESCE(args->>'user_id', approved_by, '')) = lower($1::text)
+                              AND is_reverted = FALSE
                             ORDER BY id DESC LIMIT 1
                             """,
                             owner_identity,
                         )
-                        if row:
-                            found = True
-                            log_id = row["id"]
-                            t_name = row["tool"]
-                            aff_id = row["affected_id"]
-                            new_st = row["new_state"] or {}
-                            if isinstance(new_st, str):
-                                import json
-                                try:
-                                    new_st = json.loads(new_st)
-                                except Exception:
-                                    new_st = {}
-                            reverted_title = new_st.get("title") or "task"
-
-                            if t_name == "add_task" and aff_id:
-                                await conn.execute(
-                                    "DELETE FROM tasks WHERE id = $1 AND user_id = $2",
-                                    int(aff_id),
-                                    owner_identity,
-                                )
-                            elif t_name in ("edit_task", "update_task_status") and aff_id and row["previous_state"]:
-                                prev_st = row["previous_state"]
-                                if isinstance(prev_st, str):
-                                    import json
-                                    try:
-                                        prev_st = json.loads(prev_st)
-                                    except Exception:
-                                        prev_st = {}
-                                await structured.update_task(conn, int(aff_id), **prev_st)
-
-                            await conn.execute("UPDATE agent_audit_log SET is_reverted = TRUE WHERE id = $1", log_id)
-                            resp_msg = f"Undid: Removed task '{reverted_title}'."
-                            ret_data = None
-                        else:
-                            resp_msg = "No recently deleted tasks were found within the 10-minute undo window."
-                            ret_data = None
+                        audit_id_to_undo = row["id"] if row else None
+                if not restored and audit_id_to_undo is None:
+                    resp_msg = "No recently deleted tasks were found within the 10-minute undo window."
+                    ret_data = None
+                elif not restored:
+                    from backend.agent_persistence import undo_last_agent_action
+                    undo_result = await undo_last_agent_action(
+                        pool, audit_log_id=audit_id_to_undo, owner_id=owner_identity
+                    )
+                    if undo_result.get("status") == "ok":
+                        found = True
+                        what = (undo_result.get("reverted") or {}).get("action") or "the last change"
+                        resp_msg = f"Undid: {what}."
+                    else:
+                        resp_msg = undo_result.get("message") or "Nothing could be undone."
+                    ret_data = None
         except Exception as e:
             logger.warning(f"Undo operation failed: {e}")
             resp_msg = "Unable to process undo request right now."

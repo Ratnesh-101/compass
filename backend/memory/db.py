@@ -43,6 +43,8 @@ async def _ensure_tables(pool: asyncpg.Pool) -> None:
             updated_at         TIMESTAMPTZ   NOT NULL DEFAULT now()
         );
         ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS conversation_id TEXT;
+        ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS user_id TEXT;
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_user_id         ON agent_runs(user_id);
         CREATE INDEX IF NOT EXISTS idx_agent_runs_status          ON agent_runs(status);
         CREATE INDEX IF NOT EXISTS idx_agent_runs_created_at      ON agent_runs(created_at);
         CREATE INDEX IF NOT EXISTS idx_agent_runs_conversation_id ON agent_runs(conversation_id);

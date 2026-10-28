@@ -136,6 +136,7 @@ CREATE TABLE IF NOT EXISTS agent_runs (
     accumulated_steps  JSONB         NOT NULL DEFAULT '[]'::jsonb,
     messages           JSONB         NOT NULL DEFAULT '[]'::jsonb,
     pending_actions    JSONB         NOT NULL DEFAULT '[]'::jsonb,
+    user_id            TEXT,
     created_at         TIMESTAMPTZ   NOT NULL DEFAULT now(),
     updated_at         TIMESTAMPTZ   NOT NULL DEFAULT now()
 );
@@ -147,6 +148,7 @@ CREATE TRIGGER update_agent_runs_modtime
 
 CREATE INDEX IF NOT EXISTS idx_agent_runs_status     ON agent_runs(status);
 CREATE INDEX IF NOT EXISTS idx_agent_runs_created_at ON agent_runs(created_at);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_user_id    ON agent_runs(user_id);
 
 -- ============================================================
 -- Agent Audit Log — audit trail for agent-executed mutations

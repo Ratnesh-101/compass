@@ -340,36 +340,32 @@ async def agent_critique_stats(request: Request):
 
 @router.get("/runs")
 async def agent_list_runs(
+    request: Request,
     limit: int = Query(20, ge=1, le=100),
     conversation_id: Optional[str] = Query(None),
 ):
-    """Retrieve list of recent agent runs from agent_runs table for run history."""
+    """Retrieve the caller's recent agent runs (admins see all) for run history."""
+    ident = _dependencies._get_current_identity(request)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    owner = None if ident.is_admin else ident.id
     pool = await get_pool()
     if not pool:
         return {"runs": [], "total": 0}
     async with pool.acquire() as conn:
-        if conversation_id:
-            rows = await conn.fetch(
-                """
-                SELECT id, goal, status, conversation_id, accumulated_steps, pending_actions, created_at, updated_at
-                FROM agent_runs
-                WHERE conversation_id = $1
-                ORDER BY created_at DESC
-                LIMIT $2
-                """,
-                conversation_id,
-                limit,
-            )
-        else:
-            rows = await conn.fetch(
-                """
-                SELECT id, goal, status, conversation_id, accumulated_steps, pending_actions, created_at, updated_at
-                FROM agent_runs
-                ORDER BY created_at DESC
-                LIMIT $1
-                """,
-                limit,
-            )
+        rows = await conn.fetch(
+            """
+            SELECT id, goal, status, conversation_id, accumulated_steps, pending_actions, created_at, updated_at
+            FROM agent_runs
+            WHERE ($1::text IS NULL OR lower(user_id) = lower($1::text))
+              AND ($2::text IS NULL OR conversation_id = $2)
+            ORDER BY created_at DESC
+            LIMIT $3
+            """,
+            owner,
+            conversation_id,
+            limit,
+        )
     runs = []
     for r in rows:
         steps_raw = r.get("accumulated_steps") or "[]"
@@ -399,13 +395,17 @@ async def agent_list_runs(
 
 
 @router.get("/runs/{run_id}")
-async def agent_get_run(run_id: str):
-    """Fetch persistent agent run state by run_id."""
+async def agent_get_run(run_id: str, request: Request):
+    """Fetch persistent agent run state by run_id (owner or admin only)."""
     from backend.agent import get_agent_run
 
+    ident = _dependencies._get_current_identity(request)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Authentication required")
     pool = await get_pool()
     run = await get_agent_run(pool, run_id)
-    if not run:
+    owner = (run or {}).get("user_id") or ""
+    if not run or (not ident.is_admin and owner.lower() != ident.id.lower()):
         raise HTTPException(status_code=404, detail=f"Agent run '{run_id}' not found.")
     return run
 
@@ -437,8 +437,14 @@ async def agent_capabilities():
 
 
 @router.get("/proactive-briefing")
-async def get_latest_proactive_briefing():
-    """Retrieve the latest proactive nightly agent run."""
+async def get_latest_proactive_briefing(request: Request):
+    """Retrieve the latest proactive nightly agent run.
+
+    The nightly run audits every tenant's deadlines, so its briefing is only shown to admins.
+    """
+    ident = _dependencies._get_current_identity(request)
+    if not ident or not ident.is_admin:
+        return {"found": False, "message": "No proactive nightly briefing found yet."}
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(

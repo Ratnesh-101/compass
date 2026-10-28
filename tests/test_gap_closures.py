@@ -299,9 +299,9 @@ async def test_detect_deadline_conflicts_skill():
 
 
 @pytest.mark.asyncio
-async def test_agent_runs_list_endpoint(client: AsyncClient):
+async def test_agent_runs_list_endpoint(client: AsyncClient, auth_headers: dict):
     """Enhancement 5: Verify GET /api/agent/runs lists recent runs for the Run History panel."""
-    resp = await client.get("/api/agent/runs?limit=10")
+    resp = await client.get("/api/agent/runs?limit=10", headers=auth_headers)
     assert resp.status_code == 200
     data = resp.json()
     assert "runs" in data
@@ -375,7 +375,7 @@ async def test_agent_conversation_memory_injection(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_agent_runs_conversation_id_filtering(client: AsyncClient):
+async def test_agent_runs_conversation_id_filtering(client: AsyncClient, auth_headers: dict):
     """Verify GET /api/agent/runs accurately persists and filters by conversation_id."""
     from backend.agent import save_agent_run
     from backend.memory.db import get_pool
@@ -398,7 +398,7 @@ async def test_agent_runs_conversation_id_filtering(client: AsyncClient):
 
     try:
         # 1. Fetch filtered by conversation_id
-        resp = await client.get(f"/api/agent/runs?conversation_id={test_conv_id}")
+        resp = await client.get(f"/api/agent/runs?conversation_id={test_conv_id}", headers=auth_headers)
         assert resp.status_code == 200
         data = resp.json()
         assert data["total"] >= 1
@@ -407,7 +407,9 @@ async def test_agent_runs_conversation_id_filtering(client: AsyncClient):
         assert matched[0]["conversation_id"] == test_conv_id
 
         # 2. Fetch with non-matching conversation_id
-        resp_empty = await client.get("/api/agent/runs?conversation_id=nonexistent_conv_id_123")
+        resp_empty = await client.get(
+            "/api/agent/runs?conversation_id=nonexistent_conv_id_123", headers=auth_headers
+        )
         assert resp_empty.status_code == 200
         assert resp_empty.json()["total"] == 0
     finally:

@@ -5,6 +5,7 @@ Compass — Context, Memory, and Synthesis Handlers.
 from typing import Any, Dict, Optional, Tuple
 import logging
 
+from backend.services.ownership import scope_owner
 from backend.skills.registry import register_skill
 
 logger = logging.getLogger("compass.skills.context")
@@ -227,18 +228,23 @@ async def handle_summarize_across_domains(args: Dict[str, Any], pool: Any) -> Di
 
     settings = get_settings()
     user_id = args.get("user_id")
+    chunk_owner = scope_owner(user_id)
     async with pool.acquire() as conn:
         tasks = await structured.list_tasks(conn, status="open", user_id=user_id)
         projects = await structured.list_projects(conn)
         try:
             code_chunks = await conn.fetch(
-                "SELECT id, content, tags FROM memory_chunks WHERE domain = 'code' ORDER BY id DESC LIMIT 5"
+                "SELECT id, content, tags FROM memory_chunks WHERE domain = 'code' "
+                "AND ($1::text IS NULL OR lower(user_id) = lower($1::text)) ORDER BY id DESC LIMIT 5",
+                chunk_owner,
             )
         except Exception:
             code_chunks = []
         try:
             cw_chunks = await conn.fetch(
-                "SELECT id, content, tags FROM memory_chunks WHERE domain = 'coursework' ORDER BY id DESC LIMIT 5"
+                "SELECT id, content, tags FROM memory_chunks WHERE domain = 'coursework' "
+                "AND ($1::text IS NULL OR lower(user_id) = lower($1::text)) ORDER BY id DESC LIMIT 5",
+                chunk_owner,
             )
         except Exception:
             cw_chunks = []

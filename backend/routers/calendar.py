@@ -238,6 +238,7 @@ async def reactive_schedule_check_endpoint(
                 accumulated_steps=[step_think, step_confirm],
                 messages=[{"role": "assistant", "content": rationale}],
                 pending_actions=[pending_action],
+                user_id=ident.id,
             )
             from backend.agent_pending import register_pending_action
             await register_pending_action(

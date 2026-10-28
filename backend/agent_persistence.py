@@ -27,8 +27,9 @@ async def save_agent_run(
     messages: List[Dict[str, Any]],
     pending_actions: List[Dict[str, Any]],
     conversation_id: Optional[str] = None,
+    user_id: Optional[str] = None,
 ) -> None:
-    """Persist agent run state into agent_runs table."""
+    """Persist agent run state into agent_runs table. The owner is fixed by the first save."""
     try:
         steps_json = json.dumps([asdict(s) for s in accumulated_steps], default=str)
         messages_json = json.dumps(messages, default=str)
@@ -37,14 +38,15 @@ async def save_agent_run(
         async with pool.acquire() as conn:
             await conn.execute(
                 """
-                INSERT INTO agent_runs (id, goal, status, accumulated_steps, messages, pending_actions, conversation_id)
-                VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7)
+                INSERT INTO agent_runs (id, goal, status, accumulated_steps, messages, pending_actions, conversation_id, user_id)
+                VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7, $8)
                 ON CONFLICT (id) DO UPDATE SET
                     status = EXCLUDED.status,
                     accumulated_steps = EXCLUDED.accumulated_steps,
                     messages = EXCLUDED.messages,
                     pending_actions = EXCLUDED.pending_actions,
                     conversation_id = COALESCE(EXCLUDED.conversation_id, agent_runs.conversation_id),
+                    user_id = COALESCE(agent_runs.user_id, EXCLUDED.user_id),
                     updated_at = now()
                 """,
                 run_id,
@@ -54,6 +56,7 @@ async def save_agent_run(
                 messages_json,
                 pending_json,
                 conversation_id,
+                user_id,
             )
     except Exception as e:
         logger.warning(f"Failed to save agent run {run_id}: {e}")
@@ -71,6 +74,7 @@ async def get_agent_run(pool: Any, run_id: str) -> Optional[Dict[str, Any]]:
                 "goal": row["goal"],
                 "status": row["status"],
                 "conversation_id": row["conversation_id"] if "conversation_id" in row else None,
+                "user_id": row["user_id"] if "user_id" in row else None,
                 "accumulated_steps": json.loads(row["accumulated_steps"]) if isinstance(row["accumulated_steps"], str) else row["accumulated_steps"],
                 "messages": json.loads(row["messages"]) if isinstance(row["messages"], str) else row["messages"],
                 "pending_actions": json.loads(row["pending_actions"]) if isinstance(row["pending_actions"], str) else row["pending_actions"],

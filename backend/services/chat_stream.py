@@ -186,7 +186,9 @@ async def generate_chat_events(
 
         from backend.agents.specialist import run_specialist_task
         pool = await _resolve_pool()
-        spec_result = await run_specialist_task(capability=valid_id, user_goal=message, pool=pool)
+        spec_result = await run_specialist_task(
+            capability=valid_id, user_goal=message, pool=pool, user_id=user_id or guest_id
+        )
         response_text = spec_result.get("summary", f"Specialist analysis completed for '{message}'.")
 
         try:
@@ -367,6 +369,7 @@ async def generate_chat_events(
                 target_message_id=target_msg_id,
                 target_message_content=target_msg_content,
                 pool=pool,
+                conv_mode=getattr(req, "mode", None),
             )
             response_text = result.get("response", "")
             skill_used = result.get("skill_used") or "agent"
@@ -464,6 +467,8 @@ async def generate_chat_events(
                 history=history_items if history_items else None,
                 memory_context=memory_context if memory_context else None,
                 persist=False,
+                tone=getattr(req, "tone", None),
+                conv_mode=getattr(req, "mode", None),
             )
             response_text = result.get("response", "")
             skill_used = result.get("skill_used") or "chat"
@@ -649,6 +654,7 @@ async def generate_chat_events(
                 target_message_id=target_msg_id,
                 target_message_content=target_msg_content,
                 tone=getattr(req, "tone", None),
+                conv_mode=getattr(req, "mode", None),
             )
             response_text = result.get("response", "")
             skill_used = result.get("skill_used") or "agent"
@@ -715,6 +721,7 @@ async def generate_chat_events(
                 memory_context=memory_context if memory_context else None,
                 persist=False,
                 tone=getattr(req, "tone", None),
+                conv_mode=getattr(req, "mode", None),
             )
             response_text = result.get("response", "")
             skill_used = result.get("skill_used") or "chat"
