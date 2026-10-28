@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { splitOnLineBreaks } from '../../utils/markdownBreaks'
 
 /**
  * Validates and sanitizes a link URL to prevent script injection (XSS).
@@ -21,6 +22,17 @@ function sanitizeUrl(url) {
  * - Inline code: `text`
  * - Links: [label](url)
  */
+function renderTextWithBreaks(text, keyBase) {
+  const segments = splitOnLineBreaks(text)
+  if (segments.length === 1) return segments[0]
+  const nodes = []
+  segments.forEach((segment, i) => {
+    if (i > 0) nodes.push(<br key={`${keyBase}-br-${i}`} />)
+    if (segment) nodes.push(segment)
+  })
+  return nodes
+}
+
 export function parseInlineFormatting(text) {
   if (!text) return ''
 
@@ -32,7 +44,7 @@ export function parseInlineFormatting(text) {
 
   while ((match = regex.exec(text)) !== null) {
     if (match.index > lastIndex) {
-      parts.push(text.substring(lastIndex, match.index))
+      parts.push(...[].concat(renderTextWithBreaks(text.substring(lastIndex, match.index), `t${lastIndex}`)))
     }
     const token = match[0]
 
@@ -92,7 +104,7 @@ export function parseInlineFormatting(text) {
   }
 
   if (lastIndex < text.length) {
-    parts.push(text.substring(lastIndex))
+    parts.push(...[].concat(renderTextWithBreaks(text.substring(lastIndex), `t${lastIndex}`)))
   }
 
   return parts.length > 0 ? parts : text
