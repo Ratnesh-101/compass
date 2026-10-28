@@ -25,6 +25,8 @@ import {
 import { isDemoTask } from './utils/demoConstants'
 import { haveTasksChanged } from './utils/taskDiff'
 
+const TASK_POLL_INTERVAL_MS = 8000
+
 export default function App() {
   const [tasks, setTasks] = useState([])
   const [allTasks, setAllTasks] = useState([])
@@ -151,6 +153,9 @@ export default function App() {
 
   // Monotonic request counter so out-of-order task responses can be discarded
   const loadSeqRef = useRef(0)
+
+  // In-flight guard to prevent overlapping task poll requests
+  const pollInFlightRef = useRef(false)
 
   // Refresh usage stats from the backend (public endpoint, no auth required)
   const refreshUsage = useCallback(async () => {
@@ -312,9 +317,15 @@ export default function App() {
       }
     }
 
-    // Task Polling (Every 3000ms with Clean State Merge): uses current domain filter
+    // Task Polling (Every 8000ms with Clean State Merge): uses current domain filter
     const pollTasks = () => {
-      if (isMounted) loadTasks(selectedDomainRef.current)
+      if (!isMounted) return
+      if (typeof document !== 'undefined' && document.hidden) return
+      if (pollInFlightRef.current) return
+      pollInFlightRef.current = true
+      Promise.resolve(loadTasks(selectedDomainRef.current)).finally(() => {
+        pollInFlightRef.current = false
+      })
     }
 
     // Immediate initial sync
@@ -341,8 +352,18 @@ export default function App() {
       }
     })
 
-    // 1. Task polling interval: 3000ms
-    const taskInterval = setInterval(pollTasks, 3000)
+    // Re-fetch tasks immediately when tab returns to foreground
+    const handleVisibilityChange = () => {
+      if (isMounted && typeof document !== 'undefined' && !document.hidden) {
+        loadTasks(selectedDomainRef.current)
+      }
+    }
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange)
+    }
+
+    // 1. Task polling interval: 8000ms
+    const taskInterval = setInterval(pollTasks, TASK_POLL_INTERVAL_MS)
 
     // 2. Health check polling interval: 10,000ms (10 seconds)
     const healthInterval = setInterval(pollHealth, 10000)
@@ -351,6 +372,7 @@ export default function App() {
     return () => {
       isMounted = false
       clearInterval(taskInterval)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
       clearInterval(healthInterval)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
