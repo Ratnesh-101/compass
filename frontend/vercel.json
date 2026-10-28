@@ -32,7 +32,7 @@
       ]
     },
     {
-      "source": "/((?!robots\\.txt$|sitemap\\.xml$|google[a-zA-Z0-9_-]+\\.html$).+)",
+      "source": "/((?!robots\\.txt$|sitemap\\.xml$|google[a-zA-Z0-9_-]+\\.html$|og-image\\.png$|logo\\.png$|favicon\\.ico$|favicon-16x16\\.png$|favicon-32x32\\.png$|apple-touch-icon\\.png$).+)",
       "headers": [
         {
           "key": "X-Robots-Tag",
