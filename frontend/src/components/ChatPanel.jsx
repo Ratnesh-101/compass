@@ -431,6 +431,7 @@ export default function ChatPanel({
 
   const handleSelectPastChat = async (pastConvId) => {
     activeRequestIdRef.current += 1 // invalidate any in-flight stream
+    const loadRequestId = activeRequestIdRef.current
     if (activeAbortControllerRef.current) {
       activeAbortControllerRef.current.abort()
       activeAbortControllerRef.current = null
@@ -445,6 +446,8 @@ export default function ChatPanel({
     try {
       if (setConversationId) setConversationId(pastConvId)
       const msgs = await fetchConversationMessages(pastConvId)
+      // A newer send, new chat or other selection superseded this load: drop the stale result.
+      if (loadRequestId !== activeRequestIdRef.current) return
       if (msgs && msgs.length > 0) {
         setMessages(msgs)
       } else {
