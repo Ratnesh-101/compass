@@ -115,7 +115,10 @@ async def handle_resolve_parked(args: Dict[str, Any], pool: Any) -> Dict[str, An
         except Exception as e:
             logger.warning("Error resolving parked thought (continuing gracefully): %s", e)
 
-    response_text = format_tool_response("resolve_parked", {"thought_id": str(tid), "resolved": str(resolved)})
+    if resolved:
+        response_text = format_tool_response("resolve_parked", {"thought_id": str(tid), "resolved": str(resolved)})
+    else:
+        response_text = f"I couldn't find parked item #{tid} to mark as resolved."
     return {
         "response": response_text,
         "data": {

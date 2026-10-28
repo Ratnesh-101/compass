@@ -75,7 +75,7 @@ def build_daily_roadmap(
         return "You have no pending tasks requiring attention today. All clear!"
 
     top_tasks = active_tasks[:6]
-    total_count = len(tasks)
+    total_count = len(active_tasks)
 
     overdue_count = sum(
         1 for t in active_tasks
@@ -714,6 +714,7 @@ async def handle_get_hackathon_deadlines(args: Dict[str, Any], pool: Any) -> Dic
 async def handle_add_task(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
     """Add a new task via structured.create_task."""
     from backend.memory import structured
+    from backend.services.ownership import scope_owner
 
     title = args.get("title", "Untitled Task")
     domain = args.get("domain", "general")
@@ -785,6 +786,7 @@ async def handle_add_task(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
                     updated = await structured.update_task(
                         conn,
                         ex["id"],
+                        owner_id=scope_owner(args.get("user_id")),
                         due_date=due_date,
                         priority=priority,
                         notes=notes or ex.get("notes"),
@@ -878,7 +880,7 @@ async def handle_update_task_status(args: Dict[str, Any], pool: Any) -> Dict[str
     from backend.memory import structured
     from backend.services.ownership import scope_owner
     task_id = args.get("task_id")
-    status = args.get("status", "open")
+    status = args.get("status") or "open"
 
     if not task_id:
         return {"response": "Missing task_id.", "data": {}}
@@ -911,7 +913,9 @@ async def handle_edit_task(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
     update_fields: Dict[str, Any] = {}
     if "title" in args:
         update_fields["title"] = args["title"]
-    if "due_date" in args:
+    if "due_date" in args and args["due_date"] is None:
+        update_fields["due_date"] = None
+    elif "due_date" in args:
         try:
             update_fields["due_date"] = datetime.strptime(args["due_date"], "%Y-%m-%d").date()
         except (ValueError, TypeError):

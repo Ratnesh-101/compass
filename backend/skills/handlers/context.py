@@ -110,7 +110,10 @@ async def handle_log_code_context(args: Dict[str, Any], pool: Any) -> Dict[str, 
 
     try:
         async with pool.acquire() as conn:
-            chunk = await vector.store_chunk(conn, content=content, domain=domain, tags=tags)
+            chunk = await vector.store_chunk(
+                conn, content=content, domain=domain, tags=tags,
+                user_id=scope_owner(args.get("user_id")),
+            )
         return {
             "response": f"Logged code memory to {domain.upper()} domain with 768-dim vector.",
             "data": chunk,
@@ -136,7 +139,10 @@ async def handle_log_code_snippet(args: Dict[str, Any], pool: Any) -> Dict[str, 
         if project_name:
             proj = await structured.get_or_create_project(conn, project_name, "code")
             project_id = proj.get("id")
-        chunk = await vector.store_chunk(conn, content=content, domain="code", project_id=project_id, tags=tag_list)
+        chunk = await vector.store_chunk(
+            conn, content=content, domain="code", project_id=project_id, tags=tag_list,
+            user_id=scope_owner(args.get("user_id")),
+        )
     return {"response": "💻 Logged code context with 768-dim embedding in Neon HNSW index.", "data": chunk}
 
 
