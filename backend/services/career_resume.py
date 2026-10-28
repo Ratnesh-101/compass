@@ -859,9 +859,16 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
                 date_match = re.search(r"((?:20\d\d|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+20\d\d)\s*(?:[-–—~]|\bto\b)\s*(?:20\d\d|present|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+20\d\d))\b", line_clean, re.IGNORECASE)
                 start_d = None
                 end_d = None
+                trailing_highlight = None
                 if date_match:
                     d_str = date_match.group(1)
-                    comp = comp.replace(d_str, "").strip(" \t|,-–—")
+                    before = line_clean[:date_match.start()].strip(" \t|,-–—.;:")
+                    after = line_clean[date_match.end():].lstrip(" \t.,;:|-–—")
+                    if before:
+                        comp = before
+                        trailing_highlight = after if len(after.split()) >= 3 else None
+                    else:
+                        comp = comp.replace(d_str, "").strip(" \t|,-–—")
                     norm_d = re.sub(r"\bto\b", "-", d_str, flags=re.IGNORECASE)
                     parts = [p.strip() for p in re.split(r"[-–—~]", norm_d) if p.strip()]
                     start_d = parts[0] if parts else None
@@ -885,7 +892,7 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
                     start_date=start_d,
                     end_date=end_d,
                     is_current="present" in line_low,
-                    highlights=[],
+                    highlights=[trailing_highlight] if trailing_highlight else [],
                     evidence_classification="SOURCE_DOCUMENT",
                 )
                 target_list.append(current_exp)
