@@ -15,6 +15,8 @@ import logging
 from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
+from backend.services.ownership import scope_owner
+
 logger = logging.getLogger("compass.agents.specialist")
 
 
@@ -29,6 +31,7 @@ class SpecialistRequest(BaseModel):
     user_goal: str
     relevant_context: Optional[Dict[str, Any]] = None
     allowed_tools: Optional[List[str]] = None
+    user_id: Optional[str] = None  # set by the server from the caller's identity, never from the client
 
 
 class SpecialistResult(BaseModel):
@@ -144,7 +147,7 @@ async def run_coursework_specialist(
 
     # 1. Query coursework tasks
     try:
-        task_res = await handle_query_coursework_tasks({"course": goal}, pool)
+        task_res = await handle_query_coursework_tasks({"course": goal, "user_id": request.user_id}, pool)
         findings["coursework_tasks"] = task_res.get("data", {})
         if task_res.get("response"):
             summary_parts.append(task_res["response"])
@@ -153,7 +156,7 @@ async def run_coursework_specialist(
 
     # 2. Query coursework notes / lab context
     try:
-        notes_res = await handle_query_coursework_notes({"query": goal}, pool)
+        notes_res = await handle_query_coursework_notes({"query": goal, "user_id": request.user_id}, pool)
         findings["coursework_notes"] = notes_res.get("data", {})
         if notes_res.get("response") and (not summary_parts or notes_res["response"] != summary_parts[-1]):
             summary_parts.append(notes_res["response"])
@@ -197,9 +200,11 @@ async def run_research_specialist(
                     FROM tasks
                     WHERE deleted_at IS NULL
                       AND domain IN ('hackathon', 'general', 'code')
+                      AND ($1::text IS NULL OR lower(user_id) = lower($1::text))
                     ORDER BY due_date ASC NULLS LAST
                     LIMIT 10
-                    """
+                    """,
+                    scope_owner(request.user_id),
                 )
                 findings["tracked_deliverables"] = [
                     {
@@ -266,9 +271,11 @@ async def run_calendar_specialist(
                     FROM tasks
                     WHERE deleted_at IS NULL
                       AND status != 'completed'
+                      AND ($1::text IS NULL OR lower(user_id) = lower($1::text))
                     ORDER BY due_date ASC NULLS LAST, priority DESC
                     LIMIT 15
-                    """
+                    """,
+                    scope_owner(request.user_id),
                 )
                 findings["active_deadlines_and_tasks"] = [
                     {
@@ -293,7 +300,7 @@ async def run_calendar_specialist(
     ])
     if is_feasibility_query:
         try:
-            feas_res = await handle_assess_feasibility({"days": 7, "hours_per_day": 4.0}, pool)
+            feas_res = await handle_assess_feasibility({"days": 7, "hours_per_day": 4.0, "user_id": request.user_id}, pool)
             findings["feasibility_assessment"] = feas_res.get("data", {})
             if feas_res.get("response"):
                 summary_parts.append(feas_res["response"])
@@ -302,7 +309,7 @@ async def run_calendar_specialist(
 
     # 3. Fetch calendar availability
     try:
-        avail_res = await handle_get_calendar_availability({}, pool)
+        avail_res = await handle_get_calendar_availability({"user_id": request.user_id}, pool)
         findings["availability"] = avail_res.get("data", {})
         if avail_res.get("response") and not is_feasibility_query:
             summary_parts.append(avail_res["response"])
@@ -311,7 +318,7 @@ async def run_calendar_specialist(
 
     # 4. Detect schedule conflicts
     try:
-        conf_res = await handle_detect_schedule_conflicts({}, pool)
+        conf_res = await handle_detect_schedule_conflicts({"user_id": request.user_id}, pool)
         findings["conflicts"] = conf_res.get("data", {})
         if conf_res.get("response") and not summary_parts:
             summary_parts.append(conf_res["response"])
@@ -350,7 +357,7 @@ async def run_memory_specialist(
 
     # 1. Query semantic vector chunks (768-dim Matryoshka embeddings)
     try:
-        vec_res = await handle_query_code_context({"query": goal}, pool)
+        vec_res = await handle_query_code_context({"query": goal, "user_id": request.user_id}, pool)
         findings["vector_memory"] = vec_res.get("data", {})
         if vec_res.get("response"):
             summary_parts.append(vec_res["response"])
@@ -359,7 +366,7 @@ async def run_memory_specialist(
 
     # 2. Query task backlog
     try:
-        tasks_res = await handle_query_tasks({}, pool)
+        tasks_res = await handle_query_tasks({"user_id": request.user_id}, pool)
         findings["task_backlog"] = tasks_res.get("data", {})
         if tasks_res.get("response") and not summary_parts:
             summary_parts.append(tasks_res["response"])
@@ -481,8 +488,9 @@ async def run_specialist_task(
     relevant_context: Optional[Dict[str, Any]] = None,
     allowed_tools: Optional[List[str]] = None,
     pool: Any = None,
+    user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Canonical helper function for delegating a specialized task."""
+    """Canonical helper function for delegating a specialized task, scoped to `user_id` when given."""
     req_cap = (capability or "auto-dispatcher").lower().strip()
     if req_cap not in ("coursework", "research", "calendar", "memory", "auto-dispatcher", "auto"):
         req_cap = "auto-dispatcher"
@@ -492,6 +500,7 @@ async def run_specialist_task(
         user_goal=user_goal,
         relevant_context=relevant_context,
         allowed_tools=allowed_tools,
+        user_id=user_id,
     )
     result = await SpecialistDispatcher.dispatch(request, pool=pool)
     return result.model_dump()

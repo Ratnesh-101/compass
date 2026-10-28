@@ -87,6 +87,7 @@ async def handle_delegate_to_specialist(args: Dict[str, Any], pool: Any) -> Dict
         capability=capability,
         user_goal=task_description,
         pool=pool,
+        user_id=args.get("user_id"),
     )
 
     summary = specialist_res.get("summary", "")

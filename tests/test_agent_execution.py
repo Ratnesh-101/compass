@@ -460,7 +460,7 @@ async def test_agent_report_card_emitted():
 
 
 @pytest.mark.asyncio
-async def test_proactive_nightly_run_persisted_and_retrievable(client: AsyncClient):
+async def test_proactive_nightly_run_persisted_and_retrievable(client: AsyncClient, auth_headers: dict):
     """Verify autonomous nightly run executes and is retrievable via /api/agent/proactive-briefing."""
     from backend.jobs.consolidate import trigger_proactive_nightly_run
     pool = await get_pool()
@@ -479,7 +479,7 @@ async def test_proactive_nightly_run_persisted_and_retrievable(client: AsyncClie
 
     try:
         # Test GET /api/agent/proactive-briefing
-        resp = await client.get("/api/agent/proactive-briefing")
+        resp = await client.get("/api/agent/proactive-briefing", headers=auth_headers)
         assert resp.status_code == 200
         data = resp.json()
         assert data["found"] is True

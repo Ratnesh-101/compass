@@ -411,8 +411,11 @@ async def get_memory_overview(request: Request):
     try:
         async with pool.acquire() as conn:
             convs = await conversations.list_conversations(conn, limit=10, user_id=user_id, guest_id=guest_id)
+            owner = None if (ident and ident.is_admin) else (ident.id if ident else "")
             runs_rows = await conn.fetch(
-                "SELECT id, goal, status, created_at FROM agent_runs ORDER BY created_at DESC LIMIT 10"
+                "SELECT id, goal, status, created_at FROM agent_runs "
+                "WHERE ($1::text IS NULL OR lower(user_id) = lower($1::text)) ORDER BY created_at DESC LIMIT 10",
+                owner,
             )
             runs = [
                 {
@@ -423,8 +426,15 @@ async def get_memory_overview(request: Request):
                 }
                 for r in runs_rows
             ]
-            tasks_count = await conn.fetchval("SELECT COUNT(*) FROM tasks WHERE deleted_at IS NULL")
-            chunks_count = await conn.fetchval("SELECT COUNT(*) FROM memory_chunks")
+            tasks_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM tasks WHERE deleted_at IS NULL "
+                "AND ($1::text IS NULL OR lower(user_id) = lower($1::text))",
+                owner,
+            )
+            chunks_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM memory_chunks WHERE ($1::text IS NULL OR lower(user_id) = lower($1::text))",
+                owner,
+            )
             return {
                 "status": "connected",
                 "recent_chats": convs,
@@ -470,7 +480,9 @@ async def public_chat(req: PublicChatRequest, request: Request, _rl: None = Depe
 
         from backend.agents.specialist import run_specialist_task
         pool = await get_pool()
-        spec_result = await run_specialist_task(capability=valid_id, user_goal=msg, pool=pool)
+        spec_result = await run_specialist_task(
+            capability=valid_id, user_goal=msg, pool=pool, user_id=ident.id if ident else None
+        )
         resp_text = spec_result.get("summary", f"Specialist analysis completed for '{msg}'.")
 
         conv_id = req.conversation_id or str(uuid.uuid4())
