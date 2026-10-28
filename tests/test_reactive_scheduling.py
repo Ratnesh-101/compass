@@ -269,11 +269,12 @@ async def test_oauth_endpoints(client: AsyncClient, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_reactive_schedule_check_endpoint(client: AsyncClient):
+async def test_reactive_schedule_check_endpoint(client: AsyncClient, auth_headers: dict):
     """POST /api/schedule/reactive-check detects slipped tasks and stages replan."""
     resp = await client.post(
         "/api/schedule/reactive-check",
-        json={"current_time": "2026-09-25T18:00:00Z"}
+        json={"current_time": "2026-09-25T18:00:00Z"},
+        headers=auth_headers,
     )
     assert resp.status_code == 200
     data = resp.json()
@@ -282,9 +283,9 @@ async def test_reactive_schedule_check_endpoint(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_schedule_conflicts_endpoint(client: AsyncClient):
+async def test_schedule_conflicts_endpoint(client: AsyncClient, auth_headers: dict):
     """GET /api/schedule/conflicts returns conflict detection report."""
-    resp = await client.get("/api/schedule/conflicts")
+    resp = await client.get("/api/schedule/conflicts", headers=auth_headers)
     assert resp.status_code == 200
     data = resp.json()
     assert "data" in data or "response" in data

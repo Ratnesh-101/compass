@@ -13,6 +13,7 @@ from openai import AsyncOpenAI
 
 from backend.agent_persistence import record_audit_log
 from backend.agent_types import AgentStep, MUTATING_TOOLS, _extract_content_from_response
+from backend.services.ownership import scope_owner
 from backend.services.usage import compute_step_cost, record_usage
 
 logger = logging.getLogger("compass.agent_critic")
@@ -97,8 +98,13 @@ async def execute_confirmed_actions(
     for action in confirmed_actions:
         tool_name = action.get("tool", "")
         tool_args = action.get("args", {})
-        if user_id and isinstance(tool_args, dict) and "user_id" not in tool_args:
-            tool_args["user_id"] = user_id
+        if user_id and isinstance(tool_args, dict):
+            if approved_by == "admin_override":
+                tool_args.setdefault("user_id", user_id)
+            else:
+                # The owner is always the authenticated caller, never a client-supplied value.
+                tool_args = {**tool_args, "user_id": user_id}
+        owner_scope = scope_owner(user_id)
 
         if tool_name not in SKILL_REGISTRY:
             results.append({"tool": tool_name, "status": "error", "message": f"Unknown tool: {tool_name}"})
@@ -113,7 +119,12 @@ async def execute_confirmed_actions(
                 task_id = tool_args.get("task_id")
                 if task_id:
                     async with pool.acquire() as conn:
-                        row = await conn.fetchrow("SELECT * FROM tasks WHERE id = $1 AND deleted_at IS NULL", int(task_id))
+                        row = await conn.fetchrow(
+                            "SELECT * FROM tasks WHERE id = $1 AND deleted_at IS NULL "
+                            "AND ($2::text IS NULL OR lower(user_id) = lower($2::text))",
+                            int(task_id),
+                            owner_scope,
+                        )
                         if row:
                             previous_state = dict(row)
                             for k, v in previous_state.items():
@@ -125,7 +136,12 @@ async def execute_confirmed_actions(
                 affected_ids = [a.get("task_id") for a in assignments if a.get("task_id")]
                 if affected_ids:
                     async with pool.acquire() as conn:
-                        rows = await conn.fetch("SELECT id, scheduled_start, scheduled_end FROM tasks WHERE id = ANY($1::int[]) AND deleted_at IS NULL", affected_ids)
+                        rows = await conn.fetch(
+                            "SELECT id, scheduled_start, scheduled_end FROM tasks WHERE id = ANY($1::int[]) AND deleted_at IS NULL "
+                            "AND ($2::text IS NULL OR lower(user_id) = lower($2::text))",
+                            affected_ids,
+                            owner_scope,
+                        )
                         previous_state = {
                             "tasks": [
                                 {

@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from backend.agent_persistence import record_audit_log
 from backend.agent_types import AgentStep, MUTATING_TOOLS
+from backend.services.ownership import scope_owner
 
 logger = logging.getLogger("compass.agent_step_executor")
 
@@ -77,7 +78,8 @@ async def execute_agent_tool_step(
                 {},
             )
 
-        if user_id and isinstance(tool_args, dict) and "user_id" not in tool_args:
+        if user_id and isinstance(tool_args, dict):
+            # Never let model- or client-supplied args choose the owner.
             tool_args["user_id"] = user_id
         try:
             prev_state = None
@@ -87,7 +89,12 @@ async def execute_agent_tool_step(
                     tid = tool_args.get("task_id")
                     if tid:
                         async with pool.acquire() as conn:
-                            row = await conn.fetchrow("SELECT * FROM tasks WHERE id = $1", int(tid))
+                            row = await conn.fetchrow(
+                                "SELECT * FROM tasks WHERE id = $1 AND deleted_at IS NULL "
+                                "AND ($2::text IS NULL OR lower(user_id) = lower($2::text))",
+                                int(tid),
+                                scope_owner(user_id),
+                            )
                             if row:
                                 prev_state = dict(row)
                                 for k, v in prev_state.items():

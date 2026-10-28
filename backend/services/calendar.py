@@ -153,8 +153,11 @@ async def get_calendar_freebusy(
     pool: Any = None,
     user_id: str = "default_user",
     include_simulated: bool = True,
+    task_user_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Query busy blocks within a date range.
+
+    `task_user_id`, when set, restricts the Compass task blocks to that owner.
 
     Combines:
     1. Fixed/already scheduled tasks from PostgreSQL `tasks`.
@@ -180,10 +183,12 @@ async def get_calendar_freebusy(
                       AND scheduled_end IS NOT NULL
                       AND scheduled_start < $2
                       AND scheduled_end > $1
+                      AND ($3::text IS NULL OR lower(user_id) = lower($3::text))
                     ORDER BY scheduled_start ASC
                     """,
                     start_utc,
                     end_utc,
+                    task_user_id,
                 )
                 for r in rows:
                     busy_blocks.append({
