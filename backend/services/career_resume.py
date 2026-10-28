@@ -1099,14 +1099,27 @@ def draft_truthful_cover_letter(
         edu = master.education[0]
         edu_note = f"As a student at {edu.institution} pursuing {edu.degree}, "
 
+    # Only claim skills the master profile actually supports.
+    if matched_skills:
+        opening = (
+            f"{edu_note}I have developed a solid foundation in {', '.join(matched_skills[:3])}, "
+            f"and I am eager to contribute meaningfully to {comp}'s technical engineering objectives."
+        )
+        closing_claim = (
+            f"bring my technical background, rigorous work ethic, and verified skills in "
+            f"{', '.join(matched_skills)} to the {role} position. "
+        )
+    else:
+        opening = f"{edu_note}I am eager to contribute meaningfully to {comp}'s technical engineering objectives."
+        closing_claim = f"bring my rigorous work ethic and eagerness to learn to the {role} position. "
+
     letter = (
         f"Dear Hiring Team at {comp},\n\n"
         f"I am writing to express my strong interest in the {role} opportunity at {comp}. "
-        f"{edu_note}I have developed a solid foundation in {', '.join(matched_skills[:3]) if matched_skills else 'software development'}, "
-        f"and I am eager to contribute meaningfully to {comp}'s technical engineering objectives.\n\n"
+        f"{opening}\n\n"
         f"{proj_paragraphs}"
-        f"I admire {comp}'s high engineering standards and would welcome the chance to bring my technical background, "
-        f"rigorous work ethic, and verified skills in {', '.join(matched_skills)} to the {role} position. "
+        f"I admire {comp}'s high engineering standards and would welcome the chance to "
+        f"{closing_claim}"
         f"I am available for the designated duration and look forward to discussing how my experience aligns with your team's goals.\n\n"
         f"Sincerely,\n"
         f"{master.full_name}\n"
