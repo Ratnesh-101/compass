@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { splitOnLineBreaks } from '../../utils/markdownBreaks'
+import { isHorizontalRule } from '../../utils/markdownRules'
 
 /**
  * Validates and sanitizes a link URL to prevent script injection (XSS).
@@ -464,6 +465,15 @@ export default function MarkdownRenderer({ content }) {
             {parseInlineFormatting(itemText)}
           </span>
         </div>
+      )
+      i++
+      continue
+    }
+
+    // 7b. Horizontal rules (---, ***, ___)
+    if (isHorizontalRule(trimmed)) {
+      elements.push(
+        <hr key={`hr-${elements.length}`} style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '12px 0' }} />
       )
       i++
       continue
