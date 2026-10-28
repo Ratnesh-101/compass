@@ -115,3 +115,57 @@ async def test_blank_owner_cannot_commit_schedule_on_any_task(client: AsyncClien
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT scheduled_start FROM tasks WHERE id = $1", task_id)
     assert row["scheduled_start"] is None
+
+
+@pytest.mark.asyncio
+async def test_stale_guest_token_with_user_session_authenticates_as_user(client: AsyncClient, production):
+    user = f"alice_{uuid.uuid4().hex[:8]}@example.com"
+    gid = str(uuid.uuid4())
+    headers = {
+        "Authorization": f"Bearer {create_session(user)}",
+        "x-guest-id": gid,
+        "x-guest-token": _expired_token(gid),
+    }
+    res = await client.get("/api/auth/me", headers=headers)
+    assert res.status_code == 200, res.text
+    assert res.json()["user_id"] == user
+
+    ident = dependencies._get_current_identity(_request_with(headers))
+    assert ident.user_id == user and not ident.is_guest
+    assert ident.guest_id is None  # the stale guest id is not trusted
+
+
+@pytest.mark.asyncio
+async def test_forged_token_naming_other_guest_gives_user_no_guest_data(client: AsyncClient, production):
+    victim_gid, victim_token = generate_guest_token()
+    chat = await client.post(
+        "/api/chat",
+        json={"message": "Victim guest private plan", "conversation_id": None},
+        headers={"x-guest-token": victim_token, "x-guest-id": victim_gid},
+    )
+    assert chat.status_code == 200, chat.text
+    victim_conv = chat.json().get("conversation_id")
+    assert victim_conv is not None
+
+    user = f"mallory_{uuid.uuid4().hex[:8]}@example.com"
+    headers = {
+        "Authorization": f"Bearer {create_session(user)}",
+        "x-guest-id": victim_gid,
+        "x-guest-token": f"{victim_gid}.{int(time.time())}.{'0' * 64}",
+    }
+    res = await client.get("/api/conversations", headers=headers)
+    assert res.status_code == 200, res.text
+    assert victim_conv not in [c["id"] for c in res.json().get("conversations", [])]
+
+    ident = dependencies._get_current_identity(_request_with(headers))
+    assert ident.user_id == user and ident.guest_id is None
+
+
+def _request_with(headers: dict):
+    from starlette.requests import Request
+
+    scope = {
+        "type": "http",
+        "headers": [(k.lower().encode(), v.encode()) for k, v in headers.items()],
+    }
+    return Request(scope)
