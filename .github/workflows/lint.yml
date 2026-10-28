@@ -18,6 +18,9 @@ on:
       - 'pyproject.toml'
       - '.github/workflows/lint.yml'
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true

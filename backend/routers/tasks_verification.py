@@ -12,15 +12,18 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from backend.config import get_settings
 from backend.dependencies import (
+    Identity,
     _get_current_identity,
     _get_or_create_user_id,
     _extract_verified_guest_id,
     generate_guest_token,
     rate_limit,
+    require_identity,
 )
 from backend.memory import structured
 from backend.memory.db import get_pool
 from backend.models import AddDependencyBody
+from backend.services.ownership import require_task_access
 from backend.services.rate_limiter import enforce_seeding_rate_limits
 
 logger = logging.getLogger("compass.routers.tasks_verification")
@@ -37,17 +40,20 @@ class DemoSeedRequest(BaseModel):
 
 # ---- Task Dependencies Endpoints --------------------------------------
 @router.get("/api/tasks/{task_id}/dependencies")
-async def get_task_dependencies_endpoint(task_id: int):
+async def get_task_dependencies_endpoint(task_id: int, ident: Identity = Depends(require_identity)):
     """Retrieve prerequisite dependencies for a task."""
     pool = await get_pool()
     if not pool:
         return []
     async with pool.acquire() as conn:
+        await require_task_access(conn, task_id, ident)
         return await structured.get_task_dependencies(conn, task_id)
 
 
 @router.post("/api/tasks/{task_id}/dependencies")
-async def add_task_dependency_endpoint(task_id: int, body: AddDependencyBody):
+async def add_task_dependency_endpoint(
+    task_id: int, body: AddDependencyBody, ident: Identity = Depends(require_identity)
+):
     """Add a prerequisite dependency: task_id depends on body.depends_on_task_id."""
     pool = await get_pool()
     if not pool:
@@ -57,6 +63,8 @@ async def add_task_dependency_endpoint(task_id: int, body: AddDependencyBody):
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     async with pool.acquire() as conn:
+        await require_task_access(conn, task_id, ident)
+        await require_task_access(conn, prereq_id, ident)
         try:
             dep = await structured.add_task_dependency(conn, task_id, prereq_id)
             return {"status": "ok", "dependency": dep}
@@ -65,12 +73,15 @@ async def add_task_dependency_endpoint(task_id: int, body: AddDependencyBody):
 
 
 @router.delete("/api/tasks/{task_id}/dependencies/{depends_on_task_id}")
-async def remove_task_dependency_endpoint(task_id: int, depends_on_task_id: int):
+async def remove_task_dependency_endpoint(
+    task_id: int, depends_on_task_id: int, ident: Identity = Depends(require_identity)
+):
     """Remove a dependency edge."""
     pool = await get_pool()
     if not pool:
         raise HTTPException(status_code=500, detail="Database unavailable")
     async with pool.acquire() as conn:
+        await require_task_access(conn, task_id, ident)
         deleted = await structured.remove_task_dependency(conn, task_id, depends_on_task_id)
         return {"status": "ok", "deleted": deleted}
 
@@ -708,11 +719,15 @@ async def seed_demo_persona_legacy_alias(request: Request, body: Optional[DemoSe
 
 # ---- Tavily Live Deadline Verification -------------------------------------
 @router.post("/api/tasks/{task_id}/verify")
-async def verify_task_deadline_endpoint(task_id: int, request: Request):
+async def verify_task_deadline_endpoint(
+    task_id: int, request: Request, ident: Identity = Depends(require_identity)
+):
     """Verify a task deadline against live official web sources using Tavily."""
     pool = await get_pool()
     if not pool:
         raise HTTPException(status_code=500, detail="Database unavailable")
+    async with pool.acquire() as conn:
+        await require_task_access(conn, task_id, ident)
     try:
         from backend.skills.handlers.web import handle_verify_deadline
         result = await handle_verify_deadline({"task_id": task_id}, pool)

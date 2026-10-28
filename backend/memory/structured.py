@@ -236,15 +236,22 @@ async def list_tasks(
 async def update_task(
     conn: DbConn,
     task_id: int,
+    owner_id: Optional[str] = None,
     **kwargs: Any
 ) -> Optional[dict]:
-    """Update task fields dynamically (e.g. status, priority, due_date, notes, scheduling) with normalization."""
+    """Update task fields dynamically (e.g. status, priority, due_date, notes, scheduling) with normalization.
+
+    When `owner_id` is given the UPDATE only matches a task owned by that user (case-insensitive).
+    """
     allowed_fields = {"domain", "project_id", "title", "due_date", "status", "priority", "notes",
                       "duration_minutes", "scheduled_start", "scheduled_end", "is_fixed", "recurrence_rule", "trusted_event_url"}
     updates = {k: v for k, v in kwargs.items() if k in allowed_fields}
 
     if not updates:
-        return await get_task(conn, task_id)
+        found = await get_task(conn, task_id)
+        if found and owner_id and (found.get("user_id") or "").lower() != owner_id.lower():
+            return None
+        return found
 
     # Normalize fields if provided
     if "domain" in updates and updates["domain"]:
@@ -278,6 +285,7 @@ async def update_task(
             trusted_event_url = CASE WHEN $26::boolean THEN $27::text ELSE trusted_event_url END,
             updated_at = now()
         WHERE id = $1 AND deleted_at IS NULL
+          AND ($28::text IS NULL OR lower(user_id) = lower($28::text))
         RETURNING id
     """
     row = await conn.fetchrow(
@@ -309,6 +317,7 @@ async def update_task(
         updates.get("recurrence_rule"),
         "trusted_event_url" in updates,
         updates.get("trusted_event_url"),
+        owner_id,
     )
     if not row:
         return None
@@ -320,11 +329,13 @@ async def update_task_status(conn: DbConn, task_id: int, status: str) -> Optiona
     return await update_task(conn, task_id, status=status)
 
 
-async def delete_task(conn: DbConn, task_id: int) -> bool:
-    """Soft delete a task by ID."""
+async def delete_task(conn: DbConn, task_id: int, owner_id: Optional[str] = None) -> bool:
+    """Soft delete a task by ID, optionally restricted to its owner (case-insensitive)."""
     result = await conn.execute(
-        "UPDATE tasks SET deleted_at = now(), updated_at = now() WHERE id = $1 AND deleted_at IS NULL",
+        "UPDATE tasks SET deleted_at = now(), updated_at = now() "
+        "WHERE id = $1 AND deleted_at IS NULL AND ($2::text IS NULL OR lower(user_id) = lower($2::text))",
         task_id,
+        owner_id,
     )
     return "UPDATE 1" in result
 

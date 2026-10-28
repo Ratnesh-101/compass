@@ -197,24 +197,36 @@ async def undo_last_agent_action(
     pool: Any,
     run_id: Optional[str] = None,
     audit_log_id: Optional[int] = None,
+    owner_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Revert an agent-executed mutation using agent_audit_log."""
+    """Revert an agent-executed mutation using agent_audit_log.
+
+    When `owner_id` is set, only audit rows owned by that user can be selected or reverted.
+    """
     async with pool.acquire() as conn:
         if audit_log_id is not None:
             row = await conn.fetchrow(
-                "SELECT * FROM agent_audit_log WHERE id = $1",
+                "SELECT * FROM agent_audit_log WHERE id = $1 "
+                "AND ($2::text IS NULL OR lower(COALESCE(args->>'user_id', approved_by, '')) = lower($2::text))",
                 audit_log_id,
+                owner_id,
             )
             if row and (row.get("is_reverted") if hasattr(row, "get") else row["is_reverted"]):
                 return {"status": "error", "message": f"Action #{audit_log_id} has already been reverted."}
         elif run_id:
             row = await conn.fetchrow(
-                "SELECT * FROM agent_audit_log WHERE run_id = $1 AND is_reverted = FALSE ORDER BY id DESC LIMIT 1",
+                "SELECT * FROM agent_audit_log WHERE run_id = $1 AND is_reverted = FALSE "
+                "AND ($2::text IS NULL OR lower(COALESCE(args->>'user_id', approved_by, '')) = lower($2::text)) "
+                "ORDER BY id DESC LIMIT 1",
                 run_id,
+                owner_id,
             )
         else:
             row = await conn.fetchrow(
-                "SELECT * FROM agent_audit_log WHERE is_reverted = FALSE ORDER BY id DESC LIMIT 1"
+                "SELECT * FROM agent_audit_log WHERE is_reverted = FALSE "
+                "AND ($1::text IS NULL OR lower(COALESCE(args->>'user_id', approved_by, '')) = lower($1::text)) "
+                "ORDER BY id DESC LIMIT 1",
+                owner_id,
             )
 
         if not row:
@@ -228,7 +240,11 @@ async def undo_last_agent_action(
         reverted_action = {"tool": tool, "affected_id": affected_id, "audit_log_id": audit_id}
 
         if tool == "add_task" and affected_id:
-            await conn.execute("DELETE FROM tasks WHERE id = $1", affected_id)
+            await conn.execute(
+                "DELETE FROM tasks WHERE id = $1 AND ($2::text IS NULL OR lower(user_id) = lower($2::text))",
+                affected_id,
+                owner_id,
+            )
             reverted_action["action"] = f"Deleted added task #{affected_id}"
 
         elif tool in ("edit_task", "update_task_status") and affected_id and prev_state:
@@ -243,7 +259,7 @@ async def undo_last_agent_action(
                 """
                 UPDATE tasks
                 SET title = $2, due_date = $3, priority = $4, status = $5, notes = $6
-                WHERE id = $1
+                WHERE id = $1 AND ($7::text IS NULL OR lower(user_id) = lower($7::text))
                 """,
                 affected_id,
                 prev_state.get("title"),
@@ -251,6 +267,7 @@ async def undo_last_agent_action(
                 prev_state.get("priority", "medium"),
                 prev_state.get("status", "open"),
                 prev_state.get("notes"),
+                owner_id,
             )
             reverted_action["action"] = f"Restored task #{affected_id} to previous state"
 
@@ -264,14 +281,16 @@ async def undo_last_agent_action(
 
             inserted = await conn.fetchrow(
                 """
-                INSERT INTO tasks (id, domain, project_id, title, due_date, status, priority, notes)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                INSERT INTO tasks (id, domain, project_id, title, due_date, status, priority, notes, user_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                 ON CONFLICT (id) DO UPDATE SET
                     domain = EXCLUDED.domain,
                     title = EXCLUDED.title,
                     status = EXCLUDED.status,
                     priority = EXCLUDED.priority,
-                    notes = EXCLUDED.notes
+                    notes = EXCLUDED.notes,
+                    deleted_at = NULL
+                WHERE tasks.user_id IS NOT DISTINCT FROM EXCLUDED.user_id
                 RETURNING id
                 """,
                 affected_id,
@@ -282,6 +301,7 @@ async def undo_last_agent_action(
                 prev_state.get("status", "open"),
                 prev_state.get("priority", "medium"),
                 prev_state.get("notes"),
+                prev_state.get("user_id"),
             )
             if inserted and not isinstance(inserted, (str, bytes)):
                 try:
@@ -293,7 +313,11 @@ async def undo_last_agent_action(
             reverted_action["action"] = f"Restored deleted task #{restored_id}"
 
         elif tool in ("log_code_snippet", "log_code_context") and affected_id:
-            await conn.execute("DELETE FROM memory_chunks WHERE id = $1", affected_id)
+            await conn.execute(
+                "DELETE FROM memory_chunks WHERE id = $1 AND ($2::text IS NULL OR lower(user_id) = lower($2::text))",
+                affected_id,
+                owner_id,
+            )
             reverted_action["action"] = f"Deleted logged memory chunk #{affected_id}"
 
         elif tool == "ingest_url":
@@ -302,16 +326,26 @@ async def undo_last_agent_action(
             audit_ts = row.get("created_at")
             if target_url and audit_ts:
                 await conn.execute(
-                    "DELETE FROM memory_chunks WHERE source = $1 AND created_at >= ($2::timestamptz - interval '2 minutes')",
+                    "DELETE FROM memory_chunks WHERE source = $1 AND created_at >= ($2::timestamptz - interval '2 minutes') "
+                    "AND ($3::text IS NULL OR lower(user_id) = lower($3::text))",
                     target_url,
                     audit_ts,
+                    owner_id,
                 )
                 reverted_action["action"] = f"Deleted ingested memory chunks for {target_url}"
             elif target_url:
-                await conn.execute("DELETE FROM memory_chunks WHERE source = $1", target_url)
+                await conn.execute(
+                    "DELETE FROM memory_chunks WHERE source = $1 AND ($2::text IS NULL OR lower(user_id) = lower($2::text))",
+                    target_url,
+                    owner_id,
+                )
                 reverted_action["action"] = f"Deleted ingested memory chunks for {target_url}"
             elif affected_id:
-                await conn.execute("DELETE FROM memory_chunks WHERE id = $1", affected_id)
+                await conn.execute(
+                    "DELETE FROM memory_chunks WHERE id = $1 AND ($2::text IS NULL OR lower(user_id) = lower($2::text))",
+                    affected_id,
+                    owner_id,
+                )
                 reverted_action["action"] = f"Deleted ingested memory chunk #{affected_id}"
             else:
                 reverted_action["action"] = "Reverted ingested URL memory"

@@ -3,12 +3,14 @@ Compass — Calendar and Scheduling Endpoints.
 """
 
 import logging
+import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, Optional, cast
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
-from backend.dependencies import _get_current_identity
+from backend.dependencies import Identity, _get_current_identity, require_identity
+from backend.services.ownership import scope_owner
 from backend.memory.db import get_pool
 from backend.memory import structured
 from backend.models import (
@@ -41,6 +43,7 @@ async def get_calendar_status_endpoint(request: Request):
 async def get_calendar_availability_endpoint(
     start_date: Optional[str] = Query(None, description="Start date YYYY-MM-DD"),
     end_date: Optional[str] = Query(None, description="End date YYYY-MM-DD"),
+    ident: Identity = Depends(require_identity),
 ):
     """Retrieve busy blocks and available working windows."""
     from backend.skills import SKILL_REGISTRY
@@ -51,12 +54,12 @@ async def get_calendar_availability_endpoint(
     handler = SKILL_REGISTRY.get("get_calendar_availability")
     if not handler:
         raise HTTPException(status_code=500, detail="Availability skill not registered")
-    result = await handler({"start_date": start_date, "end_date": end_date}, pool)
+    result = await handler({"start_date": start_date, "end_date": end_date, "user_id": ident.id}, pool)
     return result
 
 
 @router.post("/api/schedule/propose")
-async def propose_schedule_endpoint(body: ProposeScheduleBody):
+async def propose_schedule_endpoint(body: ProposeScheduleBody, ident: Identity = Depends(require_identity)):
     """Generate deterministic schedule proposal for tasks."""
     from backend.skills import SKILL_REGISTRY
     try:
@@ -66,12 +69,12 @@ async def propose_schedule_endpoint(body: ProposeScheduleBody):
     handler = SKILL_REGISTRY.get("propose_schedule")
     if not handler:
         raise HTTPException(status_code=500, detail="Schedule proposer skill not registered")
-    result = await handler(body.model_dump(), pool)
+    result = await handler({**body.model_dump(), "user_id": ident.id}, pool)
     return result
 
 
 @router.post("/api/schedule/commit")
-async def commit_schedule_endpoint(body: CommitScheduleBody):
+async def commit_schedule_endpoint(body: CommitScheduleBody, ident: Identity = Depends(require_identity)):
     """Commit approved time slots to tasks and calendar."""
     from backend.skills import SKILL_REGISTRY
     try:
@@ -81,7 +84,7 @@ async def commit_schedule_endpoint(body: CommitScheduleBody):
     handler = SKILL_REGISTRY.get("commit_schedule")
     if not handler:
         raise HTTPException(status_code=500, detail="Schedule commit skill not registered")
-    result = await handler(body.model_dump(), pool)
+    result = await handler({**body.model_dump(), "user_id": ident.id}, pool)
     return result
 
 
@@ -119,7 +122,7 @@ async def export_calendar_ics_endpoint(
 
 
 @router.get("/api/calendar/preferences")
-async def get_calendar_preferences_endpoint():
+async def get_calendar_preferences_endpoint(ident: Identity = Depends(require_identity)):
     """Retrieve working hours, days, and buffer preferences."""
     pool = await get_pool()
     if not pool:
@@ -132,24 +135,27 @@ async def get_calendar_preferences_endpoint():
             "preferred_focus": "morning",
         }
     async with pool.acquire() as conn:
-        prefs = await structured.get_scheduling_preferences(conn)
+        prefs = await structured.get_scheduling_preferences(conn, user_id=ident.id)
         return prefs
 
 
 @router.put("/api/calendar/preferences")
-async def update_calendar_preferences_endpoint(body: UpdatePreferencesBody):
+async def update_calendar_preferences_endpoint(body: UpdatePreferencesBody, ident: Identity = Depends(require_identity)):
     """Update working hours, days, and buffer preferences."""
     pool = await get_pool()
     if not pool:
         return {"status": "error", "message": "Database not available"}
     async with pool.acquire() as conn:
         updates = {k: v for k, v in body.model_dump().items() if v is not None}
-        prefs = await structured.update_scheduling_preferences(conn, **updates)
+        prefs = await structured.update_scheduling_preferences(conn, user_id=ident.id, **updates)
         return {"status": "ok", "preferences": prefs}
 
 
 @router.post("/api/schedule/reactive-check")
-async def reactive_schedule_check_endpoint(body: Optional[ReactiveCheckBody] = None):
+async def reactive_schedule_check_endpoint(
+    body: Optional[ReactiveCheckBody] = None,
+    ident: Identity = Depends(require_identity),
+):
     """Detect uncompleted tasks that passed their scheduled end time and compute reactive re-plan."""
     from backend.services.scheduler import find_slipped_tasks, replan_slipped_tasks, get_available_windows
     from backend.services.calendar import get_calendar_freebusy
@@ -161,10 +167,11 @@ async def reactive_schedule_check_endpoint(body: Optional[ReactiveCheckBody] = N
 
     now = datetime.fromisoformat(body.current_time.replace("Z", "+00:00")) if (body and body.current_time) else datetime.now(timezone.utc)
 
+    owner = scope_owner(ident.id)
     async with pool.acquire() as conn:
-        all_tasks = await structured.list_tasks(conn)
+        all_tasks = await structured.list_tasks(conn, user_id=owner)
         dep_map = await structured.get_all_dependencies_map(conn)
-        prefs = await structured.get_scheduling_preferences(conn)
+        prefs = await structured.get_scheduling_preferences(conn, user_id=ident.id)
 
     slipped = find_slipped_tasks(all_tasks, current_time=now)
     if not slipped:
@@ -176,7 +183,9 @@ async def reactive_schedule_check_endpoint(body: Optional[ReactiveCheckBody] = N
             "replan": None,
         }
 
-    busy = await get_calendar_freebusy(now, now + timedelta(days=7), pool=pool)
+    busy = await get_calendar_freebusy(
+        now, now + timedelta(days=7), pool=pool, user_id=ident.id, task_user_id=owner
+    )
     windows = get_available_windows(
         busy,
         now,
@@ -195,7 +204,7 @@ async def reactive_schedule_check_endpoint(body: Optional[ReactiveCheckBody] = N
         buffer_minutes=prefs.get("buffer_minutes", 15),
     )
 
-    run_id = f"reactive_replan_{int(now.timestamp())}"
+    run_id = f"reactive_replan_{int(now.timestamp())}_{uuid.uuid4().hex[:12]}"
     if replan["rescheduled"]:
         rationale = f"Reactive re-schedule: {len(slipped)} task(s) slipped past scheduled end ({replan['slipped_task_ids']}). Replanned {len(replan['rescheduled'])} affected tasks."
         pending_action = {
@@ -230,6 +239,10 @@ async def reactive_schedule_check_endpoint(body: Optional[ReactiveCheckBody] = N
                 messages=[{"role": "assistant", "content": rationale}],
                 pending_actions=[pending_action],
             )
+            from backend.agent_pending import register_pending_action
+            await register_pending_action(
+                pool, run_id, ident.id, "commit_schedule", cast(Dict[str, Any], pending_action["args"])
+            )
         except Exception as e:
             logger.warning(f"Could not persist reactive agent run: {e}")
 
@@ -246,6 +259,7 @@ async def reactive_schedule_check_endpoint(body: Optional[ReactiveCheckBody] = N
 async def get_schedule_conflicts_endpoint(
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
+    ident: Identity = Depends(require_identity),
 ):
     """Check for schedule overlaps, dependency timing violations, and slipped deadlines."""
     from backend.skills import SKILL_REGISTRY
@@ -253,5 +267,5 @@ async def get_schedule_conflicts_endpoint(
     handler = SKILL_REGISTRY.get("detect_schedule_conflicts")
     if not handler:
         raise HTTPException(status_code=500, detail="Conflict detection skill not registered")
-    result = await handler({"start_date": start_date, "end_date": end_date}, pool)
+    result = await handler({"start_date": start_date, "end_date": end_date, "user_id": ident.id}, pool)
     return result

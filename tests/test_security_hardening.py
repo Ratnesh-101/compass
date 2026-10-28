@@ -388,6 +388,14 @@ async def test_agent_confirm_proposal_integrity_and_replay_protection(client: As
 
     monkeypatch.setattr("backend.agent.get_agent_run", mock_get_pending_run)
 
+    # A legacy run with no registered pending_actions rows falls back to the admin tool-name check.
+    from backend.agent_pending import PendingClaimError
+
+    async def mock_unregistered_claim(pool, run_id, caller_identity, requested=None):
+        raise PendingClaimError(409, "No registered pending proposal for this run.", unregistered=True)
+
+    monkeypatch.setattr("backend.agent_pending.claim_run_actions", mock_unregistered_claim)
+
     tamper_resp = await client.post(
         "/api/agent/confirm",
         headers=auth_header,
@@ -411,7 +419,7 @@ async def test_agent_undo_replay_protection(client: AsyncClient, monkeypatch):
     assert unauth_resp.status_code == 401
 
     # 2. Mock undo_last_agent_action returning already reverted
-    async def mock_undo_already_reverted(pool, run_id=None, audit_log_id=None):
+    async def mock_undo_already_reverted(pool, run_id=None, audit_log_id=None, owner_id=None):
         return {"status": "error", "message": f"Action #{audit_log_id or 1} has already been reverted."}
 
     import backend.routers.agent as agent_router

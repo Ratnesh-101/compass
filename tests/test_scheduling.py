@@ -263,18 +263,20 @@ async def test_calendar_export_ics_endpoint(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_calendar_availability_endpoint(client: AsyncClient):
+async def test_calendar_availability_endpoint(client: AsyncClient, auth_headers: dict):
     """GET /api/calendar/availability responds with free/busy blocks."""
-    resp = await client.get("/api/calendar/availability?start_date=2026-09-21&end_date=2026-09-25")
+    resp = await client.get(
+        "/api/calendar/availability?start_date=2026-09-21&end_date=2026-09-25", headers=auth_headers
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert "data" in data or "busy_intervals" in data
 
 
 @pytest.mark.asyncio
-async def test_schedule_propose_endpoint(client: AsyncClient):
+async def test_schedule_propose_endpoint(client: AsyncClient, auth_headers: dict):
     """POST /api/schedule/propose generates proposed time slots."""
-    resp = await client.post("/api/schedule/propose", json={"target_date": "2026-09-21"})
+    resp = await client.post("/api/schedule/propose", json={"target_date": "2026-09-21"}, headers=auth_headers)
     assert resp.status_code == 200
     data = resp.json()
     assert "data" in data or "scheduled" in data

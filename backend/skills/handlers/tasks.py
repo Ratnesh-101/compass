@@ -876,6 +876,7 @@ async def handle_add_task(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
 async def handle_update_task_status(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
     """Update the status of an existing task."""
     from backend.memory import structured
+    from backend.services.ownership import scope_owner
     task_id = args.get("task_id")
     status = args.get("status", "open")
 
@@ -884,7 +885,9 @@ async def handle_update_task_status(args: Dict[str, Any], pool: Any) -> Dict[str
 
     try:
         async with pool.acquire() as conn:
-            updated = await structured.update_task(conn, int(task_id), status=status)
+            updated = await structured.update_task(
+                conn, int(task_id), owner_id=scope_owner(args.get("user_id")), status=status
+            )
         if updated:
             return {
                 "response": f"Updated task #{task_id} status to '{status}'.",
@@ -899,6 +902,7 @@ async def handle_update_task_status(args: Dict[str, Any], pool: Any) -> Dict[str
 async def handle_edit_task(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
     """Edit an existing task's title, due date, priority, or notes."""
     from backend.memory import structured
+    from backend.services.ownership import scope_owner
     task_id = args.get("task_id")
 
     if not task_id:
@@ -922,7 +926,9 @@ async def handle_edit_task(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
 
     try:
         async with pool.acquire() as conn:
-            updated = await structured.update_task(conn, int(task_id), **update_fields)
+            updated = await structured.update_task(
+                conn, int(task_id), owner_id=scope_owner(args.get("user_id")), **update_fields
+            )
         if updated:
             fields_str = ", ".join(f"{k}={v}" for k, v in update_fields.items())
             return {
@@ -938,6 +944,7 @@ async def handle_edit_task(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
 async def handle_delete_task(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
     """Delete a task by ID."""
     from backend.memory import structured
+    from backend.services.ownership import scope_owner
     task_id = args.get("task_id")
 
     if not task_id:
@@ -945,7 +952,9 @@ async def handle_delete_task(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
 
     try:
         async with pool.acquire() as conn:
-            deleted = await structured.delete_task(conn, int(task_id))
+            deleted = await structured.delete_task(
+                conn, int(task_id), owner_id=scope_owner(args.get("user_id"))
+            )
         if deleted:
             return {"response": f"Deleted task #{task_id}.", "data": {"deleted": True}}
         return {"response": f"Task #{task_id} not found.", "data": {"deleted": False}}
