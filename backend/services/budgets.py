@@ -97,9 +97,6 @@ def reset_daily_budget(identity_id: Optional[str] = None) -> None:
 
 
 
-_UTC_DAY_START_SQL = "(date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')"
-
-
 def _seconds_until_utc_midnight() -> int:
     now = datetime.now(timezone.utc)
     tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -132,7 +129,8 @@ async def _identity_credits_today(identity_id: str) -> int:
         return 0
     async with pool.acquire() as conn:
         used = await conn.fetchval(
-            f"SELECT COALESCE(SUM(credits), 0) FROM tavily_usage_log WHERE identity = $1 AND created_at >= {_UTC_DAY_START_SQL}",
+            "SELECT COALESCE(SUM(credits), 0) FROM tavily_usage_log "
+            "WHERE identity = $1 AND created_at >= (date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')",
             identity_id,
         )
     return int(used or 0)
