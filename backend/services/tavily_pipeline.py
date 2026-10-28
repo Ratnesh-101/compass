@@ -27,6 +27,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from backend.config import get_settings
 from backend.memory.db import get_pool
+from fastapi import HTTPException
+
+from backend.services import budget_context
 from backend.services.budgets import check_run_limits, BudgetExceededError
 from backend.services.tavily import (
     tavily_available,
@@ -172,8 +175,13 @@ async def execute_subqueries(
     sub_queries: List[str],
     include_domains: Optional[List[str]] = None,
     max_credits: int = 4,
+    capped_out: Optional[List[str]] = None,
 ) -> Tuple[List[Dict[str, Any]], int]:
-    """Execute sub-queries concurrently with a semaphore, bounded by credit budget."""
+    """Execute sub-queries concurrently with a semaphore, bounded by credit budget.
+
+    When a per-run / daily / global Tavily budget stops a sub-query, its message is appended
+    to ``capped_out`` (if given) so the caller can report a capped search instead of "no sources".
+    """
     semaphore = asyncio.Semaphore(2)
     credits_used = 0
     raw_results: List[Dict[str, Any]] = []
@@ -192,6 +200,14 @@ async def execute_subqueries(
                 )
                 credits_used += 1
                 return resp.get("results", []) or []
+            except (BudgetExceededError, HTTPException) as e:
+                reason = e.detail if isinstance(e, HTTPException) else str(e)
+                if isinstance(reason, dict):
+                    reason = reason.get("message") or reason.get("code") or "budget exceeded"
+                logger.warning("Subquery capped by budget for '%s': %s", q, reason)
+                if capped_out is not None:
+                    capped_out.append(str(reason))
+                return []
             except Exception as e:
                 logger.warning("Subquery failed for '%s': %s", q, e)
                 return []
@@ -749,7 +765,34 @@ async def run_tavily_research(
     target_entity: Optional[str] = None,
     trusted_event_url: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Execute complete Tavily research pipeline with deterministic evidence ledger."""
+    """Execute complete Tavily research pipeline with deterministic evidence ledger.
+
+    Starts a per-run Tavily credit counter when the caller has not already bound one
+    (e.g. background jobs), so a single research run can never exceed the per-run cap.
+    """
+    counter_token = budget_context.ensure_run_counter()
+    try:
+        return await _run_tavily_research(
+            query,
+            run_id=run_id,
+            include_domains=include_domains,
+            max_credits=max_credits,
+            target_entity=target_entity,
+            trusted_event_url=trusted_event_url,
+        )
+    finally:
+        if counter_token is not None:
+            budget_context.end_run_counter(counter_token)
+
+
+async def _run_tavily_research(
+    query: str,
+    run_id: Optional[str] = None,
+    include_domains: Optional[List[str]] = None,
+    max_credits: int = 4,
+    target_entity: Optional[str] = None,
+    trusted_event_url: Optional[str] = None,
+) -> Dict[str, Any]:
     settings = get_settings()
     if not tavily_available():
         return {
@@ -792,9 +835,10 @@ async def run_tavily_research(
         stage_timings["decomposition_ms"] = round((time.perf_counter() - t0) * 1000, 2)
 
         t0 = time.perf_counter()
+        capped_reasons: List[str] = []
         try:
             raw_results, search_credits = await execute_subqueries(
-                sub_queries, include_domains=include_domains, max_credits=max_credits
+                sub_queries, include_domains=include_domains, max_credits=max_credits, capped_out=capped_reasons
             )
             total_credits += search_credits
         except Exception as e:
@@ -810,6 +854,19 @@ async def run_tavily_research(
                 "stage_timings": stage_timings,
             }
         stage_timings["search_ms"] = round((time.perf_counter() - t0) * 1000, 2)
+
+        if not raw_results and capped_reasons:
+            stage_timings["total_ms"] = round((time.perf_counter() - t_start) * 1000, 2)
+            return {
+                "status": "unavailable",
+                "verdict": "NOT_FOUND",
+                "summary": f"Web search capped: {capped_reasons[0]}",
+                "capped": True,
+                "evidence_ledger": [],
+                "sources": [],
+                "credits": total_credits,
+                "stage_timings": stage_timings,
+            }
 
         if not raw_results:
             stage_timings["total_ms"] = round((time.perf_counter() - t_start) * 1000, 2)

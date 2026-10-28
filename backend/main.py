@@ -23,6 +23,7 @@ from fastapi.responses import RedirectResponse, JSONResponse
 
 from backend.config import get_settings
 from backend.memory.db import init_pool, close_pool
+from backend.services import budget_context
 from backend.dependencies import (
     _rate_store,
     _agent_rate_store,
@@ -206,6 +207,42 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
+class BudgetContextMiddleware:
+    """Pure ASGI middleware binding the caller's identity and a per-run Tavily counter.
+
+    Pure ASGI (not BaseHTTPMiddleware) so the contextvars survive into streaming responses
+    (SSE generators) and tasks spawned by the request. Identity resolution failures never
+    break the request: the route's own auth dependency still produces the 401/403.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope.get("method") == "OPTIONS":
+            await self.app(scope, receive, send)
+            return
+        identity = None
+        try:
+            from backend.dependencies import _get_current_identity
+            ident = _get_current_identity(Request(scope))
+            if ident and ident.id:
+                identity = budget_context.BudgetIdentity(
+                    identity_id=ident.id, is_guest=bool(ident.is_guest), is_admin=bool(ident.is_admin)
+                )
+        except Exception as exc:  # HTTPException from bad headers, etc.
+            logger.debug("Budget context identity resolution skipped: %s", exc)
+        identity_token = budget_context.bind_identity(identity)
+        # One HTTP request is one run for non-admin callers; admin/system work is not run-capped.
+        counter_token = None if (identity and identity.is_admin) else budget_context.begin_run_counter()
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            if counter_token is not None:
+                budget_context.end_run_counter(counter_token)
+            budget_context.reset_identity(identity_token)
+
+
 # ---------------------------------------------------------------------------
 # App Instance
 # ---------------------------------------------------------------------------
@@ -252,6 +289,7 @@ app.add_middleware(
         "X-Requested-With",
     ],
 )
+app.add_middleware(BudgetContextMiddleware)  # outermost: binds identity/run counter for the whole request
 
 # ---------------------------------------------------------------------------
 # Router Registration

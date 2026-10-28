@@ -122,6 +122,8 @@ async def _ensure_tables(pool: asyncpg.Pool) -> None:
             created_at TIMESTAMPTZ  NOT NULL DEFAULT now()
         );
         CREATE INDEX IF NOT EXISTS idx_tavily_usage_created_at ON tavily_usage_log(created_at);
+        ALTER TABLE tavily_usage_log ADD COLUMN IF NOT EXISTS identity TEXT;
+        CREATE INDEX IF NOT EXISTS idx_tavily_usage_identity_created ON tavily_usage_log(identity, created_at);
 
         -- Dynamic Scheduling & Calendar Extensions
         ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_domain_check;

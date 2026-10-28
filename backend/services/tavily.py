@@ -71,6 +71,8 @@ except ImportError:
     AsyncTavilyClient = _HttpTavilyClient  # type: ignore[assignment,misc]
 
 from backend.config import get_settings
+from backend.services import budget_context
+from backend.services.budgets import enforce_tavily_budget
 from backend.services.usage import record_tavily_credits
 
 logger = logging.getLogger("compass.services.tavily")
@@ -116,18 +118,24 @@ async def search(
     depth = search_depth or settings.TAVILY_SEARCH_DEPTH
     q = query[:390]  # Tavily recommends keeping queries under 400 chars
 
-    client = _get_client()
-    resp = await asyncio.wait_for(
-        client.search(
-            query=q,
-            max_results=max_results or settings.TAVILY_MAX_RESULTS,
-            search_depth=depth,
-            topic=topic,
-            include_domains=include_domains or [],
-        ),
-        timeout=settings.TAVILY_TIMEOUT_S,
-    )
-    await record_tavily_credits("search", _SEARCH_CREDITS.get(depth, 1))
+    credits = _SEARCH_CREDITS.get(depth, 1)
+    await enforce_tavily_budget(credits)  # raises BudgetExceededError / HTTPException before any spend
+    try:
+        client = _get_client()
+        resp = await asyncio.wait_for(
+            client.search(
+                query=q,
+                max_results=max_results or settings.TAVILY_MAX_RESULTS,
+                search_depth=depth,
+                topic=topic,
+                include_domains=include_domains or [],
+            ),
+            timeout=settings.TAVILY_TIMEOUT_S,
+        )
+    except BaseException:
+        budget_context.add_run_credits(-credits)  # nothing was spent: release the reservation
+        raise
+    await record_tavily_credits("search", credits, wait=True)
     return resp
 
 
@@ -137,16 +145,24 @@ async def extract(urls: List[str], extract_depth: str = "basic") -> Dict[str, An
         raise RuntimeError("Tavily is disabled or unconfigured")
 
     settings = get_settings()
-    client = _get_client()
     target_urls = urls[:20]
-    resp = await asyncio.wait_for(
-        client.extract(urls=target_urls, extract_depth=extract_depth),
-        timeout=settings.TAVILY_TIMEOUT_S * 2,
-    )
+    rate = 2 if extract_depth == "advanced" else 1
+    reserved = math.ceil(len(target_urls) / 5) * rate if target_urls else 0
+    await enforce_tavily_budget(reserved)  # raises BudgetExceededError / HTTPException before any spend
+    try:
+        client = _get_client()
+        resp = await asyncio.wait_for(
+            client.extract(urls=target_urls, extract_depth=extract_depth),
+            timeout=settings.TAVILY_TIMEOUT_S * 2,
+        )
+    except BaseException:
+        budget_context.add_run_credits(-reserved)
+        raise
     successful = len(resp.get("results", []) or [])
-    if successful:
-        rate = 2 if extract_depth == "advanced" else 1
-        await record_tavily_credits("extract", math.ceil(successful / 5) * rate)
+    actual = math.ceil(successful / 5) * rate if successful else 0
+    budget_context.add_run_credits(actual - reserved)  # settle the reservation against real usage
+    if actual:
+        await record_tavily_credits("extract", actual, wait=True)
     return resp
 
 

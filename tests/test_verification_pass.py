@@ -115,7 +115,8 @@ async def test_daily_budget_exceeded():
         with pytest.raises(HTTPException) as exc_info:
             await check_daily_identity_budget(user_id="usr_abc")
         assert exc_info.value.status_code == 429
-        assert "Daily Tavily search credit budget" in exc_info.value.detail
+        assert exc_info.value.detail["code"] == "tavily_budget_exceeded"
+        assert "Daily Tavily search credit budget" in exc_info.value.detail["message"]
 
 
 # --- 3. AUTH & IDENTITY SECURITY ---

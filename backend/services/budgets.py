@@ -8,10 +8,12 @@ Fails gracefully with clear user-facing messages.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 from fastapi import HTTPException
 
 from backend.memory.db import get_pool
+from backend.services import budget_context
 
 logger = logging.getLogger("compass.budgets")
 
@@ -95,45 +97,96 @@ def reset_daily_budget(identity_id: Optional[str] = None) -> None:
 
 
 
+_UTC_DAY_START_SQL = "(date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')"
+
+
+def _seconds_until_utc_midnight() -> int:
+    now = datetime.now(timezone.utc)
+    tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return max(1, int((tomorrow - now).total_seconds()))
+
+
+def _daily_tavily_limit(is_guest: bool) -> int:
+    return MAX_DAILY_GUEST_TAVILY_CREDITS if is_guest else MAX_DAILY_USER_TAVILY_CREDITS
+
+
+def _daily_identity_exceeded(is_guest: bool, limit: int) -> HTTPException:
+    identity_label = "guest session" if is_guest else "user account"
+    return HTTPException(
+        status_code=429,
+        detail={
+            "code": "tavily_budget_exceeded",
+            "message": (
+                f"Daily Tavily search credit budget of {limit} credits reached for this "
+                f"{identity_label}. Please try again tomorrow."
+            ),
+        },
+        headers={"Retry-After": str(_seconds_until_utc_midnight())},
+    )
+
+
+async def _identity_credits_today(identity_id: str) -> int:
+    """Sum today's (UTC) Tavily credits recorded for ONE identity. Raises on DB errors."""
+    pool = await get_pool()
+    if not pool:
+        return 0
+    async with pool.acquire() as conn:
+        used = await conn.fetchval(
+            f"SELECT COALESCE(SUM(credits), 0) FROM tavily_usage_log WHERE identity = $1 AND created_at >= {_UTC_DAY_START_SQL}",
+            identity_id,
+        )
+    return int(used or 0)
+
+
 async def check_daily_identity_budget(
     user_id: Optional[str] = None,
     guest_id: Optional[str] = None,
+    cost: int = 0,
 ) -> None:
-    """Check the GLOBAL daily Tavily credit sum against a per-identity-type threshold.
+    """Check ONE identity's Tavily credits for the current UTC day against its guest/user limit.
 
-    NOTE: tavily_usage_log has no identity column, so this sums credits for ALL identities
-    and compares against the guest/user limit; it is not a true per-identity check. It is
-    currently unused by production code. Fails open on DB errors (advisory check).
-
-    Raises HTTPException(429) if the threshold is reached.
+    The identity is ``user_id`` (authenticated) or else ``guest_id``. Raises HTTPException(429)
+    with code ``tavily_budget_exceeded`` when used + cost would exceed the limit (with cost=0,
+    when the limit is already reached). Fails open on DB errors (the global cap is the hard backstop).
     """
     is_guest = bool(not user_id or (guest_id and not user_id))
-    max_model_calls = MAX_DAILY_GUEST_MODEL_CALLS if is_guest else MAX_DAILY_USER_MODEL_CALLS
-    max_tavily = MAX_DAILY_GUEST_TAVILY_CREDITS if is_guest else MAX_DAILY_USER_TAVILY_CREDITS
-
+    identity_id = user_id or guest_id
+    if not identity_id:
+        return
+    limit = _daily_tavily_limit(is_guest)
     try:
-        pool = await get_pool()
-        if pool:
-            async with pool.acquire() as conn:
-                # Count today's tavily credits
-                tav_credits = await conn.fetchval(
-                    """
-                    SELECT COALESCE(SUM(credits), 0)
-                    FROM tavily_usage_log
-                    WHERE created_at >= date_trunc('day', now())
-                    """
-                ) or 0
-
-                if int(tav_credits) >= max_tavily:
-                    identity_label = "guest session" if is_guest else "user account"
-                    raise HTTPException(
-                        status_code=429,
-                        detail=f"Daily Tavily search credit budget of {max_tavily} credits reached for this {identity_label}. Please try again tomorrow.",
-                    )
-    except HTTPException:
-        raise
+        used = await _identity_credits_today(identity_id)
     except Exception as e:
-        logger.warning("Could not verify daily budget against DB: %s", e)
+        logger.warning("Could not verify daily Tavily budget against DB: %s", e)
+        return
+    if used + max(0, cost) > limit or (cost == 0 and used >= limit):
+        raise _daily_identity_exceeded(is_guest, limit)
+
+
+async def enforce_tavily_budget(cost: int) -> None:
+    """Enforce per-run, global and per-identity Tavily budgets BEFORE spending ``cost`` credits.
+
+    Per-run credits are reserved on success; the caller must refund via
+    ``budget_context.add_run_credits(-cost)`` if the Tavily call then fails.
+    Raises BudgetExceededError (per-run) or HTTPException (429 daily / global, 503 kill switch).
+    Jobs without a bound identity (nightly consolidation, radar sync) face only the global cap.
+    """
+    cost = max(0, int(cost))
+    used = budget_context.run_credits_used()
+    if used is not None and used + cost > MAX_RUN_TAVILY_CREDITS:
+        check_run_limits(0, 0, used + cost)
+
+    await check_global_spend_cap()
+
+    caller = budget_context.get_identity()
+    if caller is not None and not caller.is_admin:
+        await check_daily_identity_budget(
+            user_id=None if caller.is_guest else caller.identity_id,
+            guest_id=caller.identity_id if caller.is_guest else None,
+            cost=cost,
+        )
+
+    budget_context.add_run_credits(cost)
 
 
 def _get_budget_settings():

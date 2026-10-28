@@ -182,6 +182,8 @@ CREATE TABLE IF NOT EXISTS tavily_usage_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_tavily_usage_created_at ON tavily_usage_log(created_at);
+ALTER TABLE tavily_usage_log ADD COLUMN IF NOT EXISTS identity TEXT;  -- caller identity; NULL for system jobs / legacy rows
+CREATE INDEX IF NOT EXISTS idx_tavily_usage_identity_created ON tavily_usage_log(identity, created_at);
 
 -- ============================================================
 -- Shared DB Rate Limiter Table

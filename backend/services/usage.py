@@ -143,22 +143,18 @@ async def _persist_tavily_to_db(
     operation: str,
     credits: int,
     conn: Optional[asyncpg.Connection] = None,
+    identity: Optional[str] = None,
 ) -> None:
-    """Insert a record into tavily_usage_log table."""
+    """Insert a record into tavily_usage_log table (identity is NULL for system jobs)."""
+    insert_sql = "INSERT INTO tavily_usage_log (operation, credits, identity) VALUES ($1, $2, $3)"
     try:
         if conn is not None:
-            await conn.execute(
-                "INSERT INTO tavily_usage_log (operation, credits) VALUES ($1, $2)",
-                operation, credits,
-            )
+            await conn.execute(insert_sql, operation, credits, identity)
         else:
             from backend.memory.db import get_pool
             pool = await get_pool()
             async with pool.acquire() as db_conn:
-                await db_conn.execute(
-                    "INSERT INTO tavily_usage_log (operation, credits) VALUES ($1, $2)",
-                    operation, credits,
-                )
+                await db_conn.execute(insert_sql, operation, credits, identity)
     except Exception as err:
         logger.warning(f"Failed to persist tavily_usage_log: {err}")
 
@@ -167,20 +163,32 @@ async def record_tavily_credits(
     operation: str,
     credits: int,
     conn: Optional[asyncpg.Connection] = None,
+    *,
+    wait: bool = False,
 ) -> None:
-    """Record Tavily credit usage and persist asynchronously with strong reference."""
+    """Record Tavily credit usage, attributed to the bound caller identity (if any).
+
+    Persists in a background task by default; ``wait=True`` awaits the write so budget
+    checks that follow immediately see it.
+    """
     import asyncio
+    from backend.services import budget_context
+    caller = budget_context.get_identity()
+    identity = caller.identity_id if caller else None
     st = _TAVILY_STATE.setdefault(operation, {"calls": 0, "credits": 0})
     st["calls"] += 1
     st["credits"] += credits
 
-    try:
-        loop = asyncio.get_running_loop()
-        task = loop.create_task(_persist_tavily_to_db(operation, credits, conn=conn))
-        _BACKGROUND_TASKS.add(task)
-        task.add_done_callback(_on_persist_done)
-    except RuntimeError:
-        pass
+    if wait:
+        await _persist_tavily_to_db(operation, credits, conn=conn, identity=identity)
+    else:
+        try:
+            loop = asyncio.get_running_loop()
+            task = loop.create_task(_persist_tavily_to_db(operation, credits, conn=conn, identity=identity))
+            _BACKGROUND_TASKS.add(task)
+            task.add_done_callback(_on_persist_done)
+        except RuntimeError:
+            pass
 
     logger.info(f"Tavily credit recorded: operation={operation}, credits={credits}")
 
