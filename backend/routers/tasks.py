@@ -338,8 +338,9 @@ async def get_frontend_tasks(
     except HTTPException:
         raise
     except Exception as e:
+        # A backend failure must not look like "you have no tasks": the client keeps its current view on non-OK.
         logger.warning(f"Error fetching frontend tasks from DB: {e}")
-        return []
+        raise HTTPException(status_code=503, detail="Tasks are temporarily unavailable. Please retry.") from e
 
 
 # ---- POST /api/tasks --------------------------------------------------
@@ -432,7 +433,8 @@ async def update_frontend_task(task_id: str, req: UpdateTaskRequest, request: Re
                     update_kwargs["due_date"] = None
                 else:
                     try:
-                        update_kwargs["due_date"] = date.fromisoformat(req.due_date)
+                        # Accept a plain date or an ISO timestamp (only the calendar date is a deadline)
+                        update_kwargs["due_date"] = date.fromisoformat(req.due_date.strip()[:10])
                     except ValueError:
                         raise HTTPException(status_code=400, detail=f"Invalid due_date format: {req.due_date}")
 

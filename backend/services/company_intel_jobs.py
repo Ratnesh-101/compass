@@ -18,9 +18,13 @@ import json
 import logging
 import re
 import time
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set
 from urllib.parse import urlparse
 import uuid
+
+from fastapi import HTTPException
+
+from backend.services.intel_grounding import STOPWORDS, is_point_grounded  # noqa: F401  (single implementation lives there)
 
 logger = logging.getLogger("compass.services.company_intel_jobs")
 
@@ -387,57 +391,12 @@ def _parse_json_safely(raw_text: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-STOPWORDS: Set[str] = {
-    "the", "and", "that", "this", "with", "from", "have", "been", "will",
-    "they", "their", "them", "what", "which", "about", "role", "team",
-    "company", "focus", "work", "also", "into", "over", "more", "most",
-    "such", "some", "other", "than", "then", "when", "where", "while",
-    "for", "are", "can", "could", "should", "would", "its", "has", "had",
-    "you", "your", "our", "were", "who", "whom", "whose"
-}
-
-
-def is_point_grounded(
-    point_text: str,
-    cited_source: Dict[str, Any],
-    all_sources: List[Dict[str, Any]],
-) -> bool:
-    """Verifies that a summarized point is factually grounded in the provided sources.
-
-    Checks:
-    1. Numbers, percentages, and metrics must appear in the source texts.
-    2. Key content words must have lexical support in the cited source or all sources.
-    """
-    if not point_text:
-        return False
-
-    all_sources_text = " ".join((s.get("snippet", "") + " " + s.get("title", "")) for s in all_sources).lower()
-
-    # 1. Number / Metric grounding check
-    point_numbers = set(re.findall(r"\b\d+(?:[.,]\d+)?%?\b", point_text))
-    point_numbers = {n for n in point_numbers if n not in ("1", "2", "3", "4", "5", "6")}
-    source_numbers = set(re.findall(r"\b\d+(?:[.,]\d+)?%?\b", all_sources_text))
-    if point_numbers and not point_numbers.issubset(source_numbers):
-        return False
-
-    # 2. Content tokens grounding check
-    tokens = [w.lower() for w in re.findall(r"\b[a-zA-Z]{3,}\b", point_text) if w.lower() not in STOPWORDS]
-    if not tokens:
-        return True
-
-    cited_text = (cited_source.get("snippet", "") + " " + cited_source.get("title", "")).lower()
-    cited_matches = sum(1 for tok in tokens if tok in cited_text)
-    all_matches = sum(1 for tok in tokens if tok in all_sources_text)
-
-    if all_matches == 0:
-        return False
-    if len(tokens) >= 3 and cited_matches == 0 and all_matches < 2:
-        return False
-
-    return True
-
-
-async def run_intel_refresh_job(job_id: str, opp_id: int, user_id: Optional[str] = None) -> None:
+async def run_intel_refresh_job(
+    job_id: str,
+    opp_id: int,
+    user_id: Optional[str] = None,
+    on_paid_work: Optional[Callable[[], None]] = None,
+) -> None:
     """Execute background intelligence refresh and record final status."""
     from backend.memory.radar import get_opportunity_by_id
     from backend.services import winning_features
@@ -454,7 +413,7 @@ async def run_intel_refresh_job(job_id: str, opp_id: int, user_id: Optional[str]
             )
             return
 
-        brief = await winning_features.generate_company_intel_brief(opp, force_refresh=True)
+        brief = await winning_features.generate_company_intel_brief(opp, force_refresh=True, on_paid_work=on_paid_work)
         if brief.get("status") == "error":
             await update_job(
                 job_id,
@@ -465,6 +424,15 @@ async def run_intel_refresh_job(job_id: str, opp_id: int, user_id: Optional[str]
             )
         else:
             await update_job(job_id, status="done", result=brief)
+    except HTTPException as exc:
+        # Cooldown / already-refreshing / budget / daily-cap refusals keep their structured code.
+        detail = exc.detail if isinstance(exc.detail, dict) else {}
+        await update_job(
+            job_id,
+            status="failed",
+            reason=str(detail.get("code") or "refused"),
+            error=str(detail.get("detail") or exc.detail),
+        )
     except Exception as exc:
         logger.error("Intel job %s failed unexpectedly: %s", job_id, exc, exc_info=True)
         await update_job(
