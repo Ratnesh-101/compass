@@ -8,6 +8,7 @@
  */
 
 import { API_BASE as BASE_URL, getAuthHeaders, getGuestToken, initGuestSession, safeHref } from './baseClient.js'
+import { extractErrorDetail, parseRetryAfter, buildJobAnalysisRequest } from '../utils/careerUiHelpers.js'
 
 const API_BASE = `${BASE_URL}/api/career`
 
@@ -19,6 +20,17 @@ async function ensureSession() {
       /* ignore storage access error */
     }
   }
+}
+
+/** Build an Error from a failed response, preferring the backend `detail` over statusText. */
+async function errorFromResponse(res, fallback) {
+  const body = await res.json().catch(() => ({}))
+  const err = new Error(extractErrorDetail(body, `${fallback}: ${res.statusText || `HTTP ${res.status}`}`))
+  err.status = res.status
+  const detail = body && typeof body === 'object' ? body.detail : null
+  if (detail && typeof detail === 'object' && !Array.isArray(detail) && detail.code) err.code = detail.code
+  err.retryAfter = parseRetryAfter(res.headers && typeof res.headers.get === 'function' ? res.headers.get('Retry-After') : null)
+  return err
 }
 
 function getJsonHeaders() {
@@ -61,7 +73,7 @@ export async function fetchResumes() {
   return res.json()
 }
 
-export async function tailorResume(opportunityId, customTitle = null, targetSkills = null) {
+export async function tailorResume(opportunityId, customTitle = null, targetSkills = null, applicationId = null) {
   await ensureSession()
   const res = await fetch(`${API_BASE}/resumes/tailor`, {
     method: 'POST',
@@ -71,6 +83,7 @@ export async function tailorResume(opportunityId, customTitle = null, targetSkil
       opportunity_id: opportunityId,
       custom_title: customTitle,
       target_skills_emphasis: targetSkills,
+      ...(applicationId !== null && applicationId !== undefined ? { application_id: applicationId } : {}),
     }),
   })
   if (!res.ok) throw new Error(`Failed to tailor resume: ${res.statusText}`)
@@ -167,7 +180,7 @@ export async function commitExtractedResume(content, originalDocumentId = null, 
       target,
     }),
   })
-  if (!res.ok) throw new Error(`Failed to commit extracted resume: ${res.statusText}`)
+  if (!res.ok) throw await errorFromResponse(res, 'Failed to commit extracted resume')
   return res.json()
 }
 
@@ -212,21 +225,20 @@ export async function ingestExternalProfile(sourceType, rawContent, sourceUrl = 
       source_url: sourceUrl,
     }),
   })
-  if (!res.ok) throw new Error(`Failed to ingest external profile: ${res.statusText}`)
+  if (!res.ok) throw await errorFromResponse(res, 'Failed to ingest external profile')
   return res.json()
 }
 
 export async function fetchJobAnalysis(opportunityId, customDesc = null) {
   await ensureSession()
-  let url = `${API_BASE}/opportunities/${opportunityId}/job-analysis`
-  if (customDesc) {
-    url += `?custom_desc=${encodeURIComponent(customDesc)}`
-  }
-  const res = await fetch(url, {
-    headers: getAuthHeaders(),
+  const req = buildJobAnalysisRequest(API_BASE, opportunityId, customDesc)
+  const res = await fetch(req.url, {
+    method: req.method,
+    headers: req.method === 'POST' ? getJsonHeaders() : getAuthHeaders(),
     credentials: 'include',
+    ...(req.body ? { body: req.body } : {}),
   })
-  if (!res.ok) throw new Error(`Failed to fetch job requirement analysis: ${res.statusText}`)
+  if (!res.ok) throw await errorFromResponse(res, 'Failed to fetch job requirement analysis')
   return res.json()
 }
 
@@ -266,7 +278,7 @@ export async function fetchCompanyIntel(opportunityId, refresh = false) {
     headers: getAuthHeaders(),
     credentials: 'include',
   })
-  if (!res.ok) throw new Error(`Failed to fetch company intelligence: ${res.statusText}`)
+  if (!res.ok) throw await errorFromResponse(res, 'Failed to fetch company intelligence')
   return res.json()
 }
 
@@ -277,14 +289,7 @@ export async function refreshCompanyIntelJob(opportunityId) {
     headers: getJsonHeaders(),
     credentials: 'include',
   })
-  if (!res.ok) {
-    const errData = await res.json().catch(() => ({}))
-    const msg = (typeof errData?.detail === 'object' ? errData.detail.detail : errData?.detail) || `Refresh failed: ${res.statusText}`
-    const error = new Error(msg)
-    error.status = res.status
-    error.data = errData
-    throw error
-  }
+  if (!res.ok) throw await errorFromResponse(res, 'Refresh failed')
   return res.json()
 }
 
@@ -349,7 +354,7 @@ export async function updateApplication(appId, updates) {
     credentials: 'include',
     body: JSON.stringify(updates),
   })
-  if (!res.ok) throw new Error(`Failed to update application: ${res.statusText}`)
+  if (!res.ok) throw await errorFromResponse(res, 'Failed to update application')
   return res.json()
 }
 
@@ -431,5 +436,26 @@ export async function fetchAdapters() {
     credentials: 'include',
   })
   if (!res.ok) throw new Error(`Failed to fetch adapters: ${res.statusText}`)
+  return res.json()
+}
+
+export async function markApplied(appId) {
+  await ensureSession()
+  const res = await fetch(`${API_BASE}/applications/${appId}/mark-applied`, {
+    method: 'POST',
+    headers: getJsonHeaders(),
+    credentials: 'include',
+  })
+  if (!res.ok) throw await errorFromResponse(res, 'Failed to record submission confirmation')
+  return res.json()
+}
+
+export async function fetchHandoffKit(appId) {
+  await ensureSession()
+  const res = await fetch(`${API_BASE}/applications/${appId}/handoff-kit`, {
+    headers: getAuthHeaders({ Accept: 'application/json' }),
+    credentials: 'include',
+  })
+  if (!res.ok) throw await errorFromResponse(res, 'Failed to load Handoff Kit')
   return res.json()
 }

@@ -34,6 +34,7 @@ from backend.memory.radar import get_opportunity_by_id
 from backend.models_career import (
     CareerApplicationOut,
     CareerApplicationStatus,
+    ResumeValidationStatus,
     SubmissionAdapterCapability,
     SubmissionMethod,
     SubmissionResultItem,
@@ -83,9 +84,61 @@ def compute_batch_content_hash(apps_data: List[Dict[str, Any]]) -> str:
         res_id = app.get("resume_id")
         cl = app.get("cover_letter") or ""
         fa = json.dumps(app.get("form_answers") or {}, sort_keys=True)
-        elements.append(f"{aid}:{opp_id}:{res_id}:{cl}:{fa}")
+        # Version stamp of the linked resume: editing the resume after approval changes the hash.
+        res_stamp = app.get("resume_stamp") or ""
+        elements.append(f"{aid}:{opp_id}:{res_id}:{res_stamp}:{cl}:{fa}")
     joined = "|".join(elements)
     return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+
+
+def _resume_stamp(resume: Any) -> str:
+    updated = getattr(resume, "updated_at", None)
+    stamp = updated.isoformat() if hasattr(updated, "isoformat") else str(updated or "")
+    return f"v{getattr(resume, 'version', 1)}@{stamp}"
+
+
+async def load_batch_apps_data(user_id: str, app_ids: List[int]) -> List[Dict[str, Any]]:
+    """Owner-scoped application dicts for hashing, each stamped with its resume's version/updated_at."""
+    apps_data: List[Dict[str, Any]] = []
+    for aid in app_ids:
+        app_rec = await get_career_application_by_id(aid, user_id)
+        if not app_rec:
+            continue
+        data = app_rec.model_dump()
+        if app_rec.resume_id:
+            resume = await get_resume_by_id(app_rec.resume_id, user_id)
+            data["resume_stamp"] = _resume_stamp(resume) if resume else "missing"
+        apps_data.append(data)
+    return apps_data
+
+
+_APPROVABLE_RESUME_STATUSES = {
+    ResumeValidationStatus.READY_FOR_REVIEW,
+    ResumeValidationStatus.APPROVED,
+}
+
+
+async def find_batch_not_ready(user_id: str, app_ids: List[int]) -> List[Dict[str, Any]]:
+    """Readiness gate for batch approval: list apps lacking a valid resume or a cover letter."""
+    problems: List[Dict[str, Any]] = []
+    for aid in app_ids:
+        app_rec = await get_career_application_by_id(aid, user_id)
+        if not app_rec:
+            problems.append({"application_id": aid, "reasons": ["Application not found."]})
+            continue
+        reasons: List[str] = []
+        resume = await get_resume_by_id(app_rec.resume_id, user_id) if app_rec.resume_id else None
+        if not app_rec.resume_id:
+            reasons.append("No tailored resume attached.")
+        elif not resume:
+            reasons.append("Attached resume not found.")
+        elif resume.validation_status not in _APPROVABLE_RESUME_STATUSES:
+            reasons.append(f"Resume validation status is {resume.validation_status.value}.")
+        if not (app_rec.cover_letter or "").strip():
+            reasons.append("No cover letter.")
+        if reasons:
+            problems.append({"application_id": aid, "reasons": reasons})
+    return problems
 
 
 def generate_batch_approval_token(
@@ -198,6 +251,11 @@ def generate_manual_application_package(
         missing.append("Education history")
     if not answers.get("work_authorization"):
         missing.append("Work authorization declaration")
+    if not answers.get("availability"):
+        missing.append("Availability")
+    current_degree = answers.get("degree") or answers.get("current_degree")
+    if not current_degree:
+        missing.append("Current degree")
 
     return {
         "portal_url": portal_url,
@@ -216,9 +274,10 @@ def generate_manual_application_package(
             "location": resume_content.get("location"),
         },
         "prefilled_answers": {
-            "work_authorization": answers.get("work_authorization", "Eligible to work in India / No sponsorship required for domestic roles"),
-            "availability": answers.get("availability", "Available for Summer / Full-term internship"),
-            "current_degree": answers.get("degree", "B.Tech / Undergraduate"),
+            # Unknown answers stay None: the candidate must supply them, we never invent them.
+            "work_authorization": answers.get("work_authorization") or None,
+            "availability": answers.get("availability") or None,
+            "current_degree": current_degree or None,
             "skills_summary": ", ".join(resume_content.get("skills", [])[:6]),
         },
         "submission_instructions": [

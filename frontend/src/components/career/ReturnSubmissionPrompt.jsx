@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react'
+import { markApplied } from '../../api/careerApi'
 
 export default function ReturnSubmissionPrompt({ onSubmissionConfirmed }) {
   const [pendingPrompt, setPendingPrompt] = useState(null)
   const [confirming, setConfirming] = useState(false)
+  const [confirmError, setConfirmError] = useState(null)
 
   useEffect(() => {
     const handleCheckReturn = () => {
@@ -38,21 +40,16 @@ export default function ReturnSubmissionPrompt({ onSubmissionConfirmed }) {
 
   const handleYesApplied = async () => {
     setConfirming(true)
+    setConfirmError(null)
     try {
-      const res = await fetch(`/api/career/applications/${pendingPrompt.applicationId}/mark-applied`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      })
-      if (!res.ok) throw new Error('Failed to record submission confirmation.')
-
-      const updated = await res.json()
+      const updated = await markApplied(pendingPrompt.applicationId)
       window.sessionStorage?.removeItem('pending_submission_check')
       setPendingPrompt(null)
       if (onSubmissionConfirmed) {
         onSubmissionConfirmed(updated)
       }
     } catch (err) {
-      console.error(`Error updating application: ${err.message}`)
+      setConfirmError(err.message || 'Could not record your confirmation. Please try again.')
     } finally {
       setConfirming(false)
     }
@@ -113,6 +110,12 @@ export default function ReturnSubmissionPrompt({ onSubmissionConfirmed }) {
       <p style={{ margin: '0 0 14px 0', fontSize: '12px', color: 'var(--text-muted, #64748b)', lineHeight: 1.5 }}>
         Compass never sets applied status automatically. Confirming will schedule a 14-day follow-up reminder and move this to your submitted pipeline.
       </p>
+
+      {confirmError && (
+        <div role="alert" style={{ margin: '0 0 12px 0', padding: '8px 10px', borderRadius: '6px', background: '#fee2e2', color: '#991b1b', fontSize: '12px' }}>
+          {confirmError}
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
         <button

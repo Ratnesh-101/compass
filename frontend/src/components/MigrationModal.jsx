@@ -31,7 +31,17 @@ export default function MigrationModal({
     }
   }, [isOpen])
 
+  // The success view is the one place where closing means "finished", not "skip for now".
+  const handleDone = useCallback(() => {
+    if (typeof onMigrationComplete === 'function') onMigrationComplete(importResult)
+    if (typeof onClose === 'function') onClose()
+  }, [onMigrationComplete, onClose, importResult])
+
   const handleSkip = useCallback(() => {
+    if (view === 'success') {
+      handleDone()
+      return
+    }
     // 1. Immediately dismiss modal so UI responds without blocking on network I/O
     if (typeof onClose === 'function') {
       onClose()
@@ -48,7 +58,7 @@ export default function MigrationModal({
     skipMigration().catch((err) => {
       console.warn('[Migration] Skip notification failed:', err)
     })
-  }, [onClose])
+  }, [onClose, view, handleDone])
 
   // Close dialog on Escape key when interactive (not importing)
   useEffect(() => {
@@ -112,7 +122,6 @@ export default function MigrationModal({
       const result = await importAllGuestData()
       setImportResult(result)
       setView('success')
-      if (onMigrationComplete) onMigrationComplete(result)
     } catch (err) {
       setError(err.message || 'Failed to import conversations')
       setView('prompt')
@@ -130,7 +139,6 @@ export default function MigrationModal({
       const result = await importSelectedGuestConversations(Array.from(selectedIds), importMemory)
       setImportResult(result)
       setView('success')
-      if (onMigrationComplete) onMigrationComplete(result)
     } catch (err) {
       setError(err.message || 'Failed to import selected conversations')
       setView('select')
@@ -636,7 +644,8 @@ export default function MigrationModal({
                 Original guest records remain safely preserved in your browser session.
               </div>
               <button
-                onClick={onClose}
+                id="migration-success-done"
+                onClick={handleDone}
                 className="btn-touch-target btn-primary-amber"
                 style={{
                   padding: '0.7rem 1.75rem',
@@ -647,7 +656,7 @@ export default function MigrationModal({
                   minHeight: '44px',
                 }}
               >
-                Continue Chatting
+                Done
               </button>
             </div>
           )}

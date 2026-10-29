@@ -10,6 +10,7 @@ import json
 from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 from pydantic import BaseModel, Field, field_validator
 
 from backend.models_radar import OpportunityOut
@@ -163,6 +164,8 @@ class TailorResumeRequest(BaseModel):
     opportunity_id: int
     custom_title: Optional[str] = None
     target_skills_emphasis: Optional[List[str]] = None
+    # When set, the new tailored resume is also linked to this (owner-scoped) application.
+    application_id: Optional[int] = None
 
 
 class SaveResumeRequest(BaseModel):
@@ -175,6 +178,14 @@ class SaveResumeRequest(BaseModel):
 
 class ResumeParseUploadRequest(BaseModel):
     raw_text: str = Field(max_length=200000)
+
+
+class ResumeParseUploadOut(ResumeContent):
+    """Parsed resume content plus additive extraction diagnostics."""
+    missing_fields: List[str] = Field(default_factory=list)
+    ambiguous_fields: List[str] = Field(default_factory=list)
+    field_confidence: Dict[str, float] = Field(default_factory=dict)
+    overall_confidence: Optional[float] = None
 
 
 class CoverLetterOut(BaseModel):
@@ -224,6 +235,8 @@ class UpdateApplicationStatusRequest(BaseModel):
     form_answers: Optional[Dict[str, Any]] = None
     cover_letter: Optional[str] = Field(default=None, max_length=50000)
     target_deadline: Optional[date] = None
+    # Explicitly clear the deadline (omitting target_deadline leaves it unchanged).
+    clear_target_deadline: bool = False
     private_notes: Optional[str] = Field(default=None, max_length=20000)
 
     @field_validator("form_answers")
@@ -331,8 +344,9 @@ class GitHubRepoEvidence(BaseModel):
     description: Optional[str] = None
     primary_language: Optional[str] = None
     detected_technologies: List[str] = Field(default_factory=list)
-    has_tests: bool = False
-    has_ci_cd: bool = False
+    # None means unknown (the check could not be completed, e.g. rate limited or fork)
+    has_tests: Optional[bool] = False
+    has_ci_cd: Optional[bool] = False
     has_documentation: bool = False
     commit_count_estimate: Optional[int] = None
     analysis_timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -348,6 +362,8 @@ class GitHubProfileIntelligence(BaseModel):
     detected_skills: List[str] = Field(default_factory=list)
     evidence_summary: str = ""
     warnings: List[str] = Field(default_factory=list)
+    # "ok" | "partial" | "failed" (additive; failed means nothing could be analyzed)
+    status: str = "ok"
 
 
 class GitHubImportRequest(BaseModel):
@@ -368,10 +384,34 @@ class ExternalProfileSource(str, Enum):
     OFFICIAL_API = "OFFICIAL_API"
 
 
+def safe_http_url(value: Optional[str]) -> Optional[str]:
+    """Return the stripped URL when it is a well-formed http(s) URL with a host, else None."""
+    if not value:
+        return None
+    candidate = value.strip()
+    try:
+        parsed = urlparse(candidate)
+    except ValueError:
+        return None
+    if parsed.scheme.lower() not in ("http", "https") or not parsed.hostname:
+        return None
+    return candidate
+
+
 class ExternalProfileImportRequest(BaseModel):
     source_type: ExternalProfileSource
-    raw_content: str
+    raw_content: str = Field(max_length=200000)
     source_url: Optional[str] = None
+
+    @field_validator("source_url")
+    @classmethod
+    def _source_url_must_be_http(cls, value: Optional[str]) -> Optional[str]:
+        if value is None or not value.strip():
+            return None
+        safe = safe_http_url(value)
+        if safe is None:
+            raise ValueError("source_url must be a valid http:// or https:// URL")
+        return safe
 
 
 # ===========================================================================

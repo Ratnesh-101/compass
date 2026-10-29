@@ -1,4 +1,5 @@
 import { API_BASE, getAuthHeaders, getGuestToken, initGuestSession } from './baseClient.js'
+import { extractErrorDetail } from '../utils/careerUiHelpers.js'
 
 async function ensureSession() {
   if (!getGuestToken()) {
@@ -175,7 +176,10 @@ export async function updateRadarProfile(profile) {
     body: JSON.stringify(profile),
     credentials: 'include',
   })
-  if (!res.ok) throw new Error(`Failed to update profile: HTTP ${res.status}`)
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(extractErrorDetail(body, `Failed to update profile: HTTP ${res.status}`))
+  }
   return res.json()
 }
 
@@ -185,7 +189,11 @@ export async function triggerRadarSync(source = 'all') {
     headers: getAuthHeaders(),
     credentials: 'include',
   })
-  if (!res.ok) throw new Error(`Sync trigger failed: HTTP ${res.status}`)
+  if (!res.ok) {
+    let detail = ''
+    try { detail = (await res.json())?.detail || '' } catch { /* non-JSON body */ }
+    throw new Error(detail || `Sync trigger failed: HTTP ${res.status}`)
+  }
   return res.json()
 }
 
