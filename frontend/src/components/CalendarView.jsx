@@ -35,7 +35,7 @@ import { CalendarGrid } from './calendar/CalendarGrid'
 import { CalendarSidebar } from './calendar/CalendarSidebar'
 import { ProposedPlanModal, QuickConnectModal, IcsExportModal } from './calendar/CalendarModals'
 import DarkModeToggle from './DarkModeToggle'
-import { syncResultBanner, commitResultBanner, reactiveResultBanner, availabilityNote } from '../utils/scheduleHonesty'
+import { syncResultBanner, syncErrorBanner, commitResultBanner, reactiveResultBanner, availabilityNote } from '../utils/scheduleHonesty'
 
 const DOMAIN_STYLES = {
   hackathon: {
@@ -128,6 +128,7 @@ export default function CalendarView({
   activeDomain,
   onTasksUpdated,
   onOpenAuthModal,
+  isSignedIn = true,
   isDarkMode,
   onToggleDarkMode,
 }) {
@@ -326,8 +327,13 @@ export default function CalendarView({
   }
 
   const handleSyncNow = async () => {
-    setSyncingCalendar(true)
     setBannerMessage(null)
+    if (!isSignedIn) {
+      setBannerMessage(syncErrorBanner(null, false))
+      setShowMoreMenu(false)
+      return
+    }
+    setSyncingCalendar(true)
     try {
       const res = await syncCalendarNow()
       const banner = syncResultBanner(res, calendarStatus.account_email)
@@ -335,7 +341,7 @@ export default function CalendarView({
       if (Number(res.live_created ?? 0) === 0 && banner.type !== 'error') setShowIcsModal(true)
       loadAvailability(weekStart)
     } catch (err) {
-      setBannerMessage({ type: 'error', text: `Failed to sync: ${err.message}` })
+      setBannerMessage(syncErrorBanner(err, true))
     } finally {
       setSyncingCalendar(false)
       setShowMoreMenu(false)
@@ -753,7 +759,7 @@ export default function CalendarView({
                   <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '8px' }}>
                     <CheckCircle2 size={24} strokeWidth={1.8} style={{ color: 'var(--code)' }} />
                   </div>
-                  <p style={{ fontSize: '13px', margin: 0, color: 'var(--text-primary)', fontWeight: '500' }}>All tasks are scheduled into calendar time slots!</p>
+                  <p style={{ fontSize: '13px', margin: 0, color: 'var(--text-primary)', fontWeight: '500' }}>{(tasks || []).length > 0 ? 'All tasks are scheduled into calendar time slots!' : 'No pending tasks.'}</p>
                 </div>
               )}
             </div>
@@ -768,7 +774,7 @@ export default function CalendarView({
                 <li>Days: Monday - Friday (workdays)</li>
                 <li>Inter-task buffer: 15 minutes</li>
                 <li>Deterministic slot allocator</li>
-                <li>RFC 5545 + Google Calendar sync</li>
+                <li>Export as .ics (RFC 5545)</li>
               </ul>
             </div>
           </section>

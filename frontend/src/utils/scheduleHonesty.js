@@ -15,6 +15,17 @@ export function dueDatePatch(originalDueDate, editedValue) {
   return { due_date: edited || null }
 }
 
+export const SIGN_IN_TO_SYNC = 'Sign in with Google to sync your calendar.'
+
+// Banner for a failed (or skipped, when not signed in) calendar sync. Never leaks backend auth internals.
+export function syncErrorBanner(err, signedIn = true) {
+  const msg = String(err?.message || '')
+  if (!signedIn || /compass_session|cookie|HTTP 40[13]|not authenticated|sign in/i.test(msg)) {
+    return { type: 'info', text: SIGN_IN_TO_SYNC }
+  }
+  return { type: 'error', text: `Failed to sync: ${msg || 'unknown error'}` }
+}
+
 // Result of POST /api/calendar/sync-now
 export function syncResultBanner(res, accountEmail) {
   const live = Number(res?.live_created ?? 0)

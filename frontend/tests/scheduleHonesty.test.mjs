@@ -191,3 +191,24 @@ test('CalendarView builds its banners from the honest helpers', () => {
   assert.doesNotMatch(view, /directly to your Google Calendar/)
   assert.match(view, /Could not read|availabilityNote/)
 })
+
+// ---- guest wording -----------------------------------------------------------------------
+
+test('guest sync shows plain sign-in wording and never leaks the cookie name', () => {
+  const guest = H.syncErrorBanner(null, false)
+  assert.equal(guest.text, 'Sign in with Google to sync your calendar.')
+  const leaked = H.syncErrorBanner(new Error('Valid active compass_session cookie required to sync tasks'), true)
+  assert.equal(leaked.text, 'Sign in with Google to sync your calendar.')
+  assert.doesNotMatch(leaked.text, /compass_session/)
+  assert.match(H.syncErrorBanner(new Error('boom'), true).text, /Failed to sync: boom/)
+})
+
+test('CalendarView skips the sync call for guests and words empty/policy text honestly', () => {
+  const src = read('components/CalendarView.jsx')
+  assert.match(src, /if \(!isSignedIn\)[\s\S]{0,200}syncErrorBanner\(null, false\)[\s\S]{0,120}return/)
+  assert.match(src, /'No pending tasks\.'/)
+  assert.match(src, /\(tasks \|\| \[\]\)\.length > 0/)
+  assert.doesNotMatch(src, /Google Calendar sync<\/li>/)
+  assert.match(src, /Export as \.ics \(RFC 5545\)/)
+  assert.match(read('App.jsx'), /isSignedIn=\{Boolean\(currentUser\?\.authenticated\)\}/)
+})

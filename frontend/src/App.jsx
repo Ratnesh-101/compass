@@ -789,6 +789,7 @@ export default function App() {
               refreshUsage()
             }}
             onOpenAuthModal={() => setShowAuthModal(true)}
+            isSignedIn={Boolean(currentUser?.authenticated)}
             isDarkMode={theme === 'dark'}
             onToggleDarkMode={toggleTheme}
           />
