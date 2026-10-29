@@ -615,11 +615,12 @@ def log(
     tags: Optional[str] = typer.Option(None, "--tags", "-t", help="Comma-separated tags"),
 ):
     """📝 Log a memory entry (code context, coursework note, etc.)."""
+    tags_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
     payload = {
         "content": summary,
         "domain": domain,
         "project": project,
-        "tags": tags,
+        "tags": tags_list,
     }
     result = _post("/api/log", payload)
 
