@@ -102,7 +102,8 @@ async def test_1_1password_realistic_snippets_ready_state(mock_opp):
         assert len(brief["priorities"]) == 1
         assert brief["priorities"][0]["source"] == 1
         assert len(brief["sources"]) == 2
-        assert brief["confidence"] == "high"
+        # Confidence is derived from surviving points/sources, not the model's claim of "high"
+        assert brief["confidence"] in ("medium", "low")
 
 
 # 2. The exact snippets from earlier screenshots: at least one point survives

@@ -379,16 +379,9 @@ async def ingest_external_profile_endpoint(body: ExternalProfileImportRequest, r
     return content
 
 
-@router.get("/opportunities/{opportunity_id}/job-analysis", response_model=JobAnalysisReport)
-async def analyze_opportunity_job_endpoint(
-    opportunity_id: int,
-    request: Request,
-    custom_desc: Optional[str] = Query(None, max_length=20000),
-):
-    """
-    Analyzes job description requirements (mandatory, preferred, responsibilities, eligibility)
-    and maps supporting evidence from the candidate's verified Master Profile.
-    """
+async def _run_job_analysis(
+    opportunity_id: int, request: Request, custom_description: Optional[str]
+) -> JobAnalysisReport:
     user_id = _get_or_create_user_id(request)
     opp = await get_opportunity_by_id(opportunity_id, user_id)
     if not opp:
@@ -406,8 +399,34 @@ async def analyze_opportunity_job_endpoint(
     return analyze_job_and_match(
         opportunity=opp,
         master=master.content,
-        custom_description=custom_desc,
+        custom_description=custom_description,
     )
+
+
+@router.get("/opportunities/{opportunity_id}/job-analysis", response_model=JobAnalysisReport)
+async def analyze_opportunity_job_endpoint(
+    opportunity_id: int,
+    request: Request,
+    custom_desc: Optional[str] = Query(None, max_length=20000),
+):
+    """
+    Analyzes job description requirements (mandatory, preferred, responsibilities, eligibility)
+    and maps supporting evidence from the candidate's verified Master Profile.
+    """
+    return await _run_job_analysis(opportunity_id, request, custom_desc)
+
+
+from backend.models_career import JobAnalysisRequest  # noqa: E402
+
+
+@router.post("/opportunities/{opportunity_id}/job-analysis", response_model=JobAnalysisReport)
+async def analyze_opportunity_job_post_endpoint(
+    opportunity_id: int,
+    request: Request,
+    body: JobAnalysisRequest,
+):
+    """POST variant of job analysis: long custom descriptions travel in the body, not the query string."""
+    return await _run_job_analysis(opportunity_id, request, body.custom_description)
 
 
 @router.get(
@@ -429,7 +448,11 @@ async def get_company_intel_endpoint(
         raise HTTPException(status_code=404, detail="Opportunity not found")
 
     try:
-        brief = await winning_features.generate_company_intel_brief(opp, force_refresh=refresh)
+        from backend.services.rate_limiter import make_company_intel_cap_charger
+
+        brief = await winning_features.generate_company_intel_brief(
+            opp, force_refresh=refresh, on_paid_work=make_company_intel_cap_charger(request)
+        )
         return brief
     except HTTPException:
         raise
