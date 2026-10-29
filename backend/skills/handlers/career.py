@@ -33,7 +33,7 @@ from backend.memory.radar import (
 from backend.models_career import CareerApplicationStatus, SubmissionMethod
 from backend.models_radar import UserOpportunityProfileIn
 from backend.services.career_resume import (
-    build_default_master_from_profile,
+    build_default_master_for_user,
     draft_truthful_cover_letter,
     tailor_resume_for_opportunity,
 )
@@ -77,7 +77,7 @@ async def handle_tailor_resume(args: Dict[str, Any], pool: Any = None) -> Dict[s
     master = await get_master_resume(user_id)
     if not master:
         profile = await get_user_opportunity_profile(user_id) or UserOpportunityProfileIn()
-        master = await upsert_master_resume(user_id, build_default_master_from_profile(profile), "Master Resume")
+        master = await upsert_master_resume(user_id, build_default_master_for_user(profile, user_id), "Master Resume")
 
     tailored_content, report, val_status = tailor_resume_for_opportunity(
         master=master.content,
@@ -137,7 +137,7 @@ async def handle_prepare_application(args: Dict[str, Any], pool: Any = None) -> 
         master = await get_master_resume(user_id)
         if not master:
             profile = await get_user_opportunity_profile(user_id) or UserOpportunityProfileIn()
-            master = await upsert_master_resume(user_id, build_default_master_from_profile(profile), "Master Resume")
+            master = await upsert_master_resume(user_id, build_default_master_for_user(profile, user_id), "Master Resume")
 
         tailored_content, report, val_status = tailor_resume_for_opportunity(master.content, opp)
         tailored = await create_tailored_resume(
@@ -304,7 +304,7 @@ async def handle_draft_cover_letter(args: Dict[str, Any], pool: Any = None) -> D
     master = await get_master_resume(user_id)
     if not master:
         profile = await get_user_opportunity_profile(user_id) or UserOpportunityProfileIn()
-        master = await upsert_master_resume(user_id, build_default_master_from_profile(profile), "Master Resume")
+        master = await upsert_master_resume(user_id, build_default_master_for_user(profile, user_id), "Master Resume")
 
     letter_text, verified_projs, verified_skls = draft_truthful_cover_letter(
         master=master.content,

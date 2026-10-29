@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import html
 import re
+import uuid
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse
 
@@ -22,6 +23,25 @@ from backend.models_career import (
     ResumeValidationStatus,
 )
 from backend.models_radar import OpportunityOut, UserOpportunityProfileIn
+
+
+def identity_fields_from_user_id(user_id: Optional[str]) -> tuple[str, str]:
+    """Return (name, email) seeded from a signed-in user id; guests have no name, so never invent one."""
+    uid = (user_id or "").strip()
+    if not uid or uid.startswith("guest_"):
+        return "", ""
+    try:
+        uuid.UUID(uid)
+        return "", ""  # bare UUID == guest id
+    except ValueError:
+        pass
+    return ("", uid) if "@" in uid else (uid, "")
+
+
+def build_default_master_for_user(profile: Optional[UserOpportunityProfileIn], user_id: Optional[str]) -> ResumeContent:
+    """Default master draft with identity seeded from the signed-in user id (empty for guests)."""
+    name, email = identity_fields_from_user_id(user_id)
+    return build_default_master_from_profile(profile, user_name=name, email=email)
 
 
 def build_default_master_from_profile(profile: Optional[UserOpportunityProfileIn] = None, user_name: str = "", email: str = "") -> ResumeContent:

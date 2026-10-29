@@ -100,7 +100,7 @@ from backend.services.career_github import analyze_github_profile
 from backend.services.career_job_match import analyze_job_and_match
 from backend.services.career_profile_sources import ingest_external_profile
 from backend.services.career_resume import (
-    build_default_master_from_profile,
+    build_default_master_for_user,
     draft_truthful_cover_letter,
     generate_resume_docx,
     generate_resume_html,
@@ -132,14 +132,8 @@ router = APIRouter(prefix="/api/career", tags=["career_copilot"])
 
 def _build_initial_master_content(profile: Optional[UserOpportunityProfileIn], request: Request) -> ResumeContent:
     ident = getattr(request.state, "identity", None) or _get_current_identity(request)
-    authed_name = ""
-    authed_email = ""
-    if ident and not ident.is_guest and ident.user_id:
-        if "@" in ident.user_id:
-            authed_email = ident.user_id
-        else:
-            authed_name = ident.user_id
-    return build_default_master_from_profile(profile, user_name=authed_name, email=authed_email)
+    authed_id = ident.user_id if ident and not ident.is_guest else None
+    return build_default_master_for_user(profile, authed_id)
 
 
 @router.get("/resumes/master", response_model=ResumeOut)
