@@ -8,7 +8,7 @@ import CompassPanel from './components/CompassPanel'
 import AuthModal from './components/AuthModal'
 import SharedChatView from './components/SharedChatView'
 import DemoDataBanner from './components/DemoDataBanner'
-import { fetchDemoStatus, clearDemoPersona } from './api/chatApi'
+import { fetchDemoStatus, clearDemoPersona, setChatIncludeDemo } from './api/chatApi'
 
 const CareerCopilot = React.lazy(() => import('./components/CareerCopilot'))
 import MigrationModal from './components/MigrationModal'
@@ -227,6 +227,11 @@ export default function App() {
     }
   }, [])
 
+
+  // Chat sees the demo workspace only while the dashboard shows it
+  useEffect(() => {
+    setChatIncludeDemo(isDemoActive)
+  }, [isDemoActive])
 
   // Re-fetch tasks from server whenever the domain filter or demo active state changes
   useEffect(() => {

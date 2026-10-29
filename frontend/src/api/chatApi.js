@@ -9,6 +9,13 @@ import {
   initGuestSession,
 } from './baseClient.js'
 
+// When the Judge Persona workspace is visible, chat must see the same demo data the dashboard shows.
+let includeDemoInChat = false
+
+export function setChatIncludeDemo(active) {
+  includeDemoInChat = Boolean(active)
+}
+
 /**
  * Send a chat message to the Nebius-powered assistant.
  * Passes conversation_id for multi-turn memory.
@@ -20,6 +27,9 @@ export async function sendQueryToAssistant(prompt, conversationId, tone = null, 
     const timeoutId = setTimeout(() => controller.abort(), 45000)
 
     const body = { message: prompt }
+    if (includeDemoInChat) {
+      body.include_demo = true
+    }
     if (conversationId) {
       body.conversation_id = conversationId
     }
@@ -87,6 +97,9 @@ export async function streamQueryFromAssistant(prompt, conversationId, { onToken
   let streamResult = null
   try {
     const body = { message: prompt }
+    if (includeDemoInChat) {
+      body.include_demo = true
+    }
     if (conversationId) {
       body.conversation_id = conversationId
     }
