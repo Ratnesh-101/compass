@@ -18,7 +18,9 @@ from backend.memory.radar import (
     delete_user_saved_opportunity,
     get_all_opportunities,
     get_last_sync_run,
+    OPENING_SOON_STATUSES,
     get_opportunity_by_id,
+    get_recommendation_candidates,
     get_radar_overview_stats,
     get_user_application_tracking,
     get_user_opportunity_profile,
@@ -29,6 +31,7 @@ from backend.memory.radar import (
     upsert_user_saved_opportunity,
 )
 from backend.models_radar import (
+    ApplicationStatus,
     EligibilityClassification,
     OpportunitiesListResponse,
     OpportunityOut,
@@ -91,6 +94,11 @@ def _enrich_opportunity(opp: OpportunityOut, profile: Optional[UserOpportunityPr
     return opp
 
 
+async def _require_opportunity(opportunity_id: int) -> None:
+    if await get_opportunity_by_id(opportunity_id) is None:
+        raise HTTPException(status_code=404, detail="Opportunity not found")
+
+
 @router.get("", response_model=OpportunitiesListResponse)
 async def list_opportunities_endpoint(
     request: Request,
@@ -139,6 +147,7 @@ async def get_recommended_opportunities(
     limit: int = Query(20, ge=1, le=50),
     employer_type: Optional[str] = Query(None),
     eligible_only: bool = Query(False, description="When true, strictly returns only confirmed ELIGIBLE opportunities"),
+    india_only: bool = Query(True),
 ):
     """
     Return top recommended opportunities tailored to user's profile and preferences.
@@ -148,14 +157,13 @@ async def get_recommended_opportunities(
     user_id = _get_or_create_user_id(request)
     profile = await get_user_opportunity_profile(user_id)
 
-    raw_items, _ = await get_all_opportunities(
-        user_id=user_id,
-        employer_type=employer_type,
-        page=1,
-        page_size=200,  # Evaluate broader candidate set for ranking
-    )
+    # Same candidate set as the ELIGIBLE MATCHES stat: open / upcoming / announced only.
+    raw_items = await get_recommendation_candidates(user_id, employer_type=employer_type, india_only=india_only)
 
     enriched = [_enrich_opportunity(item, profile) for item in raw_items]
+
+    # Recommendations never include listings the candidate is definitively ineligible for.
+    enriched = [o for o in enriched if o.eligibility_classification != EligibilityClassification.INELIGIBLE]
 
     # If eligible_only is requested, strictly filter for ELIGIBLE
     if eligible_only:
@@ -228,20 +236,14 @@ async def get_open_confirmed_opportunities(
 
 @router.get("/upcoming", response_model=List[OpportunityOut])
 async def get_upcoming_opportunities(request: Request):
-    """Return confirmed future openings and opportunities with reliable recruitment cycle estimates."""
+    """Return confirmed future openings (same status filter as the Opening Soon stat)."""
     user_id = _get_or_create_user_id(request)
     profile = await get_user_opportunity_profile(user_id)
 
-    raw_items, _ = await get_all_opportunities(user_id=user_id, page=1, page_size=100)
-    enriched = [_enrich_opportunity(item, profile) for item in raw_items]
-
-    # Filter items that are either UPCOMING_CONFIRMED or have non-empty prediction
-    upcoming = [
-        item for item in enriched
-        if item.current_status in {OpportunityStatus.UPCOMING_CONFIRMED, OpportunityStatus.ANNOUNCED}
-        or (item.prediction and item.prediction.estimated_open_window is not None)
-    ]
-    return upcoming
+    raw_items, _ = await get_all_opportunities(
+        user_id=user_id, statuses=OPENING_SOON_STATUSES, page=1, page_size=100
+    )
+    return [_enrich_opportunity(item, profile) for item in raw_items]
 
 
 @router.get("/analytics", response_model=OpportunityOverviewStats)
@@ -265,6 +267,7 @@ async def get_watchlist_endpoint(request: Request):
 async def save_opportunity_endpoint(opportunity_id: int, request: Request):
     """Save an opportunity to user watchlist."""
     user_id = _get_or_create_user_id(request)
+    await _require_opportunity(opportunity_id)
     await upsert_user_saved_opportunity(user_id, opportunity_id, is_saved=True)
     return {"status": "ok", "saved": True, "opportunity_id": opportunity_id}
 
@@ -273,6 +276,7 @@ async def save_opportunity_endpoint(opportunity_id: int, request: Request):
 async def unsave_opportunity_endpoint(opportunity_id: int, request: Request):
     """Remove an opportunity from user watchlist."""
     user_id = _get_or_create_user_id(request)
+    await _require_opportunity(opportunity_id)
     await delete_user_saved_opportunity(user_id, opportunity_id)
     return {"status": "ok", "saved": False, "opportunity_id": opportunity_id}
 
@@ -295,6 +299,9 @@ async def update_application_status_endpoint(
 ):
     """Update application tracking status, deadlines, and private notes."""
     user_id = _get_or_create_user_id(request)
+    if body.application_status not in ApplicationStatus.ALL:
+        raise HTTPException(status_code=422, detail="Unknown application_status")
+    await _require_opportunity(opportunity_id)
     await upsert_user_application_status(
         user_id=user_id,
         opportunity_id=opportunity_id,
