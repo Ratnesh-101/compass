@@ -454,6 +454,25 @@ export async function seedJudgeDemoPersona() {
 }
 
 /**
+ * Check if the current account/session has Judge Persona demo data active.
+ * Returns { active: boolean, task_count: number } or null on non-ok/error.
+ */
+export async function fetchDemoStatus() {
+  try {
+    const res = await fetch(`${API_BASE}/api/demo/status`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+      credentials: 'include',
+    })
+    if (!res.ok) return null
+    return await res.json()
+  } catch (err) {
+    console.warn('Fetch demo status error:', err)
+    return null
+  }
+}
+
+/**
  * Remove all demo persona dummy tasks for the current identity.
  * Genuine user tasks are strictly preserved.
  */

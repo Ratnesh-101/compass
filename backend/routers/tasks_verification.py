@@ -87,6 +87,7 @@ async def remove_task_dependency_endpoint(
 
 
 # Known Judge Persona and legacy dummy demo task titles
+DEMO_MEMORY_SOURCE = "judge_demo_persona"
 DEMO_TASK_TITLES: List[str] = [
     # Legacy seed titles (commit c34cf7b)
     "36-hour Hackathon Sprint: Final Demo Build",
@@ -181,21 +182,80 @@ async def clear_demo_tasks(conn, user_id: str) -> int:
     return len(task_ids)
 
 
+async def clear_demo_memories(conn, user_id: str) -> int:
+    """Delete all demo persona memory chunks for a user."""
+    if not user_id:
+        return 0
+    try:
+        status = await conn.execute(
+            "DELETE FROM memory_chunks WHERE user_id = $1 AND source = $2",
+            user_id,
+            DEMO_MEMORY_SOURCE,
+        )
+        if isinstance(status, int):
+            return status
+        if status and isinstance(status, str):
+            parts = status.strip().split()
+            if len(parts) >= 2 and parts[0].upper() == "DELETE":
+                try:
+                    return int(parts[1])
+                except ValueError:
+                    return 0
+            if parts:
+                try:
+                    return int(parts[-1])
+                except ValueError:
+                    return 0
+        return 0
+    except Exception as e:
+        logger.warning(f"Error executing demo memories deletion for user {user_id}: {e}")
+        return 0
+
+
 @router.post("/api/demo/clear")
 @router.delete("/api/demo/clear")
 @router.delete("/api/demo/tasks")
 async def clear_demo_tasks_endpoint(request: Request):
-    """Remove all demo persona dummy tasks for the current identity.
+    """Remove all demo persona dummy tasks and memories for the current identity.
     Genuine user tasks are strictly preserved.
     """
     ident = _get_current_identity(request)
     user_id = ident.id if ident else _get_or_create_user_id(request)
     pool = await get_pool()
     if not pool:
-        return {"status": "ok", "deleted_count": 0}
+        return {"status": "ok", "deleted_count": 0, "memories_deleted": 0}
     async with pool.acquire() as conn:
         deleted = await clear_demo_tasks(conn, user_id)
-        return {"status": "ok", "deleted_count": deleted}
+        memories_deleted = await clear_demo_memories(conn, user_id)
+        return {"status": "ok", "deleted_count": deleted, "memories_deleted": memories_deleted}
+
+
+@router.get("/api/demo/status")
+async def demo_status_endpoint(request: Request):
+    """Report whether the current identity still holds Judge Persona demo tasks."""
+    inactive = {"active": False, "task_count": 0}
+    ident = _get_current_identity(request)
+    if not ident:
+        return inactive
+    pool = await get_pool()
+    if not pool:
+        return inactive
+    try:
+        async with pool.acquire() as conn:
+            count = await conn.fetchval(
+                """
+                SELECT COUNT(*) FROM tasks
+                WHERE user_id = $1
+                  AND deleted_at IS NULL
+                  AND trusted_event_url LIKE 'compass://demo-persona/%'
+                """,
+                ident.id,
+            )
+    except Exception as e:
+        logger.warning(f"Error reading demo status: {e}")
+        return inactive
+    count = int(count or 0)
+    return {"active": count > 0, "task_count": count}
 
 
 # ---- 1-Click Judge Demo Persona Seeding ------------------------------------
@@ -695,7 +755,7 @@ async def seed_demo_persona_endpoint(request: Request, body: Optional[DemoSeedRe
                 INSERT INTO memory_chunks (domain, project_id, content, embedding, source, tags, user_id)
                 VALUES ($1, $2, $3, $4, $5, $6, $7)
                 """,
-                m["domain"], m["project_id"], m["content"], emb, "judge_demo_persona", m["tags"], user_id,
+                m["domain"], m["project_id"], m["content"], emb, DEMO_MEMORY_SOURCE, m["tags"], user_id,
             )
             seeded_mem_count += 1
 

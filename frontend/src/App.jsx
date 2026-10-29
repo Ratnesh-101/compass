@@ -7,6 +7,8 @@ import CalendarView from './components/CalendarView'
 import CompassPanel from './components/CompassPanel'
 import AuthModal from './components/AuthModal'
 import SharedChatView from './components/SharedChatView'
+import DemoDataBanner from './components/DemoDataBanner'
+import { fetchDemoStatus, clearDemoPersona } from './api/chatApi'
 
 const CareerCopilot = React.lazy(() => import('./components/CareerCopilot'))
 import MigrationModal from './components/MigrationModal'
@@ -146,10 +148,11 @@ export default function App() {
     if (stats) setUsageStats(stats)
   }, [])
 
-  // Demo persona is strictly session-scoped: on reload, it starts false so dummy data is gone
+  // Demo persona is visible while the account still holds Judge Persona data (checked on mount via /api/demo/status); Reset demo clears it
   const [isDemoActive, setIsDemoActive] = useState(false)
   const isDemoActiveRef = useRef(false)
   isDemoActiveRef.current = isDemoActive
+  const [resettingDemo, setResettingDemo] = useState(false)
 
   // P0.1 FIX: Domain-aware task fetcher: fires a NEW server-side request with
   // ?domain=<X> query param every time selectedDomain changes, instead of
@@ -187,6 +190,18 @@ export default function App() {
     }
   }, [])
 
+  const handleResetDemo = useCallback(async () => {
+    setResettingDemo(true)
+    try {
+      await clearDemoPersona()
+      isDemoActiveRef.current = false
+      setIsDemoActive(false)
+      loadTasks(selectedDomainRef.current, false)
+    } finally {
+      setResettingDemo(false)
+    }
+  }, [loadTasks])
+
   // Listen for explicit "Load Judge Persona" clicks
   useEffect(() => {
     const handleDemoLoaded = () => {
@@ -197,6 +212,20 @@ export default function App() {
     window.addEventListener('compass:demo-persona-loaded', handleDemoLoaded)
     return () => window.removeEventListener('compass:demo-persona-loaded', handleDemoLoaded)
   }, [selectedDomain, loadTasks])
+
+  // Check if account holds Judge Persona demo data on mount and activate if active
+  useEffect(() => {
+    let cancelled = false
+    fetchDemoStatus().then((result) => {
+      if (!cancelled && result && result.active === true) {
+        isDemoActiveRef.current = true
+        setIsDemoActive(true)
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
 
   // Re-fetch tasks from server whenever the domain filter or demo active state changes
@@ -582,7 +611,9 @@ export default function App() {
         </header>
 
         {activeTab === 'dashboard' ? (
-          <Dashboard
+          <>
+            {isDemoActive && <DemoDataBanner onReset={handleResetDemo} resetting={resettingDemo} />}
+            <Dashboard
             tasks={allTasks.length > 0 ? allTasks : tasks}
             backendStatus={backendStatus}
             usageStats={usageStats}
@@ -602,6 +633,7 @@ export default function App() {
             onOpenAuth={() => setShowAuthModal(true)}
             customDomains={customDomains}
           />
+          </>
         ) : activeTab === 'timeline' ? (
           <Timeline
             tasks={tasks}
