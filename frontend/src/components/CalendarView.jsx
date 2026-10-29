@@ -36,6 +36,7 @@ import { CalendarSidebar } from './calendar/CalendarSidebar'
 import { ProposedPlanModal, QuickConnectModal, IcsExportModal } from './calendar/CalendarModals'
 import DarkModeToggle from './DarkModeToggle'
 import { syncResultBanner, syncErrorBanner, commitResultBanner, reactiveResultBanner, availabilityNote } from '../utils/scheduleHonesty'
+import { getUserTimeZone, zonedDateKey, zonedMinutes, workingWindowLabel } from '../utils/userTimezone'
 
 const DOMAIN_STYLES = {
   hackathon: {
@@ -142,6 +143,7 @@ export default function CalendarView({
   const [proposedPlan, setProposedPlan] = useState(null)
   const [bannerMessage, setBannerMessage] = useState(null)
   const [availabilityError, setAvailabilityError] = useState(null)
+  const userTimeZone = useMemo(() => getUserTimeZone(), [])
   const [checkingReactive, setCheckingReactive] = useState(false)
   const [syncingCalendar, setSyncingCalendar] = useState(false)
   const [quickEmailInput, setQuickEmailInput] = useState('')
@@ -229,19 +231,19 @@ export default function CalendarView({
   const scheduledForDay = useCallback((isoDate) => {
     return tasks.filter(t => {
       if (!t.scheduled_start) return false
-      const taskDate = t.scheduled_start.split('T')[0]
+      const taskDate = zonedDateKey(t.scheduled_start, userTimeZone)
       const matchesDomain = activeDomain === 'all' || t.domain === activeDomain
       return taskDate === isoDate && matchesDomain
     })
-  }, [tasks, activeDomain])
+  }, [tasks, activeDomain, userTimeZone])
 
   // External busy events on a given ISO date
   const externalEventsForDay = useCallback((isoDate) => {
     return busyIntervals.filter(b => {
       if (!b.start) return false
-      return b.start.split('T')[0] === isoDate && b.source === 'google_calendar'
+      return zonedDateKey(b.start, userTimeZone) === isoDate && b.source === 'google_calendar'
     })
-  }, [busyIntervals])
+  }, [busyIntervals, userTimeZone])
 
   // Filter unplaced / unscheduled tasks
   const unscheduledTasks = tasks.filter(t => {
@@ -257,17 +259,15 @@ export default function CalendarView({
     [tasks, activeDomain]
   )
   const scheduledDateSet = useMemo(
-    () => new Set(allScheduledTasks.map(t => t.scheduled_start.split('T')[0])),
-    [allScheduledTasks]
+    () => new Set(allScheduledTasks.map(t => zonedDateKey(t.scheduled_start, userTimeZone))),
+    [allScheduledTasks, userTimeZone]
   )
 
   // Calculate top/height (%) for the 08:00–20:00 grid (12h = 720 min)
   const getEventPosition = (startIso, endIso) => {
     try {
-      const start = new Date(startIso)
-      const end = new Date(endIso)
-      const startMinutes = start.getUTCHours() * 60 + start.getUTCMinutes()
-      const endMinutes = end.getUTCHours() * 60 + end.getUTCMinutes()
+      const startMinutes = zonedMinutes(startIso, userTimeZone)
+      const endMinutes = zonedMinutes(endIso, userTimeZone)
       const gridStart = 8 * 60
       const gridEnd = 20 * 60
       const totalMinutes = gridEnd - gridStart
@@ -446,7 +446,7 @@ export default function CalendarView({
 
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', marginTop: '8px' }}>
           <p className="calendar-policy-subtext" style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>
-            09:00 - 18:00 UTC · 15m buffer · deterministic allocation
+            {workingWindowLabel(userTimeZone)} · 15m buffer · deterministic allocation
           </p>
 
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -770,7 +770,7 @@ export default function CalendarView({
                 <span>Deterministic Policy</span>
               </h4>
               <ul style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.6', paddingLeft: '16px', margin: 0 }}>
-                <li>Working Window: 09:00 - 18:00 UTC</li>
+                <li>Working Window: {workingWindowLabel(userTimeZone)}</li>
                 <li>Days: Monday - Friday (workdays)</li>
                 <li>Inter-task buffer: 15 minutes</li>
                 <li>Deterministic slot allocator</li>

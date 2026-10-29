@@ -48,6 +48,7 @@ def replan_slipped_tasks(
     dependencies: Optional[Mapping[int, Sequence[int]]] = None,
     available_windows: Sequence[Any] = (),
     buffer_minutes: int = 15,
+    tz_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Re-scope and replan slipped tasks and all downstream dependents. Preserves unaffected tasks."""
     from backend.services.scheduler import allocate_task_slots
@@ -109,6 +110,7 @@ def replan_slipped_tasks(
         buffer_minutes=buffer_minutes,
         dependencies=dep_map,
         existing_scheduled_map=existing_scheduled,
+        tz_name=tz_name,
     )
 
     downstream_count = max(0, len(affected_ids) - len(slipped_ids))

@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from backend.dependencies import Identity, _get_current_identity, require_identity
 from backend.services.ownership import scope_owner
+from backend.services.user_timezone import resolve_timezone_name
 from backend.memory.db import get_pool
 from backend.memory import structured
 from backend.models import (
@@ -45,6 +46,7 @@ async def get_calendar_status_endpoint(request: Request):
 async def get_calendar_availability_endpoint(
     start_date: Optional[str] = Query(None, description="Start date YYYY-MM-DD"),
     end_date: Optional[str] = Query(None, description="End date YYYY-MM-DD"),
+    tz: Optional[str] = Query(None, description="IANA timezone; unknown values fall back to UTC"),
     ident: Identity = Depends(require_identity),
 ):
     """Retrieve busy blocks and available working windows."""
@@ -56,12 +58,16 @@ async def get_calendar_availability_endpoint(
     handler = SKILL_REGISTRY.get("get_calendar_availability")
     if not handler:
         raise HTTPException(status_code=500, detail="Availability skill not registered")
-    result = await handler({"start_date": start_date, "end_date": end_date, "user_id": ident.id}, pool)
+    result = await handler({"start_date": start_date, "end_date": end_date, "timezone": tz, "user_id": ident.id}, pool)
     return result
 
 
 @router.post("/api/schedule/propose")
-async def propose_schedule_endpoint(body: ProposeScheduleBody, ident: Identity = Depends(require_identity)):
+async def propose_schedule_endpoint(
+    body: ProposeScheduleBody,
+    tz: Optional[str] = Query(None, description="IANA timezone; unknown values fall back to UTC"),
+    ident: Identity = Depends(require_identity),
+):
     """Generate deterministic schedule proposal for tasks."""
     from backend.skills import SKILL_REGISTRY
     try:
@@ -71,7 +77,7 @@ async def propose_schedule_endpoint(body: ProposeScheduleBody, ident: Identity =
     handler = SKILL_REGISTRY.get("propose_schedule")
     if not handler:
         raise HTTPException(status_code=500, detail="Schedule proposer skill not registered")
-    result = await handler({**body.model_dump(), "user_id": ident.id}, pool)
+    result = await handler({**body.model_dump(), "timezone": tz, "user_id": ident.id}, pool)
     return result
 
 
@@ -168,6 +174,7 @@ async def update_calendar_preferences_endpoint(body: UpdatePreferencesBody, iden
 @router.post("/api/schedule/reactive-check")
 async def reactive_schedule_check_endpoint(
     body: Optional[ReactiveCheckBody] = None,
+    tz: Optional[str] = Query(None, description="IANA timezone; unknown values fall back to UTC"),
     ident: Identity = Depends(require_identity),
 ):
     """Detect uncompleted tasks that passed their scheduled end time and compute reactive re-plan."""
@@ -208,6 +215,7 @@ async def reactive_schedule_check_endpoint(
         work_end_time=prefs.get("work_end_time", "18:00:00"),
         work_days=prefs.get("work_days", [1, 2, 3, 4, 5]),
         buffer_minutes=prefs.get("buffer_minutes", 15),
+        tz_name=resolve_timezone_name(tz),
     )
 
     replan = replan_slipped_tasks(
@@ -216,6 +224,7 @@ async def reactive_schedule_check_endpoint(
         dependencies=dep_map,
         available_windows=windows,
         buffer_minutes=prefs.get("buffer_minutes", 15),
+        tz_name=resolve_timezone_name(tz),
     )
 
     run_id = f"reactive_replan_{int(now.timestamp())}_{uuid.uuid4().hex[:12]}"

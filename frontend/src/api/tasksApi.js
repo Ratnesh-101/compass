@@ -1,6 +1,7 @@
 // Tasks & Verification API
 
 import { API_BASE, getAuthHeaders, fetchWithGuestRetry } from './baseClient.js'
+import { getUserTimeZone } from '../utils/userTimezone.js'
 
 /**
  * Fetch synchronized task list from Neon PostgreSQL with per-account isolation.
@@ -22,6 +23,7 @@ export async function fetchTasks(domain, options = {}) {
       params.set('include_demo', String(Boolean(options.include_demo)))
     }
 
+    params.set('tz', getUserTimeZone())
     const qs = params.toString()
     const url = qs ? `${API_BASE}/api/tasks?${qs}` : `${API_BASE}/api/tasks`
 

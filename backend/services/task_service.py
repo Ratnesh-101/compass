@@ -55,10 +55,11 @@ def build_frontend_task(
     cognitive_conflict: Optional[dict] = None,
     duration_minutes: Optional[int] = None,
     now: Optional[datetime] = None,
+    user_tz_name: Optional[str] = None,
 ) -> FrontendTaskOut:
     """Convert a database task row into FrontendTaskOut with deterministic classification."""
     due_d = row.get("due_date")
-    c = classify_deadline(row, now=now)
+    c = classify_deadline(row, now=now, user_tz_name=user_tz_name)
     countdown_str = c["label"]
 
     created_at = row.get("created_at") or datetime.now(timezone.utc)

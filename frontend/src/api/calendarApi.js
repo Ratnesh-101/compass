@@ -1,6 +1,7 @@
 // Calendar & Dynamic Scheduling API
 
 import { API_BASE, getAuthHeaders, getCurrentUserId, setCurrentUserId, safeHref, fetchWithTimeout } from './baseClient.js'
+import { getUserTimeZone } from '../utils/userTimezone.js'
 import { classifyAuthMe } from '../utils/firstRun.js'
 import { commitErrorText } from '../utils/scheduleHonesty.js'
 
@@ -129,6 +130,7 @@ export async function fetchCalendarAvailability(startDate, endDate) {
     const params = new URLSearchParams()
     if (startDate) params.append('start_date', startDate)
     if (endDate) params.append('end_date', endDate)
+    params.append('tz', getUserTimeZone())
     if (params.toString()) url += `?${params.toString()}`
 
     const res = await fetch(url, { headers: getAuthHeaders() })
@@ -148,7 +150,7 @@ export async function proposeSchedule({ targetDate, domain, taskIds } = {}) {
   if (domain && domain !== 'all') payload.domain = domain
   if (taskIds && taskIds.length > 0) payload.task_ids = taskIds
 
-  const res = await fetch(`${API_BASE}/api/schedule/propose`, {
+  const res = await fetch(`${API_BASE}/api/schedule/propose?${new URLSearchParams({ tz: getUserTimeZone() })}`, {
     method: 'POST',
     headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(payload),
@@ -198,7 +200,7 @@ export function getCalendarExportUrl(domain) {
 
 export async function checkReactiveSchedule(currentTime = null) {
   const body = currentTime ? { current_time: currentTime } : {}
-  const res = await fetch(`${API_BASE}/api/schedule/reactive-check`, {
+  const res = await fetch(`${API_BASE}/api/schedule/reactive-check?${new URLSearchParams({ tz: getUserTimeZone() })}`, {
     method: 'POST',
     headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(body),
