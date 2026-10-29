@@ -624,13 +624,14 @@ def log(
     }
     result = _post("/api/log", payload)
 
-    console.print("\n[compass.success]✅ Memory logged to pgvector with 768-dim embedding[/]")
-    console.print(f"   Domain:   {_domain_text(domain)}")
+    console.print("\n[compass.success]✓ Memory saved[/]")
+    console.print(f"   Domain:    {_domain_text(domain)}")
+    console.print( "   Embedding: Generated")
     if project:
-        console.print(f"   Project:  [bold]{project}[/]")
+        console.print(f"   Project:   [bold]{project}[/]")
     if tags:
-        console.print(f"   Tags:     [cyan]{tags}[/]")
-    console.print(f"   Status:   {result.get('message', 'Logged')}")
+        console.print(f"   Tags:      [cyan]{tags}[/]")
+    console.print(f"   Status:    {result.get('message', 'Memory logged successfully')}")
 
 
 @app.command()

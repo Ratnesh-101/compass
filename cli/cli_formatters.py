@@ -49,14 +49,14 @@ PRIORITY_STYLE = {
 }
 
 STEP_COLORS = {
-    "think": ("bold blue", "🧠 THINKING"),
-    "tool_call": ("bold yellow", "🔧 TOOL CALL"),
-    "observe": ("bold green", "👁️ RESULT"),
-    "confirm_request": ("bold red", "⚠️ CONFIRM"),
-    "critic": ("bold magenta", "⚖️ SELF-CRITIQUE"),
-    "synthesize": ("bold cyan", "✨ SYNTHESIS"),
-    "error": ("bold red", "❌ ERROR"),
-    "done": ("bold green", "✅ COMPLETE"),
+    "think": ("bold blue", "Thinking"),
+    "tool_call": ("bold yellow", "Action"),
+    "observe": ("bold green", "Result"),
+    "confirm_request": ("bold red", "Confirmation needed"),
+    "critic": ("bold magenta", "Self-critique"),
+    "synthesize": ("bold cyan", "Summary"),
+    "error": ("bold red", "Error"),
+    "done": ("bold green", "Complete"),
 }
 
 compass_theme = Theme({
@@ -67,6 +67,7 @@ compass_theme = Theme({
     "compass.title": "bold cyan",
     "compass.error": "bold red",
     "compass.success": "bold green",
+    "compass.dim": "dim",
 })
 
 console = Console(theme=compass_theme, legacy_windows=False)
@@ -233,16 +234,16 @@ def render_agent_activity_table(entries: List[Dict[str, Any]]) -> None:
         return
 
     table = Table(
-        title="📋 Agent Activity Log (Audit Trail)",
+        title="📋 Agent Activity Log",
         box=box.ROUNDED,
         header_style="bold cyan",
     )
-    table.add_column("Log ID", style="bold", justify="right")
-    table.add_column("Tool", style="yellow")
-    table.add_column("Target", style="white")
-    table.add_column("Status", style="bold")
-    table.add_column("Timestamp", style="dim")
-    table.add_column("Run ID", style="dim cyan")
+    table.add_column("ID", style="bold", justify="right", width=5)
+    table.add_column("Action", style="yellow", width=14)
+    table.add_column("Target", style="white", width=18)
+    table.add_column("Status", width=10, justify="center")
+    table.add_column("Time", style="dim", width=20)
+    table.add_column("Run", style="dim cyan", width=14)
 
     for item in entries:
         lid = str(item.get("id", ""))
@@ -250,14 +251,19 @@ def render_agent_activity_table(entries: List[Dict[str, Any]]) -> None:
         tbl = item.get("affected_table", "tasks")
         aff_id = str(item.get("affected_id") or "")
         reverted = item.get("is_reverted", False)
-        st_badge = "[red]REVERTED[/]" if reverted else "[green]ACTIVE[/]"
+        target = f"{tbl} #{aff_id}" if aff_id else tbl
         ts = item.get("created_at", "")[:19].replace("T", " ")
         rid = (item.get("run_id") or "")[:12]
 
-        table.add_row(lid, tool, f"{tbl} #{aff_id}", st_badge, ts, rid)
+        if reverted:
+            status_cell = Text("REVERTED", style="red")
+        else:
+            status_cell = Text("ACTIVE", style="green")
+
+        table.add_row(lid, tool, target, status_cell, ts, rid)
 
     console.print(table)
-    console.print("[dim]Revert any mutation using: compass agent-undo --log-id <ID>[/]")
+    console.print("[dim]  Revert any action:  compass agent-undo --log-id <ID>[/]")
 
 
 def render_agent_stats_view(data: Dict[str, Any]) -> None:
@@ -267,25 +273,33 @@ def render_agent_stats_view(data: Dict[str, Any]) -> None:
     flagged = data.get("critique_issues_flagged", 0)
     rate = data.get("critique_effectiveness_rate", 0.0)
 
-    panel_content = (
-        f"[bold]Total Agent Runs Analyzed:[/] {tot}\n"
-        f"[bold]Runs with Self-Critique Pass:[/] {crit}\n"
-        f"[bold]Critique Issues Flagged / Revised:[/] [yellow]{flagged}[/]\n"
-        f"[bold]Critique Intervention Rate:[/] [cyan]{rate}%[/]\n\n"
-        "[dim]A single-model self-critique pass checks plan constraints against real database data before final synthesis.[/]"
-    )
-    console.print(Panel(panel_content, title="⚖️ Self-Critique Effectiveness", border_style="magenta"))
+    # Build a clean, aligned key-value block without raw Markdown bolding
+    lines = [
+        f"  Runs analyzed:       {tot}",
+        f"  Critique passes:     {crit}",
+        f"  Issues revised:      [yellow]{flagged}[/]",
+        f"  Intervention rate:   [cyan]{rate}%[/]",
+        "",
+        "  [dim]A single-model self-critique pass checks plan constraints against real database data before synthesis.[/]",
+    ]
+    console.print(Panel(
+        "\n".join(lines),
+        title="⚖️  Agent Self-Critique",
+        border_style="magenta",
+        padding=(1, 2),
+    ))
 
     recent = data.get("recent_critique_evaluations", [])
     if recent:
-        t = Table(title="Recent Self-Critique Evaluations", box=box.SIMPLE, header_style="bold magenta")
-        t.add_column("Run ID", style="dim cyan")
-        t.add_column("Flagged Issue?", justify="center")
-        t.add_column("Critique Summary", style="white")
+        t = Table(title="Recent Evaluations", box=box.SIMPLE, header_style="bold magenta")
+        t.add_column("Run ID", style="dim cyan", width=14)
+        t.add_column("Issue?", justify="center", width=8)
+        t.add_column("Summary", style="white")
 
         for ev in recent[:5]:
-            f_icon = "⚠️ YES" if ev.get("flagged_issue") else "✅ NO"
-            t.add_row(ev.get("run_id", "")[:12], f_icon, ev.get("critique_summary", "")[:80])
+            flagged_icon = Text("⚠️  YES", style="yellow") if ev.get("flagged_issue") else Text("✅  NO", style="green")
+            summary = ev.get("critique_summary", "")[:90]
+            t.add_row(ev.get("run_id", "")[:14], flagged_icon, summary)
         console.print(t)
 
 
@@ -300,24 +314,26 @@ def render_agent_runs_table(runs: List[Dict[str, Any]]) -> None:
         box=box.ROUNDED,
         header_style="bold cyan",
     )
-    table.add_column("Run ID", style="dim cyan")
-    table.add_column("Goal", style="white")
-    table.add_column("Status", style="bold")
-    table.add_column("Steps", justify="right", style="magenta")
-    table.add_column("Created", style="dim")
-    table.add_column("Conv ID", style="dim yellow")
+    table.add_column("Run ID", style="dim cyan", no_wrap=True)
+    table.add_column("Goal", style="white", no_wrap=True)
+    table.add_column("Status", width=11, justify="center", no_wrap=True)
+    table.add_column("Steps", justify="right", style="magenta", width=6)
+    table.add_column("Created", style="dim", no_wrap=True)
 
     for r in runs:
-        rid = (r.get("id") or "")[:18]
-        goal = (r.get("goal") or "")[:40]
-        if len(r.get("goal") or "") > 40:
-            goal += "..."
+        rid = (r.get("id") or "")
+        raw_goal = r.get("goal") or ""
+        goal = (raw_goal[:45] + "…") if len(raw_goal) > 45 else raw_goal
         status = r.get("status", "unknown")
-        st_style = "[green]COMPLETED[/]" if status == "completed" else f"[yellow]{status.upper()}[/]"
+        if status == "completed":
+            status_cell = Text("COMPLETED", style="green")
+        elif status == "paused":
+            status_cell = Text("PAUSED", style="yellow")
+        else:
+            status_cell = Text(status.upper(), style="dim")
         steps = str(r.get("steps_count", 0))
-        created = (r.get("created_at") or "")[:19].replace("T", " ")
-        cid = (r.get("conversation_id") or "—")[:8]
-        table.add_row(rid, goal, st_style, steps, created, cid)
+        created = (r.get("created_at") or "")[:16].replace("T", " ")
+        table.add_row(rid, goal, status_cell, steps, created)
 
     console.print(table)
 
