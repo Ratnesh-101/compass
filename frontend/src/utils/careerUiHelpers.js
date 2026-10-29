@@ -26,7 +26,7 @@ export function extractErrorDetail(body, fallback) {
     if (parts.length > 0) return parts.join('; ')
   }
   if (detail && typeof detail === 'object') {
-    const inner = detail.message || detail.msg
+    const inner = detail.message || detail.msg || detail.detail
     if (typeof inner === 'string' && inner) return inner
   }
   return fallback

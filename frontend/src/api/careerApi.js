@@ -1,5 +1,5 @@
 /**
- * Compass — Career Copilot API Client.
+ * Compass - Career Copilot API Client.
  * Communicates with /api/career/* endpoints for:
  * - Master & tailored resume management
  * - Factual validation reports & HTML export
@@ -279,6 +279,34 @@ export async function fetchCompanyIntel(opportunityId, refresh = false) {
     credentials: 'include',
   })
   if (!res.ok) throw await errorFromResponse(res, 'Failed to fetch company intelligence')
+  return res.json()
+}
+
+export async function refreshCompanyIntelJob(opportunityId) {
+  await ensureSession()
+  const res = await fetch(`${API_BASE}/opportunities/${opportunityId}/company-intel/refresh`, {
+    method: 'POST',
+    headers: getJsonHeaders(),
+    credentials: 'include',
+  })
+  if (!res.ok) throw await errorFromResponse(res, 'Refresh failed')
+  return res.json()
+}
+
+export async function getCompanyIntelJobStatus(opportunityId, jobId) {
+  await ensureSession()
+  const res = await fetch(`${API_BASE}/opportunities/${opportunityId}/company-intel/jobs/${jobId}`, {
+    headers: getAuthHeaders(),
+    credentials: 'include',
+  })
+  if (res.status === 404) {
+    return {
+      status: 'failed',
+      reason: 'job_lost',
+      error: 'Server restarted or research session expired. Please refresh intel again.',
+    }
+  }
+  if (!res.ok) throw new Error(`Job status check failed: ${res.statusText}`)
   return res.json()
 }
 

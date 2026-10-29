@@ -203,3 +203,21 @@ test('workspace modal is keyed by opportunity id and customJobDesc starts from t
   assert.match(radar, /<ApplicationWorkspaceModal\s+key=\{activeWorkspaceOpp\.id\}/)
   assert.match(modal, /useState\(opportunity\?\.description \|\| ''\)/)
 })
+
+// ---- merged with the async refresh flow (#188) ------------------------------
+
+test('detail.detail strings (async refresh 429 shape) are extracted', () => {
+  assert.equal(extractErrorDetail({ detail: { code: 'x', detail: 'Search budget used up.' } }, 'f'), 'Search budget used up.')
+})
+
+test('async refresh: a 429 on job creation is surfaced, not retried through the sync path', () => {
+  assert.match(modal, /postErr\?\.status === 429\) throw postErr/)
+  assert.match(api, /errorFromResponse\(res, 'Refresh failed'\)/)
+})
+
+test('async refresh: cooldown starts only once the server accepted the job, and the button honours it', () => {
+  assert.match(modal, /if \(job\) startCooldown\(DEFAULT_INTEL_COOLDOWN_SECONDS\)/)
+  assert.match(modal, /startCooldown\(intelCooldownForError\(err\)\)/)
+  assert.match(modal, /disabled=\{loadingIntel \|\| cooldownSeconds > 0\}/)
+  assert.match(modal, /getCompanyIntelJobStatus/)
+})
