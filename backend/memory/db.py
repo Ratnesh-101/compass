@@ -437,11 +437,11 @@ async def _ensure_tables(pool: asyncpg.Pool) -> None:
             updated_at                  TIMESTAMPTZ   NOT NULL DEFAULT now()
         );
         CREATE INDEX IF NOT EXISTS idx_user_opp_prof_user ON user_opportunity_profiles(user_id);
-        ALTER TABLE user_opportunity_profiles ADD COLUMN IF NOT EXISTS cgpa DOUBLE PRECISION;
-        ALTER TABLE user_opportunity_profiles ADD COLUMN IF NOT EXISTS cgpa_scale DOUBLE PRECISION DEFAULT 10.0;
-        ALTER TABLE user_opportunity_profiles ADD COLUMN IF NOT EXISTS active_backlogs INT DEFAULT 0;
-        ALTER TABLE user_opportunity_profiles ADD COLUMN IF NOT EXISTS work_authorization TEXT DEFAULT 'India';
-        ALTER TABLE user_opportunity_profiles ADD COLUMN IF NOT EXISTS requires_sponsorship BOOLEAN DEFAULT FALSE;
+        ALTER TABLE user_opportunity_profiles ADD COLUMN IF NOT EXISTS cgpa DOUBLE PRECISION,
+            ADD COLUMN IF NOT EXISTS cgpa_scale DOUBLE PRECISION DEFAULT 10.0, ADD COLUMN IF NOT EXISTS active_backlogs INT DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS work_authorization TEXT DEFAULT 'India', ADD COLUMN IF NOT EXISTS requires_sponsorship BOOLEAN DEFAULT FALSE,
+            ADD COLUMN IF NOT EXISTS learning_skills TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+            ADD COLUMN IF NOT EXISTS auto_prepare_strongest_matches BOOLEAN NOT NULL DEFAULT FALSE;
 
         CREATE TABLE IF NOT EXISTS user_opportunities (
             id                          SERIAL        PRIMARY KEY,
