@@ -166,19 +166,11 @@ export default function CalendarView({
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search)
     if (urlParams.get('calendar_connected') === 'true') {
-      const email = urlParams.get('email') || ''
+      // The ?email= value is untrusted; the verified account comes from fetchCalendarStatus below.
       setBannerMessage({
         type: 'success',
-        text: `Google Calendar successfully connected via OAuth (${email || 'Live'})! Scheduled tasks will synchronize directly.`
+        text: 'Google Calendar connection finished. Verifying the connected account...'
       })
-      if (email) {
-        setCalendarStatus({
-          connected: true,
-          mode: 'live',
-          account_email: email,
-          label: `Google Calendar: ${email} (Live OAuth Connected)`,
-        })
-      }
       window.history.replaceState({}, document.title, window.location.pathname)
     }
 

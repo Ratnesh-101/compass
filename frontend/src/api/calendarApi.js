@@ -1,6 +1,7 @@
 // Calendar & Dynamic Scheduling API
 
-import { API_BASE, getAuthHeaders, getCurrentUserId, setCurrentUserId, safeHref } from './baseClient.js'
+import { API_BASE, getAuthHeaders, getCurrentUserId, setCurrentUserId, safeHref, fetchWithTimeout } from './baseClient.js'
+import { classifyAuthMe } from '../utils/firstRun.js'
 
 export async function fetchCalendarStatus() {
   try {
@@ -15,20 +16,37 @@ export async function fetchCalendarStatus() {
   }
 }
 
-export async function fetchCurrentUser() {
+/**
+ * Ask the server who we are and say how sure it is.
+ * status: 'authenticated' | 'unauthenticated' (explicit 401 / authenticated:false) |
+ * 'transient' (network error, timeout, 5xx - the caller must keep stored identity).
+ */
+export async function fetchCurrentUserResult() {
   try {
-    const res = await fetch(`${API_BASE}/api/auth/me`, {
+    const res = await fetchWithTimeout(`${API_BASE}/api/auth/me`, {
       headers: getAuthHeaders(),
     })
-    if (!res.ok) return null
-    const data = await res.json()
-    if (data.authenticated && data.user_id) {
+    let data = null
+    if (res.ok) {
+      try {
+        data = await res.json()
+      } catch {
+        return { status: 'transient', user: null }
+      }
+    }
+    const status = classifyAuthMe(res.status, data)
+    if (status === 'authenticated' && data.user_id) {
       setCurrentUserId(data.user_id)
     }
-    return data
+    return { status, user: status === 'authenticated' ? data : (res.ok ? data : null) }
   } catch {
-    return null
+    return { status: 'transient', user: null }
   }
+}
+
+export async function fetchCurrentUser() {
+  const result = await fetchCurrentUserResult()
+  return result.user
 }
 
 export async function logoutUser() {
