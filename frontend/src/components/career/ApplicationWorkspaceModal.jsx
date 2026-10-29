@@ -1556,6 +1556,11 @@ export default function ApplicationWorkspaceModal({
                                       }}
                                     >
                                       <span>{p.point}</span>
+                                      {p.similar_role && (
+                                        <span style={{ marginLeft: '6px', fontSize: '11px', fontStyle: 'italic', color: 'var(--text-muted)' }}>
+                                          (from a similar role listing)
+                                        </span>
+                                      )}
                                       {p.source && (
                                         <button
                                           type="button"

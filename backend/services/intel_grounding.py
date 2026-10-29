@@ -117,3 +117,89 @@ def _derive_confidence(brief: Dict[str, Any], model_claim: str) -> str:
     if model_claim in _CONFIDENCE_RANK and _CONFIDENCE_RANK[model_claim] < _CONFIDENCE_RANK[derived]:
         return model_claim
     return derived
+
+
+# ---------------------------------------------------------------------------
+# Complete-sentence handling and role relevance (plain string ops, no regexes)
+# ---------------------------------------------------------------------------
+
+SENTENCE_END = (".", "!", "?")
+ELLIPSIS = "…"
+MIN_SENTENCE_WORDS = 4
+_DANGLING_WORDS = {"and", "or", "of", "the", "a", "an", "to", "in", "for", "with", "that", "as", "at", "by", "on"}
+
+# Words that say little about WHICH role a listing is for.
+_GENERIC_ROLE_TOKENS: Set[str] = {
+    "intern", "interns", "internship", "winter", "summer", "spring", "fall", "autumn",
+    "2025", "2026", "2027", "2028", "and", "the", "for", "with", "senior", "junior", "lead",
+    "staff", "principal", "associate", "new", "grad", "graduate", "remote", "hybrid", "co", "op",
+    "coop", "ii", "iii", "of", "at", "in", "to",
+}
+# Job-family nouns; a snippet naming one the listing does not have is about another role.
+_ROLE_FAMILY_NOUNS: Set[str] = {
+    "engineer", "developer", "designer", "scientist", "analyst", "manager", "architect",
+    "researcher", "recruiter", "marketer", "accountant", "consultant", "technician",
+}
+
+ROLE_MATCH = "match"
+ROLE_SIMILAR = "similar"
+ROLE_NONE = "none"
+
+
+def _stem(token: str) -> str:
+    return token[:-1] if len(token) > 3 and token.endswith("s") else token
+
+
+def _role_tokens(text: str) -> Set[str]:
+    return {_stem(t) for t in _word_tokens(text)}
+
+
+def shape_point_text(text: str, max_words: int) -> Optional[Dict[str, Any]]:
+    """Return {"text", "truncated"} holding only whole sentences, or None for a fragment.
+
+    Prefers the first complete sentence that fits max_words. A longer sentence is cut at a word
+    boundary, ends with an ellipsis and is marked truncated, so a cut-off sentence is never
+    presented as a finished one. Text with no sentence end that is short enough to be whole is
+    itself a cut-off source fragment and is dropped.
+    """
+    flat = " ".join(str(text or "").replace("—", "-").replace("–", "-").split())
+    words = flat.split(" ") if flat else []
+    if len(words) < MIN_SENTENCE_WORDS:
+        return None
+    end_idx = -1
+    for idx, word in enumerate(words):
+        if word.endswith(SENTENCE_END) and idx + 1 >= MIN_SENTENCE_WORDS:
+            end_idx = idx
+            break
+    if 0 <= end_idx < max_words:
+        return {"text": " ".join(words[: end_idx + 1]), "truncated": False}
+    if end_idx < 0 and len(words) <= max_words:
+        return None
+    kept = words[:max_words]
+    while kept and kept[-1].lower().strip(".,;:!?") in _DANGLING_WORDS:
+        kept.pop()
+    if len(kept) < MIN_SENTENCE_WORDS:
+        return None
+    return {"text": " ".join(kept).rstrip(".,;:!?-") + ELLIPSIS, "truncated": True}
+
+
+def role_relevance(point_text: str, cited_source: Dict[str, Any], role: str) -> str:
+    """Is this snippet actually about the listing's role? Token overlap with the role title.
+
+    Returns ROLE_MATCH, ROLE_SIMILAR (weak overlap, or another job family is named) or ROLE_NONE.
+    """
+    role_sig = {t for t in _role_tokens(role) if t not in _GENERIC_ROLE_TOKENS and len(t) >= 3}
+    if not role_sig:
+        return ROLE_MATCH  # nothing to compare against; do not invent a conflict
+    text_tokens = _role_tokens(f"{point_text} {cited_source.get('snippet', '')} {cited_source.get('title', '')}")
+    overlap = len(role_sig & text_tokens)
+    if overlap == 0:
+        return ROLE_NONE
+    other_family = (_ROLE_FAMILY_NOUNS & text_tokens) - _role_tokens(role)
+    if other_family and overlap < 2:
+        return ROLE_NONE  # a single shared word ("user") plus another job family: a different role
+    if other_family and overlap < 3:
+        return ROLE_SIMILAR
+    if overlap >= 2 or overlap * 2 >= len(role_sig):
+        return ROLE_MATCH
+    return ROLE_SIMILAR
