@@ -12,11 +12,13 @@ import json
 import logging
 import re
 from datetime import date, datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import asyncpg
+from pydantic import ValidationError
 
 from backend.memory.db import get_pool as _raw_get_pool
+from backend.services.radar_profile_parse import derive_country, latest_education, parse_grade
 from backend.models_radar import (
     ApplicationStatus,
     OpportunityCycleOut,
@@ -590,12 +592,15 @@ async def get_all_opportunities(
     applied_only: bool = False,
     page: int = 1,
     page_size: int = 25,
+    statuses: Optional[Sequence[str]] = None,
 ) -> Tuple[List[OpportunityOut], int]:
     pool = await get_pool()
     if not pool:
         items = list(_in_memory_opportunities.values())
         if status:
             items = [i for i in items if i.get("current_status") == status]
+        if statuses:
+            items = [i for i in items if i.get("current_status") in statuses]
         if verified_only:
             items = [i for i in items if i.get("current_status") == "OPEN_CONFIRMED"]
         if category:
@@ -631,6 +636,9 @@ async def get_all_opportunities(
     if status:
         args.append(status)
         conditions.append(f"o.current_status = ${len(args)}")
+    if statuses:
+        args.append(list(statuses))
+        conditions.append(f"o.current_status = ANY(${len(args)}::text[])")
     if verified_only:
         conditions.append("o.current_status = 'OPEN_CONFIRMED'")
     if category:
@@ -808,7 +816,7 @@ def derive_profile_from_master_resume(content: Any) -> Optional[UserOpportunityP
     if not edu_list and not skills:
         return None
 
-    first_edu = edu_list[0] if edu_list else None
+    first_edu = latest_education(list(edu_list))
     grade_str = ""
     if isinstance(first_edu, dict):
         degree = first_edu.get("degree")
@@ -827,40 +835,42 @@ def derive_profile_from_master_resume(content: Any) -> Optional[UserOpportunityP
     else:
         degree = specialization = university = grad_year = None
 
-    # Parse CGPA from cgpa_or_grade if available
-    cgpa = None
-    cgpa_scale = 10.0
-    if grade_str:
-        import re
-        m = re.search(r"(\d+(?:\.\d+)?)\s*(?:/\s*(\d+(?:\.\d+)?))?", grade_str)
-        if m:
-            try:
-                cgpa = float(m.group(1))
-                if m.group(2):
-                    cgpa_scale = float(m.group(2))
-            except ValueError:
-                pass
+    cgpa, parsed_scale = parse_grade(grade_str)
+    country = derive_country(location)
 
-    country = "India" if "india" in location.lower() else ("USA" if any(u in location.lower() for u in ("usa", "united states", "wa", "ca", "ny", "tx")) else "India")
-
-    return UserOpportunityProfileIn(
-        degree=degree,
-        degree_specialization=specialization,
-        university=university,
-        academic_year=None,
-        grad_year=grad_year,
-        cgpa=cgpa,
-        cgpa_scale=cgpa_scale,
-        active_backlogs=0,
-        country_of_study=country,
-        country_of_residence=country,
-        skills=skills,
-    )
+    try:
+        return UserOpportunityProfileIn(
+            degree=degree,
+            degree_specialization=specialization,
+            university=university,
+            academic_year=None,
+            grad_year=grad_year,
+            cgpa=cgpa,
+            cgpa_scale=parsed_scale if cgpa is not None else 10.0,
+            active_backlogs=None,
+            country_of_study=country,
+            country_of_residence=country,
+            skills=skills,
+        )
+    except ValidationError as exc:
+        logger.warning("Resume-derived radar profile rejected (%s); dropping grade and year facts", exc.error_count())
+        return UserOpportunityProfileIn(
+            degree=degree if isinstance(degree, str) else None,
+            degree_specialization=specialization if isinstance(specialization, str) else None,
+            university=university if isinstance(university, str) else None,
+            country_of_study=country,
+            country_of_residence=country,
+            skills=[s for s in skills if isinstance(s, str)],
+        )
 
 
 async def sync_candidate_profile_from_master(user_id: str, content: Any) -> None:
     """Synchronizes candidate profile updates from Resume Studio into radar storage."""
-    derived = derive_profile_from_master_resume(content)
+    try:
+        derived = derive_profile_from_master_resume(content)
+    except Exception as exc:
+        logger.warning("Could not derive radar profile from master resume: %s", type(exc).__name__)
+        return
     if not derived:
         return
     existing = await get_user_opportunity_profile(user_id)
@@ -904,11 +914,11 @@ async def get_user_opportunity_profile(user_id: str) -> Optional[UserOpportunity
                     grad_year=row["grad_year"],
                     cgpa=float(row["cgpa"]) if row.get("cgpa") is not None else None,
                     cgpa_scale=float(row["cgpa_scale"]) if row.get("cgpa_scale") is not None else 10.0,
-                    active_backlogs=row.get("active_backlogs", 0) if row.get("active_backlogs") is not None else 0,
+                    active_backlogs=row.get("active_backlogs"),
                     work_authorization=row.get("work_authorization") or "India",
                     requires_sponsorship=bool(row.get("requires_sponsorship", False)),
-                    country_of_study=row["country_of_study"] or "India",
-                    country_of_residence=row["country_of_residence"] or "India",
+                    country_of_study=row["country_of_study"],
+                    country_of_residence=row["country_of_residence"],
                     preferred_locations=row["preferred_locations"] or ["India", "Remote"],
                     preferred_work_arrangements=row["preferred_work_arrangements"] or ["remote", "hybrid", "onsite"],
                     preferred_roles=row["preferred_roles"] or [],
@@ -925,7 +935,11 @@ async def get_user_opportunity_profile(user_id: str) -> Optional[UserOpportunity
         master = None
 
     if master and master.content:
-        derived = derive_profile_from_master_resume(master.content)
+        try:
+            derived = derive_profile_from_master_resume(master.content)
+        except Exception as exc:  # a malformed resume must never break every radar endpoint
+            logger.warning("Could not derive radar profile from master resume: %s", type(exc).__name__)
+            derived = None
         if derived:
             if not existing_profile:
                 return derived
@@ -1051,6 +1065,28 @@ async def _get_all_user_opportunities(user_id: str, **filters: bool) -> List[Opp
         page += 1
 
 
+RECOMMENDABLE_STATUSES = (
+    OpportunityStatus.OPEN_CONFIRMED,
+    OpportunityStatus.UPCOMING_CONFIRMED,
+    OpportunityStatus.ANNOUNCED,
+)
+OPENING_SOON_STATUSES = (OpportunityStatus.UPCOMING_CONFIRMED, OpportunityStatus.ANNOUNCED)
+
+
+async def get_recommendation_candidates(
+    user_id: str,
+    employer_type: Optional[str] = None,
+    india_only: bool = True,
+) -> List[OpportunityOut]:
+    """Every listing the Recommended list and the ELIGIBLE MATCHES stat may draw from (one shared filter set)."""
+    return await _get_all_user_opportunities(
+        user_id,
+        statuses=RECOMMENDABLE_STATUSES,
+        employer_type=employer_type,
+        india_only=india_only,
+    )
+
+
 async def get_user_saved_opportunities(user_id: str) -> List[OpportunityOut]:
     return await _get_all_user_opportunities(user_id, saved_only=True)
 
@@ -1100,18 +1136,18 @@ async def get_radar_overview_stats(user_id: str) -> Dict[str, Any]:
     from backend.models_radar import EligibilityClassification
 
     profile = await get_user_opportunity_profile(user_id)
+    strong_matches_count = 0
+    if profile:
+        candidates = await get_recommendation_candidates(user_id)
+        strong_matches_count = sum(
+            1 for opp in candidates
+            if evaluate_eligibility(opp, profile)[0] == EligibilityClassification.ELIGIBLE
+        )
+
     pool = await get_pool()
     if not pool:
         all_opps = list(_in_memory_opportunities.values())
         verified_open_opps = [o for o in all_opps if o.get("current_status") == "OPEN_CONFIRMED"]
-        
-        strong_matches_count = 0
-        if profile:
-            for raw_o in verified_open_opps:
-                opp_model = _parse_row_to_opportunity(raw_o, raw_o.get("sources", []), raw_o.get("cycles", []))
-                status, _, _ = evaluate_eligibility(opp_model, profile)
-                if status == EligibilityClassification.ELIGIBLE:
-                    strong_matches_count += 1
 
         return {
             "verified_open_count": len(verified_open_opps),
@@ -1132,10 +1168,12 @@ async def get_radar_overview_stats(user_id: str) -> Dict[str, Any]:
     async with pool.acquire() as conn:
         total = await conn.fetchval("SELECT COUNT(*) FROM opportunities") or 0
         open_cnt = await conn.fetchval("SELECT COUNT(*) FROM opportunities WHERE current_status = 'OPEN_CONFIRMED'") or 0
-        upcoming_cnt = await conn.fetchval("SELECT COUNT(*) FROM opportunities WHERE current_status IN ('UPCOMING_CONFIRMED', 'ANNOUNCED')") or 0
+        upcoming_cnt = await conn.fetchval(
+            "SELECT COUNT(*) FROM opportunities WHERE current_status = ANY($1::text[])", list(OPENING_SOON_STATUSES)
+        ) or 0
         saved_cnt = await conn.fetchval("SELECT COUNT(*) FROM user_opportunities WHERE user_id = $1 AND is_saved IS TRUE", user_id) or 0
         apps_cnt = await conn.fetchval(
-            "SELECT COUNT(*) FROM user_opportunities WHERE user_id = $1 AND application_status IS NOT NULL",
+            "SELECT COUNT(*) FROM user_opportunities WHERE user_id = $1 AND application_status IS NOT NULL AND application_status <> ''",
             user_id,
         ) or 0
         last_sync = await conn.fetchval(
@@ -1143,20 +1181,6 @@ async def get_radar_overview_stats(user_id: str) -> Dict[str, Any]:
         )
         type_rows = await conn.fetch("SELECT employer_type, COUNT(*) as cnt FROM opportunities GROUP BY employer_type")
         type_counts = {r["employer_type"]: r["cnt"] for r in type_rows}
-
-        # Calculate Eligible Matches independently by evaluating candidate profile against open opportunities
-        strong_matches_count = 0
-        if profile and open_cnt > 0:
-            open_opps, _ = await get_all_opportunities(
-                user_id=user_id,
-                status=OpportunityStatus.OPEN_CONFIRMED,
-                page=1,
-                page_size=500,
-            )
-            for opp in open_opps:
-                elig_status, _, _ = evaluate_eligibility(opp, profile)
-                if elig_status == EligibilityClassification.ELIGIBLE:
-                    strong_matches_count += 1
 
         return {
             "verified_open_count": open_cnt,
