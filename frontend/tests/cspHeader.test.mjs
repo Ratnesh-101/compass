@@ -17,6 +17,7 @@ const EXPECTED_CSP = [
   "img-src 'self' data: blob: https:",
   "connect-src 'self'",
   "frame-ancestors 'none'",
+  "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self' https://accounts.google.com",
 ].join('; ')
@@ -24,17 +25,17 @@ const EXPECTED_CSP = [
 function findCspHeader(config) {
   for (const entry of config.headers || []) {
     const csp = entry.headers?.find(
-      (h) => h.key === 'Content-Security-Policy-Report-Only'
+      (h) => h.key === 'Content-Security-Policy'
     )
     if (csp) return { entry, header: csp }
   }
   return null
 }
 
-test('both manifests contain Content-Security-Policy-Report-Only header with frame-ancestors none and default-src self', () => {
+test('both manifests contain Content-Security-Policy header with frame-ancestors none and default-src self', () => {
   for (const { name, config } of configs) {
     const found = findCspHeader(config)
-    assert.ok(found, `Expected ${name} to contain a Content-Security-Policy-Report-Only header`)
+    assert.ok(found, `Expected ${name} to contain a Content-Security-Policy header`)
     assert.match(
       found.header.value,
       /frame-ancestors 'none'/,
@@ -58,7 +59,7 @@ test('both manifests contain Content-Security-Policy-Report-Only header with fra
   }
 })
 
-test('frontend/vercel.json and root vercel.json stay identical in Content-Security-Policy-Report-Only header and source route', () => {
+test('frontend/vercel.json and root vercel.json stay identical in Content-Security-Policy header and source route', () => {
   const frontendCsp = findCspHeader(frontendConfig)
   const rootCsp = findCspHeader(rootConfig)
 
