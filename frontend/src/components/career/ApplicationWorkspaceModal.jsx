@@ -42,6 +42,7 @@ import {
 } from '../../utils/workspaceDraft'
 import ValidationReportCard from './ValidationReportCard'
 import { getSafeHttpUrl } from '../../utils/safeUrl.js'
+import { buildStatusOptions, buildDeadlinePayload } from '../../utils/careerUiHelpers.js'
 
 const STATUS_LABELS = {
   discovered: 'Discovered',
@@ -407,7 +408,7 @@ export default function ApplicationWorkspaceModal({
     setTailoring(true)
     setError(null)
     try {
-      const tailored = await tailorResume(opportunity.id)
+      const tailored = await tailorResume(opportunity.id, null, null, application?.id ?? null)
       setResume(tailored)
       populateResumeForm(tailored)
       if (application) {
@@ -548,7 +549,7 @@ export default function ApplicationWorkspaceModal({
       const updated = await updateApplication(application.id, {
         status: statusToSend,
         private_notes: privateNotes || null,
-        target_deadline: targetDeadline || null,
+        ...buildDeadlinePayload(targetDeadline),
       })
       setApplication(updated)
       setAppStatus(String(updated.status || newStatus).toLowerCase())
@@ -2083,7 +2084,7 @@ export default function ApplicationWorkspaceModal({
                   {/* Preparation Checklist */}
                   <div style={{ padding: '16px', borderRadius: '10px', background: 'var(--bg-app)', border: '1px solid var(--border)' }}>
                     <h3 style={{ margin: '0 0 12px 0', fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                      Application Preparation Checklist
+                      Local checklist (not saved)
                     </h3>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                       {[
@@ -2129,13 +2130,11 @@ export default function ApplicationWorkspaceModal({
                           onChange={e => setAppStatus(e.target.value)}
                           style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: '13px' }}
                         >
-                          <option value="preparing">Preparing</option>
-                          <option value="ready_for_review">Ready for Review</option>
-                          <option value="submitted">Applied / Submitted Externally</option>
-                          <option value="interview">Interviewing</option>
-                          <option value="offer_received">Offer Received</option>
-                          <option value="rejected">Rejected</option>
-                          <option value="withdrawn">Withdrawn</option>
+                          {buildStatusOptions(appStatus, { useLowerCase: true }).map(opt => (
+                            <option key={opt.value} value={opt.value}>
+                              {opt.value === 'submitted' ? 'Applied / Submitted Externally' : opt.label}
+                            </option>
+                          ))}
                         </select>
                       </div>
 
@@ -2222,6 +2221,7 @@ export default function ApplicationWorkspaceModal({
                         <button
                           type="button"
                           onClick={handleConfirmExternalSubmission}
+                          disabled={savingStatus}
                           style={{
                             padding: '10px 18px',
                             borderRadius: '8px',
@@ -2230,7 +2230,8 @@ export default function ApplicationWorkspaceModal({
                             border: '1px solid var(--border)',
                             fontWeight: 600,
                             fontSize: '13px',
-                            cursor: 'pointer',
+                            cursor: savingStatus ? 'not-allowed' : 'pointer',
+                            opacity: savingStatus ? 0.6 : 1,
                           }}
                         >
                           {appStatus === 'submitted' ? '✓ Marked as Submitted' : 'Mark as Submitted Externally'}

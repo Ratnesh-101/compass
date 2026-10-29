@@ -14,6 +14,7 @@ import HandoffKitDrawer from './HandoffKitDrawer'
 import ReturnSubmissionPrompt from './ReturnSubmissionPrompt'
 import CoverLetterModal from './CoverLetterModal'
 import { cleanOpportunity } from '../../utils/jobCardCleaner'
+import { buildStatusOptions, summarizeBatchResults } from '../../utils/careerUiHelpers'
 
 export default function ApplicationCenter({ onNavigateToResumeStudio }) {
   const [applications, setApplications] = useState([])
@@ -179,6 +180,8 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
     )
   }
 
+  const batchSummary = summarizeBatchResults(submitResult?.results)
+
   return (
     <div style={{ padding: '0 8px 32px', maxWidth: '1200px', margin: '0 auto' }}>
       {/* Header bar */}
@@ -225,22 +228,22 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
       )}
 
       {submitResult && (
-        <div style={{ background: '#dcfce7', border: '1px solid #86efac', borderRadius: '12px', padding: '16px', marginBottom: '20px' }}>
+        <div style={{ background: 'var(--bg-card-soft)', border: '1px solid var(--border)', borderRadius: '12px', padding: '16px', marginBottom: '20px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <h4 style={{ margin: 0, color: '#166534', fontSize: '15px', fontWeight: '800' }}>
-              🎉 Batch Submission Executed ({submitResult.successful_count + submitResult.manual_count}/{submitResult.total_processed})
+            <h4 style={{ margin: 0, color: 'var(--text-primary)', fontSize: '15px', fontWeight: '800' }}>
+              {batchSummary.message}
             </h4>
             <button
               type="button"
               onClick={() => setSubmitResult(null)}
-              style={{ background: 'transparent', border: 'none', color: '#166534', cursor: 'pointer', fontWeight: 'bold' }}
+              style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', fontWeight: 'bold' }}
             >
               ✕
             </button>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             {submitResult.results.map((r, idx) => (
-              <div key={idx} style={{ fontSize: '13px', color: '#14532d', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div key={idx} style={{ fontSize: '13px', color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span>• <strong>{r.company_name}</strong> ({r.role_title}): {r.message}</span>
                 {r.manual_package && (
                   <button
@@ -399,19 +402,9 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
                               fontWeight: '600',
                             }}
                           >
-                            <option value="DISCOVERED">Discovered</option>
-                            <option value="ELIGIBILITY_CHECKED">Eligibility Checked</option>
-                            <option value="PREPARING">Preparing</option>
-                            <option value="SAVED">Saved</option>
-                            <option value="READY_FOR_REVIEW">Ready for Review</option>
-                            <option value="READY_FOR_APPROVAL">Ready for Approval</option>
-                            <option value="APPROVED_FOR_SUBMISSION">Approved</option>
-                            <option value="SUBMITTED">Submitted</option>
-                            <option value="MANUAL_SUBMISSION_REQUIRED">Manual Handoff</option>
-                            <option value="INTERVIEW">Interviewing</option>
-                            <option value="OFFER_RECEIVED">Offer Received</option>
-                            <option value="REJECTED">Rejected</option>
-                            <option value="WITHDRAWN">Withdrawn</option>
+                            {buildStatusOptions(app.status).map(opt => (
+                              <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            ))}
                           </select>
                         </td>
                         <td style={{ padding: '12px 16px' }}>
@@ -525,6 +518,7 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
         setLegalAccepted={setLegalAccepted}
         onConfirm={handleExecuteApprovalAndSubmit}
         processing={processing}
+        error={error}
       />
 
       {/* Manual Handoff Application Kit Drawer (Section 10.1) */}

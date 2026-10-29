@@ -236,7 +236,7 @@ export default function RadarFilters({
           <button
             type="button"
             onClick={onOpenProfile}
-            title="Manage candidate profile in Resume Studio"
+            title="Edit your candidate profile"
             style={{
               display: 'flex',
               alignItems: 'center',

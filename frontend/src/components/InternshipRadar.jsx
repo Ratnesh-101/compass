@@ -21,6 +21,7 @@ import {
   triggerRadarSync,
   verifyOpportunity,
 } from '../api/radarApi'
+import { hasSavedProfile } from '../utils/careerUiHelpers'
 
 export default function InternshipRadar({
   refreshTrigger = 0,
@@ -30,6 +31,7 @@ export default function InternshipRadar({
   onNavigateToResumeStudio,
 } = {}) {
   const handleGoToResumeStudio = onNavigateToResumeStudio || onOpenProfile
+  const handleOpenCandidateProfile = onOpenProfile || onNavigateToResumeStudio
   const [activeTab, setActiveTab] = useState('recommended')
   const [opportunities, setOpportunities] = useState([])
   const [stats, setStats] = useState(null)
@@ -54,11 +56,7 @@ export default function InternshipRadar({
   const [activeWorkspaceOpp, setActiveWorkspaceOpp] = useState(null)
   const [bannerDismissed, setBannerDismissed] = useState(false)
 
-  const hasCandidateProfile = Boolean(
-    profile &&
-    profile.has_profile !== false &&
-    (profile.degree_level || (profile.skills && profile.skills.length > 0) || profile.grad_year)
-  )
+  const hasCandidateProfile = hasSavedProfile(profile)
 
   // Load analytics & profile
   const loadMetadata = useCallback(async () => {
@@ -341,7 +339,7 @@ export default function InternshipRadar({
       <RadarOverviewCards
         stats={stats}
         profile={profile}
-        onOpenProfile={handleGoToResumeStudio}
+        onOpenProfile={handleOpenCandidateProfile}
         onNavigateToResumeStudio={handleGoToResumeStudio}
         onSelectTab={setActiveTab}
       />
@@ -360,7 +358,7 @@ export default function InternshipRadar({
         onToggleIndiaOnly={() => setIndiaOnly(prev => !prev)}
         workArrangement={workArrangement}
         onWorkArrangementChange={setWorkArrangement}
-        onOpenProfile={handleGoToResumeStudio}
+        onOpenProfile={handleOpenCandidateProfile}
         onSync={handleSyncSources}
         isSyncing={isSyncing}
       />
@@ -439,7 +437,7 @@ export default function InternshipRadar({
           </button>
         </div>
       ) : opportunities.length === 0 ? (
-        activeTab === 'recommended' && (!profile || profile.has_profile === false || (!profile.degree_level && (!profile.skills || profile.skills.length === 0) && !profile.grad_year)) ? (
+        activeTab === 'recommended' && !hasCandidateProfile ? (
           <div
             style={{
               padding: '48px 24px',
