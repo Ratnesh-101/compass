@@ -15,6 +15,8 @@ class ChatRequest(BaseModel):
     tone: Optional[str] = None
     include_demo: bool = False
     mode: Optional[str] = None
+    tz: Optional[str] = None  # browser IANA timezone; validated server-side, falls back to profile then UTC
+    request_id: Optional[str] = None  # client-generated id; a retry with the same id repeats no change
     specialist_id: Optional[str] = None
     specialistId: Optional[str] = None
     target_message_id: Optional[str] = None
@@ -31,6 +33,8 @@ class PublicChatRequest(BaseModel):
     conversation_id: Optional[str] = None
     tone: Optional[str] = None
     mode: Optional[str] = None
+    tz: Optional[str] = None
+    request_id: Optional[str] = None
     specialist_id: Optional[str] = None
     specialistId: Optional[str] = None
     target_message_id: Optional[str] = None
@@ -262,6 +266,8 @@ class StreamChatRequest(BaseModel):
     tone: Optional[str] = None
     include_demo: bool = False
     mode: Optional[str] = None
+    tz: Optional[str] = None
+    request_id: Optional[str] = None
     specialist_id: Optional[str] = None
     specialistId: Optional[str] = None
     target_message_id: Optional[str] = None

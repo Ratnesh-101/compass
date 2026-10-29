@@ -35,7 +35,10 @@ from backend.router_helpers import (
     resolve_verification_claim_and_entity,
     _fallback_route,
     is_external_project_request,
+    _current_today,
 )
+from backend.services.task_intake_parse import parse_task_list
+from backend.services.task_intent import CAPABILITY_REPLY, is_capability_question
 
 logger = logging.getLogger("compass.router")
 settings = get_settings()
@@ -182,6 +185,10 @@ async def route_message(
         return "chat_delete_task", {"query": del_target, "clear_all": is_clear}, ""
     if is_undo_request(message):
         return "undo", {"message": message}, ""
+    if parse_task_list(message) is not None:
+        return "add_tasks_preview", {"message": message}, ""
+    if is_capability_question(message):
+        return None, None, CAPABILITY_REPLY
     if is_explicit_task_creation(message):
         extracted = _extract_task_creation_args(message)
         if not extracted.get("title"):
@@ -217,7 +224,7 @@ async def route_message(
     ) and not is_mocked
     if is_placeholder_key:
         return _fallback_route(message, history, tone=tone)
-    today_iso = date.today().isoformat()
+    today_iso = _current_today().isoformat()
     system_prompt = (
         f"You are Compass, an intelligent personal assistant with persistent memory across chat sessions. "
         f"Today's date is {today_iso}. When extracting dates without a specified year (e.g. '30th oct' or 'next week'), "

@@ -114,7 +114,6 @@ async def _ensure_tables(pool: asyncpg.Pool) -> None:
         ALTER TABLE agent_audit_log ADD COLUMN IF NOT EXISTS is_reverted BOOLEAN NOT NULL DEFAULT FALSE;
         CREATE INDEX IF NOT EXISTS idx_agent_audit_log_run_id     ON agent_audit_log(run_id);
         CREATE INDEX IF NOT EXISTS idx_agent_audit_log_created_at ON agent_audit_log(created_at);
-
         CREATE TABLE IF NOT EXISTS tavily_usage_log (
             id         SERIAL       PRIMARY KEY,
             operation  TEXT         NOT NULL,
@@ -139,10 +138,8 @@ async def _ensure_tables(pool: asyncpg.Pool) -> None:
         CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id);
         CREATE INDEX IF NOT EXISTS idx_tasks_scheduled_start ON tasks(scheduled_start);
         CREATE INDEX IF NOT EXISTS idx_tasks_deleted_at ON tasks(deleted_at);
-
         ALTER TABLE memory_chunks ADD COLUMN IF NOT EXISTS user_id VARCHAR(255) DEFAULT 'default_user';
         CREATE INDEX IF NOT EXISTS idx_memory_chunks_user_id ON memory_chunks(user_id);
-
         CREATE TABLE IF NOT EXISTS chat_pending_actions (
             id SERIAL PRIMARY KEY, action TEXT NOT NULL, task_ids INTEGER[] NOT NULL DEFAULT '{}'::integer[],
             task_titles JSONB NOT NULL DEFAULT '[]'::jsonb, count INTEGER NOT NULL DEFAULT 1,
@@ -152,6 +149,9 @@ async def _ensure_tables(pool: asyncpg.Pool) -> None:
         CREATE INDEX IF NOT EXISTS idx_chat_pending_owner_conv ON chat_pending_actions(owner_identity, conversation_id, status);
         CREATE INDEX IF NOT EXISTS idx_chat_pending_expires ON chat_pending_actions(expires_at);
         ALTER TABLE messages ADD COLUMN IF NOT EXISTS verifiable BOOLEAN DEFAULT FALSE;
+        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS due_at TIMESTAMPTZ;
+        CREATE TABLE IF NOT EXISTS chat_request_log (owner_identity TEXT NOT NULL, request_id TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', response JSONB, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (owner_identity, request_id));
+        CREATE INDEX IF NOT EXISTS idx_chat_request_log_created ON chat_request_log(created_at);
 
             CREATE TABLE IF NOT EXISTS sessions (
                 token_hash        TEXT          PRIMARY KEY,

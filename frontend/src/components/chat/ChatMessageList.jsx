@@ -3,6 +3,7 @@ import EvidenceCard from './EvidenceCard'
 import ThinkingBlock from './ThinkingBlock'
 import MarkdownRenderer from './MarkdownRenderer'
 import ChatTaskCard from './ChatTaskCard'
+import IntakePreviewCard from './IntakePreviewCard'
 import { fetchPersonaPhrases } from '../../api/chatApi'
 import Logo from '../Logo'
 import { generateFollowUpSuggestions, formatSuggestionText } from '../../utils/suggestionGenerator'
@@ -222,6 +223,11 @@ export default function ChatMessageList({
                       ) : (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                           {msg.text ? <MarkdownRenderer content={msg.text} /> : null}
+                          {msg.savedNotice && (
+                            <div role="status" style={{ marginTop: msg.text ? '10px' : '0', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                              {msg.savedNotice}
+                            </div>
+                          )}
                           {msg.error && (
                             <div style={{
                               display: 'flex',
@@ -246,7 +252,7 @@ export default function ChatMessageList({
                                   type="button"
                                   onClick={() => {
                                     if (onRetry) {
-                                      onRetry(idx, msg.retryPrompt, msg.retrySpecialistId)
+                                      onRetry(idx, msg.retryPrompt, msg.retrySpecialistId, msg.retryRequestId)
                                     } else if (onSendMessage) {
                                       onSendMessage(msg.retryPrompt)
                                     }
@@ -326,7 +332,14 @@ export default function ChatMessageList({
                           </button>
                         </div>
                       )}
-                      {(msg.data?.pending_action || msg.pending_action) && isLatest && !isStreaming && !isTyping && (
+                      {pendingKind === 'add_tasks' && isLatest && !isStreaming && !isTyping && (
+                        <IntakePreviewCard
+                          pendingAction={pendingAction}
+                          onConfirm={() => onSendMessage && onSendMessage("Confirm")}
+                          onCancel={() => onSendMessage && onSendMessage("Cancel")}
+                        />
+                      )}
+                      {(msg.data?.pending_action || msg.pending_action) && isLatest && !isStreaming && !isTyping && pendingKind !== 'add_tasks' && (
                         <div
                           className="chat-pending-action-card"
                           role="region"

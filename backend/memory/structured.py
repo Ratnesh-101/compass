@@ -137,6 +137,7 @@ async def create_task(
     duration_minutes: Optional[int] = None,
     scheduled_start: Optional[datetime] = None,
     scheduled_end: Optional[datetime] = None,
+    due_at: Optional[datetime] = None,
 ) -> dict:
     """Insert a new task into the structured tasks table with normalized inputs and user identity."""
     # Normalize domain, status, and priority
@@ -150,11 +151,11 @@ async def create_task(
 
     row = await conn.fetchrow(
         """
-        INSERT INTO tasks (domain, project_id, title, due_date, status, priority, notes, user_id, trusted_event_url, duration_minutes, scheduled_start, scheduled_end)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-        RETURNING id, domain, project_id, title, due_date, status, priority, notes, user_id, trusted_event_url, duration_minutes, scheduled_start, scheduled_end, created_at, updated_at
+        INSERT INTO tasks (domain, project_id, title, due_date, status, priority, notes, user_id, trusted_event_url, duration_minutes, scheduled_start, scheduled_end, due_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        RETURNING id, domain, project_id, title, due_date, due_at, status, priority, notes, user_id, trusted_event_url, duration_minutes, scheduled_start, scheduled_end, created_at, updated_at
         """,
-        norm_domain, project_id, title.strip(), due_date, norm_status, norm_priority, notes, user_id, trusted_event_url, duration_minutes, scheduled_start, scheduled_end
+        norm_domain, project_id, title.strip(), due_date, norm_status, norm_priority, notes, user_id, trusted_event_url, duration_minutes, scheduled_start, scheduled_end, due_at
     )
     return dict(row) if row else {}
 

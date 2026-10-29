@@ -10,6 +10,7 @@ import {
   fetchWithTimeout,
 } from './baseClient.js'
 import { SEED_TIMEOUT_MS } from '../utils/firstRun.js'
+import { chatRequestFields } from '../utils/chatRequest.js'
 
 // When the Judge Persona workspace is visible, chat must see the same demo data the dashboard shows.
 let includeDemoInChat = false
@@ -28,7 +29,7 @@ export async function sendQueryToAssistant(prompt, conversationId, tone = null, 
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 45000)
 
-    const body = { message: prompt }
+    const body = { message: prompt, ...chatRequestFields() }
     if (includeDemoInChat) {
       body.include_demo = true
     }
@@ -93,12 +94,13 @@ export function sanitizeModesMarker(text) {
  * Dispatches incremental tokens via onToken, completion metadata via onComplete,
  * and errors via onError.
  */
-export async function streamQueryFromAssistant(prompt, conversationId, { onToken, onThought, onStatus, onComplete, onError, tone = null, mode = null, specialistId = null, targetMessageId = null, targetMessageContent = null, signal = null } = {}) {
+export async function streamQueryFromAssistant(prompt, conversationId, { onToken, onThought, onStatus, onComplete, onError, tone = null, mode = null, specialistId = null, targetMessageId = null, targetMessageContent = null, signal = null, requestId = null } = {}) {
   let fullResponse = ''
   let reader = null
   let streamResult = null
+  let committed = null
   try {
-    const body = { message: prompt }
+    const body = { message: prompt, ...chatRequestFields(requestId) }
     if (includeDemoInChat) {
       body.include_demo = true
     }
@@ -169,6 +171,8 @@ export async function streamQueryFromAssistant(prompt, conversationId, { onToken
 
       if (evt.type === 'status' || evt.type === 'activity') {
         if (onStatus) onStatus(evt)
+      } else if (evt.type === 'committed') {
+        committed = { skill_used: evt.skill_used, count: evt.count }
       } else if (evt.type === 'thought') {
         if (onThought) onThought(evt.value)
       } else if (evt.type === 'token') {
@@ -245,10 +249,12 @@ export async function streamQueryFromAssistant(prompt, conversationId, { onToken
       pending_action: lastPendingAction,
       can_undo: lastCanUndo,
       data: lastData,
+      committed,
     }
   } catch (err) {
     if (err && typeof err === 'object') {
       err.partialResponse = fullResponse
+      if (committed) err.committed = committed
     }
     if (onError) {
       await onError(err)

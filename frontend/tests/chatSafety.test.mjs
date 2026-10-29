@@ -36,7 +36,7 @@ test('pending-action card renders only for the latest non-streaming message', ()
 
 test('retry keeps the specialist of the failed message', () => {
   const p = read('ChatPanel.jsx')
-  assert.match(p, /retrySpecialistId: specialistIdToUse/)
-  assert.match(p, /handleSend\(retryPrompt, null, retrySpecialistId, true\)/)
-  assert.match(read('chat/ChatMessageList.jsx'), /onRetry\(idx, msg\.retryPrompt, msg\.retrySpecialistId\)/)
+  assert.match(p, /specialistId: specialistIdToUse/)
+  assert.match(p, /handleSend\(retryPrompt, null, retrySpecialistId, true, \{ requestId: retryRequestId \}\)/)
+  assert.match(read('chat/ChatMessageList.jsx'), /onRetry\(idx, msg\.retryPrompt, msg\.retrySpecialistId, msg\.retryRequestId\)/)
 })

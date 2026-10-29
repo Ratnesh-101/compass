@@ -13,6 +13,7 @@ import {
   fetchChatRecap,
   getCurrentUserId,
 } from '../api/client'
+import { makeRequestId, failureMessage } from '../utils/chatRequest'
 import ChatHistoryDrawer from './chat/ChatHistoryDrawer'
 import ShareModal from './ShareModal'
 import ChatChatMessageList from './chat/ChatMessageList'
@@ -21,6 +22,8 @@ import ChatContextBar from './chat/ChatContextBar'
 import ChatHeaderToolbar from './chat/ChatHeaderToolbar'
 import ParkedThoughtsShelf from './chat/ParkedThoughtsShelf'
 import ProfileFactsShelf from './chat/ProfileFactsShelf'
+
+const CONNECT_ERROR = "I encountered an issue connecting to Compass. Please verify the service is running and try again."
 
 export default function ChatPanel({
   messages, setMessages, conversationId, setConversationId, isTyping, onChatComplete,
@@ -246,6 +249,8 @@ export default function ChatPanel({
     const abortController = new AbortController()
     activeAbortControllerRef.current = abortController
     const requestId = ++activeRequestIdRef.current
+    // One id per user send, reused by Retry, so the server never repeats a change it already saved.
+    const clientRequestId = extraMeta?.requestId || makeRequestId()
 
     isSendingRef.current = true
     setInput('')
@@ -275,6 +280,7 @@ export default function ChatPanel({
         targetMessageId,
         targetMessageContent,
         signal: abortController.signal,
+        requestId: clientRequestId,
         onStatus: (statusEvt) => {
           if (requestId !== activeRequestIdRef.current) return
           setStreamingStatus(statusEvt)
@@ -341,20 +347,12 @@ export default function ChatPanel({
           setStreamingThought('')
           setStreamingStatus(null)
           isSendingRef.current = false
-          const errMsg = err?.message || "I encountered an issue connecting to Compass. Please verify the service is running and try again."
           const partialText = (err?.partialResponse || receivedTokens || '').trim()
-          setMessages(prev => [
-            ...prev,
-            {
-              role: 'assistant',
-              text: partialText,
-              error: errMsg,
-              canRetry: true,
-              retryPrompt: text,
-              retrySpecialistId: specialistIdToUse,
-              thought: receivedThought || null,
-            },
-          ])
+          setMessages(prev => [...prev, failureMessage({
+            err, partialText, prompt: text, specialistId: specialistIdToUse, requestId: clientRequestId,
+            thought: receivedThought, fallbackError: CONNECT_ERROR,
+          })])
+          if (err?.committed && onChatComplete) onChatComplete()
         }
       })
     } catch (err) {
@@ -372,25 +370,18 @@ export default function ChatPanel({
       setStreamingThought('')
       isSendingRef.current = false
       const partialText = (err?.partialResponse || receivedTokens || '').trim()
-      setMessages(prev => [
-        ...prev,
-        {
-          role: 'assistant',
-          text: partialText,
-          error: err?.message || "I encountered an issue connecting to Compass. Please verify the service is running and try again.",
-          canRetry: true,
-          retryPrompt: text,
-          retrySpecialistId: specialistIdToUse,
-          thought: receivedThought || null,
-        },
-      ])
+      setMessages(prev => [...prev, failureMessage({
+        err, partialText, prompt: text, specialistId: specialistIdToUse, requestId: clientRequestId,
+        thought: receivedThought, fallbackError: CONNECT_ERROR,
+      })])
+      if (err?.committed && onChatComplete) onChatComplete()
     }
   }
 
-  const handleRetry = (msgIndex, retryPrompt, retrySpecialistId = null) => {
+  const handleRetry = (msgIndex, retryPrompt, retrySpecialistId = null, retryRequestId = null) => {
     // Remove the failed assistant message at msgIndex, preserving original user prompt
     setMessages(prev => prev.filter((_, idx) => idx !== msgIndex))
-    handleSend(retryPrompt, null, retrySpecialistId, true)
+    handleSend(retryPrompt, null, retrySpecialistId, true, { requestId: retryRequestId })
   }
 
   const handleSendRef = useRef(handleSend)

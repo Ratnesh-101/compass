@@ -174,9 +174,12 @@ def test_fallback_route_extracts_facts():
 def test_router_false_positives_regression():
     """Verify router false positive prevention as required by A1."""
     # 1. "don't forget to add a task for Friday" -> NOT forget_fact (routes to add_task)
-    skill_neg_forget, _, _ = _fallback_route("don't forget to add a task for Friday")
+    # The message names no task ("add a task for Friday"), so it asks for a name instead of
+    # inventing a title out of the leftover words.
+    skill_neg_forget, _, neg_forget_reply = _fallback_route("don't forget to add a task for Friday")
     assert skill_neg_forget != "forget_fact"
-    assert skill_neg_forget == "add_task"
+    assert skill_neg_forget is None
+    assert "name this task" in neg_forget_reply
 
     # 2. "remember that the demo is due Friday" -> NOT remember_fact (routes to task query/add)
     skill_deadline, _, _ = _fallback_route("remember that the demo is due Friday")

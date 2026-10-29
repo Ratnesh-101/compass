@@ -13,6 +13,7 @@ from typing import Optional, Dict, Any
 from backend.router import route_message
 from backend.memory.db import get_pool
 from backend.memory import structured, conversations
+from backend.services.task_time import combine_local, extract_clock, request_timezone
 
 logger = logging.getLogger("compass.orchestrator")
 _DELETE_CANDIDATE_LIMIT = 3
@@ -75,7 +76,7 @@ _SINGLE_TASK_REPLIES = frozenset({
 })
 
 
-async def handle_message(
+async def _handle_message_core(
     conversation_id: Optional[str] = None,
     message: str = "",
     user_id: Optional[str] = None,
@@ -283,12 +284,20 @@ async def handle_message(
         active_action = None
         deleted: list = []
         needs_reply = ""
+        intake_result = None
         if pool:
             async with pool.acquire() as conn:
                 active_action = await get_active_chat_pending_action(conn, owner_identity, conv_id)
                 if active_action:
                     act_type = active_action.get("action")
-                    if act_type in ("delete_task", "clear_schedule"):
+                    if act_type == "add_tasks":
+                        from backend.services.task_intake import confirm_add_tasks
+                        reply_key = (message or "").lower().strip().rstrip(".!?")
+                        if reply_key in ORDINAL_REPLIES or reply_key in _SINGLE_TASK_REPLIES:
+                            needs_reply = "That isn't a confirmation. Reply 'Confirm' to add all the tasks or 'Cancel'."
+                        else:
+                            intake_result = await confirm_add_tasks(conn, active_action, owner_identity, conv_id)
+                    elif act_type in ("delete_task", "clear_schedule"):
                         normalized_reply = (message or "").lower().strip().rstrip(".!?")
                         if normalized_reply in ORDINAL_REPLIES or (
                             act_type == "clear_schedule" and normalized_reply in _SINGLE_TASK_REPLIES
@@ -315,7 +324,9 @@ async def handle_message(
                             if not claimed:
                                 active_action = None
 
-        if needs_reply:
+        if intake_result is not None:
+            resp_msg, ret_data, success = intake_result
+        elif needs_reply:
             resp_msg = needs_reply
             ret_data = None
             success = False
@@ -619,13 +630,28 @@ async def handle_message(
             "routing_latency_ms": int((time.perf_counter() - start_time) * 1000),
         }
 
+    # 2b. Skill Execution: add_tasks_preview (a pasted list; stores a pending confirmation, writes nothing)
+    if skill_name == "add_tasks_preview":
+        from backend.services.task_intake import handle_intake_preview
+        return await handle_intake_preview(
+            message=message, conv_id=conv_id, owner_identity=owner_identity, user_id=user_id,
+            guest_id=guest_id, persist=persist, active_pool=active_pool, start_time=start_time,
+        )
+
     # 2b. Skill Execution: add_task
     if skill_name == "add_task" and args:
-        title = args.get("title") or message
+        from backend.services.task_intent import blocks_task_creation, title_problem
+        title = str(args.get("title") or "").strip()
+        if blocks_task_creation(message) or title_problem(title):
+            from backend.services.task_intake import clarification_result
+            return clarification_result(conv_id, start_time, message)
         domain = args.get("domain") or "general"
         project_name = args.get("project")
         due_str = args.get("due_date")
         due_date = _parse_iso_date(due_str)
+        user_tz = request_timezone.get() or "UTC"
+        due_clock = extract_clock(due_str, args.get("time_str"), message) if due_date else None
+        due_at = combine_local(due_date, due_clock, user_tz) if due_date and due_clock else None
 
         # Normalize priority & status
         raw_p = str(args.get("priority") or "medium").lower().strip()
@@ -764,6 +790,7 @@ async def handle_message(
                     priority=priority,
                     notes=notes,
                     user_id=task_owner,
+                    due_at=due_at,
                 )
         except Exception as e:
             logger.error(f"add_task failed — database unavailable: {e}", exc_info=True)
@@ -784,18 +811,11 @@ async def handle_message(
                 "routing_latency_ms": latency_ms,
             }
 
-        # Resolve user timezone and record into agent_audit_log for undo
-        user_tz = "UTC"
+        # Record into agent_audit_log for undo
         try:
             pool = await get_pool()
             if pool:
                 async with pool.acquire() as conn:
-                    row_tz = await conn.fetchrow(
-                        "SELECT value FROM user_profile_facts WHERE user_id = $1 AND key = 'timezone'",
-                        user_id or "default_user",
-                    )
-                    if row_tz and row_tz["value"]:
-                        user_tz = row_tz["value"].strip()
                     if task_record and "id" in task_record:
                         import json
                         await conn.execute(
@@ -817,8 +837,8 @@ async def handle_message(
         from backend.persona import format_tool_response
         summary = format_tool_response("add_task", {
             "title": title,
-            "due_date": due_str or "",
-            "time_str": args.get("time_str") or "",
+            "due_date": f"{due_date.isoformat()} {due_clock:%H:%M}" if due_date and due_clock else (due_date.isoformat() if due_date else ""),
+            "time_str": "",
             "timezone": user_tz,
             "roll_forward_note": args.get("roll_forward_note") or "",
         })
@@ -1069,3 +1089,9 @@ async def orchestrate_chat(
 ) -> Dict[str, Any]:
     """Alias for backwards compatibility with existing callers."""
     return await handle_message(conversation_id=conversation_id, message=message)
+
+
+async def handle_message(*args: Any, request_id: Optional[str] = None, tz: Optional[str] = None, **kwargs: Any) -> Dict[str, Any]:
+    """Process one chat turn in the user's timezone; a repeated request_id replays instead of re-running."""
+    from backend.services.chat_idempotency import run_chat_request
+    return await run_chat_request(_handle_message_core, args, kwargs, request_id=request_id, tz=tz)

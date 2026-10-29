@@ -38,6 +38,9 @@ from backend.router_helpers import (
     is_chat_delete_intent,
     is_undo_request,
 )
+from backend.services.chat_idempotency import committed_event, normalize_request_id, peek_replay, replay_events
+from backend.services.task_intent import is_intake_intent
+from backend.services.task_time import local_today, pick_timezone
 from backend.services.usage import record_usage
 
 logger = logging.getLogger("compass.services.chat_stream")
@@ -220,6 +223,14 @@ async def generate_chat_events(
         yield f"data: {json.dumps({'type': 'done', 'conversation_id': conv_id, 'skill_used': f'specialist_{valid_id}'})}\n\n"
         return
 
+    replayed = await peek_replay(
+        await _resolve_pool(), user_id or guest_id or "default_user", normalize_request_id(getattr(req, "request_id", None))
+    )
+    if replayed:
+        for replay_evt in replay_events(replayed, conv_id):
+            yield replay_evt
+        return
+
     stream_start = time.perf_counter()
     yield f"data: {json.dumps({'type': 'ping'})}\n\n"
     yield f"data: {json.dumps({'type': 'status', 'stage': 'thinking', 'label': 'Understanding your request…'})}\n\n"
@@ -322,7 +333,8 @@ async def generate_chat_events(
             from backend.router import get_openai_client
             client = get_openai_client()
 
-        today_iso = date.today().isoformat()
+        profile_tz = profile_facts.get("timezone") if isinstance(profile_facts, dict) else None
+        today_iso = local_today(pick_timezone(getattr(req, "tz", None), profile_tz)).isoformat()
         date_context = (
             f"Today's date is {today_iso}. When resolving dates without years (e.g. '30th oct'), use {today_iso[:4]}. "
             f"When the user asks follow-up questions, recalls earlier conversations, or asks to plan or schedule without clashing, "
@@ -371,11 +383,14 @@ async def generate_chat_events(
             or is_pending_action_cancel(message)
             or is_chat_delete_intent(message)[0]
             or is_undo_request(message)
+            or is_intake_intent(message)
         )
 
         if (not is_mocked and is_placeholder_key) or is_schedule_or_agent_intent(message) or is_tavily_verification_intent(message) or is_safety_intent:
             result = await orchestrator.handle_message(
                 conversation_id=conv_id,
+                request_id=getattr(req, "request_id", None),
+                tz=getattr(req, "tz", None),
                 message=message,
                 user_id=user_id,
                 guest_id=guest_id,
@@ -390,6 +405,9 @@ async def generate_chat_events(
                 conv_mode=getattr(req, "mode", None),
             )
             response_text = result.get("response", "")
+            committed_evt = committed_event(result)
+            if committed_evt:
+                yield committed_evt
             skill_used = result.get("skill_used") or "agent"
             thought = (result.get("data") or {}).get("thought") if isinstance(result.get("data"), dict) else None
 
@@ -480,6 +498,8 @@ async def generate_chat_events(
             logger.warning("Upstream stream creation failed: %s, falling back to orchestrator", create_err)
             result = await orchestrator.handle_message(
                 conversation_id=conv_id,
+                request_id=getattr(req, "request_id", None),
+                tz=getattr(req, "tz", None),
                 message=message,
                 user_id=user_id,
                 guest_id=guest_id,
@@ -491,6 +511,9 @@ async def generate_chat_events(
                 conv_mode=getattr(req, "mode", None),
             )
             response_text = result.get("response", "")
+            committed_evt = committed_event(result)
+            if committed_evt:
+                yield committed_evt
             skill_used = result.get("skill_used") or "chat"
             prompt_est = max(len(message.split()) * 3, 30)
             completion_est = max(len(response_text.split()), 15)
@@ -666,6 +689,8 @@ async def generate_chat_events(
 
             result = await orchestrator.handle_message(
                 conversation_id=conv_id,
+                request_id=getattr(req, "request_id", None),
+                tz=getattr(req, "tz", None),
                 message=message,
                 user_id=user_id,
                 guest_id=guest_id,
@@ -681,6 +706,9 @@ async def generate_chat_events(
                 conv_mode=getattr(req, "mode", None),
             )
             response_text = result.get("response", "")
+            committed_evt = committed_event(result)
+            if committed_evt:
+                yield committed_evt
             skill_used = result.get("skill_used") or "agent"
             thought = (result.get("data") or {}).get("thought") if isinstance(result.get("data"), dict) else None
             if thought:
@@ -738,6 +766,8 @@ async def generate_chat_events(
         if not full_text.strip():
             result = await orchestrator.handle_message(
                 conversation_id=conv_id,
+                request_id=getattr(req, "request_id", None),
+                tz=getattr(req, "tz", None),
                 message=message,
                 user_id=user_id,
                 guest_id=guest_id,
@@ -749,6 +779,9 @@ async def generate_chat_events(
                 conv_mode=getattr(req, "mode", None),
             )
             response_text = result.get("response", "")
+            committed_evt = committed_event(result)
+            if committed_evt:
+                yield committed_evt
             skill_used = result.get("skill_used") or "chat"
             thought = (result.get("data") or {}).get("thought") if isinstance(result.get("data"), dict) else None
             if thought:

@@ -83,6 +83,8 @@ async def chat(request: ChatRequest, req: Request, _token: str = Depends(verify_
         tone=request.tone,
         conv_mode=request.mode,
         include_demo=request.include_demo,
+        tz=request.tz,
+        request_id=request.request_id,
     )
     return ChatResponse(**result)
 
@@ -510,7 +512,7 @@ async def public_chat(req: PublicChatRequest, request: Request, _rl: None = Depe
 
     result = await orchestrator.handle_message(
         conversation_id=req.conversation_id, message=msg, user_id=user_id, guest_id=guest_id,
-        tone=req.tone, conv_mode=req.mode,
+        tone=req.tone, conv_mode=req.mode, tz=req.tz, request_id=req.request_id,
     )
 
     return PublicChatResponse(

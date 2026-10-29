@@ -36,6 +36,7 @@ CREATE TABLE tasks (
     project_id  INTEGER      REFERENCES projects(id) ON DELETE SET NULL,
     title       TEXT         NOT NULL,
     due_date    DATE,
+    due_at      TIMESTAMPTZ, -- exact due instant (UTC); due_date holds the user's local calendar day
     status      TEXT         NOT NULL DEFAULT 'open'
                              CHECK (status IN ('open','in_progress','done','overdue')),
     priority    TEXT         DEFAULT 'medium'
