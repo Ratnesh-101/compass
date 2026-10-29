@@ -20,7 +20,7 @@ from backend.dependencies import (
 )
 from backend.memory import structured
 from backend.memory.db import get_pool
-from backend.services.task_scope import DEMO_URL_PREFIX, demo_sql_predicate
+from backend.services.task_scope import DEMO_URL_PREFIX
 from backend.models import (
     CreateTaskRequest,
     DashboardResponse,
@@ -170,7 +170,7 @@ async def get_dashboard(
         for d in ("hackathon", "coursework", "code", "general")
     }
     target_date = ref_date or date.today()
-    demo_clause = "" if include_demo is True else f"AND {demo_sql_predicate()}"
+    show_demo = include_demo is True
 
     try:
         pool = await get_pool()
@@ -184,8 +184,9 @@ async def get_dashboard(
                     domains[d].project_count = r["count"]
 
             task_rows = await conn.fetch(
-                f"SELECT domain, COUNT(*) AS count FROM tasks WHERE status NOT IN ('completed', 'done', 'cancelled') AND deleted_at IS NULL AND user_id = $1 {demo_clause} GROUP BY domain",
+                "SELECT domain, COUNT(*) AS count FROM tasks WHERE status NOT IN ('completed', 'done', 'cancelled') AND deleted_at IS NULL AND user_id = $1 AND ($2::boolean OR COALESCE(trusted_event_url,'') NOT LIKE 'compass://demo-persona/%') GROUP BY domain",
                 user_id,
+                show_demo,
             )
             for r in task_rows:
                 d = r["domain"]
@@ -193,7 +194,7 @@ async def get_dashboard(
                     domains[d].open_task_count = r["count"]
 
             nearest_rows = await conn.fetch(
-                f"""
+                """
                 SELECT DISTINCT ON (domain) id, domain, title, due_date
                 FROM tasks
                 WHERE status NOT IN ('completed', 'done', 'cancelled')
@@ -201,11 +202,12 @@ async def get_dashboard(
                   AND due_date IS NOT NULL
                   AND due_date >= $1
                   AND user_id = $2
-                  {demo_clause}
+                  AND ($3::boolean OR COALESCE(trusted_event_url,'') NOT LIKE 'compass://demo-persona/%')
                 ORDER BY domain, due_date ASC
                 """,
                 target_date,
                 user_id,
+                show_demo,
             )
             for r in nearest_rows:
                 d = r["domain"]
@@ -251,20 +253,19 @@ async def get_timeline(
     """Fetch ordered rows across tasks (created_at) and memory_chunks (created_at) filtered by domain with per-account isolation."""
     ident = _get_current_identity(request)
     user_id = ident.id if ident else _get_or_create_user_id(request)
-    demo_clause = "" if include_demo is True else f"AND {demo_sql_predicate()}"
-    task_demo_clause = "" if include_demo is True else f"AND {demo_sql_predicate('t')}"
+    show_demo = include_demo is True
 
     try:
         pool = await get_pool()
         async with pool.acquire() as conn:
-            query = f"""
+            query = """
                 SELECT 'task' AS type, t.domain, p.name AS project, 'Created task: ' || t.title AS summary, t.created_at
                 FROM tasks t
                 LEFT JOIN projects p ON t.project_id = p.id
                 WHERE ($1::text IS NULL OR t.domain = $1)
                   AND t.deleted_at IS NULL
                   AND t.user_id = $4
-                  {task_demo_clause}
+                  AND ($5::boolean OR COALESCE(t.trusted_event_url,'') NOT LIKE 'compass://demo-persona/%')
 
                 UNION ALL
 
@@ -277,15 +278,15 @@ async def get_timeline(
                 ORDER BY created_at DESC
                 LIMIT $2 OFFSET $3
             """
-            rows = await conn.fetch(query, domain, limit, offset, user_id)
+            rows = await conn.fetch(query, domain, limit, offset, user_id, show_demo)
 
-            count_query = f"""
+            count_query = """
                 SELECT (
-                    (SELECT COUNT(*) FROM tasks WHERE ($1::text IS NULL OR domain = $1) AND deleted_at IS NULL AND user_id = $2 {demo_clause}) +
+                    (SELECT COUNT(*) FROM tasks WHERE ($1::text IS NULL OR domain = $1) AND deleted_at IS NULL AND user_id = $2 AND ($3::boolean OR COALESCE(trusted_event_url,'') NOT LIKE 'compass://demo-persona/%')) +
                     (SELECT COUNT(*) FROM memory_chunks WHERE ($1::text IS NULL OR domain = $1) AND user_id = $2)
                 ) AS total
             """
-            total_count = await conn.fetchval(count_query, domain, user_id) or 0
+            total_count = await conn.fetchval(count_query, domain, user_id, show_demo) or 0
 
             entries = [
                 TimelineEntry(

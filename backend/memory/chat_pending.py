@@ -12,7 +12,6 @@ from typing import Any, Dict, List, Optional
 import json
 import logging
 
-from backend.services.task_scope import demo_sql_predicate
 
 logger = logging.getLogger("compass.memory.chat_pending")
 
@@ -235,13 +234,13 @@ async def search_active_tasks_for_delete(
     if clean_q.isdigit():
         task_id = int(clean_q)
         row = await conn.fetchrow(
-            f"""
+            """
             SELECT id, title, domain, due_date, status, priority, user_id
             FROM tasks
             WHERE id = $1
               AND (user_id = $2 OR (user_id IS NULL AND $2 IS NULL))
               AND deleted_at IS NULL
-              AND ($3::boolean OR {demo_sql_predicate()})
+              AND ($3::boolean OR COALESCE(trusted_event_url,'') NOT LIKE 'compass://demo-persona/%')
             """,
             task_id,
             owner_identity,
@@ -253,12 +252,12 @@ async def search_active_tasks_for_delete(
     # LIKE wildcards in the user text are escaped with '!' so they match literally.
     like_q = clean_q.replace("!", "!!").replace("%", "!%").replace("_", "!_")
     rows = await conn.fetch(
-        f"""
+        """
         SELECT id, title, domain, due_date, status, priority, user_id
         FROM tasks
         WHERE (user_id = $1 OR (user_id IS NULL AND $1 IS NULL))
           AND deleted_at IS NULL
-          AND ($4::boolean OR {demo_sql_predicate()})
+          AND ($4::boolean OR COALESCE(trusted_event_url,'') NOT LIKE 'compass://demo-persona/%')
           AND (
             LOWER(title) = LOWER($2)
             OR LOWER(title) LIKE '%' || LOWER($3) || '%' ESCAPE '!'
@@ -285,12 +284,12 @@ async def list_nearest_active_titles(
 ) -> List[Dict[str, Any]]:
     """Up to ``limit`` active tasks of this owner, soonest due first (for "no match" replies)."""
     rows = await conn.fetch(
-        f"""
+        """
         SELECT id, title, domain, due_date, status, priority, user_id
         FROM tasks
         WHERE (user_id = $1 OR (user_id IS NULL AND $1 IS NULL))
           AND deleted_at IS NULL
-          AND ($3::boolean OR {demo_sql_predicate()})
+          AND ($3::boolean OR COALESCE(trusted_event_url,'') NOT LIKE 'compass://demo-persona/%')
         ORDER BY due_date ASC NULLS LAST, id ASC
         LIMIT $2
         """,
@@ -309,12 +308,12 @@ async def get_all_active_tasks_for_user(
 ) -> List[Dict[str, Any]]:
     """Get all non-deleted active tasks for clear_schedule confirmation."""
     rows = await conn.fetch(
-        f"""
+        """
         SELECT id, title, domain, due_date, status, priority, user_id
         FROM tasks
         WHERE (user_id = $1 OR (user_id IS NULL AND $1 IS NULL))
           AND deleted_at IS NULL
-          AND ($2::boolean OR {demo_sql_predicate()})
+          AND ($2::boolean OR COALESCE(trusted_event_url,'') NOT LIKE 'compass://demo-persona/%')
         ORDER BY due_date ASC NULLS LAST, id ASC
         """,
         owner_identity,

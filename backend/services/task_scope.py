@@ -29,12 +29,12 @@ async def visible_tasks(
     if not owner or not str(owner).strip():
         raise ValueError("visible_tasks requires a non-empty owner")
     rows = await conn.fetch(
-        f"""
+        """
         SELECT id, title, domain, due_date, status, priority, user_id, trusted_event_url
         FROM tasks
         WHERE user_id = $1
           AND deleted_at IS NULL
-          AND ($2::boolean OR {demo_sql_predicate()})
+          AND ($2::boolean OR COALESCE(trusted_event_url,'') NOT LIKE 'compass://demo-persona/%')
           AND ($3::text IS NULL OR domain = $3)
           AND ($4::text IS NULL OR status = $4)
         ORDER BY due_date ASC NULLS LAST, id ASC
