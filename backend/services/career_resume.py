@@ -33,7 +33,7 @@ def build_default_master_from_profile(profile: Optional[UserOpportunityProfileIn
                 institution=profile.university or "",
                 degree=profile.degree or "",
                 field_of_study=profile.degree_specialization or "",
-                end_year=profile.grad_year or "",
+                end_year=profile.grad_year or None,
             )
         )
 
@@ -72,12 +72,20 @@ def validate_resume_against_master(
     alignments: List[str] = []
 
     # 1. Contact validation
-    if not tailored.full_name or len(tailored.full_name.strip()) < 2:
+    if (
+        not tailored.full_name
+        or len(tailored.full_name.strip()) < 2
+        or tailored.full_name.strip().lower() in {"compass candidate", "candidate"}
+    ):
         missing.append("Candidate Full Name is required.")
     else:
         passed.append("Contact: Valid full name verified.")
 
-    if not tailored.email or "@" not in tailored.email:
+    if (
+        not tailored.email
+        or "@" not in tailored.email
+        or tailored.email.strip().lower() == "candidate@compass.local"
+    ):
         missing.append("Valid contact email address is required.")
     else:
         passed.append("Contact: Valid email address verified.")
@@ -219,10 +227,8 @@ def tailor_resume_for_opportunity(
     sorted_projects = sorted(master.projects, key=project_relevance_score, reverse=True)
 
     # 3. Form tailored content
-    summary_text = (
-        f"Undergraduate candidate focusing on {opportunity.category.replace('_', ' ').title()} "
-        f"and software engineering, applying for the {opportunity.role_title} role at {opportunity.company_name}."
-    )
+    # Never invent a summary: carry the master's own (verified) summary or leave it empty.
+    summary_text = master.summary or ""
 
     tailored_content = ResumeContent(
         full_name=master.full_name,
@@ -626,10 +632,10 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
         cleaned_lines.append(line)
     lines = cleaned_lines
     if not lines:
-        return ResumeContent(full_name="Candidate", email="candidate@compass.local")
+        return ResumeContent()
 
     # 1. Contact Extraction
-    full_name = "Candidate"
+    full_name = ""
     for line in lines[:5]:
         cand_name = line.split("|")[0].strip() if "|" in line else line.strip()
         cand_name = re.sub(r"^#+\s*", "", cand_name).strip()
@@ -637,7 +643,7 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
             if re.search(r"[A-Za-z]", cand_name):
                 full_name = cand_name
                 break
-    email = "candidate@compass.local"
+    email = ""
     phone = None
     location = None
     github_or_portfolio = None
@@ -718,6 +724,10 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
         )):
             current_section = "skills"
             in_skill_subgroup = False
+            for tok in line_clean.partition(":")[2].replace("•", ",").replace(";", ",").replace("|", ",").split(","):
+                clean_tok = _clean_bullet(tok).strip(" -:*•")
+                if clean_tok and 1 < len(clean_tok) < 40 and clean_tok not in skills:
+                    skills.append(clean_tok)
             continue
         elif any(line_low == h or line_low.startswith(f"{h}:") or line_low.startswith(f"{h} ") for h in (
             "education", "academic background", "academics", "qualifications"
@@ -1033,8 +1043,8 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
         github_or_portfolio=github_or_portfolio,
         linkedin_url=linkedin_url,
         summary=" ".join(summary_lines) if summary_lines else None,
-        skills=skills or ["Python", "Git"],
-        education=edu_list or [ResumeEducationItem(institution="University", degree="Undergraduate Degree", evidence_classification="SOURCE_DOCUMENT")],
+        skills=skills,
+        education=edu_list,
         projects=projects,
         experience=experience,
         internships=internships,
@@ -1118,6 +1128,78 @@ def analyze_extraction_diagnostics(content: ResumeContent, raw_text: str) -> Dic
     }
 
 
+_NON_ENGINEERING_ROLE_WORDS = (
+    "product", "design", "marketing", "business", "operations", "sales", "finance",
+    "writer", "content", "hr", "people", "program manager",
+)
+_ENGINEERING_ROLE_WORDS = (
+    "engineer", "developer", "software", "devops", "backend", "frontend", "full stack", "full-stack",
+    "machine learning", "data scientist",
+)
+_LEADING_VERBS = (
+    "built", "wrote", "developed", "created", "designed", "implemented", "made", "led", "launched",
+)
+
+
+def _is_non_engineering_role(role_title: str) -> bool:
+    """True when the role title suggests a non-engineering function (plain substring checks)."""
+    lowered = role_title.lower()
+    if any(term in lowered for term in _ENGINEERING_ROLE_WORDS):
+        return False
+    words = lowered.replace("/", " ").replace("-", " ").split()
+    for term in _NON_ENGINEERING_ROLE_WORDS:
+        if " " in term or len(term) > 3:
+            if term in lowered:
+                return True
+        elif term in words:
+            return True
+    return False
+
+
+def _as_sentence(text: str) -> str:
+    """Trim and end with a period; leave existing terminal punctuation alone."""
+    trimmed = text.strip()
+    if not trimmed:
+        return ""
+    return trimmed if trimmed[-1] in ".!?" else trimmed + "."
+
+
+def _join_list(items: List[str]) -> str:
+    if len(items) <= 1:
+        return "".join(items)
+    return ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def _project_sentence(p: ResumeProjectItem) -> str:
+    text = f'For example, I built {p.title}'
+    description = p.description.strip()
+    if description:
+        first, _, rest = description.partition(" ")
+        if first.lower() in _LEADING_VERBS:
+            description = first.lower() + (" " + rest if rest else "")
+        text += ": " + _as_sentence(description)
+    else:
+        text += "."
+    techs = [t for t in p.technologies if t and t.strip()]
+    if techs:
+        text += f" It used {_join_list(techs)}."
+    return text
+
+
+def _experience_sentence(exp: ResumeExperienceItem) -> str:
+    sentence = f"Most recently, I worked as {exp.role_title} at {exp.company}"
+    if exp.start_date and exp.end_date:
+        sentence += f" ({exp.start_date} to {exp.end_date})"
+    elif exp.start_date and exp.is_current:
+        sentence += f" ({exp.start_date} to present)"
+    elif exp.start_date:
+        sentence += f" (from {exp.start_date})"
+    sentence += "."
+    if exp.highlights and exp.highlights[0].strip():
+        sentence += " " + _as_sentence(exp.highlights[0])
+    return sentence
+
+
 def draft_truthful_cover_letter(
     master: ResumeContent,
     opportunity: OpportunityOut,
@@ -1156,35 +1238,36 @@ def draft_truthful_cover_letter(
         req_skills = {s.lower() for s in opportunity.requirements.required_skills}
     matched_skills = [s for s in master.skills if s.lower() in req_skills or s.lower() in role.lower()][:5]
     if not matched_skills:
-        matched_skills = master.skills[:4]
+        matched_skills = master.skills[:5]
 
-    # 3. Formulate truthful cover letter body
-    proj_paragraphs = ""
-    for p in ref_projects:
-        tech_note = f" using {', '.join(p.technologies)}" if p.technologies else ""
-        proj_paragraphs += (
-            f"In my project \"{p.title}\"{tech_note}, {p.description.strip()} "
-            f"This hands-on work reinforced my practical experience with {', '.join(p.technologies[:3]) if p.technologies else 'core software engineering'} "
-            f"and tackling real-world problem constraints.\n\n"
-        )
+    # 3. Formulate truthful cover letter body (verified profile data only)
+    proj_paragraphs = "".join(_project_sentence(p) + "\n\n" for p in ref_projects)
+    exp_paragraph = _experience_sentence(master.experience[0]) if master.experience else ""
+    if exp_paragraph:
+        proj_paragraphs = exp_paragraph + "\n\n" + proj_paragraphs
 
     edu_note = ""
     if master.education:
         edu = master.education[0]
         edu_note = f"As a student at {edu.institution} pursuing {edu.degree}, "
 
+    if _is_non_engineering_role(role):
+        objectives = f"contribute to {comp}'s goals"
+    else:
+        objectives = f"contribute meaningfully to {comp}'s technical engineering objectives"
+
     # Only claim skills the master profile actually supports.
     if matched_skills:
         opening = (
             f"{edu_note}I have developed a solid foundation in {', '.join(matched_skills[:3])}, "
-            f"and I am eager to contribute meaningfully to {comp}'s technical engineering objectives."
+            f"and I am eager to {objectives}."
         )
         closing_claim = (
-            f"bring my technical background, rigorous work ethic, and verified skills in "
+            f"bring my background, rigorous work ethic, and verified skills in "
             f"{', '.join(matched_skills)} to the {role} position. "
         )
     else:
-        opening = f"{edu_note}I am eager to contribute meaningfully to {comp}'s technical engineering objectives."
+        opening = f"{edu_note}I am eager to {objectives}."
         closing_claim = f"bring my rigorous work ethic and eagerness to learn to the {role} position. "
 
     letter = (

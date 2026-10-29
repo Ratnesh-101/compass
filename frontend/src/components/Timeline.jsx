@@ -333,7 +333,7 @@ export default function Timeline({
         onOpenTelemetry={onOpenTelemetry}
         onVerifyAll={handleVerifyAll}
         verifyingDeadlines={verifyingDeadlines}
-        onSeedJudgePersona={handleSeedJudgePersona}
+        onSeedJudgePersona={() => handleSeedJudgePersona(false)}
         seedingPersona={seedingPersona}
         seedSuccess={seedSuccess}
         onOpenNewTask={() => setShowAddModal(true)}
@@ -346,7 +346,7 @@ export default function Timeline({
         onVerifyDeadlines={handleVerifyAll}
         onOpenTelemetry={onOpenTelemetry}
         onOpenCompass={onOpenCompass}
-        onOpenSeed={handleSeedJudgePersona}
+        onOpenSeed={() => handleSeedJudgePersona(false)}
       />
 
       {/* Filter pills: horizontal scroll on mobile, 6px radius, min 44px tap target, domain swatch */}
