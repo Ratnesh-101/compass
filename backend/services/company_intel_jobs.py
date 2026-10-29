@@ -361,36 +361,124 @@ def _build_error_intel(
 
 
 def _normalize_source_id(source_val: Any, valid_ids: Set[int]) -> Optional[int]:
-    """Robustly normalize source IDs (int, string, bracketed, zero-based, list)."""
+    """Robustly normalize source IDs (int, string, bracketed, zero-based, list, dict)."""
     if source_val is None:
+        if len(valid_ids) == 1:
+            return next(iter(valid_ids))
         return None
+    if isinstance(source_val, dict):
+        val = source_val.get("id") or source_val.get("source") or source_val.get("source_id")
+        return _normalize_source_id(val, valid_ids)
     if isinstance(source_val, int):
-        return source_val if source_val in valid_ids else (1 if source_val == 0 and 1 in valid_ids else None)
+        if source_val in valid_ids:
+            return source_val
+        if source_val == 0 and 1 in valid_ids:
+            return 1
+        if len(valid_ids) == 1:
+            return next(iter(valid_ids))
+        return None
     if isinstance(source_val, str):
-        for n in [int(x) for x in re.findall(r"\d+", source_val)]:
+        nums = [int(x) for x in re.findall(r"\d+", source_val)]
+        for n in nums:
             if n in valid_ids:
                 return n
             if n == 0 and 1 in valid_ids:
                 return 1
+        if len(valid_ids) == 1:
+            return next(iter(valid_ids))
     if isinstance(source_val, list) and source_val:
         return _normalize_source_id(source_val[0], valid_ids)
+    if len(valid_ids) == 1:
+        return next(iter(valid_ids))
     return None
 
 
 def _parse_json_safely(raw_text: str) -> Optional[Dict[str, Any]]:
-    """Safely parse JSON from LLM output handling markdown fences and extraneous text."""
+    """Safely parse JSON from LLM output handling <think> blocks, markdown fences, and extraneous prose."""
     if not raw_text or not raw_text.strip():
         return None
-    cleaned = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", raw_text.strip(), flags=re.IGNORECASE)
-    cand = raw_text[raw_text.find("{") : raw_text.rfind("}") + 1] if "{" in raw_text and "}" in raw_text else ""
-    for candidate in (cleaned, cand):
-        if candidate:
-            try:
-                data = json.loads(candidate)
-                if isinstance(data, dict):
-                    return data
-            except Exception:
-                pass
+
+    # 1. Strip reasoning and think tags: <think>...</think>, <thought>...</thought>, <reasoning>...</reasoning>
+    cleaned = re.sub(
+        r"<(?:think|thought|reasoning)>[\s\S]*?</(?:think|thought|reasoning)>",
+        "",
+        raw_text,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    # 2. Try extracting content inside markdown code fences: ```json ... ``` or ``` ... ```
+    fence_matches = re.findall(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned, flags=re.IGNORECASE)
+    candidates: List[str] = []
+    for fm in fence_matches:
+        trimmed = fm.strip()
+        if trimmed:
+            candidates.append(trimmed)
+
+    # 3. Try whole cleaned string stripped of leading/trailing fence markers
+    stripped_cleaned = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", cleaned, flags=re.IGNORECASE).strip()
+    if stripped_cleaned:
+        candidates.append(stripped_cleaned)
+
+    # 4. Balanced bracket search for top-level { ... } objects
+    def extract_balanced_objects(text: str) -> List[str]:
+        objs = []
+        depth = 0
+        start = -1
+        in_string = False
+        escape = False
+        for i, char in enumerate(text):
+            if in_string:
+                if escape:
+                    escape = False
+                elif char == "\\":
+                    escape = True
+                elif char == '"':
+                    in_string = False
+                continue
+
+            if char == '"':
+                in_string = True
+            elif char == "{":
+                if depth == 0:
+                    start = i
+                depth += 1
+            elif char == "}":
+                if depth > 0:
+                    depth -= 1
+                    if depth == 0 and start != -1:
+                        objs.append(text[start : i + 1])
+                        start = -1
+        return objs
+
+    balanced_objs = extract_balanced_objects(cleaned)
+    candidates.extend(balanced_objs)
+
+    # Try candidates in order
+    parse_err_pos = None
+    for cand in candidates:
+        if not cand:
+            continue
+        try:
+            data = json.loads(cand)
+            if isinstance(data, dict):
+                return data
+        except json.JSONDecodeError as jde:
+            parse_err_pos = jde.pos
+        except Exception:
+            pass
+
+    # Log ONLY output structural metadata, NEVER scraped text or secrets
+    has_fences = "```" in raw_text
+    has_think = "<think>" in raw_text.lower() or "<thought>" in raw_text.lower()
+    first_char = raw_text.strip()[0] if raw_text.strip() else ""
+    logger.warning(
+        "Company intel JSON parse failure [STRUCTURE]: len=%d, first_char=%r, has_fences=%s, has_think=%s, parse_err_pos=%s",
+        len(raw_text),
+        first_char,
+        has_fences,
+        has_think,
+        parse_err_pos,
+    )
     return None
 
 

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { normalizeDomainKey, saveCustomDomain, getCustomDomains } from './domainMeta'
+import { RESERVED_ROUTES } from '../../router'
 import { X, Trash2 } from 'lucide-react'
 
 const PRESET_ICONS = [
@@ -60,7 +61,12 @@ export default function CreateDomainModal({
       return
     }
 
-    // Check against existing domains (both base and custom)
+    // Check against reserved route names and existing domains (both base and custom)
+    if (RESERVED_ROUTES.includes(key)) {
+      setError(`"${key}" is a reserved system route name and cannot be used as a custom domain.`)
+      return
+    }
+
     const allExistingKeys = new Set([
       'hackathon', 'coursework', 'code', 'general', 'other',
       ...existingDomains.map(d => (typeof d === 'string' ? d : d.key).toLowerCase().trim()),

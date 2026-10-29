@@ -111,48 +111,49 @@ async def test_vector_memory_isolation_across_tenants():
     user_b_id = f"user_b_{uuid.uuid4().hex[:8]}@example.com"
 
     test_domain = f"iso_{uuid.uuid4().hex[:8]}"
-    async with pool.acquire() as conn:
-        await store_chunk(conn, "Secret notes of Guest A", domain=test_domain, user_id=guest_a_id)
-        await store_chunk(conn, "Secret notes of Guest B", domain=test_domain, user_id=guest_b_id)
-        await store_chunk(conn, "Confidential plan of User A", domain=test_domain, user_id=user_a_id)
-        await store_chunk(conn, "Confidential plan of User B", domain=test_domain, user_id=user_b_id)
-        await store_chunk(conn, "Public institutional policy", domain=test_domain, user_id=None)
+    with patch("backend.memory.vector.get_embedding", AsyncMock(return_value=[0.05] * 768)):
+        async with pool.acquire() as conn:
+            await store_chunk(conn, "Secret notes of Guest A", domain=test_domain, user_id=guest_a_id)
+            await store_chunk(conn, "Secret notes of Guest B", domain=test_domain, user_id=guest_b_id)
+            await store_chunk(conn, "Confidential plan of User A", domain=test_domain, user_id=user_a_id)
+            await store_chunk(conn, "Confidential plan of User B", domain=test_domain, user_id=user_b_id)
+            await store_chunk(conn, "Public institutional policy", domain=test_domain, user_id=None)
 
-        # 1. Guest A searches: sees Guest A + Public, NEVER Guest B, User A, User B
-        res_ga = await search_chunks(conn, "notes plan policy", domain=test_domain, user_id=guest_a_id, limit=10)
-        texts_ga = [r["content"] for r in res_ga]
-        assert any("Guest A" in t for t in texts_ga)
-        assert not any("Guest B" in t for t in texts_ga)
-        assert not any("User A" in t for t in texts_ga)
-        assert not any("User B" in t for t in texts_ga)
+            # 1. Guest A searches: sees Guest A + Public, NEVER Guest B, User A, User B
+            res_ga = await search_chunks(conn, "notes plan policy", domain=test_domain, user_id=guest_a_id, limit=10)
+            texts_ga = [r["content"] for r in res_ga]
+            assert any("Guest A" in t for t in texts_ga)
+            assert not any("Guest B" in t for t in texts_ga)
+            assert not any("User A" in t for t in texts_ga)
+            assert not any("User B" in t for t in texts_ga)
 
-        # 2. Guest B searches: sees Guest B + Public, NEVER Guest A, User A, User B
-        res_gb = await search_chunks(conn, "notes plan policy", domain=test_domain, user_id=guest_b_id, limit=10)
-        texts_gb = [r["content"] for r in res_gb]
-        assert any("Guest B" in t for t in texts_gb)
-        assert not any("Guest A" in t for t in texts_gb)
-        assert not any("User A" in t for t in texts_gb)
-        assert not any("User B" in t for t in texts_gb)
+            # 2. Guest B searches: sees Guest B + Public, NEVER Guest A, User A, User B
+            res_gb = await search_chunks(conn, "notes plan policy", domain=test_domain, user_id=guest_b_id, limit=10)
+            texts_gb = [r["content"] for r in res_gb]
+            assert any("Guest B" in t for t in texts_gb)
+            assert not any("Guest A" in t for t in texts_gb)
+            assert not any("User A" in t for t in texts_gb)
+            assert not any("User B" in t for t in texts_gb)
 
-        # 3. User A searches: sees User A + Public, NEVER User B, Guest A, Guest B
-        res_ua = await search_chunks(conn, "notes plan policy", domain=test_domain, user_id=user_a_id, limit=10)
-        texts_ua = [r["content"] for r in res_ua]
-        assert any("User A" in t for t in texts_ua)
-        assert not any("User B" in t for t in texts_ua)
-        assert not any("Guest A" in t for t in texts_ua)
-        assert not any("Guest B" in t for t in texts_ua)
+            # 3. User A searches: sees User A + Public, NEVER User B, Guest A, Guest B
+            res_ua = await search_chunks(conn, "notes plan policy", domain=test_domain, user_id=user_a_id, limit=10)
+            texts_ua = [r["content"] for r in res_ua]
+            assert any("User A" in t for t in texts_ua)
+            assert not any("User B" in t for t in texts_ua)
+            assert not any("Guest A" in t for t in texts_ua)
+            assert not any("Guest B" in t for t in texts_ua)
 
-        # 4. User B searches: sees User B + Public, NEVER User A, Guest A, Guest B
-        res_ub = await search_chunks(conn, "notes plan policy", domain=test_domain, user_id=user_b_id, limit=10)
-        texts_ub = [r["content"] for r in res_ub]
-        assert any("User B" in t for t in texts_ub)
-        assert not any("User A" in t for t in texts_ub)
-        assert not any("Guest A" in t for t in texts_ub)
-        assert not any("Guest B" in t for t in texts_ub)
+            # 4. User B searches: sees User B + Public, NEVER User A, Guest A, Guest B
+            res_ub = await search_chunks(conn, "notes plan policy", domain=test_domain, user_id=user_b_id, limit=10)
+            texts_ub = [r["content"] for r in res_ub]
+            assert any("User B" in t for t in texts_ub)
+            assert not any("User A" in t for t in texts_ub)
+            assert not any("Guest A" in t for t in texts_ub)
+            assert not any("Guest B" in t for t in texts_ub)
 
-        # 5. Anonymous / None searches: fails closed under null-owner isolation (returns [])
-        res_anon = await search_chunks(conn, "notes plan policy", domain=test_domain, user_id=None, limit=10)
-        assert res_anon == []
+            # 5. Anonymous / None searches: fails closed under null-owner isolation (returns [])
+            res_anon = await search_chunks(conn, "notes plan policy", domain=test_domain, user_id=None, limit=10)
+            assert res_anon == []
 
 
 # ===========================================================================

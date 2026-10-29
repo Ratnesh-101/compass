@@ -1,9 +1,12 @@
 # Compass — Terms of Service
 
-**Last Updated**: September 29, 2026  
-**Effective Date**: September 29, 2026  
+> [!NOTE]
+> **FLAGGED FOR LEGAL REVIEW**: This document is a plain draft describing what Compass actually does (task management, AI copilot, calendar integration, web research). Placeholders for company name, contact email, and governing jurisdiction are marked in brackets (`[...]`) below for final counsel review.
 
-Welcome to **Compass**. By accessing or using the Compass web application, APIs, or services (collectively, the "Service"), you agree to be bound by these Terms of Service ("Terms"). If you do not agree to these Terms, please do not use the Service.
+**Last Updated**: October 29, 2026  
+**Effective Date**: October 29, 2026  
+
+Welcome to **Compass**, operated by **[Company / Operator Legal Name: Pending Review]** ("we", "us", or "Compass"). By accessing or using the Compass web application, APIs, or services (collectively, the "Service"), you agree to be bound by these Terms of Service ("Terms"). If you do not agree to these Terms, please do not use the Service.
 
 ---
 
@@ -82,11 +85,13 @@ We reserve the right to suspend or terminate access to the Service at our sole d
 
 ## 10. Governing Law & Dispute Resolution
 
-These Terms shall be governed by and construed in accordance with applicable laws, without regard to its conflict of law provisions. Any legal action or proceeding arising under these Terms will be resolved through good-faith negotiation or competent courts.
+These Terms shall be governed by and construed in accordance with the laws of **[Jurisdiction, e.g. State of California, United States / State of Karnataka, India: Pending Legal Review]**, without regard to conflict of law principles. Any legal action or dispute arising under these Terms shall be resolved in the competent courts situated in **[Jurisdiction City/State: Pending Legal Review]**.
 
 ---
 
 ## 11. Contact Information
 
-For inquiries regarding these Terms of Service:
-- **Email**: `legal@compass.app`
+For inquiries regarding these Terms of Service or to submit legal notices:
+- **Legal Entity**: `[Company / Operator Legal Name: Pending Legal Review]`
+- **Contact Email**: `[legal@compass.app / Contact Email: Pending Legal Review]`
+- **Physical Address**: `[Physical / Registered Address: Pending Legal Review]`

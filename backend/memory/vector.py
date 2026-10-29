@@ -5,12 +5,14 @@ Handles generating 768-dim embeddings via Nebius Token Factory (Qwen/Qwen3-Embed
 and querying or storing chunks in PostgreSQL with pgvector cosine similarity.
 """
 
+import logging
 from typing import List, Optional, Dict, Any, Union
 import asyncpg
 from asyncpg.pool import PoolConnectionProxy
 from backend.config import get_settings
 from backend.services.embeddings import get_embedding
 
+logger = logging.getLogger("compass.memory.vector")
 settings = get_settings()
 
 DbConn = Union[asyncpg.Connection, PoolConnectionProxy]
@@ -32,9 +34,29 @@ async def store_chunk(
     tags: Optional[List[str]] = None,
     user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Store text content along with its 768-dim vector in memory_chunks with strict deduplication via content_hash."""
+    """Store text content along with its 768-dim vector in memory_chunks with strict deduplication via content_hash.
+
+    If the embedding API is unavailable, skips writing to memory_chunks and marks status as pending_retry.
+    """
     content_hash = compute_content_hash(content)
     embedding = await get_embedding(content)
+
+    if embedding is None:
+        logger.warning(
+            f"Embedding service unavailable for content_hash={content_hash[:8]}. "
+            f"Skipping write to memory_chunks and marking pending retry."
+        )
+        return {
+            "status": "pending_retry",
+            "reason": "embedding_unavailable",
+            "content": content,
+            "domain": domain,
+            "project_id": project_id,
+            "source": source,
+            "tags": tags or [],
+            "user_id": user_id,
+            "content_hash": content_hash,
+        }
 
     row = await conn.fetchrow(
         """
@@ -56,11 +78,20 @@ async def search_chunks(
     domain: Optional[str] = None,
     limit: int = 5,
     user_id: Optional[str] = None,
+    query_vec: Optional[List[float]] = None,
 ) -> List[Dict[str, Any]]:
-    """Search memory chunks by cosine similarity with per-account isolation."""
-    query_vec = await get_embedding(query)
+    """Search memory chunks by cosine similarity with per-account isolation.
 
+    If query_vec is not provided and embedding generation fails, skips vector retrieval and returns empty list.
+    """
     if not user_id:
+        return []
+
+    if query_vec is None:
+        query_vec = await get_embedding(query)
+
+    if query_vec is None:
+        logger.warning("Vector retrieval skipped: embedding service is unavailable for query.")
         return []
 
     if domain:

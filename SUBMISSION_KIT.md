@@ -30,13 +30,13 @@
 
 3. **How does the architecture enable it?**  
    - **Frontend**: Vite + React 18 dashboard and native terminal CLI.
-   - **API & Routing**: FastAPI backend with NVIDIA Nemotron-3 Nano for sub-400ms skill dispatching.
+   - **API & Routing**: FastAPI backend with NVIDIA Nemotron-3 Nano for intent routing and skill dispatching.
    - **Reasoning**: ReAct multi-step agent (Nemotron-3 Super) with 4 specialist domain assistants.
-   - **Memory & Grounding**: Neon PostgreSQL + pgvector HNSW cosine search for 768-dim semantic retrieval, paired with Tavily web intelligence for live epistemic verification.
+   - **Memory & Grounding**: Neon PostgreSQL + pgvector HNSW cosine search for 768-dim semantic retrieval through code and coursework tools, paired with Tavily web intelligence for live epistemic verification.
    - **State Safety**: Mutating actions pause at an authenticated confirmation gate with full audit logging and 1-click undo.
 
 4. **What does the demo prove?**  
-   It proves that an AI assistant can reliably remember cross-session context, refuse to guess when memory is silent by escalating to live web search, realistically assess workload feasibility without hallucinating math, and propose actionable replanning safely under human control.
+   It proves that an AI assistant can reliably remember cross-session context through structured task/schedule stores and semantic search through code and coursework tools, refuse to guess when memory is silent by escalating to live web search, realistically assess workload feasibility without hallucinating math, and propose actionable replanning safely under human control.
 
 ### Project Description / Pitch
 
@@ -45,8 +45,8 @@ As dual-degree engineering students balancing rigorous university coursework (em
 
 #### What It Does
 Compass is an autonomous productivity agent and conversational copilot with persistent memory across three partitioned domains: **Hackathons**, **Code**, and **Coursework**. Accessible via both a sleek dark-mode web dashboard and a native terminal CLI, Compass:
-1. **Intelligently Routes & Executes Skills (<400ms)**: Uses **NVIDIA Nemotron-3 Nano** to parse user intent into structured skills (`add_task`, `query_tasks`, `log_code_context`, `verify_deadline`) without brittle regex or JSON parsing errors.
-2. **Maintains Dense Semantic Code & Lecture Memory**: Generates 768-dimensional Matryoshka-truncated embeddings via `Qwen/Qwen3-Embedding-8B` on Nebius Token Factory, indexing snippets in Neon Serverless PostgreSQL with `pgvector` HNSW cosine indexing for sub-5ms semantic search.
+1. **Intelligently Routes & Executes Skills**: Uses **NVIDIA Nemotron-3 Nano** to parse user intent into structured skills (`add_task`, `query_tasks`, `log_code_context`, `verify_deadline`) without brittle regex or JSON parsing errors.
+2. **Maintains Dense Semantic Code & Lecture Memory**: Generates 768-dimensional Matryoshka-truncated embeddings via `Qwen/Qwen3-Embedding-8B` on Nebius Token Factory, indexing snippets in Neon Serverless PostgreSQL with `pgvector` HNSW cosine indexing for semantic search via code context and coursework tools.
 3. **Reasoning with Human-in-the-Loop Confirmation**: Features an autonomous **ReAct (Reason + Act)** planner powered by **NVIDIA Nemotron-3 Super (120B)**. Read-only queries execute instantly, while state-mutating actions (`add_task`, `edit_task`, `delete_task`, `ingest_url`) halt at a confirmation gate requiring explicit user approval.
 4. **Synthesizes Executive Roadmaps**: Reserved for **NVIDIA Nemotron-3 Ultra (550B)**, which aggregates cross-domain tasks and identifies deadline conflicts, balancing coursework with hackathon deliverables.
 5. **Real-Time Web Intelligence & Anti-Hallucination**: Integrates a complete 3-tool Tavily web intelligence suite:
@@ -58,7 +58,7 @@ Compass is an autonomous productivity agent and conversational copilot with pers
 
 #### How We Built It
 - **AI Inference (100% Nebius Token Factory)**:
-  - `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`: Sub-400ms intent routing & native function calling.
+  - `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`: Intent routing & native function calling.
   - `nvidia/nemotron-3-super-120b-a12b`: Deep skill reasoning and technical code retrieval synthesis.
   - `nvidia/Nemotron-3-Ultra-550b-a55b`: Multi-domain executive roadmap synthesis.
   - `Qwen/Qwen3-Embedding-8B`: 768-dim dense semantic vector embeddings.
@@ -73,8 +73,8 @@ Compass is an autonomous productivity agent and conversational copilot with pers
 3. **Safe Autonomous Agent Mutations**: Multi-step agents can easily corrupt user data if allowed to run mutations unchecked. We engineered a strict Human-in-the-Loop confirmation gate with state recovery and audit logging (`agent_audit_log`) supporting full 1-click undo.
 
 #### Accomplishments That We're Proud Of
-- **195 Automated Tests**: 195 automated tests across 20 test suites verifying memory, agent loops, security hardening, endpoints, and CLI commands.
-- **Blended Model Economics**: Squeezed 106 full-turn evaluations into just **$0.019** on Nebius Token Factory by dispatching 85% of queries to Nano and PostgreSQL directly.
+- **1,694 Automated Tests**: 1,508 backend pytest tests across 81 test suites and 186 frontend tests verifying memory, agent loops, security hardening, endpoints, and CLI commands (100% passing).
+- **Tiered Model Economics**: Routinely dispatches intent classification to Nemotron-3 Nano ($0.06 / $0.24 per 1M tokens), escalating to Super ($0.30 / $0.90 per 1M) or Ultra ($0.80 / $2.40 per 1M) only when deep reasoning or multi-domain synthesis is required: `Cost = (prompt_tokens * prompt_rate + completion_tokens * completion_rate) / 1,000,000`.
 - **Zero-Friction Evaluation**: Judges can immediately use the live web app and API without setting up accounts or providing API keys.
 - **ChatGPT-Quality UX**: Complete chat management with sidebar context menus and instant shareable public links.
 

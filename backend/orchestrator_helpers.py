@@ -77,7 +77,13 @@ async def format_chat_response(
         else:
             chat_success = False
             chat_error = "empty_model_response"
-            text_reply = "I encountered an empty response from the model. Please retry."
+            from backend.config import get_settings
+            s = get_settings()
+            key = s.NEBIUS_API_KEY or ""
+            if not key or key.startswith("your_nebius") or key.startswith("mock") or key in ("mock", "mock-key-not-used-in-tests"):
+                text_reply = "Model key missing or invalid. See the setup notes. Please retry."
+            else:
+                text_reply = "I encountered an empty response from the model. Please retry."
     elif is_greeting:
         text_reply = format_greeting_by_tone(tone)
 

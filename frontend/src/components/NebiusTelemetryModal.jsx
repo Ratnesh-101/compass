@@ -75,7 +75,7 @@ export default function NebiusTelemetryModal({ isOpen, onClose, usageStats, onRe
           `| \`${b.model}\` | ${b.tier || 'Inference'} | ${b.calls} | ${b.input_tokens || '-'} | ${b.output_tokens || '-'} | ${b.cost} |`
       ),
       '',
-      'Hardware: NVIDIA Tensor Core H100 / H200 SXM5 on Nebius Token Factory',
+      'Infrastructure: Nebius Token Factory · NVIDIA Nemotron Models',
       'Database: Neon Serverless PostgreSQL + pgvector HNSW cosine (<->)',
     ].join('\n')
 
@@ -265,7 +265,7 @@ export default function NebiusTelemetryModal({ isOpen, onClose, usageStats, onRe
             </span>
           </div>
           <p style={{ fontSize: '12.5px', color: 'rgba(255, 255, 255, 0.82)', margin: 0, lineHeight: '1.5' }}>
-            Compass uses a hierarchical Mixture-of-Experts (MoE) dispatch strategy on <strong>Nebius Token Factory</strong>. Instead of routing all calls to an expensive monolithic model, 85% of queries hit <strong>Nemotron-3 Nano</strong> for sub-400ms function calling. Complex multi-step reasoning escalates to <strong>Nemotron-3 Super</strong>, and high-altitude multi-domain synthesis is reserved for <strong>Nemotron-3 Ultra</strong>.
+            Compass uses a hierarchical Mixture-of-Experts (MoE) dispatch strategy on <strong>Nebius Token Factory</strong>. Fast classification and function calling route to <strong>Nemotron-3 Nano</strong>. Complex multi-step reasoning escalates to <strong>Nemotron-3 Super</strong>, and high-altitude multi-domain synthesis is reserved for <strong>Nemotron-3 Ultra</strong>.
           </p>
         </div>
 
@@ -282,6 +282,7 @@ export default function NebiusTelemetryModal({ isOpen, onClose, usageStats, onRe
                   <th style={{ padding: '10px 14px', color: '#94a3b8', fontWeight: '600' }}>Role / Architecture</th>
                   <th style={{ padding: '10px 14px', color: '#94a3b8', fontWeight: '600' }}>Calls</th>
                   <th style={{ padding: '10px 14px', color: '#94a3b8', fontWeight: '600' }}>Tokens</th>
+                  <th style={{ padding: '10px 14px', color: '#94a3b8', fontWeight: '600' }}>Measured Latency</th>
                   <th style={{ padding: '10px 14px', color: '#94a3b8', fontWeight: '600' }}>Est. Cost</th>
                 </tr>
               </thead>
@@ -307,6 +308,10 @@ export default function NebiusTelemetryModal({ isOpen, onClose, usageStats, onRe
                     <td style={{ padding: '10px 14px', color: '#94a3b8', fontFamily: 'monospace' }}>
                       {row.tokens.toLocaleString()}
                     </td>
+                    <td style={{ padding: '10px 14px', color: '#e2e8f0' }}>
+                      <div style={{ fontWeight: 600 }}>{row.latency?.display || 'Not enough data'}</div>
+                      <div style={{ fontSize: '10px', color: '#64748b' }}>model call time measured by the backend</div>
+                    </td>
                     <td style={{ padding: '10px 14px', color: '#fbbf24', fontWeight: '700', fontFamily: 'monospace' }}>
                       {row.cost}
                     </td>
@@ -320,7 +325,7 @@ export default function NebiusTelemetryModal({ isOpen, onClose, usageStats, onRe
         {/* Modal Actions */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginTop: '4px', paddingTop: '16px', borderTop: '1px solid rgba(255, 255, 255, 0.08)' }}>
           <div style={{ fontSize: '11px', color: '#64748b' }}>
-            NVIDIA H100 SXM5 · Neon pgvector HNSW · Zero Monolithic Overhead
+            Nebius Token Factory · Neon pgvector HNSW · Multi-tier Model Routing
           </div>
           <div style={{ display: 'flex', gap: '10px' }}>
             {onRefresh && (

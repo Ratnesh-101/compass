@@ -304,7 +304,7 @@ async def run_agent(
             usage = getattr(response, "usage", None)
             p_tok = usage.prompt_tokens if usage else 200
             c_tok = usage.completion_tokens if usage else 80
-            record_usage(reasoning_model, p_tok, c_tok)
+            record_usage(reasoning_model, p_tok, c_tok, duration_ms=int((time.perf_counter() - step_start) * 1000))
             step_cost = compute_step_cost(reasoning_model, p_tok, c_tok)
             total_run_cost_usd += step_cost
             elapsed = int((time.perf_counter() - step_start) * 1000)

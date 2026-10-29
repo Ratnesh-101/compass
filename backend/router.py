@@ -7,6 +7,7 @@ Probed and verified on Nebius Token Factory with nvidia/NVIDIA-Nemotron-3-Nano-3
 
 import json
 import logging
+import time
 from datetime import date
 from typing import Any, Optional, Tuple
 from openai import AsyncOpenAI
@@ -110,6 +111,7 @@ async def _answer_external_project_request(
         answer_client = client
     for answer_model in (settings.ROUTER_MODEL, settings.SKILL_MODEL):
         try:
+            t0 = time.perf_counter()
             response: Any = await answer_client.chat.completions.create(
                 model=answer_model,
                 messages=answer_messages,
@@ -117,6 +119,7 @@ async def _answer_external_project_request(
                 temperature=0.5,
                 stream=False,
             )
+            dur_ms = int((time.perf_counter() - t0) * 1000)
         except Exception as err:
             logger.warning("Direct project answer failed on %s (%s)", answer_model, type(err).__name__)
             continue
@@ -125,6 +128,7 @@ async def _answer_external_project_request(
             answer_model,
             usage.prompt_tokens if usage else max(len(message.split()) * 2, 64),
             usage.completion_tokens if usage else 50,
+            duration_ms=dur_ms,
         )
         choices = getattr(response, "choices", None)
         msg = getattr(choices[0], "message", None) if choices else None
@@ -208,6 +212,7 @@ async def route_message(
     is_placeholder_key = (
         not settings.NEBIUS_API_KEY
         or settings.NEBIUS_API_KEY.startswith("your_nebius")
+        or settings.NEBIUS_API_KEY.startswith("mock")
         or settings.NEBIUS_API_KEY in ("mock", "mock-key-not-used-in-tests")
     ) and not is_mocked
     if is_placeholder_key:
@@ -266,13 +271,15 @@ async def route_message(
                 call_kwargs["tools"] = tools
                 call_kwargs["tool_choice"] = "auto"
 
+            t0 = time.perf_counter()
             response: Any = await client.chat.completions.create(**call_kwargs)
+            dur_ms = int((time.perf_counter() - t0) * 1000)
 
             from backend.services.usage import record_usage
             usage = getattr(response, "usage", None)
             p_tok = usage.prompt_tokens if usage else max(len(message.split()) * 2, 64)
             c_tok = usage.completion_tokens if usage else 50
-            record_usage(settings.ROUTER_MODEL, p_tok, c_tok)
+            record_usage(settings.ROUTER_MODEL, p_tok, c_tok, duration_ms=dur_ms)
 
             choices = getattr(response, "choices", None)
             if not choices:
@@ -282,7 +289,7 @@ async def route_message(
                 direct = await _external_answer_or_none(client, message, history)
                 if direct:
                     return None, None, direct
-                return _fallback_route(message, history)
+                return _fallback_route(message, history, tone=tone)
 
             choice = choices[0]
             choice_msg = getattr(choice, "message", None)
@@ -349,7 +356,7 @@ async def route_message(
                     direct = await _external_answer_or_none(client, message, history)
                     if direct:
                         return None, None, direct
-                    return _fallback_route(message, history)
+                    return _fallback_route(message, history, tone=tone)
 
                 return None, None, reply
 
@@ -366,6 +373,6 @@ async def route_message(
             direct = await _external_answer_or_none(client, message, history)
             if direct:
                 return None, None, direct
-            return _fallback_route(message, history)
+            return _fallback_route(message, history, tone=tone)
 
-    return _fallback_route(message, history)
+    return _fallback_route(message, history, tone=tone)

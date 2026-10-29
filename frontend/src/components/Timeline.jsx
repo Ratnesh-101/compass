@@ -443,7 +443,41 @@ export default function Timeline({
             <div style={{ fontSize: '13px', color: 'var(--text-secondary)', maxWidth: '480px', margin: '0 auto', lineHeight: 1.5 }}>
               {activeDomain === 'all'
                 ? 'Use the Add deadline button in the header above to create your first milestone, or click Load Judge Persona to populate demo multi-domain tasks.'
-                : `No deadlines in ${getDomainMeta(activeDomain).label} yet. Use Add deadline in the header above to create one.`}
+                : `No deadlines in ${getDomainMeta(activeDomain).label} yet. Use Add deadline to create your first milestone.`}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', marginTop: '16px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => setShowAddModal(true)}
+                className="btn-primary-amber"
+                style={{
+                  minHeight: '38px',
+                  padding: '0 16px',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  borderRadius: 'var(--radius-btn, 6px)',
+                  cursor: 'pointer',
+                }}
+              >
+                + Add deadline to {getDomainMeta(activeDomain).label}
+              </button>
+              {activeDomain !== 'all' && (
+                <button
+                  type="button"
+                  onClick={() => onSelectDomain && onSelectDomain('all')}
+                  className="btn-secondary"
+                  style={{
+                    minHeight: '38px',
+                    padding: '0 14px',
+                    fontSize: '13px',
+                    fontWeight: '600',
+                    borderRadius: 'var(--radius-btn, 6px)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  View all domains
+                </button>
+              )}
             </div>
           </div>
         ) : displayedTasks.length === 0 ? (

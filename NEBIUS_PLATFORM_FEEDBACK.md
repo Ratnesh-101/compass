@@ -3,7 +3,7 @@
 > **Project**: [Compass](https://github.com/Ratnesh-101/compass) — The AI Copilot That Remembers Every Hackathon, Repo, and Deadline  
 > **Authors**: Rhythm, Nandani, Kunal, Ratnesh Singh  
 > **Environment**: Production FastAPI + Neon Serverless PostgreSQL (`pgvector`) + Vite/React 18 Dashboard  
-> **Evaluated Infrastructure**: Nebius Token Factory (`https://api.studio.nebius.ai/v1`) & NVIDIA Nemotron Models on NVIDIA H100 SXM5 Tensor Core GPUs  
+> **Evaluated Infrastructure**: Nebius Token Factory (`https://api.studio.nebius.ai/v1`) & NVIDIA Nemotron Models on NVIDIA Tensor Core GPUs (Nebius Cloud)  
 
 ---
 
@@ -23,7 +23,7 @@ Below is our comprehensive developer feedback, divided into **Production Strengt
 
 ## 2. Production Strengths: What Nebius Got Right
 
-### 2.1 Fast Interactive Latency on H100 SXM5 Infrastructure
+### 2.1 Responsive Interactive Latency on Nebius Cloud Infrastructure
 - **Nemotron-3 Nano (30B A3B)** demonstrated fast and responsive interactive token generation across our multi-turn skill-dispatch flows.
 - In our intent classification pipeline (`backend/agent.py`), Nano correctly extracted tool arguments (`domain`, `due_date`, `priority`, `duration_minutes`) without requiring brittle regex fallbacks.
 
@@ -93,7 +93,7 @@ Below is our comprehensive developer feedback, divided into **Production Strengt
 
 ### 3.4 Model Warmth / Cold-Start Telemetry Headers
 * **Context**: Ultra-large models like `Nemotron-3-Ultra-550b` provide incredible reasoning, but latency can spike if an instance has scaled down or is cold-starting.
-* **Suggestion for Nebius**: Expose custom HTTP response headers (e.g., `x-nebius-worker-status: warm|cold`, `x-nebius-inference-latency-ms: 124`, `x-nebius-gpu: H100-SXM5`). This empowers agent frameworks to dynamically adjust client timeouts or failover gracefully to smaller models when cold starts occur.
+* **Suggestion for Nebius**: Expose custom HTTP response headers (e.g., `x-nebius-worker-status: warm|cold`, `x-nebius-inference-latency-ms: 124`, `x-nebius-gpu: <model_accelerator>`). This empowers agent frameworks to dynamically adjust client timeouts or failover gracefully to smaller models when cold starts occur.
 
 ---
 

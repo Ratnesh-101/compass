@@ -52,6 +52,7 @@ async def _run_critic_pass(
     critic_cost = 0.0
     try:
         completions: Any = client.chat.completions
+        t0 = time.perf_counter()
         resp = await completions.create(
             model=str(settings.SKILL_MODEL),
             messages=cast(Any, [
@@ -62,10 +63,11 @@ async def _run_critic_pass(
             temperature=0.3,
             stream=False,
         )
+        dur_ms = int((time.perf_counter() - t0) * 1000)
         usage = getattr(resp, "usage", None)
         p_tok = usage.prompt_tokens if usage else 300
         c_tok = usage.completion_tokens if usage else 100
-        record_usage(settings.SKILL_MODEL, p_tok, c_tok)
+        record_usage(settings.SKILL_MODEL, p_tok, c_tok, duration_ms=dur_ms)
         critic_cost = compute_step_cost(settings.SKILL_MODEL, p_tok, c_tok)
 
         critic_text = await _extract_content_from_response(resp, default_text="APPROVED: Plan looks reasonable.")

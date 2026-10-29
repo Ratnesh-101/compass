@@ -27,6 +27,8 @@ Compass goes beyond simple AI integration to provide a high-fidelity career engi
 
 **[🌐 Live Web Application](https://compass-farmlytics.vercel.app)** · **[🔌 API Health Endpoint](https://compass-backend-qryu-vcfv.onrender.com/health)** · **[🎥 Demo Video Walkthrough Script](docs/demo_script.md)**
 
+> **Note for Judges**: Please evaluate using the live deployment at [compass-farmlytics.vercel.app](https://compass-farmlytics.vercel.app) with the live backend at [compass-backend-qryu-vcfv.onrender.com](https://compass-backend-qryu-vcfv.onrender.com). The live environment runs with full Nebius, Neon, and Tavily integrations. Local setup requires configured API keys and PostgreSQL with pgvector.
+
 ---
 
 ## Why Compass?
@@ -40,7 +42,7 @@ Modern developers and students work across fragmented environments that do not c
 | **Google Calendar** | Hourly time slots | Unaware of code context, technical backlog, or real task complexity |
 | **Job Boards / ATS** | Public listings & applications | Detached from candidate verified skills, factual projects, and academic eligibility |
 
-**Compass connects these contexts through persistent memory, model routing, and an autonomous agent.** When you ask *"What should I focus on tonight given my hackathon submission on Friday and my pending coursework?"*, Compass queries your structured database, recalls relevant vector code context, calculates calendar feasibility, and produces an actionable plan — asking for your approval before modifying any record.
+**Compass connects these contexts through persistent memory, model routing, and an autonomous agent.** When you ask *"What should I focus on tonight given my hackathon submission on Friday and my pending coursework?"*, Compass queries your structured database, retrieves relevant code and coursework notes via semantic search tools, calculates calendar feasibility, and produces an actionable plan — asking for your approval before modifying any record.
 
 ---
 
@@ -75,7 +77,7 @@ graph TD
 ### End-to-End Request Flow
 1. **Request Intake & Verification**: The user interacts through the web workspace or CLI. Requests forwarded via Vercel edge reverse proxy are verified using HMAC edge signatures (`x-compass-edge-sig`) before backend processing.
 2. **Intent Routing**: Nemotron-3 Nano 30B classifies user intent and extracts validated tool parameters using native OpenAI function schemas.
-3. **Contextual Retrieval**: Structured database records (tasks, schedules, candidate profile, applications) and semantically similar vector memory chunks (code snippets, ingested web research) are retrieved.
+3. **Contextual Retrieval**: Structured database records (tasks, schedules, candidate profile, applications) and semantically matched memory chunks (code snippets, coursework notes, ingested web research) are retrieved through dedicated code and research tools.
 4. **Agent Reasoning & Grounded Research**: The ReAct agent executes reasoning steps. If external data is needed or the model emits an epistemic `[ABSTAIN]`, Tavily performs authoritative search with prompt-injection sanitization.
 5. **Confirmation & Factual Integrity Gates**: Any state mutation (adding/editing tasks, applying triage plans, preparing application batches) halts at a human confirmation gate. For career applications, submissions require an explicit cryptographic approval token with legal attestations.
 6. **Execution & Reversible Logging**: Approved mutations write to Neon PostgreSQL and record a snapshot in `agent_audit_log`, enabling one-click undo and complete auditability.

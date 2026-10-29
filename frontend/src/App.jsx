@@ -8,6 +8,8 @@ import CompassPanel from './components/CompassPanel'
 import AuthModal from './components/AuthModal'
 import SharedChatView from './components/SharedChatView'
 import DemoDataBanner from './components/DemoDataBanner'
+import LegalView from './components/LegalView'
+import NotFoundView from './components/NotFoundView'
 import TabErrorBoundary from './components/TabErrorBoundary'
 import StatusNotices from './components/StatusNotices'
 import { fetchDemoStatusResult, clearDemoPersona, setChatIncludeDemo } from './api/chatApi'
@@ -75,6 +77,8 @@ export default function App() {
 
   const [theme, setTheme] = useState(() => {
     try {
+      const qTheme = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('theme') : null
+      if (qTheme === 'dark' || qTheme === 'light') return qTheme
       const saved = localStorage.getItem('compass.theme')
       if (saved === 'dark' || saved === 'light') return saved
       if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
@@ -675,6 +679,12 @@ export default function App() {
                 ? 'Schedule'
                 : (activeTab === 'career' || activeTab === 'radar')
                 ? 'Career Copilot'
+                : activeTab === 'terms'
+                ? 'Terms of Service'
+                : activeTab === 'privacy'
+                ? 'Privacy Policy'
+                : activeTab === '404'
+                ? 'Page Not Found'
                 : selectedDomain === 'all'
                 ? 'Timeline Feed'
                 : `${currentDomainMeta.label} Domain`}
@@ -726,7 +736,30 @@ export default function App() {
         </header>
 
         <TabErrorBoundary resetKey={activeTab}>
-        {activeTab === 'dashboard' ? (
+        {activeTab === 'terms' ? (
+          <LegalView
+            type="terms"
+            onBack={() => navigateTo('dashboard')}
+            onSelectTab={handleSelectTab}
+            isDarkMode={theme === 'dark'}
+            onToggleDarkMode={toggleTheme}
+          />
+        ) : activeTab === 'privacy' ? (
+          <LegalView
+            type="privacy"
+            onBack={() => navigateTo('dashboard')}
+            onSelectTab={handleSelectTab}
+            isDarkMode={theme === 'dark'}
+            onToggleDarkMode={toggleTheme}
+          />
+        ) : activeTab === '404' ? (
+          <NotFoundView
+            onBack={() => navigateTo('dashboard')}
+            onSelectTab={handleSelectTab}
+            isDarkMode={theme === 'dark'}
+            onToggleDarkMode={toggleTheme}
+          />
+        ) : activeTab === 'dashboard' ? (
           <>
             {isDemoActive && <DemoDataBanner onReset={handleResetDemo} resetting={resettingDemo} />}
             <Dashboard

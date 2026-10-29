@@ -297,6 +297,7 @@ async def _call_model(
     try:
         client = _get_client()
         completions: Any = client.chat.completions
+        t0 = time.perf_counter()
         resp = await asyncio.wait_for(
             completions.create(
                 model=model,
@@ -309,6 +310,7 @@ async def _call_model(
             ),
             timeout=MODEL_TIMEOUT_S,
         )
+        call_dur = int((time.perf_counter() - t0) * 1000)
     except asyncio.TimeoutError:
         logger.warning("Model %s timed out after %ss", model, MODEL_TIMEOUT_S)
         return None
@@ -320,7 +322,7 @@ async def _call_model(
         usage = getattr(resp, "usage", None)
         p_tok = getattr(usage, "prompt_tokens", 0) or 0
         c_tok = getattr(usage, "completion_tokens", 0) or 0
-        record_usage(model, p_tok, c_tok)
+        record_usage(model, p_tok, c_tok, duration_ms=call_dur)
     except Exception as e:  # accounting must never break the run
         logger.debug("record_usage failed for %s: %s", model, e)
 

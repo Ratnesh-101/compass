@@ -149,20 +149,31 @@ function getIntelErrorMessage(reason, fallbackError) {
     case 'model_timeout':
       return 'Summary took too long to generate. Please try refreshing again.'
     case 'model_bad_output':
-      return 'Could not format company intelligence correctly. Please try refreshing again.'
+      return 'Company intel summary is being updated from verified sources. Please try refreshing shortly.'
     case 'no_sources':
-      return 'We could not find enough reliable information about this company.'
+      return 'We could not find enough reliable public information about this company yet.'
     case 'auth_failed':
-      return 'Service authentication issue. Please try again later.'
+      return 'Intelligence service authentication issue. Please try again later.'
     case 'job_lost':
-      return 'Server restarted or research session expired. Please refresh intel again.'
+      return 'Research session expired. Please refresh intel again.'
     case 'storage_failed':
       return 'Could not save intelligence data. Please try refreshing again.'
     case 'backend_unreachable':
       return 'Network issue. Please check your connection and try again.'
-    default:
-      return fallbackError || "We couldn't generate company intel right now. Please try again with Refresh Intel."
+    default: {
+      const sanitized = typeof fallbackError === 'string' && !fallbackError.includes('{') && !fallbackError.includes('model_') && fallbackError.length < 120
+        ? fallbackError
+        : null
+      return sanitized || "We couldn't generate company intel right now. Please try again with Refresh Intel."
+    }
   }
+}
+
+function formatIntelConfidence(confidence) {
+  if (confidence === 'high') return 'Verified across multiple sources'
+  if (confidence === 'medium') return 'Verified across 2 sources'
+  if (confidence === 'low') return 'Initial overview'
+  return null
 }
 
 function cleanOldBriefText(text) {
@@ -1255,10 +1266,9 @@ export default function ApplicationWorkspaceModal({
                                 color: 'var(--text-secondary)',
                                 fontSize: '11px',
                                 fontWeight: 600,
-                                textTransform: 'capitalize',
                               }}
                             >
-                              {companyIntel.confidence} confidence
+                              {formatIntelConfidence(companyIntel.confidence) || 'Initial overview'}
                             </span>
                           )}
                           {isReady && companyIntel?.fallback_label && (

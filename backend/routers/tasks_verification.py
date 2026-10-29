@@ -537,7 +537,7 @@ async def seed_demo_persona_endpoint(request: Request, body: Optional[DemoSeedRe
                 "priority": "high",
                 "status": "open",
                 "duration_minutes": 90,
-                "notes": "Audit GPU token consumption and ensure quota headroom on H100 inference clusters.",
+                "notes": "Audit GPU token consumption and ensure quota headroom on Nebius Token Factory clusters.",
             },
 
             # 6. No deadline: 2
@@ -717,10 +717,10 @@ async def seed_demo_persona_endpoint(request: Request, body: Optional[DemoSeedRe
                 "domain": "hackathon",
                 "project_id": p_hack["id"],
                 "content": (
-                    "Compass 3-Tier NVIDIA Nemotron Architecture: Nemotron-3 Nano (30B MoE, 3B active) executes sub-400ms "
+                    "Compass 3-Tier NVIDIA Nemotron Architecture: Nemotron-3 Nano (30B MoE, 3B active) executes "
                     "intent routing; Nemotron-3 Super (120B MoE, 12B active) executes ReAct multi-step planning and grounded "
                     "code retrieval; Nemotron-3 Ultra (550B MoE, 55B active) executes executive roadmaps. "
-                    "Hosted on Nebius Token Factory on NVIDIA Tensor Core H100/H200 GPUs with active MoE parameter routing."
+                    "Hosted on Nebius Token Factory with active MoE parameter routing."
                 ),
                 "tags": ["nemotron", "nvidia", "nebius", "routing", "moe"],
             },
@@ -749,7 +749,10 @@ async def seed_demo_persona_endpoint(request: Request, body: Optional[DemoSeedRe
                 emb = await get_embedding(m["content"])
             except Exception as e:
                 logger.warning(f"Failed to generate embedding for demo memory: {e}")
-                emb = [0.0] * 768
+                emb = None
+            if emb is None:
+                logger.warning(f"Skipping demo memory insertion for '{m['content'][:30]}' because embedding is unavailable.")
+                continue
             await conn.execute(
                 """
                 INSERT INTO memory_chunks (domain, project_id, content, embedding, source, tags, user_id)

@@ -196,18 +196,21 @@ async def handle_create_task(conn, req: CreateTaskRequest, user_id: Optional[str
         if req.notes or req.description:
             emb_text += f" - {req.notes or req.description}"
         embedding = await get_embedding(emb_text)
-        tags_list = [dom_clean]
-        if proj_name and proj_name != "General":
-            tags_list.append(proj_name.lower().replace(" ", "-"))
-        if req.priority == "urgent":
-            tags_list.append("urgent")
-        await conn.execute(
-            """
-            INSERT INTO memory_chunks (domain, project_id, content, embedding, source, tags, user_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            """,
-            dom_clean, project_id, emb_text, embedding, "direct_task_creation", tags_list, user_id
-        )
+        if embedding is not None:
+            tags_list = [dom_clean]
+            if proj_name and proj_name != "General":
+                tags_list.append(proj_name.lower().replace(" ", "-"))
+            if req.priority == "urgent":
+                tags_list.append("urgent")
+            await conn.execute(
+                """
+                INSERT INTO memory_chunks (domain, project_id, content, embedding, source, tags, user_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                """,
+                dom_clean, project_id, emb_text, embedding, "direct_task_creation", tags_list, user_id
+            )
+        else:
+            logger.warning(f"Embedding service unavailable. Skipped memory_chunk indexing for task {task_id}.")
     except Exception as e:
         logger.warning(f"Could not index memory chunk for new task: {e}")
 

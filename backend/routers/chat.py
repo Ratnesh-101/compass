@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 import uuid
 from datetime import date
 from typing import Any, List, Optional, cast
@@ -480,10 +481,12 @@ async def public_chat(req: PublicChatRequest, request: Request, _rl: None = Depe
             raise HTTPException(status_code=400, detail=f"Invalid specialist ID '{specialist_id}'")
 
         from backend.agents.specialist import run_specialist_task
+        spec_start = time.perf_counter()
         pool = await get_pool()
         spec_result = await run_specialist_task(
             capability=valid_id, user_goal=msg, pool=pool, user_id=ident.id if ident else None
         )
+        spec_duration = int((time.perf_counter() - spec_start) * 1000)
         resp_text = spec_result.get("summary", f"Specialist analysis completed for '{msg}'.")
 
         conv_id = req.conversation_id or str(uuid.uuid4())
@@ -499,7 +502,7 @@ async def public_chat(req: PublicChatRequest, request: Request, _rl: None = Depe
 
         return PublicChatResponse(
             response=resp_text,
-            routing_latency_ms=120,
+            routing_latency_ms=spec_duration,
             message=resp_text,
             conversation_id=conv_id,
             skill_used=f"specialist_{valid_id}",
@@ -512,7 +515,7 @@ async def public_chat(req: PublicChatRequest, request: Request, _rl: None = Depe
 
     return PublicChatResponse(
         response=result.get("response", ""),
-        routing_latency_ms=result.get("routing_latency_ms", 342),
+        routing_latency_ms=result.get("routing_latency_ms"),
         message=result.get("message", result.get("response", "")),
         conversation_id=result.get("conversation_id"),
         skill_used=result.get("skill_used", "chat"),
@@ -542,6 +545,16 @@ async def log_memory_entry(req: LogMemoryRequest, request: Request, _rl: None = 
         tags_list = [t.strip() for t in req.tags.split(",") if t.strip()]
 
     embedding = await get_embedding(text)
+    if embedding is None:
+        logger.warning(f"Embedding service unavailable. Skipping write for text={text[:30]} and returning pending_retry.")
+        return {
+            "status": "pending_retry",
+            "reason": "embedding_unavailable",
+            "message": "Embedding service unavailable; memory entry marked pending retry",
+            "domain": domain_str,
+            "project": req.project,
+        }
+
     prompt_tokens = max(len(text.split()) * 2, 64)
     record_usage("qwen3-embedding", prompt_tokens, 0)
 

@@ -326,6 +326,7 @@ async def _summarize_with_model(
                     "content": "Your previous response was not valid JSON. Return ONLY a valid JSON object matching the requested schema with no extra text or markdown formatting."
                 })
 
+            t_call = time.perf_counter()
             resp = await asyncio.wait_for(
                 client.chat.completions.create(
                     model=model_name,
@@ -335,11 +336,12 @@ async def _summarize_with_model(
                 ),
                 timeout=18.0,
             )
+            call_dur = int((time.perf_counter() - t_call) * 1000)
             usage = getattr(resp, "usage", None)
             p_tok = getattr(usage, "prompt_tokens", 250) if usage else 250
             c_tok = getattr(usage, "completion_tokens", 150) if usage else 150
             tokens_recorded = p_tok + c_tok
-            record_usage(model_name, p_tok, c_tok, skill="company_intel")
+            record_usage(model_name, p_tok, c_tok, skill="company_intel", duration_ms=call_dur)
 
             raw_text = resp.choices[0].message.content or ""
             parsed = _parse_json_safely(raw_text)

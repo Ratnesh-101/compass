@@ -956,6 +956,27 @@ export default function Sidebar({
         customDomains={customDomains}
         existingDomains={displayDomains}
       />
+          {!effectivelyCollapsed && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", marginTop: "10px", fontSize: "11px", color: "var(--sidebar-text)", opacity: 0.7 }}>
+          <button
+            type="button"
+            id="sidebar-terms-link"
+            onClick={() => onSelectTab && onSelectTab("terms")}
+            style={{ background: "none", border: "none", color: "inherit", padding: 0, cursor: "pointer", textDecoration: "underline" }}
+          >
+            Terms
+          </button>
+          <span>·</span>
+          <button
+            type="button"
+            id="sidebar-privacy-link"
+            onClick={() => onSelectTab && onSelectTab("privacy")}
+            style={{ background: "none", border: "none", color: "inherit", padding: 0, cursor: "pointer", textDecoration: "underline" }}
+          >
+            Privacy
+          </button>
+        </div>
+      )}
     </aside>
   )
 }

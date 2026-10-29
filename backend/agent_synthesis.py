@@ -77,6 +77,7 @@ async def force_final_synthesis(
     max_continuations = int(getattr(settings, "MAX_CONTINUATION_ATTEMPTS", 2))
 
     completions = client.chat.completions
+    t0 = time.perf_counter()
     response = await completions.create(
         model=str(settings.SYNTHESIS_MODEL),
         messages=cast(Any, messages),
@@ -84,10 +85,11 @@ async def force_final_synthesis(
         temperature=0.5,
         stream=False,
     )
+    dur_ms = int((time.perf_counter() - t0) * 1000)
     usage = getattr(response, "usage", None)
     p_tok = usage.prompt_tokens if usage else 500
     c_tok = usage.completion_tokens if usage else 200
-    record_usage(settings.SYNTHESIS_MODEL, p_tok, c_tok)
+    record_usage(settings.SYNTHESIS_MODEL, p_tok, c_tok, duration_ms=dur_ms)
     forced_cost = compute_step_cost(settings.SYNTHESIS_MODEL, p_tok, c_tok)
 
     raw_text = await _extract_content_from_response(response, default_text="Agent completed analysis.")
@@ -112,6 +114,7 @@ async def force_final_synthesis(
             "content": "Continue exactly where you left off. Do not repeat previously generated headings, text, or table rows.",
         })
         try:
+            t0_cont = time.perf_counter()
             cont_resp = await completions.create(
                 model=str(settings.SYNTHESIS_MODEL),
                 messages=cast(Any, cont_messages),
@@ -119,10 +122,11 @@ async def force_final_synthesis(
                 temperature=0.5,
                 stream=False,
             )
+            c_dur_ms = int((time.perf_counter() - t0_cont) * 1000)
             c_usage = getattr(cont_resp, "usage", None)
             c_p_tok = c_usage.prompt_tokens if c_usage else 500
             c_c_tok = c_usage.completion_tokens if c_usage else 200
-            record_usage(settings.SYNTHESIS_MODEL, c_p_tok, c_c_tok)
+            record_usage(settings.SYNTHESIS_MODEL, c_p_tok, c_c_tok, duration_ms=c_dur_ms)
             forced_cost += compute_step_cost(settings.SYNTHESIS_MODEL, c_p_tok, c_c_tok)
 
             cont_text = await _extract_content_from_response(cont_resp, default_text="")
