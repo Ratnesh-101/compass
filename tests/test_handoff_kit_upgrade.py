@@ -391,6 +391,9 @@ async def test_mark_applied_endpoint_schedules_followup():
 
     try:
         career_app = await get_or_create_career_application(user_id, opp_id)
+        # SAVED may no longer jump straight to SUBMITTED; move to a state that may be marked applied.
+        from backend.memory.career import update_career_application
+        await update_career_application(career_app.id, user_id, {"status": "READY_FOR_REVIEW"})
 
         scope = {"type": "http", "method": "POST", "headers": [(b"host", b"localhost")]}
         req = Request(scope)
@@ -399,7 +402,8 @@ async def test_mark_applied_endpoint_schedules_followup():
         updated = await mark_application_applied_endpoint(career_app.id, req)
         assert updated.status == CareerApplicationStatus.SUBMITTED.value or updated.status == CareerApplicationStatus.SUBMITTED
         assert updated.submitted_at is not None
-        assert updated.target_deadline == date.today() + timedelta(days=14)
+        from datetime import datetime, timezone
+        assert updated.target_deadline == datetime.now(timezone.utc).date() + timedelta(days=14)
     finally:
         async with pool.acquire() as conn:
             await conn.execute("DELETE FROM career_applications WHERE opportunity_id = $1", opp_id)

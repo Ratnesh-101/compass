@@ -111,7 +111,8 @@ async def test_1_1password_realistic_snippets_ready_state(mock_opp):
         assert len(brief["priorities"]) == 1
         assert brief["priorities"][0]["source"] == 1
         assert len(brief["sources"]) == 3
-        assert brief["confidence"] == "high"
+        # Points cite only 2 distinct sources, so derived confidence is medium even though the model claimed high
+        assert brief["confidence"] == "medium"
 
 
 # 2. The exact snippets from earlier screenshots: at least one point survives
@@ -429,7 +430,11 @@ async def test_10_confidence_rating_never_high_for_single_source(mock_opp):
         {"title": "1Password Blog", "snippet": "Extended Access Management secures SaaS applications.", "url": "https://1password.com/blog", "domain": "1password.com"},
         {"title": "TechCrunch Profile", "snippet": "1Password enterprise valuation exceeds 6 billion dollars.", "url": "https://techcrunch.com/1pass", "domain": "techcrunch.com"},
     ]
-    mock_llm_json["priorities"].append({"point": "Extended Access Management secures SaaS applications.", "source": 1})
+    # Each point must be supported by the source it cites, so cite the right source for each
+    mock_llm_json["priorities"] = [
+        {"point": "Extended Access Management secures SaaS applications.", "source": 1},
+        {"point": "1Password enterprise valuation exceeds 6 billion dollars.", "source": 2},
+    ]
     mock_resp.choices = [MagicMock(message=MagicMock(content=json.dumps(mock_llm_json)))]
 
     with patch("backend.services.winning_features.tavily_research.execute_deep_research", AsyncMock(return_value={"citations": two_sources_diff_domains})), \

@@ -683,6 +683,62 @@ async def update_career_application(app_id: int, user_id: str, updates: Dict[str
         return _parse_app_row(dict(row), is_persisted=True) if row else None
 
 
+async def link_resume_if_unlinked(
+    app_id: int, user_id: str, resume_id: int, status: Optional[str] = None
+) -> Optional[CareerApplicationOut]:
+    """Atomically attach a resume only while the application has none (owner-scoped).
+
+    Returns the updated application, or None when another request already linked one first
+    (or the application is not the caller's); the caller then discards its own resume.
+    """
+    pool = await get_pool()
+    if not pool:
+        record = _in_memory_applications.get(app_id)
+        if record and record["user_id"] == user_id and not record.get("resume_id"):
+            record["resume_id"] = resume_id
+            if status:
+                record["status"] = status
+            record["updated_at"] = datetime.now(timezone.utc)
+            return _parse_app_row(record, is_persisted=False)
+        return None
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE career_applications SET
+                resume_id = $3,
+                status = COALESCE($4, status),
+                updated_at = now()
+            WHERE id = $1 AND user_id = $2 AND resume_id IS NULL
+            RETURNING *;
+            """,
+            app_id,
+            user_id,
+            resume_id,
+            status,
+        )
+        return _parse_app_row(dict(row), is_persisted=True) if row else None
+
+
+async def delete_tailored_resume(resume_id: int, user_id: str) -> bool:
+    """Delete one tailored (non-master) resume owned by the user, e.g. a race loser's orphan."""
+    pool = await get_pool()
+    if not pool:
+        record = _in_memory_resumes.get(resume_id)
+        if record and record["user_id"] == user_id and not record.get("is_master"):
+            del _in_memory_resumes[resume_id]
+            return True
+        return False
+
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            "DELETE FROM resumes WHERE id = $1 AND user_id = $2 AND is_master = FALSE",
+            resume_id,
+            user_id,
+        )
+        return result.endswith(" 1")
+
+
 # ===========================================================================
 # 3. Batch Review & Explicit Approval
 # ===========================================================================
