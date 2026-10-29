@@ -1203,10 +1203,10 @@ async def get_application_handoff_kit_endpoint(app_id: int, request: Request):
         email = (app_resume.content.email or "").strip()
         if not name or name.lower() in PLACEHOLDER_NAMES:
             is_blocked = True
-            block_msg = "Resume export blocked: Candidate full name is empty or a placeholder. Complete your profile before downloading."
+            block_msg = "Resume export blocked: Candidate full name is empty or a placeholder. If your profile already has your name, this resume predates it: open the Tailored Resume tab and use Re-Tailor with AI."
         elif not email or email.lower() in PLACEHOLDER_EMAILS or "@" not in email:
             is_blocked = True
-            block_msg = "Resume export blocked: Candidate email is empty or a placeholder. Complete your profile before downloading."
+            block_msg = "Resume export blocked: Candidate email is empty or a placeholder. If your profile already has your email, this resume predates it: open the Tailored Resume tab and use Re-Tailor with AI."
 
     # Common answers generated strictly from profile (never guessed)
     common_answers: Dict[str, Optional[str]] = {}

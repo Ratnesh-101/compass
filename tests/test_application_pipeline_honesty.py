@@ -214,6 +214,8 @@ async def test_kit_export_block_uses_the_applications_own_resume(client: AsyncCl
 
     assert kit["is_export_blocked"] is True
     assert kit["checklist"]["resume_attached"] is False
+    assert kit["block_reason"]
+    assert "Complete your profile" not in kit["block_reason"]
 
 
 # 5. batch readiness gate + approval bound to the resume version -----------------
