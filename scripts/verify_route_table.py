@@ -160,6 +160,7 @@ KNOWN_ROUTE_METADATA = {
     ("/api/demo/clear", "POST"): ("None (Gated / Rate Limited)", "Clear demo data for session", "test_demo_flow.py"),
     ("/api/demo/seed-persona", "POST"): ("_get_current_identity (Gated / Rate Limited)", "Seed Dual-Degree Hackathon judge persona", "test_demo_flow.py"),
     ("/api/demo/tasks", "DELETE"): ("None (Gated / Rate Limited)", "Clear demo tasks for session", "test_demo_flow.py"),
+    ("/api/demo/status", "GET"): ("_get_current_identity (own tasks only)", "Report whether the caller still holds Judge Persona demo tasks", "test_demo_status_and_reset.py"),
     ("/opportunities/{opportunity_id}/company-intel", "GET"): ("_get_current_identity", "Company intel alias endpoint", "test_career_copilot.py"),
     ("/opportunities/{opportunity_id}/job-analysis", "GET"): ("_get_current_identity", "Job analysis alias endpoint", "test_career_copilot.py"),
 }
