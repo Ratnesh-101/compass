@@ -153,6 +153,8 @@ KNOWN_ROUTE_METADATA = {
     ("/api/career/auto-prepare", "POST"): ("_get_current_identity", "Trigger background opt-in auto-prepare", "test_career_e2e_workflow.py"),
     ("/api/career/auto-prepare/status", "GET"): ("_get_current_identity", "Check user auto-prepare quota status", "test_career_e2e_workflow.py"),
     ("/api/career/opportunities/{opportunity_id}/company-intel", "GET"): ("_get_current_identity", "Get opportunity company intelligence", "test_career_copilot.py"),
+    ("/api/career/opportunities/{opportunity_id}/company-intel/jobs/{job_id}", "GET"): ("_get_current_identity", "Get background company intel refresh job status", "test_company_intel_resilience.py::test_async_refresh_job_queue_and_polling"),
+    ("/api/career/opportunities/{opportunity_id}/company-intel/refresh", "POST"): ("_get_current_identity", "Trigger async company intelligence refresh", "test_company_intel_resilience.py::test_async_refresh_job_queue_and_polling"),
     ("/api/career/skills/add", "POST"): ("_get_current_identity", "Add skills to profile", "test_career_copilot.py"),
     ("/api/career/track-external-application", "POST"): ("_get_current_identity", "Track external submission", "test_career_e2e_workflow.py"),
     ("/api/chat/shared/{token}", "GET"): ("None", "Public read of shared chat session", "test_share_token_flow.py"),
@@ -162,6 +164,8 @@ KNOWN_ROUTE_METADATA = {
     ("/api/demo/tasks", "DELETE"): ("None (Gated / Rate Limited)", "Clear demo tasks for session", "test_demo_flow.py"),
     ("/api/demo/status", "GET"): ("_get_current_identity (own tasks only)", "Report whether the caller still holds Judge Persona demo tasks", "test_demo_status_and_reset.py"),
     ("/opportunities/{opportunity_id}/company-intel", "GET"): ("_get_current_identity", "Company intel alias endpoint", "test_career_copilot.py"),
+    ("/opportunities/{opportunity_id}/company-intel/jobs/{job_id}", "GET"): ("_get_current_identity", "Company intel job status alias endpoint", "test_company_intel_resilience.py::test_async_refresh_job_queue_and_polling"),
+    ("/opportunities/{opportunity_id}/company-intel/refresh", "POST"): ("_get_current_identity", "Company intel refresh alias endpoint", "test_company_intel_resilience.py::test_async_refresh_job_queue_and_polling"),
     ("/opportunities/{opportunity_id}/job-analysis", "GET"): ("_get_current_identity", "Job analysis alias endpoint", "test_career_copilot.py"),
 }
 

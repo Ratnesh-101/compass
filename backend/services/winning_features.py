@@ -1,5 +1,5 @@
 """
-Compass — Hackathon Winning Features Service.
+Compass - Hackathon Winning Features Service.
 
 Implements high-impact intelligence features:
 1. Company Intel Briefs: Deep research on employers to guide application tailoring.
@@ -17,10 +17,24 @@ import re
 import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 from fastapi import HTTPException
+import openai
 from backend.config import get_settings
 from backend.models_radar import OpportunityOut
 from backend.router import get_openai_client
 from backend.services import tavily_research, career_resume
+from backend.services.company_intel_jobs import (
+    SCHEMA_VERSION,
+    STOPWORDS,
+    build_job_posting_fallback,
+    build_sources_only_fallback,
+    is_point_grounded,
+    log_intel_stage,
+    _base_empty_brief,
+    _build_empty_intel,
+    _build_error_intel,
+    _normalize_source_id,
+    _parse_json_safely,
+)
 from backend.services.usage import record_usage
 
 logger = logging.getLogger("compass.services.winning_features")
@@ -87,16 +101,6 @@ def _http_url_or_empty(value: Any) -> str:
         return url if p.scheme in ("http", "https") and p.netloc else ""
     except ValueError:
         return ""
-
-
-STOPWORDS: Set[str] = {
-    "the", "and", "that", "this", "with", "from", "have", "been", "will",
-    "they", "their", "them", "what", "which", "about", "role", "team",
-    "company", "focus", "work", "also", "into", "over", "more", "most",
-    "such", "some", "other", "than", "then", "when", "where", "while",
-    "for", "are", "can", "could", "should", "would", "its", "has", "had",
-    "you", "your", "our", "were", "who", "whom", "whose"
-}
 
 
 def clean_search_sources(
@@ -253,149 +257,25 @@ def clean_search_sources(
     return cleaned_list
 
 
-def is_point_grounded(
-    point_text: str,
-    cited_source: Dict[str, Any],
-    all_sources: List[Dict[str, Any]],
-) -> bool:
-    """Verifies that a summarized point is factually grounded in the provided sources.
-
-    Checks:
-    1. Numbers, percentages, and metrics must appear in the source texts.
-    2. Key content words must have lexical support in the cited source or all sources.
-    """
-    if not point_text:
-        return False
-
-    all_sources_text = " ".join((s.get("snippet", "") + " " + s.get("title", "")) for s in all_sources).lower()
-    
-    # 1. Number / Metric grounding check
-    point_numbers = set(re.findall(r"\b\d+(?:[.,]\d+)?%?\b", point_text))
-    point_numbers = {n for n in point_numbers if n not in ("1", "2", "3", "4", "5", "6")}
-    source_numbers = set(re.findall(r"\b\d+(?:[.,]\d+)?%?\b", all_sources_text))
-    if point_numbers and not point_numbers.issubset(source_numbers):
-        return False
-
-    # 2. Content tokens grounding check
-    tokens = [w.lower() for w in re.findall(r"\b[a-zA-Z]{3,}\b", point_text) if w.lower() not in STOPWORDS]
-    if not tokens:
-        return True
-
-    cited_text = (cited_source.get("snippet", "") + " " + cited_source.get("title", "")).lower()
-    cited_matches = sum(1 for tok in tokens if tok in cited_text)
-    all_matches = sum(1 for tok in tokens if tok in all_sources_text)
-
-    if all_matches == 0:
-        return False
-    if len(tokens) >= 3 and cited_matches == 0 and all_matches < 2:
-        return False
-
-    return True
-
-
-def _normalize_source_id(source_val: Any, valid_ids: Set[int]) -> Optional[int]:
-    """Robustly normalize source IDs (int, string, bracketed, zero-based, list)."""
-    if source_val is None:
-        return None
-    if isinstance(source_val, int):
-        return source_val if source_val in valid_ids else (1 if source_val == 0 and 1 in valid_ids else None)
-    if isinstance(source_val, str):
-        for n in [int(x) for x in re.findall(r"\d+", source_val)]:
-            if n in valid_ids:
-                return n
-            if n == 0 and 1 in valid_ids:
-                return 1
-    if isinstance(source_val, list) and source_val:
-        return _normalize_source_id(source_val[0], valid_ids)
-    return None
-
-
-def _parse_json_safely(raw_text: str) -> Optional[Dict[str, Any]]:
-    """Safely parse JSON from LLM output handling markdown fences and extraneous text."""
-    if not raw_text or not raw_text.strip():
-        return None
-    cleaned = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", raw_text.strip(), flags=re.IGNORECASE)
-    cand = raw_text[raw_text.find("{") : raw_text.rfind("}") + 1] if "{" in raw_text and "}" in raw_text else ""
-    for candidate in (cleaned, cand):
-        if candidate:
-            try:
-                data = json.loads(candidate)
-                if isinstance(data, dict):
-                    return data
-            except Exception:
-                pass
-    return None
-
-
-def _base_empty_brief(company: str, role: str, status: str, msg_key: str, msg_val: str) -> Dict[str, Any]:
-    b = {
-        "status": status, "summary": "", "priorities": [], "role_context": [], "challenges": [],
-        "talking_points": [], "sources": [], "generated_at": datetime.now(timezone.utc).isoformat(),
-        "confidence": "low", "message": msg_val, "company": company, "role": role,
-        "strategic_insights": [], "technical_pain_points": [], "recent_news": [], "cached": False,
-    }
-    if msg_key:
-        b[msg_key] = msg_val
-    return b
-
-
-def _build_empty_intel(
-    company: str, role: str, message: str = "We could not find enough reliable information about this company."
-) -> Dict[str, Any]:
-    return _base_empty_brief(company, role, "empty", "", message)
-
-
-def _build_error_intel(
-    company: str, role: str, error: str = "We couldn't generate company intel right now. Please try again."
-) -> Dict[str, Any]:
-    return _base_empty_brief(company, role, "error", "error", error)
-
-
-def _build_raw_fallback(sources: List[Dict[str, Any]], company: str, role: str) -> Dict[str, Any]:
-    """Fallback when model call fails: format cleaned snippets into short points."""
-    priorities, challenges, role_context = [], [], []
-    for s in sources[:6]:
-        snippet = s.get("snippet", "")
-        words = snippet.split(".")[0].strip().split()
-        sentence = (" ".join(words[:22]) if len(words) > 22 else " ".join(words)).rstrip(".") + "."
-        pt = {"point": sentence.replace("—", "-").replace("–", "-"), "source": s["id"]}
-        lower = snippet.lower()
-        if any(k in lower for k in ("challenge", "problem", "need", "scaling", "migration", "bottleneck")):
-            if len(challenges) < 3:
-                challenges.append(pt)
-        elif any(k in lower for k in ("role", "engineer", "developer", "responsib", "build", "design", "work")):
-            if len(role_context) < 3:
-                role_context.append(pt)
-        elif len(priorities) < 3:
-            priorities.append(pt)
-
-    if not priorities and not challenges and sources:
-        s0 = sources[0]
-        priorities.append({"point": s0["snippet"].split(".")[0].strip() + ".", "source": s0["id"]})
-
-    summary = (sources[0]["snippet"].split(".")[0].strip() + ".") if sources else ""
-    return {
-        "status": "ready", "summary": summary.replace("—", "-").replace("–", "-"),
-        "priorities": priorities, "role_context": role_context, "challenges": challenges,
-        "talking_points": [], "confidence": "low", "is_fallback": True, "fallback_label": "raw sources",
-    }
-
-
 async def _summarize_with_model(
     company: str,
     role: str,
     sources: List[Dict[str, Any]],
+    opp_id: int = 0,
 ) -> Dict[str, Any]:
     """Execute one model call via Nebius Token Factory to summarize cleaned sources."""
     settings = get_settings()
+    if not settings.NEBIUS_API_KEY:
+        log_intel_stage("model_end", opp_id, company, error_class="auth_failed")
+        return {"status": "error", "reason": "auth_failed", "error": "LLM API key not configured"}
+
     client = get_openai_client()
     model_name = str(settings.SKILL_MODEL)
 
-    formatted_sources = []
-    for s in sources:
-        formatted_sources.append(
-            f"[Source {s['id']}] (Title: {s['title']}, Domain: {s['domain']})\n{s['snippet']}"
-        )
+    formatted_sources = [
+        f"[Source {s['id']}] (Title: {s['title']}, Domain: {s['domain']})\n{s['snippet']}"
+        for s in sources
+    ]
     sources_block = "\n\n".join(formatted_sources)
 
     system_prompt = (
@@ -419,7 +299,12 @@ async def _summarize_with_model(
         {"role": "user", "content": user_prompt},
     ]
 
+    log_intel_stage("model_start", opp_id, company)
+    start_t = time.perf_counter()
     raw_response = None
+    last_error_reason = "model_failed"
+    tokens_recorded = 0
+
     for attempt in range(2):
         try:
             call_messages = list(messages)
@@ -429,15 +314,19 @@ async def _summarize_with_model(
                     "content": "Your previous response was not valid JSON. Return ONLY a valid JSON object matching the requested schema with no extra text or markdown formatting."
                 })
 
-            resp = await client.chat.completions.create(
-                model=model_name,
-                messages=call_messages,
-                temperature=0.1,
-                max_tokens=600,
+            resp = await asyncio.wait_for(
+                client.chat.completions.create(
+                    model=model_name,
+                    messages=call_messages,
+                    temperature=0.1,
+                    max_tokens=600,
+                ),
+                timeout=18.0,
             )
             usage = getattr(resp, "usage", None)
             p_tok = getattr(usage, "prompt_tokens", 250) if usage else 250
             c_tok = getattr(usage, "completion_tokens", 150) if usage else 150
+            tokens_recorded = p_tok + c_tok
             record_usage(model_name, p_tok, c_tok, skill="company_intel")
 
             raw_text = resp.choices[0].message.content or ""
@@ -447,14 +336,30 @@ async def _summarize_with_model(
             ):
                 raw_response = parsed
                 break
+            else:
+                last_error_reason = "model_bad_output"
+        except openai.AuthenticationError as e:
+            logger.warning("LLM authentication failed for %s: %s", company, e)
+            dur_ms = int((time.perf_counter() - start_t) * 1000)
+            log_intel_stage("model_end", opp_id, company, duration_ms=dur_ms, error_class="AuthenticationError")
+            return {"status": "error", "reason": "auth_failed", "error": "LLM authentication failed"}
+        except (openai.APITimeoutError, asyncio.TimeoutError) as e:
+            logger.warning("LLM timeout for %s: %s", company, e)
+            dur_ms = int((time.perf_counter() - start_t) * 1000)
+            log_intel_stage("model_end", opp_id, company, duration_ms=dur_ms, error_class="TimeoutError")
+            return {"status": "error", "reason": "model_timeout", "error": "LLM call timed out"}
         except Exception as e:
             logger.warning("Company intel LLM call attempt %d failed: %s", attempt + 1, e)
+            last_error_reason = "model_failed"
             if attempt == 0:
                 await asyncio.sleep(0.3)
 
+    dur_ms = int((time.perf_counter() - start_t) * 1000)
     if not isinstance(raw_response, dict):
-        return {"status": "error", "error": "Invalid JSON response from model"}
+        log_intel_stage("model_end", opp_id, company, duration_ms=dur_ms, error_class=last_error_reason)
+        return {"status": "error", "reason": last_error_reason, "error": "Invalid JSON response from model"}
 
+    log_intel_stage("model_end", opp_id, company, details={"tokens": tokens_recorded}, duration_ms=dur_ms)
     return raw_response
 
 
@@ -462,21 +367,15 @@ async def generate_company_intel_brief(
     opportunity: OpportunityOut,
     force_refresh: bool = False,
 ) -> Dict[str, Any]:
-    """Generates a structured, evidence-backed strategic intel brief for an opportunity.
-
-    - Reuses 24-hour cache when force_refresh=False.
-    - Serializes parallel requests with an per-opportunity lock.
-    - Enforces a 30-second cooldown on refresh to prevent double calls.
-    - Cleans search results before sending to LLM.
-    - Validates points, citations, word counts, and grounding against sources.
-    - Preserves backward compatibility keys for legacy clients.
-    """
+    """Generates a structured, evidence-backed strategic intel brief for an opportunity."""
     company = opportunity.company_name
     role = opportunity.role_title
+    opp_id = opportunity.id
 
-    async with _get_intel_lock(opportunity.id):
-        # 1. Caching & Refresh cooldown checks
-        prev_entry = _COMPANY_INTEL_CACHE.get(opportunity.id)
+    log_intel_stage("request_received", opp_id, company)
+
+    async with _get_intel_lock(opp_id):
+        prev_entry = _COMPANY_INTEL_CACHE.get(opp_id)
         prev_brief = prev_entry[1] if prev_entry else None
         has_prev_good_brief = (
             prev_brief is not None
@@ -485,17 +384,17 @@ async def generate_company_intel_brief(
         )
 
         if not force_refresh:
-            cached = get_cached_company_intel(opportunity.id)
+            cached = get_cached_company_intel(opp_id)
             if cached is not None:
-                logger.info("Company intel cache hit for opportunity %s (0 external calls)", opportunity.id)
+                log_intel_stage("response_sent", opp_id, company, details={"status": "cached", "reason": "cache_hit"})
                 return cached
         else:
             now = time.time()
-            last_refresh = _LAST_INTEL_REFRESH.get(opportunity.id, 0.0)
+            last_refresh = _LAST_INTEL_REFRESH.get(opp_id, 0.0)
             if now - last_refresh < REFRESH_COOLDOWN_SECONDS:
-                cached = get_cached_company_intel(opportunity.id)
+                cached = get_cached_company_intel(opp_id)
                 if cached is not None:
-                    logger.info("Refresh cooldown active for opportunity %s; returning cached brief", opportunity.id)
+                    log_intel_stage("response_sent", opp_id, company, details={"status": "cooldown", "reason": "cooldown_active"})
                     return cached
 
         def _preserve_older_or_return(fallback_result: Dict[str, Any]) -> Dict[str, Any]:
@@ -507,7 +406,7 @@ async def generate_company_intel_brief(
                 return older
             return fallback_result
 
-        # 2. Enforce daily Tavily sub-budget (30 credits/day), charged per search sub-query actually run
+        # Daily Tavily budget guard
         clean_role = re.sub(r"(?i)\b(intern|internship|winter|summer|fall|spring|\d{4})\b", "", role).strip()
         research_topic = (
             f"{company} company overview products technical architecture engineering challenges {clean_role or role}"
@@ -526,48 +425,95 @@ async def generate_company_intel_brief(
                 headers={"Retry-After": "86400"},
             )
 
-        # 3. Tavily search over the same sub-queries that were charged above
+        # Search stage
+        search_start_t = time.perf_counter()
+        log_intel_stage("search_start", opp_id, company)
+        raw_citations = []
         try:
-            research_result = await tavily_research.execute_deep_research(
-                topic=research_topic,
-                max_subqueries=INTEL_MAX_SUBQUERIES,
-                search_depth="basic",
+            research_result = await asyncio.wait_for(
+                tavily_research.execute_deep_research(
+                    topic=research_topic,
+                    max_subqueries=INTEL_MAX_SUBQUERIES,
+                    search_depth="basic",
+                ),
+                timeout=10.0,
             )
             raw_citations = research_result.get("citations", [])
+            search_dur_ms = int((time.perf_counter() - search_start_t) * 1000)
+            log_intel_stage("search_end", opp_id, company, details={"result_count": len(raw_citations)}, duration_ms=search_dur_ms)
         except Exception as exc:
+            search_dur_ms = int((time.perf_counter() - search_start_t) * 1000)
+            err_cls = exc.__class__.__name__
             logger.warning("Deep research search error for %s: %s", company, exc)
+            log_intel_stage("search_end", opp_id, company, duration_ms=search_dur_ms, error_class=err_cls)
+
+            # Fallback 1: Job posting fallback when web search fails
+            if opportunity.description:
+                job_fallback = build_job_posting_fallback(
+                    description=opportunity.description,
+                    company=company,
+                    role=role,
+                    canonical_url=getattr(opportunity, "canonical_url", "") or getattr(opportunity, "url", "") or "",
+                )
+                if job_fallback:
+                    store_cached_company_intel(opp_id, job_fallback)
+                    _LAST_INTEL_REFRESH[opp_id] = time.time()
+                    log_intel_stage("response_sent", opp_id, company, details={"status": "ready", "reason": "from_job_posting"})
+                    return job_fallback
+
+            reason = "search_timeout" if isinstance(exc, (asyncio.TimeoutError, TimeoutError)) else "search_failed"
             return _preserve_older_or_return(
-                _build_error_intel(company, role, "We couldn't generate company intel right now. Please try again.")
+                _build_error_intel(company, role, "We couldn't generate company intel right now. Please try again.", reason=reason)
             )
 
-        # 4. Clean search results
+        # Clean search results
         cleaned_sources = clean_search_sources(raw_citations, company_name=company, role_title=role)
         total_snippet_len = sum(len(s.get("snippet", "")) for s in cleaned_sources)
+        log_intel_stage("cleaning_done", opp_id, company, details={"result_count": len(cleaned_sources)})
 
-        # If almost nothing useful remains, skip model call
+        # If almost nothing useful remains, fall back to job posting or empty brief
         if not cleaned_sources or total_snippet_len < 30:
-            logger.info("Insufficient search data for company %s; returning empty brief", company)
-            empty_brief = _build_empty_intel(company, role)
+            if opportunity.description:
+                job_fallback = build_job_posting_fallback(
+                    description=opportunity.description,
+                    company=company,
+                    role=role,
+                    canonical_url=getattr(opportunity, "canonical_url", "") or getattr(opportunity, "url", "") or "",
+                )
+                if job_fallback:
+                    store_cached_company_intel(opp_id, job_fallback)
+                    _LAST_INTEL_REFRESH[opp_id] = time.time()
+                    log_intel_stage("response_sent", opp_id, company, details={"status": "ready", "reason": "from_job_posting"})
+                    return job_fallback
+
+            empty_brief = _build_empty_intel(company, role, reason="no_sources")
             if not has_prev_good_brief:
-                store_cached_company_intel(opportunity.id, empty_brief)
-                _LAST_INTEL_REFRESH[opportunity.id] = time.time()
+                store_cached_company_intel(opp_id, empty_brief)
+                _LAST_INTEL_REFRESH[opp_id] = time.time()
+                log_intel_stage("response_sent", opp_id, company, details={"status": "empty", "reason": "no_sources"})
                 return empty_brief
             return _preserve_older_or_return(empty_brief)
 
-        # 5. Summarize via single LLM call
-        model_data = await _summarize_with_model(company, role, cleaned_sources)
+        # Summarize via single LLM call
+        model_data = await _summarize_with_model(company, role, cleaned_sources, opp_id=opp_id)
         if model_data.get("status") == "error":
-            logger.warning("LLM summarization returned error for %s", company)
-            return _preserve_older_or_return(
-                _build_error_intel(company, role, "We couldn't generate company intel right now. Please try again.")
+            logger.warning("LLM summarization returned error for %s: %s", company, model_data.get("reason"))
+            # Fallback 2: "Sources found, summary unavailable"
+            fallback_brief = build_sources_only_fallback(
+                cleaned_sources, company, role, reason=model_data.get("reason", "model_failed")
             )
+            store_cached_company_intel(opp_id, fallback_brief)
+            _LAST_INTEL_REFRESH[opp_id] = time.time()
+            log_intel_stage("response_sent", opp_id, company, details={"status": "ready", "reason": model_data.get("reason", "model_failed")})
+            return fallback_brief
 
-        # 6. Validate and filter output
+        # Validate and filter output
         sources_by_id = {s["id"]: s for s in cleaned_sources}
         valid_ids = set(sources_by_id.keys())
 
         brief: Dict[str, Any] = {
             "status": "ready",
+            "schema_version": SCHEMA_VERSION,
             "summary": "",
             "priorities": [],
             "role_context": [],
@@ -615,14 +561,12 @@ async def generate_company_intel_brief(
 
                 point_text = point_text.replace("—", "-").replace("–", "-")
 
-                # Cap at 22 words
                 words = point_text.split()
                 if len(words) > 22:
                     point_text = " ".join(words[:22])
                     if not point_text.endswith("."):
                         point_text += "."
 
-                # Grounding check: drop ungrounded point
                 if not is_point_grounded(point_text, sources_by_id[source_id], cleaned_sources):
                     logger.info("Dropping unsupported point for %s: %s", company, point_text)
                     continue
@@ -633,24 +577,30 @@ async def generate_company_intel_brief(
 
             brief[section_name] = clean_points
 
-        # Calculate confidence
+        log_intel_stage(
+            "source_validation",
+            opp_id,
+            company,
+            details={"count": sum(len(brief[sec]) for sec in ("priorities", "role_context", "challenges", "talking_points"))},
+        )
+
+        # Calculate deterministic confidence: High needs >=3 sources from different domains,
+        # Medium needs >=2 sources from different domains, otherwise Low (single source is never High/Med).
         total_points = sum(len(brief[sec]) for sec in ("priorities", "role_context", "challenges", "talking_points"))
-        model_conf = str(model_data.get("confidence") or "").lower()
-        if model_conf in ("high", "medium", "low"):
-            brief["confidence"] = model_conf
-        elif total_points >= 3 and len(cleaned_sources) >= 2:
+        unique_domains = len(set(s.get("domain", "").lower() for s in cleaned_sources if s.get("domain")))
+        if unique_domains >= 3 and total_points >= 2:
             brief["confidence"] = "high"
-        elif total_points >= 1 and len(cleaned_sources) >= 1:
+        elif unique_domains >= 2 and total_points >= 1:
             brief["confidence"] = "medium"
         else:
             brief["confidence"] = "low"
 
         # If zero points survived and summary is empty
         if not brief["summary"] and total_points == 0:
-            empty_brief = _build_empty_intel(company, role)
-            if has_prev_good_brief:
-                return _preserve_older_or_return(empty_brief)
-            return empty_brief
+            fallback_brief = build_sources_only_fallback(cleaned_sources, company, role, reason="model_bad_output")
+            store_cached_company_intel(opp_id, fallback_brief)
+            _LAST_INTEL_REFRESH[opp_id] = time.time()
+            return fallback_brief
 
         # Populate legacy keys for backward compatibility
         brief["company"] = company
@@ -664,9 +614,16 @@ async def generate_company_intel_brief(
             brief["is_fallback"] = True
             brief["fallback_label"] = model_data.get("fallback_label", "raw sources")
 
-        # 7. Store in 24-hour cache
-        store_cached_company_intel(opportunity.id, brief)
-        _LAST_INTEL_REFRESH[opportunity.id] = time.time()
+        # Storage write with resilience
+        try:
+            store_cached_company_intel(opp_id, brief)
+            log_intel_stage("storage_write", opp_id, company, details={"status": "stored"})
+        except Exception as st_err:
+            logger.error("Failed to store company intel cache: %s", st_err)
+            brief["storage_warning"] = "storage_failed"
+
+        _LAST_INTEL_REFRESH[opp_id] = time.time()
+        log_intel_stage("response_sent", opp_id, company, details={"status": "ready"})
         return brief
 
 

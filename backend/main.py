@@ -1,5 +1,5 @@
 """
-Compass — FastAPI Application Shell.
+Compass - FastAPI Application Shell.
 
 This is the main entry point for the backend API server. It wires up:
   - Async database pool lifecycle (startup/shutdown)
@@ -17,7 +17,7 @@ import sys
 import urllib.parse
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, JSONResponse
 
@@ -318,6 +318,25 @@ from backend.services.rate_limiter import enforce_company_intel_guard
 async def company_intel_alias(opportunity_id: int, request: Request, refresh: bool = False):
     from backend.routers.career import get_company_intel_endpoint
     return await get_company_intel_endpoint(opportunity_id, request, refresh=refresh)
+
+@app.post(
+    "/opportunities/{opportunity_id}/company-intel/refresh",
+    status_code=202,
+    include_in_schema=False,
+    dependencies=[Depends(enforce_company_intel_guard)],
+)
+async def company_intel_refresh_alias(opportunity_id: int, request: Request, background_tasks: BackgroundTasks):
+    from backend.routers.career import refresh_company_intel_job_endpoint
+    return await refresh_company_intel_job_endpoint(opportunity_id, request, background_tasks)
+
+@app.get(
+    "/opportunities/{opportunity_id}/company-intel/jobs/{job_id}",
+    include_in_schema=False,
+    dependencies=[Depends(enforce_company_intel_guard)],
+)
+async def company_intel_job_alias(opportunity_id: int, job_id: str, request: Request):
+    from backend.routers.career import get_company_intel_job_endpoint
+    return await get_company_intel_job_endpoint(opportunity_id, job_id, request)
 
 @app.get(
     "/opportunities/{opportunity_id}/job-analysis",

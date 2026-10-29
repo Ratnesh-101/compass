@@ -1,5 +1,5 @@
 """
-Compass — Career Copilot API Router.
+Compass - Career Copilot API Router.
 
 Provides authenticated endpoints for:
 1. Resume Studio: Master resumes, role-specific tailoring, factual validation reports, HTML/PDF export.
@@ -14,7 +14,7 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import HTMLResponse
 
 from backend.services.career_auto_prepare import (
@@ -22,6 +22,13 @@ from backend.services.career_auto_prepare import (
     get_user_quota_status,
 )
 from backend.services import winning_features
+from backend.services.company_intel_jobs import (
+    SCHEMA_VERSION,
+    create_job,
+    get_active_job_for_opportunity,
+    get_job,
+    run_intel_refresh_job,
+)
 from backend.services.rate_limiter import enforce_company_intel_guard
 from backend.services.career_file_parser import extract_resume_from_file_bytes, ResumeParseResult
 
@@ -446,6 +453,59 @@ async def get_company_intel_endpoint(
             opp.role_title,
             error="We couldn't generate company intel right now. Please try again.",
         )
+
+
+@router.post(
+    "/opportunities/{opportunity_id}/company-intel/refresh",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(enforce_company_intel_guard)],
+)
+async def refresh_company_intel_job_endpoint(
+    opportunity_id: int,
+    request: Request,
+    background_tasks: BackgroundTasks,
+):
+    """
+    Asynchronously starts a background refresh job for company intelligence.
+    Returns 202 Accepted with a job_id for client-side polling.
+    """
+    user_id = _get_or_create_user_id(request)
+    opp = await get_opportunity_by_id(opportunity_id, user_id)
+    if not opp:
+        raise HTTPException(status_code=404, detail="Opportunity not found")
+
+    job = await create_job(opp.id, opp.company_name, opp.role_title)
+    if job.get("status") in ("queued", "running"):
+        background_tasks.add_task(run_intel_refresh_job, job["job_id"], opp.id, user_id)
+
+    return {
+        "job_id": job["job_id"],
+        "status": job["status"],
+        "schema_version": SCHEMA_VERSION,
+        "opportunity_id": opportunity_id,
+        "company": opp.company_name,
+    }
+
+
+@router.get(
+    "/opportunities/{opportunity_id}/company-intel/jobs/{job_id}",
+    dependencies=[Depends(enforce_company_intel_guard)],
+)
+async def get_company_intel_job_endpoint(
+    opportunity_id: int,
+    job_id: str,
+    request: Request,
+):
+    """
+    Polls the status of an asynchronous company intelligence job.
+    Returns status: queued | running | done | failed.
+    """
+    _get_or_create_user_id(request)
+    job = await get_job(job_id)
+    if not job or job.get("opportunity_id") != opportunity_id:
+        raise HTTPException(status_code=404, detail="Company intel job not found")
+
+    return job
 
 
 
