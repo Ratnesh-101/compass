@@ -34,7 +34,7 @@ test('Item 2: status case normalization, valid enum select options, and uppercas
   assert.ok(!code.includes('value="interested"'), 'Select options must not include invalid enum "interested"')
   assert.ok(!code.includes('value="interviewing"'), 'Select options must not include invalid enum "interviewing"')
   // 3. Status select options must include valid enum "interview"
-  assert.ok(code.includes('value="interview"'), 'Select options must include valid backend enum "interview"')
+  assert.match(code, /buildStatusOptions\(appStatus,\s*\{\s*useLowerCase:\s*true\s*\}\)/, 'Select options must come from the shared backend-status list (includes "interview")')
   // 4. Outgoing update must send uppercase enum matching CareerApplicationStatus
   assert.match(code, /const\s+\w+\s*=\s*\w+\s*\?\s*String\(\s*\w+\s*\)\.toUpperCase\(\)\s*:\s*undefined|\.toUpperCase\(\)/, 'Outgoing status update must send uppercase enum to match CareerApplicationStatus')
 })

@@ -168,6 +168,25 @@ def get_available_windows(
     return [w for w in available if w.duration_minutes >= max(15, buffer_minutes)]
 
 
+INACTIVE_TASK_STATUSES = frozenset({"done", "completed", "cancelled"})
+SLOT_QUANTUM_MINUTES = 15
+
+
+def ceil_to_quarter_hour(moment: datetime | str) -> datetime:
+    """Round a moment UP to the next 15-minute boundary (UTC); exact boundaries are kept."""
+    dt = _ensure_utc(moment)
+    if dt.second or dt.microsecond:
+        dt = dt.replace(second=0, microsecond=0) + timedelta(minutes=1)
+    remainder = dt.minute % SLOT_QUANTUM_MINUTES
+    return dt if remainder == 0 else dt + timedelta(minutes=SLOT_QUANTUM_MINUTES - remainder)
+
+
+def earliest_schedulable_start(requested_start: datetime | str, now: Optional[datetime | str] = None) -> datetime:
+    """Never propose a slot in the past: max(requested start, now rounded up to 15 minutes)."""
+    floor = ceil_to_quarter_hour(now if now is not None else datetime.now(timezone.utc))
+    return max(_ensure_utc(requested_start), floor)
+
+
 def allocate_task_slots(
     tasks: Sequence[Dict[str, Any]],
     available_windows: Sequence[TimeWindow],
@@ -175,8 +194,15 @@ def allocate_task_slots(
     strategy: str = "priority_first",
     dependencies: Optional[Mapping[int, Sequence[int]]] = None,
     existing_scheduled_map: Optional[Dict[int, Dict[str, Any]]] = None,
+    not_before: Optional[datetime | str] = None,
 ) -> Dict[str, Any]:
     """Deterministically allocate tasks into available time windows.
+
+    Prerequisite rule: a prerequisite only blocks a task while it is a live candidate
+    in this run (or already has a slot in ``existing_scheduled_map``). Prerequisites
+    that are done/cancelled, or that are not among the tasks being scheduled, are
+    ignored, so finishing a prerequisite unblocks its dependents.
+    ``not_before`` trims every free window so no slot starts earlier than that moment.
 
     Tasks are prioritized by:
       1. Topological dependency prerequisites (parents must finish before children start)
@@ -225,8 +251,27 @@ def allocate_task_slots(
         duration = int(t.get("duration_minutes") or 60)
         return (prio_rank, due_dt, duration)
 
+    candidate_ids = {int(t["id"]) for t in tasks if t.get("id") is not None}
+    inactive_ids = {
+        int(t["id"]) for t in tasks
+        if t.get("id") is not None and str(t.get("status") or "").lower() in INACTIVE_TASK_STATUSES
+    }
+
+    def live_prereqs(task_id: Any) -> List[int]:
+        if task_id is None:
+            return []
+        return [
+            p for p in dep_map.get(int(task_id), [])
+            if p in scheduled_map or (p in candidate_ids and p not in inactive_ids)
+        ]
+
     remaining_tasks = list(tasks)
-    free_blocks: List[List[datetime]] = [[w.start, w.end] for w in available_windows]
+    floor = _ensure_utc(not_before) if not_before is not None else None
+    free_blocks: List[List[datetime]] = []
+    for w in available_windows:
+        w_start = max(w.start, floor) if floor else w.start
+        if w.end > w_start:
+            free_blocks.append([w_start, w.end])
 
     scheduled: List[Dict[str, Any]] = []
     unassigned: List[Dict[str, Any]] = []
@@ -237,9 +282,7 @@ def allocate_task_slots(
     while remaining_tasks:
         ready_tasks = []
         for t in remaining_tasks:
-            tid = t.get("id")
-            prereqs = dep_map.get(int(tid), []) if tid is not None else []
-            if all(p in scheduled_map for p in prereqs):
+            if all(p in scheduled_map for p in live_prereqs(t.get("id"))):
                 ready_tasks.append(t)
 
         if not ready_tasks:
@@ -272,7 +315,7 @@ def allocate_task_slots(
                 due_limit = _ensure_utc(raw_due)
 
         tid = task.get("id")
-        prereqs = dep_map.get(int(tid), []) if tid is not None else []
+        prereqs = live_prereqs(tid)
         if prereqs:
             earliest_allowed_start = max(scheduled_map[p]["scheduled_end"] + buf_delta for p in prereqs)
         else:
@@ -356,6 +399,8 @@ __all__ = [
     "merge_overlapping_intervals",
     "get_available_windows",
     "allocate_task_slots",
+    "ceil_to_quarter_hour",
+    "earliest_schedulable_start",
     "find_slipped_tasks",
     "replan_slipped_tasks",
     "detect_schedule_conflicts",

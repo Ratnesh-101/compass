@@ -82,23 +82,26 @@ async def test_create_google_calendar_event_simulated():
 
 @pytest.mark.asyncio
 async def test_link_calendar_event_persists_link():
-    """Verify link_calendar_event creates the event and links task in DB."""
+    """A live (Google-confirmed) event is recorded in calendar_event_links."""
     mock_pool = MagicMock()
     mock_conn = AsyncMock()
     mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
+    live = {"id": "evt_live_1", "status": "confirmed", "htmlLink": "https://calendar.google.com/e", "mode": "live"}
 
-    res = await link_calendar_event(
-        task_id=42,
-        start_dt="2026-09-18T14:00:00Z",
-        end_dt="2026-09-18T15:00:00Z",
-        title="Benchmark GPU Memory",
-        pool=mock_pool,
-        user_id="scholar@gmail.com",
-        domain="code",
-    )
+    with patch("backend.services.calendar.get_valid_access_token_for_user", AsyncMock(return_value="ya29.live")),          patch("backend.services.calendar.create_google_calendar_event", AsyncMock(return_value=live)):
+        res = await link_calendar_event(
+            task_id=42,
+            start_dt="2026-09-18T14:00:00Z",
+            end_dt="2026-09-18T15:00:00Z",
+            title="Benchmark GPU Memory",
+            pool=mock_pool,
+            user_id="scholar@gmail.com",
+            domain="code",
+        )
     assert res["status"] == "synced"
+    assert res["live_created"] is True
     assert res["task_id"] == 42
-    assert "google_event_id" in res
+    assert res["google_event_id"] == "evt_live_1"
     assert mock_conn.execute.called
 
 

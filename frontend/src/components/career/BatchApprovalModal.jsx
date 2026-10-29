@@ -13,6 +13,7 @@ export default function BatchApprovalModal({
   setLegalAccepted,
   onConfirm,
   processing,
+  error = null,
 }) {
   if (!show || !currentBatch) return null
 
@@ -107,6 +108,15 @@ export default function BatchApprovalModal({
           </label>
         </div>
 
+        {error && (
+          <div
+            role="alert"
+            style={{ background: '#fee2e2', color: '#991b1b', padding: '10px 12px', borderRadius: '8px', marginBottom: '14px', fontSize: '13px', whiteSpace: 'pre-wrap' }}
+          >
+            {error}
+          </div>
+        )}
+
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
           <button
             type="button"
@@ -137,7 +147,7 @@ export default function BatchApprovalModal({
               minHeight: '44px',
             }}
           >
-            {processing ? 'Processing...' : 'Authorize & Submit Batch'}
+            {processing ? 'Processing...' : 'Approve & prepare kits'}
           </button>
         </div>
       </div>
