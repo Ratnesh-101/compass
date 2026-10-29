@@ -352,7 +352,7 @@ def test_ingest_linkedin_csv_export():
     )
     content, notes = ingest_external_profile(req)
 
-    assert len(content.skills) > 0
+    assert content.skills == [] and content.experience[0].company == "DataScale"
     assert content.evidence_classifications.get("source") == ExternalProfileSource.LINKEDIN_DATA_EXPORT.value
 
 

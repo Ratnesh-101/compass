@@ -72,12 +72,20 @@ def validate_resume_against_master(
     alignments: List[str] = []
 
     # 1. Contact validation
-    if not tailored.full_name or len(tailored.full_name.strip()) < 2:
+    if (
+        not tailored.full_name
+        or len(tailored.full_name.strip()) < 2
+        or tailored.full_name.strip().lower() in {"compass candidate", "candidate"}
+    ):
         missing.append("Candidate Full Name is required.")
     else:
         passed.append("Contact: Valid full name verified.")
 
-    if not tailored.email or "@" not in tailored.email:
+    if (
+        not tailored.email
+        or "@" not in tailored.email
+        or tailored.email.strip().lower() == "candidate@compass.local"
+    ):
         missing.append("Valid contact email address is required.")
     else:
         passed.append("Contact: Valid email address verified.")
@@ -626,10 +634,10 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
         cleaned_lines.append(line)
     lines = cleaned_lines
     if not lines:
-        return ResumeContent(full_name="Candidate", email="candidate@compass.local")
+        return ResumeContent()
 
     # 1. Contact Extraction
-    full_name = "Candidate"
+    full_name = ""
     for line in lines[:5]:
         cand_name = line.split("|")[0].strip() if "|" in line else line.strip()
         cand_name = re.sub(r"^#+\s*", "", cand_name).strip()
@@ -637,7 +645,7 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
             if re.search(r"[A-Za-z]", cand_name):
                 full_name = cand_name
                 break
-    email = "candidate@compass.local"
+    email = ""
     phone = None
     location = None
     github_or_portfolio = None
@@ -718,6 +726,10 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
         )):
             current_section = "skills"
             in_skill_subgroup = False
+            for tok in line_clean.partition(":")[2].replace("•", ",").replace(";", ",").replace("|", ",").split(","):
+                clean_tok = _clean_bullet(tok).strip(" -:*•")
+                if clean_tok and 1 < len(clean_tok) < 40 and clean_tok not in skills:
+                    skills.append(clean_tok)
             continue
         elif any(line_low == h or line_low.startswith(f"{h}:") or line_low.startswith(f"{h} ") for h in (
             "education", "academic background", "academics", "qualifications"
@@ -1033,8 +1045,8 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
         github_or_portfolio=github_or_portfolio,
         linkedin_url=linkedin_url,
         summary=" ".join(summary_lines) if summary_lines else None,
-        skills=skills or ["Python", "Git"],
-        education=edu_list or [ResumeEducationItem(institution="University", degree="Undergraduate Degree", evidence_classification="SOURCE_DOCUMENT")],
+        skills=skills,
+        education=edu_list,
         projects=projects,
         experience=experience,
         internships=internships,
