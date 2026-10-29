@@ -44,7 +44,18 @@ import {
 } from '../../utils/workspaceDraft'
 import ValidationReportCard from './ValidationReportCard'
 import { getSafeHttpUrl } from '../../utils/safeUrl.js'
-import { buildStatusOptions, buildDeadlinePayload } from '../../utils/careerUiHelpers.js'
+import {
+  buildStatusOptions,
+  buildDeadlinePayload,
+  formatMatchScore,
+  resolveSkillMatch,
+  intelCooldownForError,
+  intelErrorMessage,
+  cooldownSecondsLeft,
+  copyWithFeedback,
+  DEFAULT_INTEL_COOLDOWN_SECONDS,
+  NO_APPLICATION_URL_TEXT,
+} from '../../utils/careerUiHelpers.js'
 
 const STATUS_LABELS = {
   discovered: 'Discovered',
@@ -223,6 +234,8 @@ export default function ApplicationWorkspaceModal({
   // Job Requirement Analysis state (Phase 5 & 8)
   const [jobAnalysis, setJobAnalysis] = useState(null)
   const [loadingAnalysis, setLoadingAnalysis] = useState(false)
+  const [analysisError, setAnalysisError] = useState(null)
+  const [workspaceError, setWorkspaceError] = useState(null)
   const [customJobDesc, setCustomJobDesc] = useState(opportunity?.description || '')
 
   // Preparation Checklist state (stored in application metadata / notes or locally)
@@ -238,11 +251,13 @@ export default function ApplicationWorkspaceModal({
   const loadJobAnalysisData = useCallback(async (customDesc = null) => {
     if (!opportunity?.id) return
     setLoadingAnalysis(true)
+    setAnalysisError(null)
     try {
       const report = await fetchJobAnalysis(opportunity.id, customDesc)
       setJobAnalysis(report)
     } catch (err) {
       console.warn('Could not load detailed job analysis:', err)
+      setAnalysisError(err?.message || 'Could not load the analysis.')
     } finally {
       setLoadingAnalysis(false)
     }
@@ -256,9 +271,24 @@ export default function ApplicationWorkspaceModal({
   const [lastAttemptTime, setLastAttemptTime] = useState(null)
   const [sourcesExpanded, setSourcesExpanded] = useState(false)
   const [highlightedSourceId, setHighlightedSourceId] = useState(null)
-  const [refreshCooldownNotice, setRefreshCooldownNotice] = useState('')
+  const [intelRequested, setIntelRequested] = useState(false)
+  const [cooldownUntil, setCooldownUntil] = useState(0)
+  const [nowTick, setNowTick] = useState(() => Date.now())
   const refreshBtnRef = useRef(null)
-  const lastIntelRefreshTimeRef = useRef(0)
+  const cooldownUntilRef = useRef(0)
+  const intelFetchStartedRef = useRef(false)
+  const cooldownSeconds = cooldownSecondsLeft(cooldownUntil, nowTick)
+
+  // Tick once a second while a cooldown is running so the countdown stays visible.
+  useEffect(() => {
+    if (!cooldownUntil || cooldownUntil <= Date.now()) return undefined
+    const timer = setInterval(() => {
+      const now = Date.now()
+      setNowTick(now)
+      if (now >= cooldownUntil) clearInterval(timer)
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [cooldownUntil])
   const companyIntelRef = useRef(null)
   const loadingIntelRef = useRef(false)
   const coldStartTimerRef = useRef(null)
@@ -280,21 +310,19 @@ export default function ApplicationWorkspaceModal({
     if (!opportunity?.id) return
     if (loadingIntelRef.current) return
 
-    if (isRefresh) {
-      const now = Date.now()
-      const elapsed = (now - lastIntelRefreshTimeRef.current) / 1000
-      if (elapsed < 30) {
-        setRefreshCooldownNotice('Please wait a few seconds before refreshing again')
-        setTimeout(() => setRefreshCooldownNotice(''), 3000)
-        return
-      }
-      lastIntelRefreshTimeRef.current = now
+    if (isRefresh && cooldownUntilRef.current > Date.now()) return
+
+    const startCooldown = (seconds) => {
+      if (!(seconds > 0)) return
+      const until = Date.now() + seconds * 1000
+      cooldownUntilRef.current = until
+      setCooldownUntil(until)
+      setNowTick(Date.now())
     }
 
     loadingIntelRef.current = true
     setLoadingIntel(true)
     setIntelError(null)
-    setRefreshCooldownNotice('')
     setColdStartPending(false)
     if (coldStartTimerRef.current) clearTimeout(coldStartTimerRef.current)
     coldStartTimerRef.current = setTimeout(() => {
@@ -307,8 +335,12 @@ export default function ApplicationWorkspaceModal({
         try {
           job = await refreshCompanyIntelJob(opportunity.id)
         } catch (postErr) {
+          // The server answered 429: do not retry through the sync path, surface its message.
+          if (postErr?.status === 429) throw postErr
           console.warn('Async refresh job creation failed, falling back to sync fetch:', postErr)
         }
+        // The server accepted the refresh (job created or answered): only now throttle further refreshes.
+        if (job) startCooldown(DEFAULT_INTEL_COOLDOWN_SECONDS)
 
         if (job?.status === 'done' && job?.result) {
           setCompanyIntel(job.result)
@@ -364,6 +396,7 @@ export default function ApplicationWorkspaceModal({
           }
         } else {
           const intel = await fetchCompanyIntel(opportunity.id, true)
+          startCooldown(DEFAULT_INTEL_COOLDOWN_SECONDS)
           setCompanyIntel(intel)
           if (intel?.status === 'error' || intel?.error) {
             setIntelError(getIntelErrorMessage(intel.reason, intel.error))
@@ -381,10 +414,14 @@ export default function ApplicationWorkspaceModal({
     } catch (err) {
       console.warn('Could not load company intelligence:', err)
       setLastAttemptTime(new Date().toISOString())
-      const reasonCode = err?.status === 429 ? 'search_quota' : 'backend_unreachable'
-      const errMsg = getIntelErrorMessage(reasonCode, err.message)
+      // A 429 means the server refused: back off for Retry-After. Other failures never start a cooldown.
+      startCooldown(intelCooldownForError(err))
+      // Prefer the server's own wording (budget exhausted / cooldown / daily cap) when it answered.
+      const errMsg = err?.status ? intelErrorMessage(err) : getIntelErrorMessage('backend_unreachable', err?.message)
       if (!companyIntelRef.current) {
         setIntelError(errMsg)
+      } else if (err?.status) {
+        showNotification(errMsg, 'error')
       } else {
         showNotification('Could not refresh intelligence report. Please try again.', 'error')
       }
@@ -407,6 +444,7 @@ export default function ApplicationWorkspaceModal({
     if (!opportunity?.id) return
     setLoading(true)
     setError(null)
+    setWorkspaceError(null)
     try {
       const app = await prepareApplication(opportunity.id)
       setApplication(app)
@@ -438,18 +476,28 @@ export default function ApplicationWorkspaceModal({
       }
       setIsInitialLoaded(true)
       loadJobAnalysisData()
-      loadCompanyIntelData()
     } catch (err) {
       console.error('Error loading application workspace:', err)
-      setError(err.message || 'Failed to prepare application workspace.')
+      const message = err.message || 'Failed to prepare application workspace.'
+      setError(message)
+      setWorkspaceError(message)
     } finally {
       setLoading(false)
     }
-  }, [opportunity?.id, loadJobAnalysisData, loadCompanyIntelData])
+  }, [opportunity?.id, loadJobAnalysisData])
 
   useEffect(() => {
     loadWorkspaceData()
   }, [loadWorkspaceData])
+
+  // Company Intel spends the shared daily search budget, so fetch it lazily the first time
+  // its tab is opened (once per mount); afterwards only the Refresh button re-fetches.
+  useEffect(() => {
+    if (activeTab !== 'company_intel' || !isInitialLoaded || intelFetchStartedRef.current) return
+    intelFetchStartedRef.current = true
+    setIntelRequested(true)
+    loadCompanyIntelData()
+  }, [activeTab, isInitialLoaded, loadCompanyIntelData])
 
   // Restore unsaved local draft edits
   const handleRestoreDraft = () => {
@@ -698,12 +746,18 @@ export default function ApplicationWorkspaceModal({
     }
   }
 
+  // Copy to the clipboard and report the real outcome (never announce success on failure).
+  const handleCopy = async (label, text) => {
+    const result = await copyWithFeedback(label, text)
+    showNotification(result.message, result.ok ? 'success' : 'error')
+  }
+
   // Handle External Submission Confirmation
   const handleConfirmExternalSubmission = async () => {
     const success = await handleUpdateApplicationRecord('submitted')
     if (!success) return
     setChecklist(prev => ({ ...prev, submittedExternally: true }))
-    showNotification('Confirmed: Marked as submitted on employer portal.')
+    showNotification('You marked this as submitted. Compass cannot verify submissions on employer portals.')
   }
 
   // Compute Match Analysis
@@ -711,15 +765,19 @@ export default function ApplicationWorkspaceModal({
   const requiredSkills = rawRequiredSkills.length > 0
     ? rawRequiredSkills
     : (jobAnalysis?.required_skills || [])
-  const userSkills = resume?.content?.skills || []
-  const matchedSkills = requiredSkills.filter(s =>
-    userSkills.some(us => us.toLowerCase() === s.toLowerCase())
-  )
-  const missingSkills = requiredSkills.filter(s =>
-    !userSkills.some(us => us.toLowerCase() === s.toLowerCase())
-  )
+  // Matched/missing come from the analysis once loaded, so the overview and the analysis tab agree.
+  const skillMatch = resolveSkillMatch({
+    analysis: jobAnalysis,
+    loading: loadingAnalysis,
+    failed: Boolean(analysisError),
+    postingSkills: requiredSkills,
+  })
+  const matchedSkills = skillMatch.matched
+  const missingSkills = skillMatch.missing
+  const matchScoreView = formatMatchScore(loadingAnalysis && !jobAnalysis ? null : jobAnalysis)
 
   const cleanedOpp = cleanOpportunity(opportunity)
+  const safeApplyUrl = getSafeHttpUrl(opportunity?.official_application_url)
 
   const tabListRef = useRef(null)
   const [canScrollLeft, setCanScrollLeft] = useState(false)
@@ -915,8 +973,8 @@ export default function ApplicationWorkspaceModal({
           <div
             style={{
               padding: '10px 20px',
-              background: notification.type === 'success' ? '#f0fdf4' : '#eff6ff',
-              color: notification.type === 'success' ? '#166534' : '#1d4ed8',
+              background: notification.type === 'success' ? '#f0fdf4' : notification.type === 'error' ? '#fef2f2' : '#eff6ff',
+              color: notification.type === 'success' ? '#166534' : notification.type === 'error' ? '#991b1b' : '#1d4ed8',
               borderBottom: '1px solid var(--border)',
               fontSize: '13px',
               fontWeight: 600,
@@ -925,7 +983,7 @@ export default function ApplicationWorkspaceModal({
               gap: '8px',
             }}
           >
-            <span>{notification.type === 'success' ? '✓' : 'ℹ️'}</span>
+            <span>{notification.type === 'success' ? '✓' : notification.type === 'error' ? '⚠️' : 'ℹ️'}</span>
             <span>{notification.message}</span>
           </div>
         )}
@@ -1081,8 +1139,29 @@ export default function ApplicationWorkspaceModal({
                 </div>
               )}
 
+              {/* Workspace failed to load: Company Intel and Job Analysis depend on it */}
+              {workspaceError && (activeTab === 'company_intel' || activeTab === 'job_analysis') && (
+                <div
+                  id="workspace-load-error"
+                  role="alert"
+                  style={{ padding: '24px 20px', borderRadius: '8px', background: '#fef2f2', border: '1px solid #fecaca', textAlign: 'center' }}
+                >
+                  <p style={{ margin: '0 0 12px 0', fontSize: '13px', color: '#991b1b' }}>
+                    Could not prepare this workspace: {workspaceError}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={loadWorkspaceData}
+                    className="radar-card-btn radar-card-btn-secondary"
+                  >
+                    <RefreshCw size={14} aria-hidden="true" />
+                    <span>Retry</span>
+                  </button>
+                </div>
+              )}
+
               {/* TAB: Company Intel Brief */}
-              {activeTab === 'company_intel' && (() => {
+              {activeTab === 'company_intel' && !workspaceError && (() => {
                 const isOldBrief = companyIntel && !('summary' in companyIntel) && Boolean(companyIntel.strategic_insights || companyIntel.technical_pain_points)
                 const isError = Boolean(companyIntel?.status === 'error' || companyIntel?.error || intelError)
                 const isEmptyInfo = Boolean(
@@ -1200,9 +1279,9 @@ export default function ApplicationWorkspaceModal({
                           {isError && !isShowingOlderBrief && lastAttemptTime && (
                             <span>{formatAttemptTime(lastAttemptTime)}</span>
                           )}
-                          {refreshCooldownNotice && (
-                            <span style={{ color: 'var(--brand)', fontSize: '11px', fontWeight: 600 }}>
-                              {refreshCooldownNotice}
+                          {cooldownSeconds > 0 && (
+                            <span style={{ color: 'var(--brand)', fontSize: '11px', fontWeight: 600 }} aria-live="polite">
+                              Refresh available in {cooldownSeconds}s
                             </span>
                           )}
                         </div>
@@ -1212,12 +1291,12 @@ export default function ApplicationWorkspaceModal({
                           ref={refreshBtnRef}
                           type="button"
                           onClick={() => loadCompanyIntelData(true)}
-                          disabled={loadingIntel || Boolean(refreshCooldownNotice)}
+                          disabled={loadingIntel || cooldownSeconds > 0}
                           className="radar-card-btn radar-card-btn-secondary"
                           aria-label="Refresh company intelligence"
                         >
                           <RefreshCw size={14} className={loadingIntel ? 'spin' : ''} strokeWidth={1.8} aria-hidden="true" />
-                          <span>{loadingIntel ? 'Updating…' : 'Refresh Intel'}</span>
+                          <span>{loadingIntel ? 'Updating…' : cooldownSeconds > 0 ? `Refresh in ${cooldownSeconds}s` : 'Refresh Intel'}</span>
                         </button>
                       </div>
                     </div>
@@ -1248,7 +1327,7 @@ export default function ApplicationWorkspaceModal({
                     )}
 
                     {/* Loading Skeleton */}
-                    {loadingIntel ? (
+                    {(loadingIntel || (!intelRequested && !companyIntel)) ? (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }} aria-busy="true">
                         <div
                           style={{
@@ -1328,7 +1407,7 @@ export default function ApplicationWorkspaceModal({
                         <button
                           type="button"
                           onClick={() => loadCompanyIntelData(true)}
-                          disabled={loadingIntel || Boolean(refreshCooldownNotice)}
+                          disabled={loadingIntel || cooldownSeconds > 0}
                           className="radar-card-btn radar-card-btn-secondary"
                           style={{ margin: '0 auto', display: 'inline-flex', alignItems: 'center', gap: '6px', minHeight: '36px', padding: '6px 14px' }}
                           aria-label="Refresh company intelligence"
@@ -1374,6 +1453,7 @@ export default function ApplicationWorkspaceModal({
                           <button
                             type="button"
                             onClick={() => loadCompanyIntelData(true)}
+                            disabled={cooldownSeconds > 0}
                             style={{
                               background: 'transparent',
                               border: 'none',
@@ -1385,7 +1465,7 @@ export default function ApplicationWorkspaceModal({
                               textDecoration: 'underline',
                             }}
                           >
-                            Refresh now
+                            {cooldownSeconds > 0 ? `Refresh in ${cooldownSeconds}s` : 'Refresh now'}
                           </button>
                         </div>
                         {oldItems.length > 0 && (
@@ -1648,6 +1728,14 @@ export default function ApplicationWorkspaceModal({
                             {sk}
                           </span>
                         ))
+                      ) : skillMatch.status === 'loading' ? (
+                        <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                          Checking this posting's requirements…
+                        </span>
+                      ) : skillMatch.status === 'unavailable' ? (
+                        <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                          Requirements unavailable: the analysis could not be loaded.
+                        </span>
                       ) : (
                         <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
                           No explicit prerequisite technical skills mandated for this role.
@@ -1674,7 +1762,16 @@ export default function ApplicationWorkspaceModal({
                       </span>
                     </div>
 
-                    {requiredSkills.length === 0 ? (
+                    {skillMatch.status !== 'ready' ? (
+                      <div
+                        id="factual-match-pending"
+                        style={{ padding: '14px 16px', borderRadius: '8px', background: 'var(--bg-card)', border: '1px solid var(--border)', fontSize: '12px', color: 'var(--text-secondary)' }}
+                      >
+                        {skillMatch.status === 'loading'
+                          ? 'Checking your skills against this posting…'
+                          : 'Skill match unavailable: the analysis could not be loaded. Open the Job Analysis tab to retry.'}
+                      </div>
+                    ) : requiredSkills.length === 0 || skillMatch.required.length === 0 ? (
                       <div
                         id="factual-match-general-role"
                         style={{
@@ -1719,7 +1816,7 @@ export default function ApplicationWorkspaceModal({
                         {missingSkills.length === 0 ? (
                           <div style={{ padding: '12px', borderRadius: '8px', background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
                             <div style={{ fontWeight: 700, fontSize: '12px', color: '#166534', marginBottom: '6px' }}>
-                              ✓ All Role Requirements Verified! ({matchedSkills.length}/{requiredSkills.length})
+                              ✓ All Role Requirements Verified! ({matchedSkills.length}/{skillMatch.required.length})
                             </div>
                             <span style={{ fontSize: '12px', color: '#15803d' }}>
                               100% of required skills found in your verified master profile!
@@ -1766,7 +1863,7 @@ export default function ApplicationWorkspaceModal({
               )}
 
               {/* TAB: Deep Job Description Analysis & Evidence Match (Phase 5) */}
-              {activeTab === 'job_analysis' && (
+              {activeTab === 'job_analysis' && !workspaceError && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
                   {/* Top Match Score & Verdict Card */}
                   <div
@@ -1790,8 +1887,27 @@ export default function ApplicationWorkspaceModal({
                         {opportunity.role_title} @ {opportunity.company_name}
                       </h3>
                       <div style={{ fontSize: '13px', color: 'var(--text-secondary)', maxWidth: '600px', lineHeight: 1.5 }}>
-                        {jobAnalysis?.summary_verdict || (loadingAnalysis ? 'Analyzing requirements against candidate master profile…' : 'Requirement analysis ready.')}
+                        {jobAnalysis?.summary_verdict || (loadingAnalysis ? 'Analyzing requirements against candidate master profile…' : analysisError ? 'Could not load the analysis' : 'Requirement analysis ready.')}
                       </div>
+                      {analysisError && (
+                        <div
+                          id="job-analysis-error"
+                          role="alert"
+                          style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', fontSize: '12px', color: '#991b1b' }}
+                        >
+                          <span>
+                            {jobAnalysis ? `Re-analysis failed (showing the previous report): ${analysisError}` : `Could not load the analysis: ${analysisError}`}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => loadJobAnalysisData(jobAnalysis ? customJobDesc : null)}
+                            disabled={loadingAnalysis}
+                            style={{ padding: '3px 10px', borderRadius: '6px', border: '1px solid #fecaca', background: '#ffffff', color: '#991b1b', fontWeight: 700, fontSize: '11px', cursor: loadingAnalysis ? 'not-allowed' : 'pointer' }}
+                          >
+                            Retry
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     <div
@@ -1807,11 +1923,14 @@ export default function ApplicationWorkspaceModal({
                         style={{
                           fontSize: '26px',
                           fontWeight: 800,
-                          color: (jobAnalysis?.match_score || 0) >= 0.75 ? '#16a34a' : (jobAnalysis?.match_score || 0) >= 0.5 ? '#d97706' : '#dc2626',
+                          color: matchScoreView.color,
                         }}
                       >
-                        {loadingAnalysis ? '…' : `${Math.round((jobAnalysis?.match_score || 0) * 100)}%`}
+                        {loadingAnalysis && !jobAnalysis ? '…' : analysisError && !jobAnalysis ? '?' : matchScoreView.text}
                       </div>
+                      {matchScoreView.caption && !loadingAnalysis && (
+                        <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '2px' }}>{matchScoreView.caption}</div>
+                      )}
                       <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
                         Match Score
                       </div>
@@ -2316,7 +2435,7 @@ export default function ApplicationWorkspaceModal({
                         >
                           {buildStatusOptions(appStatus, { useLowerCase: true }).map(opt => (
                             <option key={opt.value} value={opt.value}>
-                              {opt.value === 'submitted' ? 'Applied / Submitted Externally' : opt.label}
+                              {opt.value === 'submitted' ? 'Applied / Submitted Externally (self-reported)' : opt.label}
                             </option>
                           ))}
                         </select>
@@ -2376,13 +2495,15 @@ export default function ApplicationWorkspaceModal({
                       </h3>
                     </div>
                     <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-                      {opportunity.company_name} requires submissions directly through their official career portal. Compass prepares your truthful documents and prefilled answers to make completion fast and accurate.
+                      {safeApplyUrl
+                        ? `${opportunity.company_name} accepts applications through its own career portal. Compass prepares your truthful documents and prefilled answers to make completion fast and accurate.`
+                        : "Compass prepares your truthful documents and prefilled answers. Submit them on the employer's own site; Compass has not verified an official application URL for this role."}
                     </p>
 
-                    {opportunity.official_application_url ? (
+                    {safeApplyUrl ? (
                       <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
                         <a
-                          href={opportunity.official_application_url}
+                          href={safeApplyUrl}
                           target="_blank"
                           rel="noopener noreferrer"
                           style={{
@@ -2418,12 +2539,12 @@ export default function ApplicationWorkspaceModal({
                             opacity: savingStatus ? 0.6 : 1,
                           }}
                         >
-                          {appStatus === 'submitted' ? '✓ Marked as Submitted' : 'Mark as Submitted Externally'}
+                          {appStatus === 'submitted' ? '✓ You marked this as submitted' : 'I submitted this externally'}
                         </button>
                       </div>
                     ) : (
                       <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-                        No direct application URL verified for this opportunity yet.
+                        {NO_APPLICATION_URL_TEXT}
                       </div>
                     )}
                   </div>
@@ -2436,30 +2557,21 @@ export default function ApplicationWorkspaceModal({
                     <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                       <button
                         type="button"
-                        onClick={() => {
-                          navigator.clipboard.writeText(summary || '')
-                          showNotification('Summary copied to clipboard!')
-                        }}
+                        onClick={() => handleCopy('Summary', summary)}
                         style={{ padding: '6px 12px', borderRadius: '6px', background: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-primary)', fontSize: '12px', cursor: 'pointer' }}
                       >
                         📋 Copy Summary
                       </button>
                       <button
                         type="button"
-                        onClick={() => {
-                          navigator.clipboard.writeText(skillsText || '')
-                          showNotification('Skills copied to clipboard!')
-                        }}
+                        onClick={() => handleCopy('Skills', skillsText)}
                         style={{ padding: '6px 12px', borderRadius: '6px', background: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-primary)', fontSize: '12px', cursor: 'pointer' }}
                       >
                         📋 Copy Skills
                       </button>
                       <button
                         type="button"
-                        onClick={() => {
-                          navigator.clipboard.writeText(coverLetterText || '')
-                          showNotification('Cover letter copied to clipboard!')
-                        }}
+                        onClick={() => handleCopy('Cover letter', coverLetterText)}
                         style={{ padding: '6px 12px', borderRadius: '6px', background: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-primary)', fontSize: '12px', cursor: 'pointer' }}
                       >
                         📋 Copy Cover Letter

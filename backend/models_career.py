@@ -428,6 +428,10 @@ class JobMatchEvidence(BaseModel):
     confidence: float = 1.0
 
 
+class JobAnalysisRequest(BaseModel):
+    custom_description: Optional[str] = Field(None, max_length=20000)
+
+
 class JobAnalysisReport(BaseModel):
     opportunity_id: int
     role_title: str
@@ -448,6 +452,8 @@ class JobAnalysisReport(BaseModel):
     partial_skills: List[str] = Field(default_factory=list)
     gap_actions: List[Dict[str, Any]] = Field(default_factory=list)
     has_complete_profile: bool = True
+    # False when the posting lists no recognisable skills (match_score is then not meaningful)
+    score_available: bool = True
     profile_missing_message: Optional[str] = None
     formula_explanation: str = "Skill overlap estimate = (matched + 0.5 * partial) / total required skills"
 

@@ -2,6 +2,7 @@
 
 import { API_BASE, getAuthHeaders, getCurrentUserId, setCurrentUserId, safeHref, fetchWithTimeout } from './baseClient.js'
 import { classifyAuthMe } from '../utils/firstRun.js'
+import { commitErrorText } from '../utils/scheduleHonesty.js'
 
 export async function fetchCalendarStatus() {
   try {
@@ -135,8 +136,9 @@ export async function fetchCalendarAvailability(startDate, endDate) {
     const json = await res.json()
     return json.data || json
   } catch (err) {
-    console.warn('[Compass Calendar Availability Fallback]', err)
-    return { busy_intervals: [], free_windows: [] }
+    // Surface the failure instead of pretending the week is empty; callers keep their previous data.
+    console.warn('[Compass Calendar Availability]', err)
+    return { calendar_error: err?.message || 'Request failed' }
   }
 }
 
@@ -162,7 +164,10 @@ export async function commitSchedule(assignments, rationale = 'Committed via Sch
     headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ assignments, rationale }),
   })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(commitErrorText(err) || `HTTP ${res.status}`)
+  }
   const json = await res.json()
   return json.data || json
 }

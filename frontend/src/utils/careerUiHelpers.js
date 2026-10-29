@@ -26,7 +26,7 @@ export function extractErrorDetail(body, fallback) {
     if (parts.length > 0) return parts.join('; ')
   }
   if (detail && typeof detail === 'object') {
-    const inner = detail.message || detail.msg
+    const inner = detail.message || detail.msg || detail.detail
     if (typeof inner === 'string' && inner) return inner
   }
   return fallback
@@ -294,4 +294,123 @@ export function hasSavedProfile(profile) {
     profile.academic_year ||
     (Array.isArray(profile.skills) && profile.skills.length > 0)
   )
+}
+
+// ---------------------------------------------------------------------------
+// Job analysis: score display, skill match, request shape
+// ---------------------------------------------------------------------------
+
+export const NO_SKILLS_CAPTION = 'No skills listed in this posting'
+export const SCORE_GREEN = '#16a34a'
+export const SCORE_AMBER = '#d97706'
+export const SCORE_RED = '#dc2626'
+export const SCORE_NEUTRAL = 'var(--text-muted)'
+const SCORE_GREEN_MIN = 75
+const SCORE_AMBER_MIN = 50
+
+/** Colour for a 0-100 match score. */
+export function matchScoreColor(score) {
+  const n = Number(score) || 0
+  if (n >= SCORE_GREEN_MIN) return SCORE_GREEN
+  if (n >= SCORE_AMBER_MIN) return SCORE_AMBER
+  return SCORE_RED
+}
+
+/**
+ * How to show a JobAnalysisReport match score. The backend sends 0-100 (not a fraction).
+ * `score_available === false` (or an analysis with no recognisable skills) is "N/A", never a red 0%.
+ * A missing `score_available` (old server) is treated as available.
+ */
+export function formatMatchScore(analysis) {
+  if (!analysis) return { text: '…', color: SCORE_NEUTRAL, caption: '', available: false }
+  const noSkills =
+    analysis.score_available === false ||
+    (analysis.score_available === undefined &&
+      Array.isArray(analysis.required_skills) &&
+      analysis.required_skills.length === 0 &&
+      !(Number(analysis.match_score) > 0))
+  if (noSkills) return { text: 'N/A', color: SCORE_NEUTRAL, caption: NO_SKILLS_CAPTION, available: false }
+  const score = Math.max(0, Math.min(100, Math.round(Number(analysis.match_score) || 0)))
+  return { text: `${score}%`, color: matchScoreColor(score), caption: '', available: true }
+}
+
+/**
+ * One source of truth for matched/missing skills, shared by the overview and the analysis tab.
+ * status: 'loading' (not loaded yet), 'unavailable' (load failed, nothing to show), 'ready'.
+ * A stale report kept after a failed re-analyze stays 'ready'.
+ */
+export function resolveSkillMatch({ analysis, loading, failed, postingSkills }) {
+  const posting = Array.isArray(postingSkills) ? postingSkills : []
+  if (analysis) {
+    const matched = Array.isArray(analysis.matched_skills) ? analysis.matched_skills : []
+    const missing = Array.isArray(analysis.missing_skills) ? analysis.missing_skills : []
+    const listed = Array.isArray(analysis.required_skills) ? analysis.required_skills : []
+    const required = listed.length > 0 ? listed : [...matched, ...missing]
+    return { status: 'ready', required, matched, missing }
+  }
+  const status = failed && !loading ? 'unavailable' : 'loading'
+  return { status, required: posting, matched: [], missing: [] }
+}
+
+/** GET when there is no custom description; POST with a JSON body otherwise (avoids huge query strings). */
+export function buildJobAnalysisRequest(apiBase, opportunityId, customDesc) {
+  const url = `${apiBase}/opportunities/${opportunityId}/job-analysis`
+  const text = typeof customDesc === 'string' ? customDesc.trim() : ''
+  if (!text) return { url, method: 'GET', body: null }
+  return { url, method: 'POST', body: JSON.stringify({ custom_description: customDesc }) }
+}
+
+// ---------------------------------------------------------------------------
+// Company intel: rate limiting
+// ---------------------------------------------------------------------------
+
+export const DEFAULT_INTEL_COOLDOWN_SECONDS = 30
+export const MAX_INTEL_COOLDOWN_SECONDS = 3600
+
+/** Parse a Retry-After header (delta-seconds). Returns a positive integer or null. */
+export function parseRetryAfter(value) {
+  if (value === null || value === undefined || value === '') return null
+  const n = Number(value)
+  if (!Number.isFinite(n) || n <= 0) return null
+  return Math.min(Math.ceil(n), MAX_INTEL_COOLDOWN_SECONDS)
+}
+
+/**
+ * Cooldown (seconds) to apply after a failed intel request.
+ * Only a 429 starts one; any other failure never reached the budget so does not lock the user out.
+ */
+export function intelCooldownForError(err) {
+  if (!err || err.status !== 429) return 0
+  return parseRetryAfter(err.retryAfter) || DEFAULT_INTEL_COOLDOWN_SECONDS
+}
+
+/** Whole seconds left until `untilMs`, never negative. */
+export function cooldownSecondsLeft(untilMs, nowMs) {
+  if (!untilMs) return 0
+  return Math.max(0, Math.ceil((untilMs - nowMs) / 1000))
+}
+
+/** User-facing message for a failed intel request, preferring the server's own wording. */
+export function intelErrorMessage(err) {
+  const msg = err && typeof err.message === 'string' ? err.message.trim() : ''
+  if (err && err.status === 429) return msg || 'Company intel is rate limited right now. Please try again shortly.'
+  if (err && err.status && msg) return msg
+  return "We couldn't generate company intel right now. Please try again."
+}
+
+// ---------------------------------------------------------------------------
+// Links and clipboard feedback
+// ---------------------------------------------------------------------------
+
+export const NO_APPLICATION_URL_TEXT = 'No direct application URL verified for this opportunity yet.'
+
+/** Copy `text` and describe the outcome. Empty text or a rejected write is a failure. */
+export async function copyWithFeedback(label, text, clipboard) {
+  if (typeof text !== 'string' || !text.trim()) {
+    return { ok: false, message: `Copy failed: there is no ${label.toLowerCase()} to copy.` }
+  }
+  const ok = await copyTextSafely(text, clipboard)
+  return ok
+    ? { ok: true, message: `${label} copied to clipboard!` }
+    : { ok: false, message: `Copy failed: could not access the clipboard.` }
 }

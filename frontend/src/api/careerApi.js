@@ -8,7 +8,7 @@
  */
 
 import { API_BASE as BASE_URL, getAuthHeaders, getGuestToken, initGuestSession, safeHref } from './baseClient.js'
-import { extractErrorDetail } from '../utils/careerUiHelpers.js'
+import { extractErrorDetail, parseRetryAfter, buildJobAnalysisRequest } from '../utils/careerUiHelpers.js'
 
 const API_BASE = `${BASE_URL}/api/career`
 
@@ -25,7 +25,12 @@ async function ensureSession() {
 /** Build an Error from a failed response, preferring the backend `detail` over statusText. */
 async function errorFromResponse(res, fallback) {
   const body = await res.json().catch(() => ({}))
-  return new Error(extractErrorDetail(body, `${fallback}: ${res.statusText || `HTTP ${res.status}`}`))
+  const err = new Error(extractErrorDetail(body, `${fallback}: ${res.statusText || `HTTP ${res.status}`}`))
+  err.status = res.status
+  const detail = body && typeof body === 'object' ? body.detail : null
+  if (detail && typeof detail === 'object' && !Array.isArray(detail) && detail.code) err.code = detail.code
+  err.retryAfter = parseRetryAfter(res.headers && typeof res.headers.get === 'function' ? res.headers.get('Retry-After') : null)
+  return err
 }
 
 function getJsonHeaders() {
@@ -226,15 +231,14 @@ export async function ingestExternalProfile(sourceType, rawContent, sourceUrl = 
 
 export async function fetchJobAnalysis(opportunityId, customDesc = null) {
   await ensureSession()
-  let url = `${API_BASE}/opportunities/${opportunityId}/job-analysis`
-  if (customDesc) {
-    url += `?custom_desc=${encodeURIComponent(customDesc)}`
-  }
-  const res = await fetch(url, {
-    headers: getAuthHeaders(),
+  const req = buildJobAnalysisRequest(API_BASE, opportunityId, customDesc)
+  const res = await fetch(req.url, {
+    method: req.method,
+    headers: req.method === 'POST' ? getJsonHeaders() : getAuthHeaders(),
     credentials: 'include',
+    ...(req.body ? { body: req.body } : {}),
   })
-  if (!res.ok) throw new Error(`Failed to fetch job requirement analysis: ${res.statusText}`)
+  if (!res.ok) throw await errorFromResponse(res, 'Failed to fetch job requirement analysis')
   return res.json()
 }
 
@@ -274,7 +278,7 @@ export async function fetchCompanyIntel(opportunityId, refresh = false) {
     headers: getAuthHeaders(),
     credentials: 'include',
   })
-  if (!res.ok) throw new Error(`Failed to fetch company intelligence: ${res.statusText}`)
+  if (!res.ok) throw await errorFromResponse(res, 'Failed to fetch company intelligence')
   return res.json()
 }
 
@@ -285,14 +289,7 @@ export async function refreshCompanyIntelJob(opportunityId) {
     headers: getJsonHeaders(),
     credentials: 'include',
   })
-  if (!res.ok) {
-    const errData = await res.json().catch(() => ({}))
-    const msg = (typeof errData?.detail === 'object' ? errData.detail.detail : errData?.detail) || `Refresh failed: ${res.statusText}`
-    const error = new Error(msg)
-    error.status = res.status
-    error.data = errData
-    throw error
-  }
+  if (!res.ok) throw await errorFromResponse(res, 'Refresh failed')
   return res.json()
 }
 

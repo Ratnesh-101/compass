@@ -186,16 +186,21 @@ async def test_company_intel_endpoint_rate_limit_and_cap(client: AsyncClient, mo
         "source": "devpost",
     }
 
+    # The guest cap counts only requests that perform paid work, so force every request to be a
+    # paid attempt (cooldown and Tavily sub-budget disabled for this test).
+    monkeypatch.setattr("backend.services.winning_features.REFRESH_COOLDOWN_SECONDS", 0.0)
+    monkeypatch.setattr("backend.services.winning_features.check_intel_tavily_budget", lambda cost=1: True)
+
     with patch("backend.routers.career.get_opportunity_by_id", AsyncMock(return_value=OpportunityOut(**mock_opp))), \
          patch("backend.services.winning_features.tavily_research.execute_deep_research", AsyncMock(return_value={"citations": []})):
 
-        # 10 successful requests (or cached hits)
+        # 10 successful paid requests
         for i in range(10):
-            resp = await client.get("/opportunities/99/company-intel", headers=headers)
+            resp = await client.get("/opportunities/99/company-intel?refresh=true", headers=headers)
             assert resp.status_code == 200, f"Request {i+1} failed with status {resp.status_code}: {resp.text}"
 
         # 11th request must return 429 with stable code and Retry-After
-        resp_11 = await client.get("/opportunities/99/company-intel", headers=headers)
+        resp_11 = await client.get("/opportunities/99/company-intel?refresh=true", headers=headers)
         assert resp_11.status_code == 429
         assert "Retry-After" in resp_11.headers
         data = resp_11.json()

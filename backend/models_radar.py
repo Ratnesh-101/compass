@@ -194,6 +194,20 @@ class OpportunityOut(BaseModel):
             return None
         return v_str
 
+    @field_validator("official_application_url", mode="after")
+    @classmethod
+    def only_http_application_url(cls, v: Optional[str]) -> Optional[str]:
+        """Only absolute http(s) URLs may reach the Official Submission link (no javascript:/data:)."""
+        if v is None:
+            return None
+        from urllib.parse import urlparse
+
+        try:
+            parsed = urlparse(v)
+        except ValueError:
+            return None
+        return v if parsed.scheme in ("http", "https") and parsed.netloc else None
+
     @field_validator("company_name", "role_title", mode="before")
     @classmethod
     def sanitize_required_strings(cls, v: Any) -> str:

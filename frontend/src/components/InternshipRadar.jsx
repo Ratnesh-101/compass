@@ -738,6 +738,7 @@ export default function InternshipRadar({
       {activeWorkspaceOpp && (
         <React.Suspense fallback={null}>
           <ApplicationWorkspaceModal
+            key={activeWorkspaceOpp.id}
             opportunity={activeWorkspaceOpp}
             onClose={() => setActiveWorkspaceOpp(null)}
             onApplicationUpdated={(updatedApp) => {

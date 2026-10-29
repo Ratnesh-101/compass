@@ -35,6 +35,7 @@ import { CalendarGrid } from './calendar/CalendarGrid'
 import { CalendarSidebar } from './calendar/CalendarSidebar'
 import { ProposedPlanModal, QuickConnectModal, IcsExportModal } from './calendar/CalendarModals'
 import DarkModeToggle from './DarkModeToggle'
+import { syncResultBanner, commitResultBanner, reactiveResultBanner, availabilityNote } from '../utils/scheduleHonesty'
 
 const DOMAIN_STYLES = {
   hackathon: {
@@ -139,6 +140,7 @@ export default function CalendarView({
   const [committing, setCommitting] = useState(false)
   const [proposedPlan, setProposedPlan] = useState(null)
   const [bannerMessage, setBannerMessage] = useState(null)
+  const [availabilityError, setAvailabilityError] = useState(null)
   const [checkingReactive, setCheckingReactive] = useState(false)
   const [syncingCalendar, setSyncingCalendar] = useState(false)
   const [quickEmailInput, setQuickEmailInput] = useState('')
@@ -207,6 +209,7 @@ export default function CalendarView({
       const rangeStart = toIso(weekStartDate)
       const rangeEnd = toIso(addDays(weekStartDate, 7))
       const data = await fetchCalendarAvailability(rangeStart, rangeEnd)
+      setAvailabilityError(availabilityNote(data))
       if (data && Array.isArray(data.busy_intervals)) {
         setBusyIntervals(data.busy_intervals)
       }
@@ -297,8 +300,8 @@ export default function CalendarView({
         scheduled_start: s.scheduled_start,
         scheduled_end: s.scheduled_end,
       }))
-      await commitSchedule(assignments, proposedPlan.summary)
-      setBannerMessage({ type: 'success', text: `Successfully slotted ${assignments.length} tasks and synced to Google Calendar!` })
+      const result = await commitSchedule(assignments, proposedPlan.summary)
+      setBannerMessage(commitResultBanner(result))
       setProposedPlan(null)
       if (onTasksUpdated) onTasksUpdated()
       loadAvailability(weekStart)
@@ -313,15 +316,8 @@ export default function CalendarView({
     setCheckingReactive(true)
     try {
       const res = await checkReactiveSchedule()
-      if (res.slipped_count > 0) {
-        setBannerMessage({
-          type: 'warning',
-          text: `Detected ${res.slipped_count} slipped task(s) past scheduled end time! Reactive re-plan staged with cascading dependencies (Run ID: ${res.run_id || 'staged'}).`
-        })
-        if (onTasksUpdated) onTasksUpdated()
-      } else {
-        setBannerMessage({ type: 'success', text: 'Schedule is currently on track: no uncompleted tasks have slipped past their end time.' })
-      }
+      setBannerMessage(reactiveResultBanner(res))
+      if (res.slipped_count > 0 && onTasksUpdated) onTasksUpdated()
     } catch (e) {
       setBannerMessage({ type: 'error', text: `Error checking schedule slips: ${e.message}` })
     } finally {
@@ -334,12 +330,9 @@ export default function CalendarView({
     setBannerMessage(null)
     try {
       const res = await syncCalendarNow()
-      if (res.is_live) {
-        setBannerMessage({ type: 'success', text: `Synced ${res.live_count || res.count || 0} scheduled tasks directly to your Google Calendar (${calendarStatus.account_email})!` })
-      } else {
-        setBannerMessage({ type: 'info', text: res.message || `Slotted ${res.count || 0} tasks in Compass.` })
-        setShowIcsModal(true)
-      }
+      const banner = syncResultBanner(res, calendarStatus.account_email)
+      setBannerMessage(banner)
+      if (Number(res.live_created ?? 0) === 0 && banner.type !== 'error') setShowIcsModal(true)
       loadAvailability(weekStart)
     } catch (err) {
       setBannerMessage({ type: 'error', text: `Failed to sync: ${err.message}` })
@@ -489,7 +482,7 @@ export default function CalendarView({
                     disabled={syncingCalendar}
                     style={{ ...menuItemStyle, display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <Calendar size={14} strokeWidth={1.8} />
-                    <span>{syncingCalendar ? 'Syncing...' : (isLive ? 'Sync to Google Calendar' : 'Slot / Sync Tasks')}</span>
+                    <span>{syncingCalendar ? 'Syncing...' : (isLive ? 'Sync to Google Calendar' : (calendarStatus.is_simulated ? 'Sync Tasks (Simulated)' : 'Slot / Sync Tasks'))}</span>
                   </button>
                   <button
                     id="btn-export-ics"
@@ -555,7 +548,7 @@ export default function CalendarView({
           fontSize: '13px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {bannerMessage.type === 'error' ? (
+            {bannerMessage.type === 'error' || bannerMessage.type === 'warning' ? (
               <AlertCircle size={16} strokeWidth={1.8} style={{ color: 'var(--danger-text, #b91c1c)', flexShrink: 0 }} />
             ) : (
               <CheckCircle2 size={16} strokeWidth={1.8} style={{ color: 'var(--domain-code, #1c8a62)', flexShrink: 0 }} />
@@ -569,6 +562,13 @@ export default function CalendarView({
           >
             <X size={14} strokeWidth={1.8} />
           </button>
+        </div>
+      )}
+
+      {availabilityError && (
+        <div role="status" id="calendar-availability-error" style={{ margin: '8px 16px 0 16px', fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+          <AlertCircle size={13} strokeWidth={1.8} style={{ flexShrink: 0 }} />
+          <span>{availabilityError}</span>
         </div>
       )}
 
