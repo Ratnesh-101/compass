@@ -244,12 +244,12 @@ class UserOpportunityProfileIn(BaseModel):
     grad_year: Optional[int] = None
     cgpa: Optional[float] = Field(None, ge=0.0, le=100.0)
     cgpa_scale: Optional[float] = Field(10.0, ge=4.0, le=100.0)
-    active_backlogs: Optional[int] = Field(0, ge=0)
+    active_backlogs: Optional[int] = Field(None, ge=0)
     # Unknown until the candidate says so: never default to a jurisdiction they did not declare.
     work_authorization: Optional[str] = Field(None, description="Jurisdictions authorized to work without sponsorship")
     requires_sponsorship: Optional[bool] = False
-    country_of_study: str = "India"
-    country_of_residence: str = "India"
+    country_of_study: Optional[str] = "India"
+    country_of_residence: Optional[str] = "India"
     preferred_locations: List[str] = Field(default_factory=lambda: ["India", "Remote"])
     preferred_work_arrangements: List[str] = Field(default_factory=list)
     preferred_roles: List[str] = Field(default_factory=list)
