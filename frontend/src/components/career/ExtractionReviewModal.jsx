@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { resolveOverallConfidence, computeMissingFields } from '../../utils/careerUiHelpers'
 
 export default function ExtractionReviewModal({
   show,
@@ -26,10 +27,12 @@ export default function ExtractionReviewModal({
   if (!show || !content) return null
 
   const diag = parseResult || {}
-  const missing = diag.missing_fields || []
+  const missing = Array.isArray(diag.missing_fields) ? diag.missing_fields : computeMissingFields(content)
   const ambiguous = diag.ambiguous_fields || []
   const conflicts = diag.field_conflicts || []
-  const confidence = diag.field_confidence?.overall || 0.85
+  const confidence = resolveOverallConfidence(diag)
+  // External profile imports (LinkedIn / portfolio) must never replace the master by accident.
+  const preferDraft = diag.file_type === 'profile_import'
 
   const handleSkillsBlur = () => {
     setContent(prev => ({
@@ -110,18 +113,20 @@ export default function ExtractionReviewModal({
               <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800', color: 'var(--text-primary, #0f172a)' }}>
                 🔍 Review Extracted Resume Data
               </h3>
-              <span
-                style={{
-                  fontSize: '11.5px',
-                  fontWeight: '700',
-                  padding: '3px 9px',
-                  borderRadius: '12px',
-                  background: confidence >= 0.8 ? '#dcfce7' : '#fef9c3',
-                  color: confidence >= 0.8 ? '#166534' : '#854d0e',
-                }}
-              >
-                {Math.round(confidence * 100)}% Confidence
-              </span>
+              {confidence !== null && (
+                <span
+                  style={{
+                    fontSize: '11.5px',
+                    fontWeight: '700',
+                    padding: '3px 9px',
+                    borderRadius: '12px',
+                    background: confidence >= 0.8 ? '#dcfce7' : '#fef9c3',
+                    color: confidence >= 0.8 ? '#166534' : '#854d0e',
+                  }}
+                >
+                  {Math.round(confidence * 100)}% Confidence
+                </span>
+              )}
             </div>
             <p style={{ margin: '4px 0 0', fontSize: '13px', color: 'var(--text-secondary, #334155)' }}>
               Source: <strong style={{ color: 'var(--text-primary)' }}>{diag.filename || 'Uploaded Document'}</strong> ({diag.file_type || 'file'}). Please verify accuracy before committing.
@@ -481,7 +486,16 @@ export default function ExtractionReviewModal({
               type="button"
               onClick={() => handleCommit('draft')}
               disabled={committing}
-              style={{
+              style={preferDraft ? {
+                background: 'var(--primary, #2563eb)',
+                color: '#fff',
+                border: 'none',
+                padding: '8px 18px',
+                borderRadius: '8px',
+                fontSize: '13px',
+                fontWeight: '700',
+                cursor: committing ? 'wait' : 'pointer',
+              } : {
                 background: 'var(--bg-card)',
                 border: '1px solid var(--border)',
                 padding: '8px 16px',
@@ -497,7 +511,15 @@ export default function ExtractionReviewModal({
               type="button"
               onClick={() => handleCommit('master')}
               disabled={committing}
-              style={{
+              style={preferDraft ? {
+                background: 'var(--bg-card)',
+                border: '1px solid var(--border)',
+                padding: '8px 16px',
+                borderRadius: '8px',
+                fontSize: '13px',
+                fontWeight: '600',
+                cursor: committing ? 'wait' : 'pointer',
+              } : {
                 background: 'var(--primary, #2563eb)',
                 color: '#fff',
                 border: 'none',

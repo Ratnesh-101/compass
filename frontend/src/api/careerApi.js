@@ -8,6 +8,7 @@
  */
 
 import { API_BASE as BASE_URL, getAuthHeaders, getGuestToken, initGuestSession, safeHref } from './baseClient.js'
+import { extractErrorDetail } from '../utils/careerUiHelpers.js'
 
 const API_BASE = `${BASE_URL}/api/career`
 
@@ -19,6 +20,12 @@ async function ensureSession() {
       /* ignore storage access error */
     }
   }
+}
+
+/** Build an Error from a failed response, preferring the backend `detail` over statusText. */
+async function errorFromResponse(res, fallback) {
+  const body = await res.json().catch(() => ({}))
+  return new Error(extractErrorDetail(body, `${fallback}: ${res.statusText || `HTTP ${res.status}`}`))
 }
 
 function getJsonHeaders() {
@@ -61,7 +68,7 @@ export async function fetchResumes() {
   return res.json()
 }
 
-export async function tailorResume(opportunityId, customTitle = null, targetSkills = null) {
+export async function tailorResume(opportunityId, customTitle = null, targetSkills = null, applicationId = null) {
   await ensureSession()
   const res = await fetch(`${API_BASE}/resumes/tailor`, {
     method: 'POST',
@@ -71,6 +78,7 @@ export async function tailorResume(opportunityId, customTitle = null, targetSkil
       opportunity_id: opportunityId,
       custom_title: customTitle,
       target_skills_emphasis: targetSkills,
+      ...(applicationId !== null && applicationId !== undefined ? { application_id: applicationId } : {}),
     }),
   })
   if (!res.ok) throw new Error(`Failed to tailor resume: ${res.statusText}`)
@@ -167,7 +175,7 @@ export async function commitExtractedResume(content, originalDocumentId = null, 
       target,
     }),
   })
-  if (!res.ok) throw new Error(`Failed to commit extracted resume: ${res.statusText}`)
+  if (!res.ok) throw await errorFromResponse(res, 'Failed to commit extracted resume')
   return res.json()
 }
 
@@ -212,7 +220,7 @@ export async function ingestExternalProfile(sourceType, rawContent, sourceUrl = 
       source_url: sourceUrl,
     }),
   })
-  if (!res.ok) throw new Error(`Failed to ingest external profile: ${res.statusText}`)
+  if (!res.ok) throw await errorFromResponse(res, 'Failed to ingest external profile')
   return res.json()
 }
 
@@ -349,7 +357,7 @@ export async function updateApplication(appId, updates) {
     credentials: 'include',
     body: JSON.stringify(updates),
   })
-  if (!res.ok) throw new Error(`Failed to update application: ${res.statusText}`)
+  if (!res.ok) throw await errorFromResponse(res, 'Failed to update application')
   return res.json()
 }
 
@@ -431,5 +439,26 @@ export async function fetchAdapters() {
     credentials: 'include',
   })
   if (!res.ok) throw new Error(`Failed to fetch adapters: ${res.statusText}`)
+  return res.json()
+}
+
+export async function markApplied(appId) {
+  await ensureSession()
+  const res = await fetch(`${API_BASE}/applications/${appId}/mark-applied`, {
+    method: 'POST',
+    headers: getJsonHeaders(),
+    credentials: 'include',
+  })
+  if (!res.ok) throw await errorFromResponse(res, 'Failed to record submission confirmation')
+  return res.json()
+}
+
+export async function fetchHandoffKit(appId) {
+  await ensureSession()
+  const res = await fetch(`${API_BASE}/applications/${appId}/handoff-kit`, {
+    headers: getAuthHeaders({ Accept: 'application/json' }),
+    credentials: 'include',
+  })
+  if (!res.ok) throw await errorFromResponse(res, 'Failed to load Handoff Kit')
   return res.json()
 }
