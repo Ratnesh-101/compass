@@ -189,7 +189,11 @@ export async function triggerRadarSync(source = 'all') {
     headers: getAuthHeaders(),
     credentials: 'include',
   })
-  if (!res.ok) throw new Error(`Sync trigger failed: HTTP ${res.status}`)
+  if (!res.ok) {
+    let detail = ''
+    try { detail = (await res.json())?.detail || '' } catch { /* non-JSON body */ }
+    throw new Error(detail || `Sync trigger failed: HTTP ${res.status}`)
+  }
   return res.json()
 }
 

@@ -18,10 +18,20 @@ import {
   unsaveOpportunity,
   updateApplication,
   fetchRadarProfile,
-  triggerRadarSync,
   verifyOpportunity,
 } from '../api/radarApi'
 import { hasSavedProfile } from '../utils/careerUiHelpers'
+
+export function newestRefreshDate(opportunities) {
+  let newest = null
+  for (const opp of opportunities || []) {
+    for (const raw of [opp?.last_verified_at, opp?.last_checked_at]) {
+      const t = raw ? Date.parse(raw) : NaN
+      if (!Number.isNaN(t) && (newest === null || t > newest)) newest = t
+    }
+  }
+  return newest === null ? null : new Date(newest)
+}
 
 export default function InternshipRadar({
   refreshTrigger = 0,
@@ -44,7 +54,6 @@ export default function InternshipRadar({
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [isSyncing, setIsSyncing] = useState(false)
   const [isVerifying, setIsVerifying] = useState(false)
   const [isRefreshingMatches, setIsRefreshingMatches] = useState(false)
   const [page, setPage] = useState(1)
@@ -285,19 +294,9 @@ export default function InternshipRadar({
     }
   }
 
-  // Sync sources trigger
-  const handleSyncSources = async () => {
-    setIsSyncing(true)
-    try {
-      await triggerRadarSync('all')
-      await loadMetadata()
-      await loadOpportunities()
-    } catch (err) {
-      console.error('Sync failed:', err)
-    } finally {
-      setIsSyncing(false)
-    }
-  }
+  // Sync is admin-only on the server (POST /api/opportunities/sync returns 403 otherwise),
+  // so ordinary users get a read-only "last refreshed" line instead of a button that cannot work.
+  const lastRefreshed = newestRefreshDate(opportunities)
 
   return (
     <div
@@ -359,8 +358,7 @@ export default function InternshipRadar({
         workArrangement={workArrangement}
         onWorkArrangementChange={setWorkArrangement}
         onOpenProfile={handleOpenCandidateProfile}
-        onSync={handleSyncSources}
-        isSyncing={isSyncing}
+        lastRefreshed={lastRefreshed}
       />
 
       {/* Scoped Background Refreshing Indicator */}
@@ -595,25 +593,8 @@ export default function InternshipRadar({
               No opportunities found in this view
             </h3>
             <p style={{ fontSize: '13px', color: 'var(--text-secondary)', maxWidth: '440px', margin: '0 auto 16px auto' }}>
-              Try broadening your criteria or triggering a discovery sync with verified sources.
+              Try broadening your criteria. Listings are refreshed automatically from verified sources.
             </p>
-            <button
-              type="button"
-              onClick={handleSyncSources}
-              disabled={isSyncing}
-              style={{
-                padding: '8px 18px',
-                borderRadius: 'var(--radius-btn, 6px)',
-                background: 'var(--brand)',
-                color: 'var(--accent-text, #1b1a17)',
-                border: 'none',
-                fontWeight: 600,
-                fontSize: '13px',
-                cursor: isSyncing ? 'not-allowed' : 'pointer',
-              }}
-            >
-              {isSyncing ? 'Syncing Sources…' : 'Trigger Discovery Sync'}
-            </button>
           </div>
         )
       ) : (
