@@ -1,5 +1,9 @@
 import React, { useState, useEffect } from 'react'
-import { downloadAuthedFile, openAuthedHtml, getAuthHeaders } from '../../api/baseClient.js'
+import { downloadAuthedFile, openAuthedHtml, API_BASE } from '../../api/baseClient.js'
+import { fetchHandoffKit } from '../../api/careerApi.js'
+import { copyTextSafely, displayKitValue } from '../../utils/careerUiHelpers.js'
+
+const withApiBase = url => (url && url.startsWith('/') ? `${API_BASE}${url}` : url)
 
 export default function HandoffKitDrawer({
   isOpen,
@@ -27,21 +31,12 @@ export default function HandoffKitDrawer({
 
     async function loadKit() {
       try {
-        const res = await fetch(`/api/career/applications/${applicationId}/handoff-kit`, {
-          headers: getAuthHeaders({ 'Accept': 'application/json' }),
-          credentials: 'include',
-        })
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}))
-          throw new Error(errData.detail || `Failed to load Handoff Kit (${res.status})`)
-        }
-        const data = await res.json()
+        const data = await fetchHandoffKit(applicationId)
         if (isMounted) {
           setKit(data)
           setChecklist(prev => ({
             ...prev,
             resumeAttached: Boolean(data.tailored_resume_id && !data.is_export_blocked),
-            coverLetterReviewed: Boolean(data.cover_letter),
           }))
         }
       } catch (err) {
@@ -57,10 +52,10 @@ export default function HandoffKitDrawer({
 
   if (!isOpen) return null
 
-  const copyToClipboard = (key, text) => {
+  const copyToClipboard = async (key, text) => {
     if (!text) return
-    navigator.clipboard?.writeText(text)
-    setCopiedKey(key)
+    const ok = await copyTextSafely(text)
+    setCopiedKey(ok ? key : `failed:${key}`)
     setTimeout(() => setCopiedKey(null), 2000)
   }
 
@@ -183,7 +178,7 @@ export default function HandoffKitDrawer({
                   <div style={{ display: 'flex', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
                     <button
                       type="button"
-                      onClick={() => openAuthedHtml(kit.export_html_url)}
+                      onClick={() => openAuthedHtml(withApiBase(kit.export_html_url))}
                       style={{
                         padding: '6px 14px',
                         borderRadius: '6px',
@@ -199,7 +194,7 @@ export default function HandoffKitDrawer({
                     </button>
                     <button
                       type="button"
-                      onClick={() => downloadAuthedFile(kit.export_docx_url, `${kit.company_name}_Resume.docx`)}
+                      onClick={() => downloadAuthedFile(withApiBase(kit.export_docx_url), `${kit.company_name}_Resume.docx`)}
                       style={{
                         padding: '6px 14px',
                         borderRadius: '6px',
@@ -238,7 +233,7 @@ export default function HandoffKitDrawer({
                         cursor: 'pointer',
                       }}
                     >
-                      {copiedKey === 'cover_letter' ? '✓ Copied!' : 'Copy Letter'}
+                      {copiedKey === 'cover_letter' ? '✓ Copied!' : copiedKey === 'failed:cover_letter' ? 'Copy failed' : 'Copy Letter'}
                     </button>
                   </div>
                   <div style={{ fontSize: '12px', color: 'var(--text-muted, #475569)', maxHeight: '110px', overflowY: 'auto', background: 'var(--bg-app, #f8fafc)', padding: '10px', borderRadius: '6px', whiteSpace: 'pre-wrap', lineHeight: 1.5, fontFamily: 'monospace' }}>
@@ -257,6 +252,12 @@ export default function HandoffKitDrawer({
                     Values generated strictly from your master profile. Missing fields are never guessed.
                   </div>
                 </div>
+
+                {Array.isArray(kit.missing_fields) && kit.missing_fields.length > 0 && (
+                  <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', padding: '8px 10px', marginBottom: '10px', fontSize: '12px', color: '#991b1b' }}>
+                    Missing from your profile: {kit.missing_fields.join(', ')}
+                  </div>
+                )}
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   {[
@@ -295,10 +296,12 @@ export default function HandoffKitDrawer({
                                 cursor: 'pointer',
                               }}
                             >
-                              {isCopied ? '✓' : 'Copy'}
+                              {isCopied ? '✓' : copiedKey === `failed:${item.key}` ? 'Copy failed' : 'Copy'}
                             </button>
                           </div>
                         ) : (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, justifyContent: 'flex-end' }}>
+                            <span style={{ fontStyle: 'italic', color: 'var(--text-muted, #64748b)' }}>{displayKitValue(val)}</span>
                           <button
                             type="button"
                             onClick={() => onNavigateToResumeStudio?.()}
@@ -315,6 +318,7 @@ export default function HandoffKitDrawer({
                           >
                             + Add to profile
                           </button>
+                          </div>
                         )}
                       </div>
                     )
