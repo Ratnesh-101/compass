@@ -925,8 +925,6 @@ async def get_user_opportunity_profile(user_id: str) -> Optional[UserOpportunity
                     skills=row["skills"] or [],
                     min_compensation=row["min_compensation"],
                     resume_url=row["resume_url"],
-                    learning_skills=row.get("learning_skills") or [],
-                    auto_prepare_strongest_matches=bool(row.get("auto_prepare_strongest_matches", False)),
                 )
 
     # Bridge with Resume Studio: Check candidate's master resume
@@ -980,11 +978,9 @@ async def upsert_user_opportunity_profile(user_id: str, p: UserOpportunityProfil
         user_id, degree, degree_specialization, university, academic_year, grad_month, grad_year,
         cgpa, cgpa_scale, active_backlogs, work_authorization, requires_sponsorship,
         country_of_study, country_of_residence, preferred_locations, preferred_work_arrangements,
-        preferred_roles, skills, min_compensation, resume_url, learning_skills,
-        auto_prepare_strongest_matches, created_at, updated_at
+        preferred_roles, skills, min_compensation, resume_url, created_at, updated_at
     ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22,
-        now(), now()
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, now(), now()
     )
     ON CONFLICT (user_id) DO UPDATE SET
         degree = EXCLUDED.degree,
@@ -1006,8 +1002,6 @@ async def upsert_user_opportunity_profile(user_id: str, p: UserOpportunityProfil
         skills = EXCLUDED.skills,
         min_compensation = EXCLUDED.min_compensation,
         resume_url = EXCLUDED.resume_url,
-        learning_skills = EXCLUDED.learning_skills,
-        auto_prepare_strongest_matches = EXCLUDED.auto_prepare_strongest_matches,
         updated_at = now();
     """
     async with pool.acquire() as conn:
@@ -1033,8 +1027,6 @@ async def upsert_user_opportunity_profile(user_id: str, p: UserOpportunityProfil
             p.skills,
             p.min_compensation,
             p.resume_url,
-            p.learning_skills,
-            p.auto_prepare_strongest_matches,
         )
 
 

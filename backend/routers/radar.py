@@ -343,13 +343,6 @@ async def get_profile_endpoint(request: Request):
 async def update_profile_endpoint(body: UserOpportunityProfileUpdate, request: Request):
     """Create or update personal opportunity matching profile."""
     user_id = _get_or_create_user_id(request)
-    # Clients such as the profile modal omit these fields; an omitted field keeps its stored value
-    # instead of silently resetting an opt-in to its default.
-    omitted = {"auto_prepare_strongest_matches", "learning_skills"} - body.model_fields_set
-    if omitted:
-        stored = await get_user_opportunity_profile(user_id)
-        if stored:
-            body = body.model_copy(update={name: getattr(stored, name) for name in omitted})
     await upsert_user_opportunity_profile(user_id, body)
     return await get_profile_endpoint(request)
 
