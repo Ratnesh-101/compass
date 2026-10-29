@@ -164,6 +164,8 @@ class TailorResumeRequest(BaseModel):
     opportunity_id: int
     custom_title: Optional[str] = None
     target_skills_emphasis: Optional[List[str]] = None
+    # When set, the new tailored resume is also linked to this (owner-scoped) application.
+    application_id: Optional[int] = None
 
 
 class SaveResumeRequest(BaseModel):
@@ -233,6 +235,8 @@ class UpdateApplicationStatusRequest(BaseModel):
     form_answers: Optional[Dict[str, Any]] = None
     cover_letter: Optional[str] = Field(default=None, max_length=50000)
     target_deadline: Optional[date] = None
+    # Explicitly clear the deadline (omitting target_deadline leaves it unchanged).
+    clear_target_deadline: bool = False
     private_notes: Optional[str] = Field(default=None, max_length=20000)
 
     @field_validator("form_answers")

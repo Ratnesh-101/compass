@@ -40,6 +40,7 @@ from backend.models_radar import (
     UpdateApplicationStatusIn,
     UserOpportunityProfileIn,
     UserOpportunityProfileOut,
+    UserOpportunityProfileUpdate,
 )
 from backend.services.radar_eligibility import evaluate_eligibility
 from backend.services.radar_inventory import get_source_inventory
@@ -339,7 +340,7 @@ async def get_profile_endpoint(request: Request):
 
 
 @router.put("/profile", response_model=UserOpportunityProfileOut)
-async def update_profile_endpoint(body: UserOpportunityProfileIn, request: Request):
+async def update_profile_endpoint(body: UserOpportunityProfileUpdate, request: Request):
     """Create or update personal opportunity matching profile."""
     user_id = _get_or_create_user_id(request)
     await upsert_user_opportunity_profile(user_id, body)

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Any, List, Optional
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -245,18 +245,59 @@ class UserOpportunityProfileIn(BaseModel):
     cgpa: Optional[float] = Field(None, ge=0.0, le=100.0)
     cgpa_scale: Optional[float] = Field(10.0, ge=4.0, le=100.0)
     active_backlogs: Optional[int] = Field(None, ge=0)
-    work_authorization: Optional[str] = Field("India", description="Jurisdictions authorized to work without sponsorship")
+    # Unknown until the candidate says so: never default to a jurisdiction they did not declare.
+    work_authorization: Optional[str] = Field(None, description="Jurisdictions authorized to work without sponsorship")
     requires_sponsorship: Optional[bool] = False
     country_of_study: Optional[str] = "India"
     country_of_residence: Optional[str] = "India"
     preferred_locations: List[str] = Field(default_factory=lambda: ["India", "Remote"])
-    preferred_work_arrangements: List[str] = Field(default_factory=lambda: ["remote", "hybrid", "onsite"])
+    preferred_work_arrangements: List[str] = Field(default_factory=list)
     preferred_roles: List[str] = Field(default_factory=list)
     skills: List[str] = Field(default_factory=list)
     learning_skills: List[str] = Field(default_factory=list)
     auto_prepare_strongest_matches: bool = False
     min_compensation: Optional[str] = None
     resume_url: Optional[str] = None
+
+
+_ALLOWED_CGPA_SCALES = (4.0, 5.0, 10.0, 100.0)
+
+
+class UserOpportunityProfileUpdate(UserOpportunityProfileIn):
+    """Request model for PUT /profile: strict range checks so bad input answers 422, not 500.
+
+    Kept separate from UserOpportunityProfileIn because that model is also built from stored rows
+    and resume-derived data (e.g. an older graduation year) which must keep loading.
+    """
+
+    @field_validator("academic_year")
+    @classmethod
+    def _check_academic_year(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and not (1 <= v <= 5):
+            raise ValueError(f"academic_year must be between 1 and 5 (received {v})")
+        return v
+
+    @field_validator("grad_year")
+    @classmethod
+    def _check_grad_year(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and not (2024 <= v <= 2035):
+            raise ValueError(f"grad_year must be between 2024 and 2035 (received {v})")
+        return v
+
+    @field_validator("cgpa_scale")
+    @classmethod
+    def _check_cgpa_scale(cls, v: Optional[float]) -> Optional[float]:
+        if v is not None and float(v) not in _ALLOWED_CGPA_SCALES:
+            raise ValueError("cgpa_scale must be one of 4, 5, 10 or 100")
+        return v
+
+    @model_validator(mode="after")
+    def _check_cgpa_within_scale(self) -> "UserOpportunityProfileUpdate":
+        if self.cgpa is not None:
+            scale = self.cgpa_scale if self.cgpa_scale is not None else 10.0
+            if not (0 <= self.cgpa <= scale):
+                raise ValueError(f"cgpa must be between 0 and the cgpa_scale {scale:g} (received {self.cgpa:g})")
+        return self
 
 
 class UserOpportunityProfileOut(UserOpportunityProfileIn):

@@ -44,6 +44,7 @@ from backend.memory.career import (
     approve_application_batch,
     create_application_batch,
     create_tailored_resume,
+    delete_tailored_resume,
     finish_application_batch,
     get_application_batch,
     get_career_application_by_id,
@@ -56,6 +57,7 @@ from backend.memory.career import (
     list_original_resume_documents,
     list_resumes,
     log_application_event,
+    link_resume_if_unlinked,
     save_original_resume_document,
     update_career_application,
     update_resume,
@@ -111,8 +113,10 @@ from backend.services.career_submission import (
     SUPPORTED_ADAPTERS,
     compute_batch_content_hash,
     execute_batch_submission,
+    find_batch_not_ready,
     generate_batch_approval_token,
     get_batch_lock,
+    load_batch_apps_data,
     submit_single_application,
     verify_batch_approval_token,
 )
@@ -178,6 +182,20 @@ async def tailor_resume_endpoint(body: TailorResumeRequest, request: Request):
     if not opp:
         raise HTTPException(status_code=404, detail="Opportunity not found")
 
+    linked_app = None
+    if body.application_id is not None:
+        # Owner-scoped lookup: another user's application answers 404, same as a missing one.
+        linked_app = await get_career_application_by_id(body.application_id, user_id)
+        if not linked_app:
+            raise HTTPException(status_code=404, detail="Application not found")
+        if linked_app.opportunity_id != opp.id:
+            raise HTTPException(status_code=400, detail="Application does not belong to this opportunity")
+        if _status_value(linked_app) not in _RESUME_RELINKABLE_STATUSES:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Cannot change the resume of an application in status '{_status_value(linked_app)}'.",
+            )
+
     master = await get_master_resume(user_id)
     if not master:
         profile = await get_user_opportunity_profile(user_id)
@@ -195,7 +213,7 @@ async def tailor_resume_endpoint(body: TailorResumeRequest, request: Request):
     )
 
     title = body.custom_title or f"{opp.company_name} — {opp.role_title} Tailored"
-    return await create_tailored_resume(
+    tailored = await create_tailored_resume(
         user_id=user_id,
         opportunity_id=opp.id,
         title=title,
@@ -203,6 +221,14 @@ async def tailor_resume_endpoint(body: TailorResumeRequest, request: Request):
         validation_report=report,
         validation_status=status,
     )
+    if linked_app is not None:
+        updates: Dict[str, Any] = {"resume_id": tailored.id}
+        new_status = _status_for_resume(linked_app, status)
+        if new_status:
+            updates["status"] = new_status
+        await update_career_application(linked_app.id, user_id, updates)
+        await log_application_event(linked_app.id, "resume_retailored", {"resume_id": tailored.id})
+    return tailored
 
 
 @router.get("/resumes/original-documents", response_model=List[OriginalResumeDocument])
@@ -686,6 +712,8 @@ async def track_external_application_endpoint(
             "submitted_at": datetime.now(timezone.utc),
             "submission_method": SubmissionMethod.MANUAL_HANDOFF.value, # Default for external
         }
+        if app.target_deadline is None:
+            updates["target_deadline"] = datetime.now(timezone.utc).date() + timedelta(days=14)
         app = await update_career_application(app.id, user_id, updates)
 
         # 3. Log the external event
@@ -773,7 +801,7 @@ async def prepare_application_endpoint(request: Request, opportunity_id: Optiona
         if not profile:
             from backend.models_radar import UserOpportunityProfileIn
             profile = UserOpportunityProfileIn()
-        master = await upsert_master_resume(user_id, build_default_master_from_profile(profile), "Master Resume")
+        master = await upsert_master_resume(user_id, _build_initial_master_content(profile, request), "Master Resume")
 
     # Check or auto-tailor resume if not yet attached
     if not app.resume_id:
@@ -786,11 +814,17 @@ async def prepare_application_endpoint(request: Request, opportunity_id: Optiona
             validation_report=report,
             validation_status=val_status,
         )
-        resume_updates: Dict[str, Any] = {"resume_id": tailored.id}
-        if app.status in _PRE_REVIEW_STATUSES:
-            resume_updates["status"] = CareerApplicationStatus.READY_FOR_REVIEW.value
-        app = await update_career_application(app.id, user_id, resume_updates)
-        app.resume = tailored
+        # Conditional link (resume_id IS NULL): a concurrent prepare that lost the race
+        # discards its own resume instead of leaving an orphan next to the winner's.
+        linked = await link_resume_if_unlinked(app.id, user_id, tailored.id, _status_for_resume(app, val_status))
+        if linked is None:
+            await delete_tailored_resume(tailored.id, user_id)
+            app = await get_career_application_by_id(app.id, user_id)
+            if not app:
+                raise HTTPException(status_code=404, detail="Application not found")
+        else:
+            app = linked
+            app.resume = tailored
 
     # Draft truthful cover letter if not present
     if not app.cover_letter and master:
@@ -806,6 +840,8 @@ async def prepare_application_endpoint(request: Request, opportunity_id: Optiona
     # Compute missing fields
     missing = []
     res_content = app.resume.content if app.resume else master.content
+    if not (res_content.full_name or "").strip():
+        missing.append("Full name")
     if not res_content.email:
         missing.append("Email address")
     if not res_content.phone:
@@ -860,6 +896,13 @@ ALLOWED_STATUS_TRANSITIONS: Dict[str, Set[str]] = {
         CareerApplicationStatus.READY_FOR_REVIEW.value,
         CareerApplicationStatus.READY_FOR_APPROVAL.value,
         CareerApplicationStatus.HANDOFF_KIT_READY.value,
+        CareerApplicationStatus.WITHDRAWN.value,
+    },
+    # Resume failed validation (e.g. missing name/email): the user fixes the profile, then moves on.
+    CareerApplicationStatus.RESUME_VALIDATION_FAILED.value: {
+        CareerApplicationStatus.SAVED.value,
+        CareerApplicationStatus.PREPARING.value,
+        CareerApplicationStatus.READY_FOR_REVIEW.value,
         CareerApplicationStatus.WITHDRAWN.value,
     },
     CareerApplicationStatus.PREPARING.value: {
@@ -981,7 +1024,7 @@ def _ensure_can_mark_submitted(app: CareerApplicationOut) -> None:
     """Reject marking SUBMITTED when the transition table forbids it for a progressed application."""
     curr_st = _status_value(app)
     allowed = ALLOWED_STATUS_TRANSITIONS.get(curr_st, set())
-    if curr_st in _POST_SUBMISSION_STATUSES and CareerApplicationStatus.SUBMITTED.value not in allowed:
+    if CareerApplicationStatus.SUBMITTED.value not in allowed:
         raise HTTPException(
             status_code=409,
             detail=f"Cannot mark application as submitted from status '{curr_st}'.",
@@ -999,6 +1042,29 @@ _PRE_REVIEW_STATUSES = {
     CareerApplicationStatus.RESUME_DRAFT,
     CareerApplicationStatus.RESUME_VALIDATION_FAILED,
 }
+
+
+# Statuses where swapping the attached resume is still meaningful (nothing sent yet).
+_RESUME_RELINKABLE_STATUSES = {s.value for s in _PRE_REVIEW_STATUSES} | {
+    CareerApplicationStatus.READY_FOR_REVIEW.value,
+    CareerApplicationStatus.READY_FOR_APPROVAL.value,
+    CareerApplicationStatus.APPROVED_FOR_SUBMISSION.value,
+    CareerApplicationStatus.HANDOFF_KIT_READY.value,
+    CareerApplicationStatus.MANUAL_SUBMISSION_REQUIRED.value,
+}
+
+
+def _status_for_resume(app: CareerApplicationOut, val_status: ResumeValidationStatus) -> Optional[str]:
+    """Status to set when a resume is attached to a pre-review application, else None (unchanged).
+
+    A resume that failed validation must not make the application look ready: the existing
+    RESUME_VALIDATION_FAILED status is used for it.
+    """
+    if app.status not in _PRE_REVIEW_STATUSES:
+        return None
+    if val_status == ResumeValidationStatus.READY_FOR_REVIEW:
+        return CareerApplicationStatus.READY_FOR_REVIEW.value
+    return CareerApplicationStatus.RESUME_VALIDATION_FAILED.value
 
 
 @router.patch("/applications/{app_id}", response_model=CareerApplicationOut)
@@ -1033,16 +1099,24 @@ async def update_application_endpoint(app_id: int, body: UpdateApplicationStatus
 
             if new_st == CareerApplicationStatus.SUBMITTED.value:
                 updates["submitted_at"] = datetime.now(timezone.utc)
-                if body.target_deadline is None and existing_app.target_deadline is None:
+                if (
+                    body.target_deadline is None
+                    and existing_app.target_deadline is None
+                    and not body.clear_target_deadline
+                ):
                     # 14-day follow-up reminder
-                    updates["target_deadline"] = date.today() + timedelta(days=14)
+                    updates["target_deadline"] = datetime.now(timezone.utc).date() + timedelta(days=14)
 
     if body.submission_method:
         updates["submission_method"] = body.submission_method.value
     if body.form_answers is not None:
         updates["form_answers"] = body.form_answers
-    if body.target_deadline is not None:
+    if body.clear_target_deadline and body.target_deadline is None:
+        updates["target_deadline"] = None
+    elif body.target_deadline is not None:
         updates["target_deadline"] = body.target_deadline
+    if body.cover_letter is not None:
+        updates["cover_letter"] = body.cover_letter
     if body.private_notes is not None:
         updates["private_notes"] = body.private_notes
 
@@ -1066,7 +1140,7 @@ async def update_application_endpoint(app_id: int, body: UpdateApplicationStatus
 async def get_application_handoff_kit_endpoint(app_id: int, request: Request):
     """
     Tenant-scoped Handoff Kit for direct portal submission.
-    Transitions pre-submission application to HANDOFF_KIT_READY.
+    Read-only (never changes the application status).
     Extracts common answers strictly from the master profile (never guessed).
     Verifies tailored resume validity (blocks export if name/email are empty or placeholders).
     """
@@ -1083,36 +1157,28 @@ async def get_application_handoff_kit_endpoint(app_id: int, request: Request):
     master = await get_master_resume(user_id)
     master_content = master.content if master else ResumeContent()
 
-    # Automatically transition to HANDOFF_KIT_READY if in preparatory states
-    pre_states = {
-        CareerApplicationStatus.SAVED.value,
-        CareerApplicationStatus.PREPARING.value,
-        CareerApplicationStatus.READY_FOR_REVIEW.value,
-        CareerApplicationStatus.READY_FOR_APPROVAL.value,
-    }
-    # APPROVED_FOR_SUBMISSION is deliberately excluded: opening the kit (a GET) must never
-    # revoke an explicit approval or invalidate the approved batch.
-    curr_st = app.status.value if hasattr(app.status, "value") else str(app.status)
-    if curr_st in pre_states:
-        app = await update_career_application(app.id, user_id, {
-            "status": CareerApplicationStatus.HANDOFF_KIT_READY.value,
-        })
-        await log_application_event(app.id, "status_changed", {"to": CareerApplicationStatus.HANDOFF_KIT_READY.value})
+    # Read-only: opening the kit (a GET) never changes the application status.
+    curr_st = _status_value(app)
 
-    # Tailored resume export validity check
+    # Export validity of the application's OWN tailored resume (what the export endpoints check)
     is_blocked = False
     block_msg = None
     PLACEHOLDER_NAMES = {"compass candidate", "candidate", ""}
     PLACEHOLDER_EMAILS = {"candidate@compass.local", ""}
 
-    name = (master_content.full_name or "").strip()
-    email = (master_content.email or "").strip()
-    if not name or name.lower() in PLACEHOLDER_NAMES:
+    app_resume = await get_resume_by_id(app.resume_id, user_id) if app.resume_id else None
+    if not app_resume:
         is_blocked = True
-        block_msg = "Resume export blocked: Candidate full name is empty or a placeholder. Complete your profile before downloading."
-    elif not email or email.lower() in PLACEHOLDER_EMAILS or "@" not in email:
-        is_blocked = True
-        block_msg = "Resume export blocked: Candidate email is empty or a placeholder. Complete your profile before downloading."
+        block_msg = "Resume export blocked: no tailored resume is attached to this application yet."
+    else:
+        name = (app_resume.content.full_name or "").strip()
+        email = (app_resume.content.email or "").strip()
+        if not name or name.lower() in PLACEHOLDER_NAMES:
+            is_blocked = True
+            block_msg = "Resume export blocked: Candidate full name is empty or a placeholder. Complete your profile before downloading."
+        elif not email or email.lower() in PLACEHOLDER_EMAILS or "@" not in email:
+            is_blocked = True
+            block_msg = "Resume export blocked: Candidate email is empty or a placeholder. Complete your profile before downloading."
 
     # Common answers generated strictly from profile (never guessed)
     common_answers: Dict[str, Optional[str]] = {}
@@ -1148,18 +1214,25 @@ async def get_application_handoff_kit_endpoint(app_id: int, request: Request):
         missing_fields.append("portfolio_url")
 
     # Work Authorization
-    if profile and profile.work_authorization:
+    form_answers = app.form_answers or {}
+    declared_auth = str(form_answers.get("work_authorization") or "").strip()
+    if declared_auth:
+        common_answers["work_authorization"] = declared_auth
+    elif profile and profile.work_authorization:
         common_answers["work_authorization"] = profile.work_authorization
     else:
         common_answers["work_authorization"] = None
         missing_fields.append("work_authorization")
 
-    # Notice / Availability
-    if profile and profile.preferred_work_arrangements:
-        common_answers["notice_or_availability"] = f"Available for {', '.join(profile.preferred_work_arrangements)} arrangements"
+    # Notice / Availability: only what the candidate stated; a work-arrangement preference is not availability.
+    declared_availability = str(form_answers.get("availability") or form_answers.get("notice_or_availability") or "").strip()
+    if declared_availability:
+        common_answers["notice_or_availability"] = declared_availability
     else:
         common_answers["notice_or_availability"] = None
         missing_fields.append("notice_or_availability")
+    if profile and profile.preferred_work_arrangements:
+        common_answers["work_arrangement_preference"] = ", ".join(profile.preferred_work_arrangements)
 
     # Check for direct listing application email
     opp_desc = opp.description or ""
@@ -1186,7 +1259,8 @@ async def get_application_handoff_kit_endpoint(app_id: int, request: Request):
         missing_profile_fields=missing_fields,
         checklist={
             "resume_attached": bool(app.resume_id and not is_blocked),
-            "cover_letter_reviewed": bool(app.cover_letter),
+            # Only an explicit user confirmation counts; merely having a draft is not a review.
+            "cover_letter_reviewed": bool(form_answers.get("cover_letter_reviewed")),
             "questions_answered": len(missing_fields) == 0,
             "submitted_on_portal": curr_st == CareerApplicationStatus.SUBMITTED.value,
         },
@@ -1220,7 +1294,8 @@ async def mark_application_applied_endpoint(app_id: int, request: Request):
     _ensure_can_mark_submitted(app)
 
     now = datetime.now(timezone.utc)
-    follow_up = date.today() + timedelta(days=14)
+    # Keep a deadline the user already set; only fill the follow-up reminder when empty.
+    follow_up = app.target_deadline or now.date() + timedelta(days=14)
 
     updated = await update_career_application(app_id, user_id, {
         "status": CareerApplicationStatus.SUBMITTED.value,
@@ -1251,7 +1326,7 @@ async def add_skill_deliberate_endpoint(body: AddSkillRequest, request: Request)
     master = await get_master_resume(user_id)
     if not master:
         profile = await get_user_opportunity_profile(user_id) or UserOpportunityProfileIn()
-        master = await upsert_master_resume(user_id, build_default_master_from_profile(profile), "Master Resume")
+        master = await upsert_master_resume(user_id, _build_initial_master_content(profile, request), "Master Resume")
 
     content = master.content
     existing_skill = next((s for s in content.skills if s.lower() == skill_clean.lower()), None)
@@ -1427,12 +1502,22 @@ async def approve_batch_endpoint(batch_id: str, body: BatchApproveRequest, reque
             detail="Explicit user confirmation of accuracy, work authorization, and legal acceptance is strictly required before submission approval.",
         )
 
-    # Compute current reviewed content hash across all applications in batch
-    apps_data = []
-    for aid in batch.get("application_ids", []):
-        app_rec = await get_career_application_by_id(aid, user_id)
-        if app_rec:
-            apps_data.append(app_rec.model_dump())
+    # Readiness gate: every application needs a validated resume and a cover letter.
+    not_ready = await find_batch_not_ready(user_id, batch.get("application_ids", []))
+    if not_ready:
+        raise HTTPException(
+            status_code=409,
+            # The app-wide handler flattens a dict detail into the response body.
+            detail={
+                "detail": "Batch cannot be approved; not ready: " + "; ".join(
+                    f"application {p['application_id']}: {' '.join(p['reasons'])}" for p in not_ready
+                ),
+                "not_ready": not_ready,
+            },
+        )
+
+    # Compute current reviewed content hash (includes each resume's version stamp)
+    apps_data = await load_batch_apps_data(user_id, batch.get("application_ids", []))
     content_hash = compute_batch_content_hash(apps_data)
 
     approval_token = generate_batch_approval_token(
@@ -1507,11 +1592,7 @@ async def submit_batch_endpoint(batch_id: str, body: BatchSubmitRequest, request
 
         try:
             # Content integrity and token verification
-            apps_data = []
-            for aid in batch.get("application_ids", []):
-                app_rec = await get_career_application_by_id(aid, user_id)
-                if app_rec:
-                    apps_data.append(app_rec.model_dump())
+            apps_data = await load_batch_apps_data(user_id, batch.get("application_ids", []))
             current_content_hash = compute_batch_content_hash(apps_data)
 
             stored_token = batch.get("approval_token")
