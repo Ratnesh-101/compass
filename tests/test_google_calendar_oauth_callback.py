@@ -32,8 +32,19 @@ from backend.routers.auth import create_session
 from backend.services.oauth import (
     generate_oauth_state,
     verify_and_consume_oauth_state,
+    verify_oauth_state,
+    _browser_nonce_digest,
     _compute_state_sig,
 )
+
+# Browser nonce the callback cookie must carry so the signed state is bound to this "browser".
+BROWSER_NONCE = "test-browser-nonce-0123456789abcdefghij"
+NONCE_COOKIES = {"oauth_nonce": BROWSER_NONCE}
+
+
+def bound_state(user_id: str) -> str:
+    """Signed state bound to BROWSER_NONCE (what /api/calendar/connect issues with its cookie)."""
+    return generate_oauth_state(user_id, browser_nonce=BROWSER_NONCE)
 
 
 @pytest.fixture(autouse=True)
@@ -79,13 +90,10 @@ async def test_1_successful_oauth_initiation_and_callback_authenticated_user():
             state = init_data["state"]
             assert state is not None
 
-            # Verify state contains user
-            is_valid, state_user, _ = await verify_and_consume_oauth_state(state)
-            assert is_valid is True
-            assert state_user == user_email
-
-            # Generate fresh state for callback (since previous was consumed in assertion)
-            fresh_state = generate_oauth_state(user_email)
+            # Verify state contains user (non-consuming) and the nonce cookie was issued
+            assert verify_oauth_state(state, user_email) is True
+            assert "oauth_nonce" in client.cookies
+            fresh_state = state
 
             # Step B: Callback from Google
             cb_resp = await client.get(
@@ -105,7 +113,7 @@ async def test_2_correct_user_association_saved_credentials():
     transport = ASGITransport(app=app)
     compass_user = "scholar@vit.ac.in"
     google_email = "scholar.personal@gmail.com"
-    state = generate_oauth_state(compass_user)
+    state = bound_state(compass_user)
 
     with patch("backend.services.oauth.is_google_oauth_configured", return_value=True), \
          patch("backend.services.calendar.save_calendar_connection", new_callable=AsyncMock) as mock_save, \
@@ -120,7 +128,7 @@ async def test_2_correct_user_association_saved_credentials():
             "account_email": google_email,
         }
 
-        async with AsyncClient(transport=transport, base_url="https://compass-farmlytics.vercel.app") as client:
+        async with AsyncClient(transport=transport, base_url="https://compass-farmlytics.vercel.app", cookies=NONCE_COOKIES) as client:
             resp = await client.get(
                 f"/api/calendar/callback?code=auth_code_xyz&state={state}",
                 follow_redirects=False,
@@ -149,11 +157,14 @@ async def test_3_missing_oauth_state():
 async def test_4_invalid_or_tampered_oauth_state():
     """4. Invalid or tampered OAuth state is rejected (signature mismatch / malformed)."""
     transport = ASGITransport(app=app)
-    valid_state = generate_oauth_state("legit_user@vit.ac.in")
-    tampered_state = valid_state[:-6] + "bad123"
+    valid_state = bound_state("legit_user@vit.ac.in")
+    import base64
+
+    decoded = base64.urlsafe_b64decode(valid_state.encode("utf-8")).decode("utf-8")
+    tampered_state = base64.urlsafe_b64encode((decoded[:-6] + "bad123").encode("utf-8")).decode("utf-8")
 
     with patch("backend.services.calendar.save_calendar_connection", new_callable=AsyncMock) as mock_save:
-        async with AsyncClient(transport=transport, base_url="https://compass-farmlytics.vercel.app") as client:
+        async with AsyncClient(transport=transport, base_url="https://compass-farmlytics.vercel.app", cookies=NONCE_COOKIES) as client:
             resp = await client.get(f"/api/calendar/callback?code=code123&state={tampered_state}", follow_redirects=False)
             assert resp.status_code == 303
             assert "calendar_error=invalid_state" in resp.headers["location"]
@@ -164,18 +175,17 @@ async def test_4_invalid_or_tampered_oauth_state():
 async def test_5_expired_oauth_state():
     """5. Expired OAuth state (older than 600s) is rejected."""
     import base64
-    import secrets
 
     transport = ASGITransport(app=app)
     old_ts = int(time.time()) - 700
-    nonce = secrets.token_urlsafe(16)
+    nonce = _browser_nonce_digest(BROWSER_NONCE)
     action = "google_calendar"
     sig = _compute_state_sig("user@vit.ac.in", old_ts, nonce, action)
     raw = f"user@vit.ac.in:{old_ts}:{nonce}:{action}:{sig}"
     expired_state = base64.urlsafe_b64encode(raw.encode("utf-8")).decode("utf-8")
 
     with patch("backend.services.calendar.save_calendar_connection", new_callable=AsyncMock) as mock_save:
-        async with AsyncClient(transport=transport, base_url="https://compass-farmlytics.vercel.app") as client:
+        async with AsyncClient(transport=transport, base_url="https://compass-farmlytics.vercel.app", cookies=NONCE_COOKIES) as client:
             resp = await client.get(f"/api/calendar/callback?code=code123&state={expired_state}", follow_redirects=False)
             assert resp.status_code == 303
             assert "calendar_error=expired_state" in resp.headers["location"]
@@ -186,7 +196,7 @@ async def test_5_expired_oauth_state():
 async def test_6_replayed_oauth_state_or_duplicate_callback():
     """6. Replayed OAuth state or duplicate callback is rejected on second attempt."""
     transport = ASGITransport(app=app)
-    state = generate_oauth_state("replay_user@vit.ac.in")
+    state = bound_state("replay_user@vit.ac.in")
     google_email = "replay_user@gmail.com"
 
     with patch("backend.services.oauth.is_google_oauth_configured", return_value=True), \
@@ -202,7 +212,7 @@ async def test_6_replayed_oauth_state_or_duplicate_callback():
             "account_email": google_email,
         }
 
-        async with AsyncClient(transport=transport, base_url="https://compass-farmlytics.vercel.app") as client:
+        async with AsyncClient(transport=transport, base_url="https://compass-farmlytics.vercel.app", cookies=NONCE_COOKIES) as client:
             resp1 = await client.get(f"/api/calendar/callback?code=code123&state={state}", follow_redirects=False)
             assert resp1.status_code == 303
             assert "calendar_connected=true" in resp1.headers["location"]
@@ -230,14 +240,14 @@ async def test_7_oauth_access_denied_by_user():
 async def test_8_failed_token_exchange():
     """8. Failed token exchange with Google does not save credentials and redirects with safe error."""
     transport = ASGITransport(app=app)
-    state = generate_oauth_state("user@vit.ac.in")
+    state = bound_state("user@vit.ac.in")
 
     with patch("backend.services.calendar.save_calendar_connection", new_callable=AsyncMock) as mock_save, \
          patch("backend.services.oauth.exchange_code_for_tokens", new_callable=AsyncMock) as mock_exchange:
 
         mock_exchange.return_value = {"error": "Google Token Exchange Failed (400): invalid_grant"}
 
-        async with AsyncClient(transport=transport, base_url="https://compass-farmlytics.vercel.app") as client:
+        async with AsyncClient(transport=transport, base_url="https://compass-farmlytics.vercel.app", cookies=NONCE_COOKIES) as client:
             resp = await client.get(f"/api/calendar/callback?code=bad_code&state={state}", follow_redirects=False)
             assert resp.status_code == 303
             assert "calendar_error=token_exchange_failed" in resp.headers["location"]
@@ -351,7 +361,7 @@ async def test_13_oauth_initiation_and_callback_work_with_actual_configured_redi
 async def test_14_failure_does_not_leave_partially_connected_integration():
     """14. Database failure or exchange failure does not leave a partially connected integration."""
     transport = ASGITransport(app=app)
-    state = generate_oauth_state("scholar@vit.ac.in")
+    state = bound_state("scholar@vit.ac.in")
 
     with patch("backend.routers.auth.get_pool", return_value=MagicMock()), \
          patch("backend.services.oauth.exchange_code_for_tokens", new_callable=AsyncMock) as mock_exchange, \
@@ -363,7 +373,7 @@ async def test_14_failure_does_not_leave_partially_connected_integration():
             "email": "scholar@gmail.com",
         }
 
-        async with AsyncClient(transport=transport, base_url="https://compass-farmlytics.vercel.app") as client:
+        async with AsyncClient(transport=transport, base_url="https://compass-farmlytics.vercel.app", cookies=NONCE_COOKIES) as client:
             resp = await client.get(f"/api/calendar/callback?code=mock_code&state={state}", follow_redirects=False)
             assert resp.status_code == 303
             assert "calendar_error=database_error" in resp.headers["location"]
@@ -518,10 +528,9 @@ async def test_20_dedicated_state_secret_and_key_rotation():
 @pytest.mark.asyncio
 async def test_21_database_failure_in_production_fails_loudly_without_silent_memory_fallback():
     """21. In production, a missing table or DB query failure raises an operational error and redirects to database_error."""
-    from backend.services.oauth import generate_oauth_state
     from backend.config import get_settings
 
-    state = generate_oauth_state("prod_user@vit.ac.in")
+    state = bound_state("prod_user@vit.ac.in")
     mock_pool = MagicMock()
     mock_conn = AsyncMock()
     mock_conn.execute.side_effect = Exception('relation "oauth_consumed_states" does not exist')
@@ -533,7 +542,7 @@ async def test_21_database_failure_in_production_fails_loudly_without_silent_mem
          patch("backend.routers.auth.get_pool", return_value=mock_pool), \
          patch("backend.services.oauth.get_settings", return_value=prod_settings):
         
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test", cookies=NONCE_COOKIES) as ac:
             resp = await ac.get(
                 "/api/calendar/callback",
                 params={"code": "valid_code", "state": state},

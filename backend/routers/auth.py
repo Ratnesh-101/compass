@@ -14,7 +14,7 @@ from html import escape
 from typing import Optional, Any
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from backend.config import get_settings
 from backend.dependencies import _get_current_identity
@@ -285,6 +285,25 @@ def is_session_oauth_verified(token: str) -> bool:
         return bool(sess.get("oauth_verified", False))
     return False
 
+
+
+def _request_is_https(request: Request) -> bool:
+    """True when the client reached us over https (directly or via a TLS-terminating proxy)."""
+    return request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
+
+
+def _reject_oauth_login_csrf(frontend_origin: str) -> HTMLResponse:
+    """400 for a callback whose state is not bound to this browser; clears the nonce cookie."""
+    response = HTMLResponse(
+        "<html><body style='font-family:sans-serif;padding:40px;background:#0f172a;color:#f87171;'>"
+        "<h3>OAuth sign-in could not be verified for this browser</h3>"
+        "<p>Start the Google connection again from Compass.</p>"
+        f"<p><a style='color:#38bdf8;' href='{frontend_origin}/'>Return to Compass</a></p>"
+        "</body></html>",
+        status_code=400,
+    )
+    response.delete_cookie(oauth.OAUTH_NONCE_COOKIE, path="/")
+    return response
 
 
 def _resolve_oauth_redirect_uri(request: Request) -> str:
@@ -565,13 +584,25 @@ async def calendar_connect(
 
     redirect_uri = _resolve_oauth_redirect_uri(request)
     effective_hint = login_hint or (current_user if current_user and "@" in current_user else None)
-    state = generate_oauth_state(current_user or "guest")
+    browser_nonce = oauth.new_browser_nonce()
+    state = generate_oauth_state(current_user or "guest", browser_nonce=browser_nonce)
     url = generate_google_oauth_url(redirect_uri=redirect_uri, login_hint=effective_hint, state=state)
 
     accept = request.headers.get("accept", "")
     if redirect or "text/html" in accept:
-        return RedirectResponse(url=url)
-    return {"status": "ok", "configured": True, "url": url, "state": state}
+        response: Any = RedirectResponse(url=url)
+    else:
+        response = JSONResponse({"status": "ok", "configured": True, "url": url, "state": state})
+    response.set_cookie(
+        key=oauth.OAUTH_NONCE_COOKIE,
+        value=browser_nonce,
+        max_age=oauth.OAUTH_NONCE_MAX_AGE_SECONDS,
+        httponly=True,
+        secure=_request_is_https(request),
+        samesite="lax",
+        path="/",
+    )
+    return response
 
 
 @router.get("/api/calendar/callback")
@@ -634,6 +665,12 @@ async def calendar_callback(
         response = RedirectResponse(url=target_url, status_code=303)
         response.delete_cookie("compass_user_id", path="/")
         return response
+
+    # 3b. Login-CSRF: the signed state must be bound to the browser that started the flow.
+    if state and not oauth.browser_nonce_matches_state(
+        state, request.cookies.get(oauth.OAUTH_NONCE_COOKIE)
+    ):
+        return _reject_oauth_login_csrf(frontend_origin)
 
     # 4. Cryptographically verify and consume OAuth state (validates signature, checks expiry and replay)
     initiating_user = None
@@ -762,6 +799,7 @@ async def calendar_callback(
             secure=is_secure,
             samesite="lax",
         )
+        response.delete_cookie(oauth.OAUTH_NONCE_COOKIE, path="/")
         return response
 
     target_url = _build_safe_frontend_redirect(frontend_origin, f"calendar_connected=true&email={safe_email}")
@@ -778,6 +816,7 @@ async def calendar_callback(
         samesite="lax",
     )
     response.delete_cookie("compass_user_id", path="/")
+    response.delete_cookie(oauth.OAUTH_NONCE_COOKIE, path="/")
     return response
 
 
