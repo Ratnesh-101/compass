@@ -34,22 +34,99 @@ def _normalize_string(val: Optional[str]) -> str:
     return " ".join(clean.split())
 
 
+def _degree_tokens(degree_str: str) -> Set[str]:
+    """Whole-word tokens plus adjacent-pair joins ("b e" -> "be"), never substrings."""
+    words = _normalize_string(degree_str).split()
+    tokens: Set[str] = set(words)
+    tokens.update(a + b for a, b in zip(words, words[1:]))
+    return tokens
+
+
+_PHD_TOKENS = {"phd", "doctorate", "doctoral"}
+_MASTERS_STRONG = {"mtech", "msc", "mca", "mba", "master", "masters", "postgraduate", "mphil"}
+_UNDERGRAD_STRONG = {"btech", "bsc", "bca", "bba", "bcom", "bachelor", "bachelors", "undergraduate"}
+# Short forms that are also common words/abbreviations: only trusted when nothing stronger matched.
+_MASTERS_WEAK = {"ms", "me"}
+_UNDERGRAD_WEAK = {"be", "bs"}
+
+
 def _degree_category(degree_str: str) -> str:
     """
-    Categorizes degree into standardized academic levels:
+    Categorizes degree into standardized academic levels using whole-word tokens:
     - undergrad: btech, be, bsc, bs, bca, bachelor, undergraduate
     - masters: mtech, me, ms, msc, mca, mba, master, postgraduate
     - phd: phd, doctorate, doctoral
-    - unknown
+    - other
     """
-    d = _normalize_string(degree_str)
-    if any(k in d for k in ["phd", "doctorate", "doctoral"]):
+    t = _degree_tokens(degree_str)
+    if t & _PHD_TOKENS:
         return "phd"
-    if any(k in d for k in ["mtech", "m tech", "me", "msc", "m sc", "ms", "mca", "mba", "master", "postgraduate"]):
+    if t & _MASTERS_STRONG:
         return "masters"
-    if any(k in d for k in ["btech", "b tech", "be", "b e", "bsc", "b sc", "bs", "bca", "bachelor", "undergraduate"]):
+    if t & _UNDERGRAD_STRONG:
+        return "undergrad"
+    if t & _MASTERS_WEAK:
+        return "masters"
+    if t & _UNDERGRAD_WEAK:
         return "undergrad"
     return "other"
+
+
+_COUNTRY_ALIASES = {
+    "usa": "united states", "us": "united states", "u s": "united states", "u s a": "united states",
+    "america": "united states", "uk": "united kingdom", "u k": "united kingdom", "england": "united kingdom",
+    "uae": "united arab emirates",
+}
+_GLOBAL_COUNTRY_WORDS = {"worldwide", "global", "anywhere", "international"}
+
+
+def _canonical_country(val: Optional[str]) -> str:
+    norm = _normalize_string(val)
+    return _COUNTRY_ALIASES.get(norm, norm)
+
+
+def _country_allowed(student_country: str, allowed_entries: List[str]) -> bool:
+    """Whole-word country match; a short name never matches by substring."""
+    student_tokens = set(student_country.split())
+    if not student_tokens:
+        return False
+    for entry in allowed_entries:
+        canon = _canonical_country(entry)
+        entry_tokens = set(canon.split())
+        if entry_tokens & _GLOBAL_COUNTRY_WORDS or student_tokens <= entry_tokens:
+            return True
+    return False
+
+
+_SUBSTANTIVE_FIELDS = {"academic_year", "grad_year", "degree", "cgpa", "backlogs", "country", "work_auth"}
+
+
+def _has_substantive_requirements(reqs: OpportunityRequirementsOut) -> bool:
+    return bool(
+        reqs.eligible_academic_years
+        or reqs.eligible_graduation_years
+        or reqs.eligible_degree_types
+        or reqs.eligible_countries
+        or reqs.work_auth_required is True
+        or reqs.min_gpa is not None
+        or reqs.required_skills
+        or reqs.no_active_backlogs is True
+        or reqs.has_conflicting_requirements
+        or (reqs.other_mandatory_requirements or "").strip()
+        or reqs.unknown_requirements
+    )
+
+
+def _requirement_gpa_scale(reqs: OpportunityRequirementsOut) -> Optional[float]:
+    """Scale of the listing's minimum grade; infers percent for large values, None when ambiguous."""
+    if reqs.gpa_scale:
+        return float(reqs.gpa_scale)
+    min_gpa = float(reqs.min_gpa or 0)
+    if min_gpa > 10.0:
+        return 100.0
+    if min_gpa <= 4.0:
+        return None
+    return 10.0
 
 
 def evaluate_eligibility(
@@ -72,18 +149,9 @@ def evaluate_eligibility(
     reqs: Optional[OpportunityRequirementsOut] = opportunity.requirements
     reasons: List[Dict[str, Any]] = []
 
-    # If opportunity has zero requirement data or completely empty
-    if not reqs or (
-        not reqs.eligible_academic_years
-        and not reqs.eligible_graduation_years
-        and not reqs.eligible_degree_types
-        and not reqs.eligible_countries
-        and reqs.work_auth_required is None
-        and reqs.min_gpa is None
-        and not reqs.required_skills
-        and not reqs.no_active_backlogs
-        and not reqs.has_conflicting_requirements
-    ):
+    # Substantive data = something we can actually compare against the candidate. Preferred skills,
+    # sponsorship flags, False-valued flags and free-text caveats are not comparable facts.
+    if not reqs or not _has_substantive_requirements(reqs):
         reasons.append({
             "field": "requirements_data",
             "status": "unspecified",
@@ -154,15 +222,22 @@ def evaluate_eligibility(
     # 3. CGPA / Minimum Grade Check
     cgpa_status = "pass"
     if reqs.min_gpa is not None:
-        if profile.cgpa is None:
+        req_scale = _requirement_gpa_scale(reqs)
+        if req_scale is None:
             reasons.append({
                 "field": "cgpa",
                 "status": "unknown",
-                "detail": f"Position requires minimum CGPA of {reqs.min_gpa} (scale: {reqs.gpa_scale or 10.0}), but your CGPA is unset."
+                "detail": f"Position requires a minimum grade of {reqs.min_gpa} but does not state its scale; cannot compare reliably."
+            })
+            cgpa_status = "unknown"
+        elif profile.cgpa is None:
+            reasons.append({
+                "field": "cgpa",
+                "status": "unknown",
+                "detail": f"Position requires minimum CGPA of {reqs.min_gpa} (scale: {req_scale}), but your CGPA is unset."
             })
             cgpa_status = "unknown"
         else:
-            req_scale = float(reqs.gpa_scale or 10.0)
             user_scale = float(profile.cgpa_scale or 10.0)
             # Normalize to 10.0 scale for comparison
             normalized_req_gpa = (float(reqs.min_gpa) / req_scale) * 10.0
@@ -254,19 +329,16 @@ def evaluate_eligibility(
     # 6. Country & Geographic Residence Check
     country_status = "pass"
     if reqs.eligible_countries:
-        student_country = (profile.country_of_residence or profile.country_of_study or "India").lower()
-        allowed_countries = [c.lower() for c in reqs.eligible_countries]
-        is_allowed = any(student_country in c or c in student_country for c in allowed_countries)
-        india_in_allowed = any("india" in c for c in allowed_countries)
-
-        if not is_allowed and not (opportunity.is_india_eligible and india_in_allowed):
+        student_country = _canonical_country(profile.country_of_residence or profile.country_of_study)
+        if not student_country:
+            # Nothing to compare against: not a verified fact either way.
             reasons.append({
                 "field": "country",
-                "status": "fail",
-                "detail": f"Position is restricted to applicants in {reqs.eligible_countries}. Candidate is based in {profile.country_of_residence or 'India'}."
+                "status": "unspecified",
+                "detail": f"Position is restricted to {reqs.eligible_countries}; your country is not set in your profile."
             })
-            country_status = "fail"
-        elif is_allowed or (opportunity.is_india_eligible and india_in_allowed):
+            country_status = "unspecified"
+        elif _country_allowed(student_country, reqs.eligible_countries):
             reasons.append({
                 "field": "country",
                 "status": "pass",
@@ -275,22 +347,32 @@ def evaluate_eligibility(
         else:
             reasons.append({
                 "field": "country",
-                "status": "unknown",
-                "detail": f"Country eligibility ({reqs.eligible_countries}) requires verification for applicant location."
+                "status": "fail",
+                "detail": f"Position is restricted to applicants in {reqs.eligible_countries}. Candidate is based in {student_country.title()}."
             })
-            country_status = "unknown"
+            country_status = "fail"
 
     # 7. Work Authorization & Sponsorship Check
     work_auth_status = "pass"
+    work_auth_verified = False
     if reqs.work_auth_required is True:
         target_country = (opportunity.country or "India").strip().lower()
-        candidate_auth = (profile.work_authorization or "India").strip().lower()
+        candidate_auth = [_canonical_country(a) for a in (profile.work_authorization or "").replace(";", ",").split(",")]
+        candidate_auth = [a for a in candidate_auth if a]
+        has_auth = _country_allowed(_canonical_country(target_country), candidate_auth) if candidate_auth else None
 
         # If international on-site or hybrid role where work authorization is required
         if target_country not in ("india", "remote") and opportunity.work_arrangement != "remote":
             if reqs.sponsorship_available is False:
                 # Employer explicitly does not sponsor
-                if target_country not in candidate_auth:
+                if has_auth is None:
+                    reasons.append({
+                        "field": "work_auth",
+                        "status": "unknown",
+                        "detail": f"Requires work authorization in {opportunity.country} and employer does not sponsor; your work authorization is not set in your profile."
+                    })
+                    work_auth_status = "unknown"
+                elif not has_auth:
                     reasons.append({
                         "field": "work_auth",
                         "status": "fail",
@@ -298,6 +380,7 @@ def evaluate_eligibility(
                     })
                     work_auth_status = "fail"
                 else:
+                    work_auth_verified = True
                     reasons.append({
                         "field": "work_auth",
                         "status": "pass",
@@ -311,7 +394,7 @@ def evaluate_eligibility(
                 })
             else:
                 # Sponsorship policy is unknown / unconfirmed
-                if target_country not in candidate_auth:
+                if not has_auth:
                     reasons.append({
                         "field": "work_auth",
                         "status": "unknown",
@@ -319,6 +402,7 @@ def evaluate_eligibility(
                     })
                     work_auth_status = "unknown"
                 else:
+                    work_auth_verified = True
                     reasons.append({
                         "field": "work_auth",
                         "status": "pass",
@@ -367,6 +451,15 @@ def evaluate_eligibility(
             "detail": f"Preferred qualifications matched ({len(matched_pref)}/{len(pref_norm)}): {matched_pref if matched_pref else 'None (preferred qualifications do not affect mandatory eligibility)'}."
         })
 
+    # 10. Free-text / unparsed mandatory requirements can never be verified automatically
+    caveats = [c for c in [(reqs.other_mandatory_requirements or "").strip(), *reqs.unknown_requirements] if c and str(c).strip()]
+    if caveats:
+        reasons.append({
+            "field": "other_requirements",
+            "status": "unknown",
+            "detail": f"Additional listing requirements need manual review: {'; '.join(str(c) for c in caveats)[:300]}."
+        })
+
     # -----------------------------------------------------------------------
     # Decision Matrix
     # -----------------------------------------------------------------------
@@ -384,8 +477,20 @@ def evaluate_eligibility(
     missing_critical = [r["field"] for r in reasons if r.get("status") == "unknown" and r["field"] in critical_fields]
 
     unknown_reasons = [r for r in reasons if r.get("status") == "unknown"]
-    if unknown_reasons or reqs.has_conflicting_requirements or missing_critical:
-        unknown_fields = [u["field"] for u in unknown_reasons]
+    # ELIGIBLE needs at least one real pass on a substantive check; with none, nothing was verified.
+    has_substantive_pass = work_auth_verified or any(
+        r.get("status") == "pass" and r["field"] in _SUBSTANTIVE_FIELDS and r["field"] != "work_auth"
+        for r in reasons
+    )
+    has_substantive_unknown = any(r["field"] in _SUBSTANTIVE_FIELDS for r in unknown_reasons)
+    if not has_substantive_pass and not has_substantive_unknown and not reqs.has_conflicting_requirements:
+        return (
+            EligibilityClassification.INSUFFICIENT_INFORMATION,
+            "Mandatory eligibility requirements cannot be extracted with sufficient confidence. Manual review required.",
+            reasons,
+        )
+    if unknown_reasons or reqs.has_conflicting_requirements or missing_critical or country_status == "unspecified":
+        unknown_fields = [u["field"] for u in unknown_reasons] or ["country"]
         explanation = f"Possible match: Aligns with profile, but requires verification of: {', '.join(unknown_fields)}."
         return (EligibilityClassification.POTENTIAL_MATCH, explanation, reasons)
 

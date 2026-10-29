@@ -489,12 +489,32 @@ async def test_security_unapproved_batch_submission_rejected():
         assert "not passed explicit user approval" in submit_res.json()["detail"]
 
 
+async def _prepare_ready_application(client, opp_id: int, headers=None) -> None:
+    """Seed a valid master and prepare the application so batch approval's readiness gate passes."""
+    put = await client.put(
+        "/api/career/resumes/master",
+        headers=headers,
+        json={
+            "full_name": "E2E Applicant",
+            "email": "e2e@example.com",
+            "skills": ["Python"],
+            "education": [{"institution": "Test University", "degree": "B.Tech", "end_year": 2027}],
+        },
+    )
+    assert put.status_code == 200
+    prep = await client.post("/api/career/applications/prepare", headers=headers, params={"opportunity_id": opp_id})
+    assert prep.status_code == 200
+    # The shared test DB persists across runs, so the application may already be further along.
+    assert prep.json()["resume_id"] is not None and prep.json()["cover_letter"]
+
+
 @pytest.mark.asyncio
 async def test_security_cross_user_approval_and_submission_isolation():
     """User B cannot approve or submit User A's batch."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         # User A prepares batch
+        await _prepare_ready_application(client, 103, {"x-user-id": "alice@compass.internal"})
         prep_res = await client.post(
             "/api/career/batches/prepare",
             json={"opportunity_ids": [103]},
@@ -535,6 +555,7 @@ async def test_security_modified_application_invalidates_batch_approval():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test", headers={"x-user-id": "test_e2e_applicant_99"}) as client:
         # 1. Prepare batch
+        await _prepare_ready_application(client, 104)
         prep_res = await client.post("/api/career/batches/prepare", json={"opportunity_ids": [104]})
         batch_id = prep_res.json()["batch_id"]
         app_id = prep_res.json()["applications"][0]["id"]
@@ -611,6 +632,7 @@ async def test_security_duplicate_and_concurrent_batch_submission():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test", headers={"x-user-id": "test_e2e_applicant_99"}) as client:
         # Prepare & approve batch
+        await _prepare_ready_application(client, 105)
         prep_res = await client.post("/api/career/batches/prepare", json={"opportunity_ids": [105]})
         batch_id = prep_res.json()["batch_id"]
 
