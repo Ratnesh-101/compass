@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import sys
+import time
 import uuid
 from datetime import date
 from typing import Any, AsyncGenerator, Dict, List, Optional, cast
@@ -64,6 +65,16 @@ async def _resolve_pool():
         return res
 
     return await db_get_pool()
+
+
+def _format_empty_model_error(result: Optional[dict] = None) -> str:
+    s = get_settings()
+    key = s.NEBIUS_API_KEY or ""
+    if not key or key.startswith("your_nebius") or key.startswith("mock") or key in ("mock", "mock-key-not-used-in-tests"):
+        return "Model key missing or invalid. See the setup notes"
+    if result and result.get("error"):
+        return str(result["error"])
+    return "The model returned an empty response. Please retry."
 
 
 async def persist_stream_messages(
@@ -209,6 +220,7 @@ async def generate_chat_events(
         yield f"data: {json.dumps({'type': 'done', 'conversation_id': conv_id, 'skill_used': f'specialist_{valid_id}'})}\n\n"
         return
 
+    stream_start = time.perf_counter()
     yield f"data: {json.dumps({'type': 'ping'})}\n\n"
     yield f"data: {json.dumps({'type': 'status', 'stage': 'thinking', 'label': 'Understanding your request…'})}\n\n"
 
@@ -386,13 +398,13 @@ async def generate_chat_events(
 
             if not response_text.strip():
                 if not is_greeting_intent(message):
-                    yield f"data: {json.dumps({'type': 'error', 'detail': result.get('error') or 'The model returned an empty response. Please retry.', 'can_retry': True})}\n\n"
+                    yield f"data: {json.dumps({'type': 'error', 'detail': _format_empty_model_error(result), 'can_retry': True})}\n\n"
                     return
                 response_text = "How can I help you today?"
 
             prompt_est = max(len(message.split()) * 3, 30)
             completion_est = max(len(response_text.split()), 15)
-            record_usage(_settings.ROUTER_MODEL, prompt_est, completion_est)
+            record_usage(_settings.ROUTER_MODEL, prompt_est, completion_est, duration_ms=result.get("routing_latency_ms"))
 
             is_first = True
             async for chunk in stream_chunks(response_text):
@@ -482,7 +494,7 @@ async def generate_chat_events(
             skill_used = result.get("skill_used") or "chat"
             prompt_est = max(len(message.split()) * 3, 30)
             completion_est = max(len(response_text.split()), 15)
-            record_usage(_settings.ROUTER_MODEL, prompt_est, completion_est)
+            record_usage(_settings.ROUTER_MODEL, prompt_est, completion_est, duration_ms=result.get("routing_latency_ms"))
 
             is_first = True
             async for text_chunk in stream_chunks(response_text):
@@ -676,13 +688,13 @@ async def generate_chat_events(
 
             if not response_text.strip():
                 if not is_greeting_intent(message):
-                    yield f"data: {json.dumps({'type': 'error', 'detail': result.get('error') or 'The model returned an empty response. Please retry.', 'can_retry': True})}\n\n"
+                    yield f"data: {json.dumps({'type': 'error', 'detail': _format_empty_model_error(result), 'can_retry': True})}\n\n"
                     return
                 response_text = "How can I help you today?"
 
             prompt_est = max(len(message.split()) * 3, 30)
             completion_est = max(len(response_text.split()), 15)
-            record_usage(_settings.ROUTER_MODEL, prompt_est, completion_est)
+            record_usage(_settings.ROUTER_MODEL, prompt_est, completion_est, duration_ms=result.get("routing_latency_ms"))
 
             if emitted_text and response_text.startswith(emitted_text):
                 # Partial prefix matches — only emit the remaining suffix
@@ -744,13 +756,13 @@ async def generate_chat_events(
 
             if not response_text.strip():
                 if not is_greeting_intent(message):
-                    yield f"data: {json.dumps({'type': 'error', 'detail': result.get('error') or 'The model returned an empty response. Please retry.', 'can_retry': True}, default=str)}\n\n"
+                    yield f"data: {json.dumps({'type': 'error', 'detail': _format_empty_model_error(result), 'can_retry': True}, default=str)}\n\n"
                     return
                 response_text = "How can I help you today?"
 
             prompt_est = max(len(message.split()) * 3, 30)
             completion_est = max(len(response_text.split()), 15)
-            record_usage(_settings.ROUTER_MODEL, prompt_est, completion_est)
+            record_usage(_settings.ROUTER_MODEL, prompt_est, completion_est, duration_ms=result.get("routing_latency_ms"))
 
             is_first = True
             async for sc_token in stream_chunks(response_text):
@@ -777,12 +789,13 @@ async def generate_chat_events(
 
         _schedule_stream_persistence(conv_id, message, full_text, user_id, guest_id, "chat")
 
+        total_dur_ms = int((time.perf_counter() - stream_start) * 1000)
         if usage_data:
-            record_usage(_settings.ROUTER_MODEL, getattr(usage_data, "prompt_tokens", 30), getattr(usage_data, "completion_tokens", 15))
+            record_usage(_settings.ROUTER_MODEL, getattr(usage_data, "prompt_tokens", 30), getattr(usage_data, "completion_tokens", 15), duration_ms=total_dur_ms)
         else:
             prompt_est = len(message.split()) * 3
             completion_est = len(full_text.split())
-            record_usage(_settings.ROUTER_MODEL, prompt_est, completion_est)
+            record_usage(_settings.ROUTER_MODEL, prompt_est, completion_est, duration_ms=total_dur_ms)
 
         done_payload_final: dict[str, Any] = {'type': 'done', 'conversation_id': conv_id, 'skill_used': 'chat'}
         if last_finish_reason == "length":

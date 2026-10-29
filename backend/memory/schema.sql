@@ -120,6 +120,7 @@ CREATE TABLE usage_log (
     output_tokens      INTEGER       NOT NULL DEFAULT 0,
     estimated_cost_usd NUMERIC(10,6),
     skill              TEXT,         -- which skill triggered this call
+    duration_ms        INTEGER,      -- measured model call duration in ms (NULL for unmeasured/legacy rows)
     created_at         TIMESTAMPTZ   NOT NULL DEFAULT now()
 );
 

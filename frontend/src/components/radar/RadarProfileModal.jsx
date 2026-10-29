@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { fetchRadarProfile, updateRadarProfile } from '../../api/radarApi.js'
 import { validateProfileForm, buildProfilePayload } from '../../utils/careerUiHelpers.js'
+import Dialog from '../Dialog'
 
 const ROLE_OPTIONS = [
   'Artificial Intelligence and Machine Learning',
@@ -120,19 +121,6 @@ function RadarProfileModalContent({
     }
   }, [profile, applyProfileData])
 
-  // Keyboard Escape listener
-  useEffect(() => {
-    const handleKeyDown = e => {
-      if (e.key === 'Escape') {
-        if (typeof onClose === 'function') onClose()
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [onClose])
-
   const toggleArrangement = arr => {
     setPreferredArrangements(prev =>
       prev.includes(arr) ? prev.filter(x => x !== arr) : [...prev, arr]
@@ -200,9 +188,7 @@ function RadarProfileModalContent({
   }
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
+    <Dialog onClose={onClose}
       aria-labelledby="radar-profile-modal-title"
       style={{
         position: 'fixed',
@@ -253,7 +239,7 @@ function RadarProfileModalContent({
             <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
               Used strictly for deterministic eligibility calculation and customized recommendation ranking.
               {loadingProfile && (
-                <span style={{ marginLeft: '8px', color: 'var(--brand)', fontStyle: 'italic' }}>
+                <span style={{ marginLeft: '8px', color: 'var(--amber-text)', fontStyle: 'italic' }}>
                   (Syncing latest profile…)
                 </span>
               )}
@@ -745,6 +731,6 @@ function RadarProfileModalContent({
           </div>
         </form>
       </div>
-    </div>
+    </Dialog>
   )
 }

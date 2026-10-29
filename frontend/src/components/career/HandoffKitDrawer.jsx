@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { downloadAuthedFile, openAuthedHtml, API_BASE } from '../../api/baseClient.js'
 import { fetchHandoffKit } from '../../api/careerApi.js'
 import { copyTextSafely, displayKitValue } from '../../utils/careerUiHelpers.js'
+import Dialog from '../Dialog'
 
 const withApiBase = url => (url && url.startsWith('/') ? `${API_BASE}${url}` : url)
 
@@ -77,7 +78,7 @@ export default function HandoffKitDrawer({
   }
 
   return (
-    <div
+    <Dialog onClose={onClose}
       id="handoff-kit-drawer-overlay"
       style={{
         position: 'fixed',
@@ -310,7 +311,7 @@ export default function HandoffKitDrawer({
                               borderRadius: '4px',
                               background: '#fffbeb',
                               border: '1px solid #fde68a',
-                              color: '#b45309',
+                              color: '#92400e',
                               fontSize: '11px',
                               fontWeight: 600,
                               cursor: 'pointer',
@@ -445,6 +446,6 @@ export default function HandoffKitDrawer({
           </div>
         </div>
       </div>
-    </div>
+    </Dialog>
   )
 }

@@ -59,6 +59,8 @@ Tavily powers three skills, registered in `backend/skills/schemas_web.py` and im
 - **ATS parsing simulation (estimate):** Estimates keyword gaps and formatting concerns in a resume.
 - **Hiring radar:** Uses historical cycle data to forecast likely internship windows, labeled as predictions.
 
+> **Note for Judges**: Please evaluate using the live deployment at [compass-farmlytics.vercel.app](https://compass-farmlytics.vercel.app) with the live backend at [compass-backend-qryu-vcfv.onrender.com](https://compass-backend-qryu-vcfv.onrender.com). The live environment runs with full Nebius, Neon, and Tavily integrations. Local setup requires configured API keys and PostgreSQL with pgvector.
+
 ---
 
 ## Why Compass?
@@ -72,7 +74,7 @@ Modern developers and students work across fragmented environments that do not c
 | **Google Calendar** | Hourly time slots | Unaware of code context, technical backlog, or real task complexity |
 | **Job Boards / ATS** | Public listings & applications | Detached from candidate verified skills, factual projects, and academic eligibility |
 
-**Compass connects these contexts through persistent memory, model routing, and an autonomous agent.** When you ask *"What should I focus on tonight given my hackathon submission on Friday and my pending coursework?"*, Compass queries your structured database, recalls relevant vector code context, calculates calendar feasibility, and produces an actionable plan — asking for your approval before modifying any record.
+**Compass connects these contexts through persistent memory, model routing, and an autonomous agent.** When you ask *"What should I focus on tonight given my hackathon submission on Friday and my pending coursework?"*, Compass queries your structured database, retrieves relevant code and coursework notes via semantic search tools, calculates calendar feasibility, and produces an actionable plan — asking for your approval before modifying any record.
 
 ---
 
@@ -107,7 +109,7 @@ graph TD
 ### End-to-End Request Flow
 1. **Request Intake & Verification**: The user interacts through the web workspace or CLI. Requests forwarded via Vercel edge reverse proxy are verified using HMAC edge signatures (`x-compass-edge-sig`) before backend processing.
 2. **Intent Routing**: Nemotron-3 Nano 30B classifies user intent and extracts validated tool parameters using native OpenAI function schemas.
-3. **Contextual Retrieval**: Structured database records (tasks, schedules, candidate profile, applications) and semantically similar vector memory chunks (code snippets, ingested web research) are retrieved.
+3. **Contextual Retrieval**: Structured database records (tasks, schedules, candidate profile, applications) and semantically matched memory chunks (code snippets, coursework notes, ingested web research) are retrieved through dedicated code and research tools.
 4. **Agent Reasoning & Grounded Research**: The ReAct agent executes reasoning steps. If external data is needed or the model emits an epistemic `[ABSTAIN]`, Tavily performs authoritative search with prompt-injection sanitization.
 5. **Confirmation & Factual Integrity Gates**: Any state mutation (adding/editing tasks, applying triage plans, preparing application batches) halts at a human confirmation gate. For career applications, submissions require an explicit cryptographic approval token with legal attestations.
 6. **Execution & Reversible Logging**: Approved mutations write to Neon PostgreSQL and record a snapshot in `agent_audit_log`, enabling one-click undo and complete auditability.
@@ -244,7 +246,7 @@ compass/
 │   └── vite.config.js
 ├── cli/
 │   └── assistant_cli.py         # Typer + Rich terminal client
-├── tests/                       # 1,734 automated tests across 141 test files
+├── tests/                       # 1,793 automated tests across 147 test files
 │   ├── test_career_copilot.py   # Resume validation, batch gates, & career endpoints
 │   ├── test_internship_radar.py # Eligibility rules, cycle forecasting, & radar endpoints
 │   ├── test_security_hardening.py# SSRF defenses, HMAC signatures, & IDOR boundaries
@@ -406,7 +408,7 @@ Compass: Calls `submit_approved_application_batch`.
 
 ## Testing & Quality Assurance
 
-Compass has **1,734 automated tests** in 141 test files (`pytest --collect-only -q`) covering unit logic, integration paths, security hardening, and user workflows. Tests run only against a local PostgreSQL: set `TEST_DATABASE_URL` to a localhost database that differs from `DATABASE_URL`, otherwise pytest refuses to start.
+Compass has **1,793 automated tests** in 147 test files (`pytest --collect-only -q`) covering unit logic, integration paths, security hardening, and user workflows. Tests run only against a local PostgreSQL: set `TEST_DATABASE_URL` to a localhost database that differs from `DATABASE_URL`, otherwise pytest refuses to start.
 
 ```bash
 export TEST_DATABASE_URL=postgresql://user:pass@localhost:5432/compass_test

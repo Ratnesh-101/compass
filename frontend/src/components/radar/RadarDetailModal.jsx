@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { ExternalLink, CheckCircle2, XCircle, AlertCircle, Info, RefreshCw } from 'lucide-react'
 import { cleanOpportunity, cleanText, cleanSource } from '../../utils/jobCardCleaner'
+import Dialog from '../Dialog'
 
 const PIPELINE_STATUSES = [
   { id: 'interested', label: 'Interested' },
@@ -107,7 +108,7 @@ export default function RadarDetailModal({
   const getStatusLabel = () => cleaned.verificationBadge.label
 
   return (
-    <div
+    <Dialog onClose={onClose}
       style={{
         position: 'fixed',
         inset: 0,
@@ -735,6 +736,6 @@ export default function RadarDetailModal({
           )}
         </div>
       </div>
-    </div>
+    </Dialog>
   )
 }

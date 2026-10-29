@@ -85,7 +85,7 @@ export default function ValidationReportCard({ validationReport }) {
           <div style={{ fontWeight: '700', color: '#92400e', fontSize: '12px', marginBottom: '4px' }}>
             Warnings:
           </div>
-          <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12px', color: '#b45309' }}>
+          <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12px', color: '#92400e' }}>
             {warnings.map((warning, idx) => (
               <li key={idx}>{warning}</li>
             ))}

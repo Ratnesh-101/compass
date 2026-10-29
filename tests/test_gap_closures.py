@@ -123,10 +123,12 @@ async def test_search_web_skill_registered_and_dispatchable(monkeypatch):
 
 def test_cli_streaming_helper_fallback(monkeypatch):
     """P2.7: Verify CLI _stream_chat gracefully handles synchronous fallback."""
+    import httpx
     from cli.assistant_cli import _stream_chat
     import cli.assistant_cli as cli_mod
 
     monkeypatch.setattr(cli_mod, "_post", lambda path, payload: {"response": "Fallback response", "conversation_id": "c1", "skill_used": "chat"})
+    monkeypatch.setattr(httpx, "stream", lambda *args, **kwargs: (_ for _ in ()).throw(httpx.ConnectError("Connection refused")))
 
     # Call with a simple query against running server
     text, conv_id, skill = _stream_chat({"message": "Hello Compass!"})

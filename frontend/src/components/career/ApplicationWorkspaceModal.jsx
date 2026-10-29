@@ -56,6 +56,7 @@ import {
   DEFAULT_INTEL_COOLDOWN_SECONDS,
   NO_APPLICATION_URL_TEXT,
 } from '../../utils/careerUiHelpers.js'
+import Dialog from '../Dialog'
 
 const STATUS_LABELS = {
   discovered: 'Discovered',
@@ -149,20 +150,31 @@ function getIntelErrorMessage(reason, fallbackError) {
     case 'model_timeout':
       return 'Summary took too long to generate. Please try refreshing again.'
     case 'model_bad_output':
-      return 'Could not format company intelligence correctly. Please try refreshing again.'
+      return 'Company intel summary is being updated from verified sources. Please try refreshing shortly.'
     case 'no_sources':
-      return 'We could not find enough reliable information about this company.'
+      return 'We could not find enough reliable public information about this company yet.'
     case 'auth_failed':
-      return 'Service authentication issue. Please try again later.'
+      return 'Intelligence service authentication issue. Please try again later.'
     case 'job_lost':
-      return 'Server restarted or research session expired. Please refresh intel again.'
+      return 'Research session expired. Please refresh intel again.'
     case 'storage_failed':
       return 'Could not save intelligence data. Please try refreshing again.'
     case 'backend_unreachable':
       return 'Network issue. Please check your connection and try again.'
-    default:
-      return fallbackError || "We couldn't generate company intel right now. Please try again with Refresh Intel."
+    default: {
+      const sanitized = typeof fallbackError === 'string' && !fallbackError.includes('{') && !fallbackError.includes('model_') && fallbackError.length < 120
+        ? fallbackError
+        : null
+      return sanitized || "We couldn't generate company intel right now. Please try again with Refresh Intel."
+    }
   }
+}
+
+function formatIntelConfidence(confidence) {
+  if (confidence === 'high') return 'Verified across multiple sources'
+  if (confidence === 'medium') return 'Verified across 2 sources'
+  if (confidence === 'low') return 'Initial overview'
+  return null
 }
 
 function cleanOldBriefText(text) {
@@ -859,7 +871,7 @@ export default function ApplicationWorkspaceModal({
   ]
 
   return (
-    <div
+    <Dialog onClose={onClose}
       id="application-workspace-backdrop"
       style={{
         position: 'fixed',
@@ -1255,10 +1267,9 @@ export default function ApplicationWorkspaceModal({
                                 color: 'var(--text-secondary)',
                                 fontSize: '11px',
                                 fontWeight: 600,
-                                textTransform: 'capitalize',
                               }}
                             >
-                              {companyIntel.confidence} confidence
+                              {formatIntelConfidence(companyIntel.confidence) || 'Initial overview'}
                             </span>
                           )}
                           {isReady && companyIntel?.fallback_label && (
@@ -1268,7 +1279,7 @@ export default function ApplicationWorkspaceModal({
                                 borderRadius: '6px',
                                 border: '1px solid var(--border)',
                                 background: 'var(--bg-card)',
-                                color: 'var(--brand)',
+                                color: 'var(--amber-text)',
                                 fontSize: '11px',
                                 fontWeight: 600,
                               }}
@@ -1280,7 +1291,7 @@ export default function ApplicationWorkspaceModal({
                             <span>{formatAttemptTime(lastAttemptTime)}</span>
                           )}
                           {cooldownSeconds > 0 && (
-                            <span style={{ color: 'var(--brand)', fontSize: '11px', fontWeight: 600 }} aria-live="polite">
+                            <span style={{ color: 'var(--amber-text)', fontSize: '11px', fontWeight: 600 }} aria-live="polite">
                               Refresh available in {cooldownSeconds}s
                             </span>
                           )}
@@ -1457,7 +1468,7 @@ export default function ApplicationWorkspaceModal({
                             style={{
                               background: 'transparent',
                               border: 'none',
-                              color: 'var(--brand)',
+                              color: 'var(--amber-text)',
                               fontWeight: 600,
                               cursor: 'pointer',
                               padding: 0,
@@ -1556,6 +1567,11 @@ export default function ApplicationWorkspaceModal({
                                       }}
                                     >
                                       <span>{p.point}</span>
+                                      {p.similar_role && (
+                                        <span style={{ marginLeft: '6px', fontSize: '11px', fontStyle: 'italic', color: 'var(--text-muted)' }}>
+                                          (from a similar role listing)
+                                        </span>
+                                      )}
                                       {p.source && (
                                         <button
                                           type="button"
@@ -1567,7 +1583,7 @@ export default function ApplicationWorkspaceModal({
                                             padding: '0 4px',
                                             fontSize: '11px',
                                             fontWeight: 700,
-                                            color: 'var(--brand)',
+                                            color: 'var(--amber-text)',
                                             background: 'transparent',
                                             border: 'none',
                                             cursor: 'pointer',
@@ -1651,7 +1667,7 @@ export default function ApplicationWorkspaceModal({
                                       gap: '6px',
                                     }}
                                   >
-                                    <span style={{ fontWeight: 700, color: 'var(--brand)', flexShrink: 0 }}>[{src.id}]</span>
+                                    <span style={{ fontWeight: 700, color: 'var(--amber-text)', flexShrink: 0 }}>[{src.id}]</span>
                                     {safeUrl ? (
                                       <a
                                         href={safeUrl}
@@ -1824,12 +1840,12 @@ export default function ApplicationWorkspaceModal({
                           </div>
                         ) : (
                           <div style={{ padding: '12px', borderRadius: '8px', background: '#fffbeb', border: '1px solid #fde68a' }}>
-                            <div style={{ fontWeight: 700, fontSize: '12px', color: '#b45309', marginBottom: '6px' }}>
+                            <div style={{ fontWeight: 700, fontSize: '12px', color: '#92400e', marginBottom: '6px' }}>
                               ⚠️ Unverified or Missing Skills ({missingSkills.length})
                             </div>
                             <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                               {missingSkills.map((sk, i) => (
-                                <span key={i} style={{ background: '#ffffff', color: '#b45309', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, border: '1px solid #fde68a' }}>
+                                <span key={i} style={{ background: '#ffffff', color: '#92400e', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, border: '1px solid #fde68a' }}>
                                   {sk}
                                 </span>
                               ))}
@@ -1849,7 +1865,7 @@ export default function ApplicationWorkspaceModal({
                           borderRadius: '6px',
                           background: 'transparent',
                           border: '1px solid var(--border)',
-                          color: 'var(--brand)',
+                          color: 'var(--amber-text)',
                           fontSize: '11px',
                           fontWeight: 700,
                           cursor: 'pointer',
@@ -2619,6 +2635,6 @@ export default function ApplicationWorkspaceModal({
           </div>
         </div>
       </div>
-    </div>
+    </Dialog>
   )
 }

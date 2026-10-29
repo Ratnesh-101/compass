@@ -6,6 +6,7 @@ from typing import Any, Dict, List
 import logging
 from datetime import datetime, date, timedelta, timezone
 
+from backend.services.user_timezone import resolve_timezone_name, resolve_zone
 from backend.skills.registry import register_skill
 
 logger = logging.getLogger("compass.skills.calendar")
@@ -24,11 +25,13 @@ async def handle_get_calendar_availability(args: Dict[str, Any], pool: Any) -> D
     end_str = args.get("end_date")
     user_id = args.get("user_id")
     scoped_owner = scope_owner(user_id)
+    tz_name = resolve_timezone_name(args.get("timezone"))
+    zone = resolve_zone(tz_name)
 
     now = datetime.now(timezone.utc)
     if start_str:
         try:
-            start_dt = datetime.combine(date.fromisoformat(start_str[:10]), datetime.min.time(), tzinfo=timezone.utc)
+            start_dt = datetime.combine(date.fromisoformat(start_str[:10]), datetime.min.time(), tzinfo=zone).astimezone(timezone.utc)
         except Exception:
             start_dt = now
     else:
@@ -36,7 +39,7 @@ async def handle_get_calendar_availability(args: Dict[str, Any], pool: Any) -> D
 
     if end_str:
         try:
-            end_dt = datetime.combine(date.fromisoformat(end_str[:10]), datetime.max.time(), tzinfo=timezone.utc)
+            end_dt = datetime.combine(date.fromisoformat(end_str[:10]), datetime.max.time(), tzinfo=zone).astimezone(timezone.utc)
         except Exception:
             end_dt = start_dt + timedelta(days=7)
     else:
@@ -66,6 +69,7 @@ async def handle_get_calendar_availability(args: Dict[str, Any], pool: Any) -> D
         work_end_time=str(prefs.get("work_end_time", "18:00:00")),
         work_days=list(prefs.get("work_days", [1, 2, 3, 4, 5])),
         buffer_minutes=buffer_minutes,
+        tz_name=tz_name,
     )
 
     summary = (
@@ -79,6 +83,7 @@ async def handle_get_calendar_availability(args: Dict[str, Any], pool: Any) -> D
         "data": {
             "start": start_dt.isoformat(),
             "end": end_dt.isoformat(),
+            "timezone": tz_name,
             "busy_count": len(busy),
             "busy_intervals": busy,
             "calendar_error": calendar_errors[0] if calendar_errors else None,
@@ -110,11 +115,13 @@ async def handle_propose_schedule(args: Dict[str, Any], pool: Any) -> Dict[str, 
     task_ids = args.get("task_ids")
     user_id = args.get("user_id")
     scoped_owner = scope_owner(user_id)
+    tz_name = resolve_timezone_name(args.get("timezone"))
+    zone = resolve_zone(tz_name)
 
     now = datetime.now(timezone.utc)
     if target_date_str:
         try:
-            requested_start = datetime.combine(date.fromisoformat(target_date_str[:10]), datetime.min.time(), tzinfo=timezone.utc)
+            requested_start = datetime.combine(date.fromisoformat(target_date_str[:10]), datetime.min.time(), tzinfo=zone).astimezone(timezone.utc)
         except Exception:
             requested_start = now
     else:
@@ -152,6 +159,7 @@ async def handle_propose_schedule(args: Dict[str, Any], pool: Any) -> Dict[str, 
         work_end_time=str(prefs.get("work_end_time", "18:00:00")),
         work_days=list(prefs.get("work_days", [1, 2, 3, 4, 5])),
         buffer_minutes=buffer_minutes,
+        tz_name=tz_name,
     )
 
     allocation = allocate_task_slots(
@@ -160,6 +168,7 @@ async def handle_propose_schedule(args: Dict[str, Any], pool: Any) -> Dict[str, 
         buffer_minutes=buffer_minutes,
         dependencies=dep_map,
         not_before=start_dt,
+        tz_name=tz_name,
     )
 
     scheduled_list = allocation["scheduled"]
@@ -175,6 +184,7 @@ async def handle_propose_schedule(args: Dict[str, Any], pool: Any) -> Dict[str, 
         "response": "\n".join(lines),
         "data": {
             "status": "proposed",
+            "timezone": tz_name,
             "horizon": {"start": start_dt.isoformat(), "end": end_dt.isoformat()},
             "earliest_start": start_dt.isoformat(),
             "scheduled": allocation["scheduled"],

@@ -29,14 +29,14 @@ export default function EvidenceCard({ evidence }) {
       case 'PARTIALLY_VERIFIED':
         return {
           bg: 'rgba(230, 81, 0, 0.15)',
-          text: '#e65100',
+          text: 'var(--amber-text)',
           border: 'rgba(230, 81, 0, 0.35)',
           label: 'PARTIALLY VERIFIED',
         }
       case 'STALE':
         return {
           bg: 'rgba(176, 96, 0, 0.15)',
-          text: '#e65100',
+          text: 'var(--amber-text)',
           border: 'rgba(230, 81, 0, 0.35)',
           label: 'STALE',
         }

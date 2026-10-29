@@ -262,6 +262,9 @@ async def seed():
                 continue
 
             emb = get_embedding(str(mc["content"]), client)
+            if not emb:
+                print(f"    - Skipping chunk for '{mc['project_name']}': embedding API unavailable (no synthetic vectors).")
+                continue
             proj_id = project_ids.get(mc["project_name"])
             row = await conn.fetchrow(
                 """

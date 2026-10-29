@@ -104,6 +104,29 @@ async def hydrate_usage_from_db(pool=None) -> Dict[str, Any]:
             _USAGE_STATE = new_state
             logger.info(f"Hydrated usage state from usage_log: {len(rows)} model groups loaded.")
 
+            # Hydrate measured model call durations (excluding unmeasured/NULL rows)
+            try:
+                lat_rows = await conn.fetch(
+                    """
+                    SELECT model, duration_ms
+                    FROM usage_log
+                    WHERE duration_ms IS NOT NULL AND duration_ms > 0
+                    ORDER BY id DESC
+                    LIMIT 2000
+                    """
+                )
+                for lr in lat_rows:
+                    m = lr["model"]
+                    dur = int(lr["duration_ms"])
+                    norm = _normalize_model_name(m)
+                    if norm in _USAGE_STATE:
+                        _USAGE_STATE[norm].setdefault("durations", []).append(dur)
+                    if m in _USAGE_STATE:
+                        _USAGE_STATE[m].setdefault("durations", []).append(dur)
+                logger.info(f"Hydrated {len(lat_rows)} measured model latency records.")
+            except Exception as le:
+                logger.debug(f"Could not hydrate durations from usage_log: {le}")
+
             # Hydrate Tavily credit telemetry
             try:
                 tavily_rows = await conn.fetch(
@@ -214,16 +237,17 @@ async def _persist_to_db(
     cost: float,
     skill: Optional[str] = None,
     conn: Optional[asyncpg.Connection] = None,
+    duration_ms: Optional[int] = None,
 ) -> None:
     """Insert a usage record into the usage_log table."""
     try:
         if conn is not None:
             await conn.execute(
                 """
-                INSERT INTO usage_log (model, input_tokens, output_tokens, estimated_cost_usd, skill)
-                VALUES ($1, $2, $3, $4, $5)
+                INSERT INTO usage_log (model, input_tokens, output_tokens, estimated_cost_usd, skill, duration_ms)
+                VALUES ($1, $2, $3, $4, $5, $6)
                 """,
-                model_name, prompt_tokens, completion_tokens, cost, skill,
+                model_name, prompt_tokens, completion_tokens, cost, skill, duration_ms,
             )
         else:
             from backend.memory.db import get_pool
@@ -231,12 +255,12 @@ async def _persist_to_db(
             async with pool.acquire() as db_conn:
                 await db_conn.execute(
                     """
-                    INSERT INTO usage_log (model, input_tokens, output_tokens, estimated_cost_usd, skill)
-                    VALUES ($1, $2, $3, $4, $5)
+                    INSERT INTO usage_log (model, input_tokens, output_tokens, estimated_cost_usd, skill, duration_ms)
+                    VALUES ($1, $2, $3, $4, $5, $6)
                     """,
-                    model_name, prompt_tokens, completion_tokens, cost, skill,
+                    model_name, prompt_tokens, completion_tokens, cost, skill, duration_ms,
                 )
-        logger.debug(f"usage_log row persisted: {model_name} ({prompt_tokens} in / {completion_tokens} out)")
+        logger.debug(f"usage_log row persisted: {model_name} ({prompt_tokens} in / {completion_tokens} out, duration={duration_ms}ms)")
     except Exception as db_err:
         logger.warning(f"Failed to persist usage_log: {db_err}")
 
@@ -247,6 +271,7 @@ def record_usage(
     completion_tokens: int,
     conn: Optional[asyncpg.Connection] = None,
     skill: Optional[str] = None,
+    duration_ms: Optional[int] = None,
 ) -> float:
     """Record token consumption and compute cost.
 
@@ -259,6 +284,7 @@ def record_usage(
         completion_tokens: Number of completion/output tokens
         conn: Optional active asyncpg connection to persist into database
         skill: Optional skill or pipeline stage identifier
+        duration_ms: Optional measured duration of model call in milliseconds
     """
     import asyncio
 
@@ -288,13 +314,21 @@ def record_usage(
     entry["prompt_tokens"] += p_tok
     entry["completion_tokens"] += c_tok
     entry["cost"] = round(entry["cost"] + cost, 6)
+
+    # Record measured latency in memory accumulator (bounded to recent 1000 items)
+    if duration_ms is not None and duration_ms > 0:
+        d_val = int(duration_ms)
+        entry.setdefault("durations", []).append(d_val)
+        if len(entry["durations"]) > 1000:
+            entry["durations"] = entry["durations"][-1000:]
+
     _USAGE_STATE[model_name] = entry
 
     # Schedule DB persistence with a strong reference and completion callback
     try:
         loop = asyncio.get_running_loop()
         task = loop.create_task(
-            _persist_to_db(model_name, prompt_tokens, completion_tokens, cost, skill, conn=conn)
+            _persist_to_db(model_name, prompt_tokens, completion_tokens, cost, skill, conn=conn, duration_ms=duration_ms)
         )
         _BACKGROUND_TASKS.add(task)
         task.add_done_callback(_on_persist_done)
@@ -303,7 +337,7 @@ def record_usage(
         pass
 
     logger.info(
-        f"Usage recorded: {model_name} | {prompt_tokens} in / {completion_tokens} out | ${cost:.6f}"
+        f"Usage recorded: {model_name} | {prompt_tokens} in / {completion_tokens} out | dur={duration_ms}ms | ${cost:.6f}"
     )
     return cost
 
@@ -382,35 +416,70 @@ def get_usage_summary() -> Dict[str, Any]:
         total_cost_float = 0.0
     savings_pct = round(((gpt4_baseline_usd - total_cost_float) / gpt4_baseline_usd) * 100, 1) if (gpt4_baseline_usd > 0 and gpt4_baseline_usd > total_cost_float) else 0.0
 
+    # Measured latency statistical analyzer
+    def _compute_latency_stats(durations: list) -> Dict[str, Any]:
+        valid = [int(d) for d in durations if isinstance(d, (int, float)) and d > 0]
+        n = len(valid)
+        if n < 20:
+            return {
+                "label": "model call time measured by the backend",
+                "sample_size": n,
+                "p50_ms": None,
+                "p95_ms": None,
+                "display": "Not enough data",
+            }
+        s = sorted(valid)
+        p50 = s[int(0.50 * (n - 1))]
+        p95 = s[int(0.95 * (n - 1))]
+        return {
+            "label": "model call time measured by the backend",
+            "sample_size": n,
+            "p50_ms": p50,
+            "p95_ms": p95,
+            "display": f"p50: {p50}ms, p95: {p95}ms (n={n})",
+        }
+
     # Tiered Nemotron technical specs
     model_metadata = {
         "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B": {
             "tier": "Tier 1: Intent Router",
-            "role": "Sub-400ms function calling & fast classification",
+            "role": "Function calling & fast classification",
             "params": "30B MoE (3B active)",
             "rate": "$0.06 / $0.24 per 1M",
-            "avg_latency_ms": 280,
+            "latency": _compute_latency_stats(
+                _USAGE_STATE.get("nemotron-nano", {}).get("durations", [])
+                or _USAGE_STATE.get("nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B", {}).get("durations", [])
+            ),
         },
         "nvidia/nemotron-3-super-120b-a12b": {
             "tier": "Tier 2: Deep ReAct Planner",
             "role": "Multi-step reasoning & grounded code context",
             "params": "120B MoE (12B active)",
             "rate": "$0.30 / $0.90 per 1M",
-            "avg_latency_ms": 650,
+            "latency": _compute_latency_stats(
+                _USAGE_STATE.get("nemotron-super", {}).get("durations", [])
+                or _USAGE_STATE.get("nvidia/nemotron-3-super-120b-a12b", {}).get("durations", [])
+            ),
         },
         "nvidia/Nemotron-3-Ultra-550b-a55b": {
             "tier": "Tier 3: Executive Synthesizer",
             "role": "Cross-domain roadmap & deadline arbitration",
             "params": "550B MoE (55B active)",
             "rate": "$0.80 / $2.40 per 1M",
-            "avg_latency_ms": 1400,
+            "latency": _compute_latency_stats(
+                _USAGE_STATE.get("nemotron-ultra", {}).get("durations", [])
+                or _USAGE_STATE.get("nvidia/Nemotron-3-Ultra-550b-a55b", {}).get("durations", [])
+            ),
         },
         "Qwen/Qwen3-Embedding-8B": {
             "tier": "Semantic Embedding",
             "role": "Matryoshka 768-dim vector embeddings for pgvector",
             "params": "8B dense",
             "rate": "$0.02 per 1M",
-            "avg_latency_ms": 120,
+            "latency": _compute_latency_stats(
+                _USAGE_STATE.get("qwen3-embedding", {}).get("durations", [])
+                or _USAGE_STATE.get("Qwen/Qwen3-Embedding-8B", {}).get("durations", [])
+            ),
         },
     }
 
@@ -427,7 +496,7 @@ def get_usage_summary() -> Dict[str, Any]:
         "gpt4_baseline_cost_usd": gpt4_baseline_usd,
         "infrastructure": {
             "cloud": "Nebius Token Factory",
-            "gpu_acceleration": "NVIDIA Tensor Core H100 / H200 SXM5",
+            "gpu_acceleration": "NVIDIA Tensor Core GPUs (Nebius Cloud)",
             "architecture": "Hierarchical Mixture-of-Experts (MoE)",
             "database": "Neon Serverless PostgreSQL 16 + pgvector HNSW",
             "cost_reduction_vs_monolithic": f"{savings_pct}%",
@@ -444,6 +513,7 @@ def get_usage_summary() -> Dict[str, Any]:
                 "tokens": v["input_tokens"] + v["output_tokens"],
                 "cost": f"${v['estimated_cost_usd']:.6f}",
                 "cost_usd": v["estimated_cost_usd"],
+                "latency": model_metadata.get(k, {}).get("latency", _compute_latency_stats(v.get("durations", []))),
             }
             for k, v in by_model.items()
         ],

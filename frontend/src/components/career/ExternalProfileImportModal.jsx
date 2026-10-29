@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { ingestExternalProfile } from '../../api/careerApi'
+import Dialog from '../Dialog'
 
 export default function ExternalProfileImportModal({
   show,
@@ -32,7 +33,7 @@ export default function ExternalProfileImportModal({
   }
 
   return (
-    <div
+    <Dialog onClose={onClose}
       style={{
         position: 'fixed',
         inset: 0,
@@ -242,6 +243,6 @@ export default function ExternalProfileImportModal({
           </button>
         </div>
       </div>
-    </div>
+    </Dialog>
   )
 }

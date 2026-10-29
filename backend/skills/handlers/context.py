@@ -36,6 +36,7 @@ async def handle_query_code_context(args: Dict[str, Any], pool: Any) -> Dict[str
     """Query memory_chunks using vector.search_chunks and synthesize response via SKILL_MODEL."""
     from backend.memory import vector
     from backend.config import get_settings
+    from backend.services.embeddings import get_embedding
     from backend.services.usage import record_usage
     from openai import AsyncOpenAI
 
@@ -54,6 +55,15 @@ async def handle_query_code_context(args: Dict[str, Any], pool: Any) -> Dict[str
             else:
                 chunks = await vector.search_chunks(conn, query=query, domain=domain, limit=3)
         count = len(chunks)
+
+        # Check embedding service availability: if unavailable, return clear status
+        query_vec = await get_embedding(query)
+        if query_vec is None:
+            logger.warning(f"Semantic search query '{query}' unavailable: embedding service offline/unconfigured.")
+            return {
+                "response": "Semantic search is unavailable right now.",
+                "data": {"chunks": [], "count": 0, "status": "unavailable"},
+            }
 
         # Synthesize technical response using SKILL_MODEL (nvidia/nemotron-3-super-120b-a12b)
         if chunks and settings.NEBIUS_API_KEY:
@@ -115,6 +125,11 @@ async def handle_log_code_context(args: Dict[str, Any], pool: Any) -> Dict[str, 
                 conn, content=content, domain=domain, tags=tags,
                 user_id=scope_owner(args.get("user_id")),
             )
+        if chunk.get("status") == "pending_retry":
+            return {
+                "response": "Embedding service unavailable. Code memory has been marked pending retry.",
+                "data": chunk,
+            }
         return {
             "response": f"Logged code memory to {domain.upper()} domain with 768-dim vector.",
             "data": chunk,
@@ -144,6 +159,8 @@ async def handle_log_code_snippet(args: Dict[str, Any], pool: Any) -> Dict[str, 
             conn, content=content, domain="code", project_id=project_id, tags=tag_list,
             user_id=scope_owner(args.get("user_id")),
         )
+    if chunk.get("status") == "pending_retry":
+        return {"response": "Embedding service unavailable. Snippet marked pending retry.", "data": chunk}
     return {"response": "💻 Logged code context with 768-dim embedding in Neon HNSW index.", "data": chunk}
 
 

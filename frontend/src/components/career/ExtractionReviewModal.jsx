@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { resolveOverallConfidence, computeMissingFields } from '../../utils/careerUiHelpers'
+import Dialog from '../Dialog'
 
 export default function ExtractionReviewModal({
   show,
@@ -70,7 +71,7 @@ export default function ExtractionReviewModal({
   }
 
   return (
-    <div
+    <Dialog onClose={onClose}
       style={{
         position: 'fixed',
         inset: 0,
@@ -157,12 +158,12 @@ export default function ExtractionReviewModal({
         {(missing.length > 0 || conflicts.length > 0 || ambiguous.length > 0) && (
           <div style={{ padding: '12px 26px', background: '#fffbeb', borderBottom: '1px solid #fef3c7' }}>
             {missing.length > 0 && (
-              <div style={{ fontSize: '12.5px', color: '#b45309', marginBottom: conflicts.length ? '4px' : '0', fontWeight: '500' }}>
+              <div style={{ fontSize: '12.5px', color: '#92400e', marginBottom: conflicts.length ? '4px' : '0', fontWeight: '500' }}>
                 ⚠️ <strong>Missing Fields:</strong> {missing.join(', ')}: you can complete these below.
               </div>
             )}
             {conflicts.map((conf, idx) => (
-              <div key={idx} style={{ fontSize: '12.5px', color: '#b45309', fontWeight: '500' }}>
+              <div key={idx} style={{ fontSize: '12.5px', color: '#92400e', fontWeight: '500' }}>
                 ⚡ <strong>Conflict:</strong> {conf.message} (Selected: {conf.selected})
               </div>
             ))}
@@ -535,6 +536,6 @@ export default function ExtractionReviewModal({
           </div>
         </div>
       </div>
-    </div>
+    </Dialog>
   )
 }

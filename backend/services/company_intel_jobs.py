@@ -24,11 +24,19 @@ import uuid
 
 from fastapi import HTTPException
 
-from backend.services.intel_grounding import STOPWORDS, is_point_grounded  # noqa: F401  (single implementation lives there)
+from backend.services.intel_grounding import (  # noqa: F401  (single implementation lives there)
+    ROLE_NONE,
+    ROLE_SIMILAR,
+    STOPWORDS,
+    is_point_grounded,
+    role_relevance,
+    shape_point_text,
+)
 
 logger = logging.getLogger("compass.services.company_intel_jobs")
 
 SCHEMA_VERSION = "2.0"
+FALLBACK_POINT_MAX_WORDS = 22
 JOB_TTL_SECONDS = 300.0  # 5 minutes maximum job lifetime
 
 # In-memory job registry: job_id -> job dict
@@ -177,35 +185,27 @@ def build_sources_only_fallback(
 
     for s in cleaned_sources[:4]:
         snippet = s.get("snippet", "")
-        # Extract first complete sentence
-        match = re.search(r"([^.!?]+[.!?])", snippet)
-        sentence = match.group(1).strip() if match else snippet.split("\n")[0].strip()
-        words = sentence.split()
-        if len(words) > 22:
-            sentence = " ".join(words[:22]).rstrip(".,;:") + "."
-        elif not sentence.endswith((".", "!", "?")):
-            sentence += "."
-        sentence = sentence.replace("—", "-").replace("–", "-")
-
-        point_entry = {"point": sentence, "source": s["id"]}
+        shaped = shape_point_text(snippet, FALLBACK_POINT_MAX_WORDS)
+        if shaped is None:
+            continue  # cut-off fragment: never show it as a bullet
+        point_entry: Dict[str, Any] = {"point": shaped["text"], "source": s["id"]}
+        if shaped["truncated"]:
+            point_entry["truncated"] = True
         lower = snippet.lower()
         if any(k in lower for k in ("challenge", "problem", "scaling", "migration", "bottleneck")):
             if len(challenges) < 2:
                 challenges.append(point_entry)
         elif any(k in lower for k in ("role", "responsib", "engineer", "build", "design", "team")):
+            relevance = role_relevance(shaped["text"], s, role)
+            if relevance == ROLE_NONE:
+                continue  # snippet is about a different role than this listing
+            if relevance == ROLE_SIMILAR:
+                point_entry["similar_role"] = True
             if len(role_context) < 2:
                 role_context.append(point_entry)
         else:
             if len(priorities) < 2:
                 priorities.append(point_entry)
-
-    if not priorities and not challenges and not role_context and cleaned_sources:
-        first_s = cleaned_sources[0]
-        sent = first_s["snippet"].split(".")[0].strip()
-        priorities.append({
-            "point": (sent[:80] + ".").replace("—", "-").replace("–", "-"),
-            "source": first_s["id"],
-        })
 
     sources_out = [
         {"id": s["id"], "title": s["title"], "domain": s["domain"], "url": s["url"]}
@@ -229,7 +229,7 @@ def build_sources_only_fallback(
         "company": company,
         "role": role,
         "cached": False,
-        "strategic_insights": [f"{s['title']}: {s.get('snippet', '')[:100]}" for s in cleaned_sources[:3]],
+        "strategic_insights": [p["point"] for p in (priorities + role_context + challenges)[:3]],
         "technical_pain_points": [p["point"] for p in challenges] or [p["point"] for p in priorities],
         "recent_news": [],
     }
@@ -256,8 +256,10 @@ def build_job_posting_fallback(
         if len(s.split()) < 4 or len(s.split()) > 25:
             continue
         low = s.lower()
-        clean_s = (" ".join(s.split()[:22])).rstrip(".,;:") + "."
-        clean_s = clean_s.replace("—", "-").replace("–", "-")
+        shaped = shape_point_text(s, 25)
+        if shaped is None:
+            continue
+        clean_s = shaped["text"]
 
         if any(k in low for k in ("responsible", "will", "build", "lead", "manage", "collaborate")):
             if len(role_points) < 3 and clean_s not in role_points:
@@ -267,8 +269,9 @@ def build_job_posting_fallback(
                 priorities.append(clean_s)
 
     if not role_points and not priorities and sentences:
-        s0 = " ".join(sentences[0].split()[:22]).rstrip(".,;:") + "."
-        priorities.append(s0.replace("—", "-").replace("–", "-"))
+        shaped0 = shape_point_text(sentences[0], FALLBACK_POINT_MAX_WORDS)
+        if shaped0 is not None:
+            priorities.append(shaped0["text"])
 
     domain = "job posting"
     if canonical_url:
@@ -358,36 +361,124 @@ def _build_error_intel(
 
 
 def _normalize_source_id(source_val: Any, valid_ids: Set[int]) -> Optional[int]:
-    """Robustly normalize source IDs (int, string, bracketed, zero-based, list)."""
+    """Robustly normalize source IDs (int, string, bracketed, zero-based, list, dict)."""
     if source_val is None:
+        if len(valid_ids) == 1:
+            return next(iter(valid_ids))
         return None
+    if isinstance(source_val, dict):
+        val = source_val.get("id") or source_val.get("source") or source_val.get("source_id")
+        return _normalize_source_id(val, valid_ids)
     if isinstance(source_val, int):
-        return source_val if source_val in valid_ids else (1 if source_val == 0 and 1 in valid_ids else None)
+        if source_val in valid_ids:
+            return source_val
+        if source_val == 0 and 1 in valid_ids:
+            return 1
+        if len(valid_ids) == 1:
+            return next(iter(valid_ids))
+        return None
     if isinstance(source_val, str):
-        for n in [int(x) for x in re.findall(r"\d+", source_val)]:
+        nums = [int(x) for x in re.findall(r"\d+", source_val)]
+        for n in nums:
             if n in valid_ids:
                 return n
             if n == 0 and 1 in valid_ids:
                 return 1
+        if len(valid_ids) == 1:
+            return next(iter(valid_ids))
     if isinstance(source_val, list) and source_val:
         return _normalize_source_id(source_val[0], valid_ids)
+    if len(valid_ids) == 1:
+        return next(iter(valid_ids))
     return None
 
 
 def _parse_json_safely(raw_text: str) -> Optional[Dict[str, Any]]:
-    """Safely parse JSON from LLM output handling markdown fences and extraneous text."""
+    """Safely parse JSON from LLM output handling <think> blocks, markdown fences, and extraneous prose."""
     if not raw_text or not raw_text.strip():
         return None
-    cleaned = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", raw_text.strip(), flags=re.IGNORECASE)
-    cand = raw_text[raw_text.find("{") : raw_text.rfind("}") + 1] if "{" in raw_text and "}" in raw_text else ""
-    for candidate in (cleaned, cand):
-        if candidate:
-            try:
-                data = json.loads(candidate)
-                if isinstance(data, dict):
-                    return data
-            except Exception:
-                pass
+
+    # 1. Strip reasoning and think tags: <think>...</think>, <thought>...</thought>, <reasoning>...</reasoning>
+    cleaned = re.sub(
+        r"<(?:think|thought|reasoning)>[\s\S]*?</(?:think|thought|reasoning)>",
+        "",
+        raw_text,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    # 2. Try extracting content inside markdown code fences: ```json ... ``` or ``` ... ```
+    fence_matches = re.findall(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned, flags=re.IGNORECASE)
+    candidates: List[str] = []
+    for fm in fence_matches:
+        trimmed = fm.strip()
+        if trimmed:
+            candidates.append(trimmed)
+
+    # 3. Try whole cleaned string stripped of leading/trailing fence markers
+    stripped_cleaned = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", cleaned, flags=re.IGNORECASE).strip()
+    if stripped_cleaned:
+        candidates.append(stripped_cleaned)
+
+    # 4. Balanced bracket search for top-level { ... } objects
+    def extract_balanced_objects(text: str) -> List[str]:
+        objs = []
+        depth = 0
+        start = -1
+        in_string = False
+        escape = False
+        for i, char in enumerate(text):
+            if in_string:
+                if escape:
+                    escape = False
+                elif char == "\\":
+                    escape = True
+                elif char == '"':
+                    in_string = False
+                continue
+
+            if char == '"':
+                in_string = True
+            elif char == "{":
+                if depth == 0:
+                    start = i
+                depth += 1
+            elif char == "}":
+                if depth > 0:
+                    depth -= 1
+                    if depth == 0 and start != -1:
+                        objs.append(text[start : i + 1])
+                        start = -1
+        return objs
+
+    balanced_objs = extract_balanced_objects(cleaned)
+    candidates.extend(balanced_objs)
+
+    # Try candidates in order
+    parse_err_pos = None
+    for cand in candidates:
+        if not cand:
+            continue
+        try:
+            data = json.loads(cand)
+            if isinstance(data, dict):
+                return data
+        except json.JSONDecodeError as jde:
+            parse_err_pos = jde.pos
+        except Exception:
+            pass
+
+    # Log ONLY output structural metadata, NEVER scraped text or secrets
+    has_fences = "```" in raw_text
+    has_think = "<think>" in raw_text.lower() or "<thought>" in raw_text.lower()
+    first_char = raw_text.strip()[0] if raw_text.strip() else ""
+    logger.warning(
+        "Company intel JSON parse failure [STRUCTURE]: len=%d, first_char=%r, has_fences=%s, has_think=%s, parse_err_pos=%s",
+        len(raw_text),
+        first_char,
+        has_fences,
+        has_think,
+        parse_err_pos,
+    )
     return None
 
 

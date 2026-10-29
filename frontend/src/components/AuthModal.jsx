@@ -26,6 +26,7 @@ import {
 
 import { isEmailSignInEnabled } from '../utils/firstRun'
 import GoogleCloudSetupGuide from './auth/GoogleCloudSetupGuide'
+import Dialog from './Dialog'
 
 // Email quick-connect only exists on development servers; production leads with Google.
 const emailSignInEnabled = isEmailSignInEnabled(import.meta.env)
@@ -113,7 +114,7 @@ export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged 
   )
 
   return (
-    <div
+    <Dialog onClose={onClose}
       onClick={onClose}
       style={{
         position: 'fixed',
@@ -529,7 +530,7 @@ export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged 
                   gap: '10px'
                 }}>
                   <div>
-                    <div style={{ fontSize: '12.5px', fontWeight: '700', color: '#b45309', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <div style={{ fontSize: '12.5px', fontWeight: '700', color: 'var(--amber-text)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <Zap size={14} strokeWidth={1.8} />
                       <span>Demo Mode Active (Simulated Calendar)</span>
                     </div>
@@ -587,7 +588,7 @@ export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged 
                     </a>
                   ) : (
                     <span style={{
-                      fontSize: '11px', color: '#b45309', fontWeight: '600',
+                      fontSize: '11px', color: 'var(--amber-text)', fontWeight: '600',
                       background: 'rgba(245, 158, 11, 0.12)',
                       border: '1px solid rgba(245, 158, 11, 0.3)',
                       borderRadius: 'var(--radius-btn, 6px)', padding: '5px 9px', flexShrink: 0,
@@ -710,6 +711,6 @@ export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged 
           </button>
         </div>
       </div>
-    </div>
+    </Dialog>
   )
 }

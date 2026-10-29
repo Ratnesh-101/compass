@@ -9,6 +9,31 @@
 
 export const KNOWN_DOMAINS = ['hackathon', 'coursework', 'code', 'general', 'other']
 
+export const RESERVED_ROUTES = [
+  'terms',
+  'privacy',
+  'dashboard',
+  'compass',
+  'northstar',
+  'assistant',
+  'planner',
+  'schedule',
+  'calendar',
+  'career',
+  'radar',
+  'internships',
+  'copilot',
+  'timeline',
+  'domain',
+  'share',
+  '404',
+  'api',
+  'health',
+  'chat',
+  'admin',
+  'auth',
+]
+
 export function parseLocation(pathname = window.location.pathname, search = window.location.search) {
   const cleanPath = (pathname || '/').replace(/\/+$/, '') || '/'
   const searchParams = new URLSearchParams(search || '')
@@ -27,6 +52,12 @@ export function parseLocation(pathname = window.location.pathname, search = wind
   const queryTab = searchParams.get('tab')
   const queryDomain = searchParams.get('domain')
 
+  if (queryTab === 'terms') {
+    return { tab: 'terms', domain: 'all' }
+  }
+  if (queryTab === 'privacy') {
+    return { tab: 'privacy', domain: 'all' }
+  }
   if (queryTab === 'dashboard' || queryTab === 'home') {
     return { tab: 'dashboard', domain: 'all' }
   }
@@ -41,6 +72,14 @@ export function parseLocation(pathname = window.location.pathname, search = wind
   }
   if (queryTab === 'timeline') {
     return { tab: 'timeline', domain: queryDomain ? queryDomain.toLowerCase().trim() : 'all' }
+  }
+
+  // Legal routes: registered BEFORE custom domain fallback
+  if (cleanPath === '/terms') {
+    return { tab: 'terms', domain: 'all' }
+  }
+  if (cleanPath === '/privacy') {
+    return { tab: 'privacy', domain: 'all' }
   }
 
   // Pathname routing: Dashboard
@@ -94,16 +133,29 @@ export function parseLocation(pathname = window.location.pathname, search = wind
   }
 
   // Any other single segment without slashes could be a custom domain (e.g. /robotics)
+  // Guarded against colliding with reserved route names
   if (rootSegment && !rootSegment.includes('/')) {
-    return { tab: 'timeline', domain: rootSegment }
+    if (!RESERVED_ROUTES.includes(rootSegment)) {
+      return { tab: 'timeline', domain: rootSegment }
+    }
   }
 
-  return { tab: 'dashboard', domain: 'all' }
+  // Any unrecognized route or multi-segment path resolves to 404
+  return { tab: '404', domain: 'all' }
 }
 
 export function buildUrl(tab, domain, shareToken = null) {
   if (tab === 'share') {
     return shareToken ? `/?share=${encodeURIComponent(shareToken)}` : '/'
+  }
+  if (tab === 'terms') {
+    return '/terms'
+  }
+  if (tab === 'privacy') {
+    return '/privacy'
+  }
+  if (tab === '404') {
+    return '/404'
   }
   if (tab === 'dashboard') {
     return '/'

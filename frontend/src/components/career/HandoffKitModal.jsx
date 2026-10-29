@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { copyTextSafely, displayKitValue } from '../../utils/careerUiHelpers'
+import Dialog from '../Dialog'
 
 export default function HandoffKitModal({ activeKit, onClose }) {
   const [copyState, setCopyState] = useState(null)
@@ -13,7 +14,7 @@ export default function HandoffKitModal({ activeKit, onClose }) {
   }
 
   return (
-    <div
+    <Dialog onClose={onClose}
       style={{
         position: 'fixed',
         inset: 0,
@@ -142,6 +143,6 @@ export default function HandoffKitModal({ activeKit, onClose }) {
           )}
         </div>
       </div>
-    </div>
+    </Dialog>
   )
 }

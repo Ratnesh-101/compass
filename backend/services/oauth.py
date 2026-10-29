@@ -266,11 +266,48 @@ def _compute_state_sig(user_id: str, ts: int, nonce: str = "", action: str = "")
     ).hex()
 
 
-def generate_oauth_state(user_id: str, action: str = "google_calendar") -> str:
-    """Generate cryptographically HMAC-signed, unpredictable OAuth state bound to user_id, timestamp, and nonce."""
+OAUTH_NONCE_COOKIE = "oauth_nonce"
+OAUTH_NONCE_MAX_AGE_SECONDS = 600
+
+
+def new_browser_nonce() -> str:
+    """Random secret handed to the initiating browser in an HttpOnly cookie (login-CSRF binding)."""
+    return secrets.token_urlsafe(32)
+
+
+def _browser_nonce_digest(browser_nonce: str) -> str:
+    return hashlib.sha256(browser_nonce.encode("utf-8")).hexdigest()
+
+
+def browser_nonce_matches_state(state: str, browser_nonce: Optional[str]) -> bool:
+    """True when the browser nonce cookie hashes to the nonce carried by the signed state.
+
+    Only compares; authenticity of the state is verified by verify_and_consume_oauth_state,
+    whose signature covers the nonce field.
+    """
+    if not state or not browser_nonce:
+        return False
+    try:
+        raw = base64.urlsafe_b64decode(state.encode("utf-8")).decode("utf-8")
+        parts = raw.split(":")
+        if len(parts) != 5:
+            return False
+        return hmac.compare_digest(parts[2], _browser_nonce_digest(browser_nonce))
+    except Exception:
+        return False
+
+
+def generate_oauth_state(
+    user_id: str, action: str = "google_calendar", browser_nonce: Optional[str] = None
+) -> str:
+    """Generate cryptographically HMAC-signed, unpredictable OAuth state bound to user_id, timestamp, and nonce.
+
+    When browser_nonce is given, its SHA-256 digest is the signed nonce field, binding the state
+    to the browser that holds the matching cookie.
+    """
     clean_user = (user_id or "guest").lower().strip()
     ts = int(time.time())
-    nonce = secrets.token_urlsafe(16)
+    nonce = _browser_nonce_digest(browser_nonce) if browser_nonce else secrets.token_urlsafe(16)
     sig = _compute_state_sig(clean_user, ts, nonce, action)
     raw = f"{clean_user}:{ts}:{nonce}:{action}:{sig}"
     return base64.urlsafe_b64encode(raw.encode("utf-8")).decode("utf-8")

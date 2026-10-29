@@ -25,6 +25,7 @@ from backend.services.cognitive_conflicts import (
     check_proactive_cognitive_conflicts,
     estimate_task_effort_hours,
 )
+from backend.services.user_timezone import resolve_zone
 from backend.services.scheduler_conflicts import (
     detect_schedule_conflicts,
     find_slipped_tasks,
@@ -102,8 +103,14 @@ def get_available_windows(
     work_end_time: str | time = "18:00:00",
     work_days: Optional[Sequence[int]] = None,
     buffer_minutes: int = 15,
+    tz_name: Optional[str] = None,
 ) -> List[TimeWindow]:
-    """Calculate free working-hour windows by subtracting busy intervals from daily working hours."""
+    """Calculate free working-hour windows by subtracting busy intervals from daily working hours.
+
+    Working hours and work days are interpreted in ``tz_name`` (IANA; unknown/None means UTC).
+    Returned windows are always UTC instants.
+    """
+    zone = resolve_zone(tz_name)
     start_utc = _ensure_utc(search_start)
     end_utc = _ensure_utc(search_end)
     w_start = _parse_time_str(work_start_time)
@@ -135,13 +142,13 @@ def get_available_windows(
     merged_busy = merge_overlapping_intervals(normalized_busy)
 
     available: List[TimeWindow] = []
-    current_day = start_utc.date()
-    end_day = end_utc.date()
+    current_day = start_utc.astimezone(zone).date()
+    end_day = end_utc.astimezone(zone).date()
 
     while current_day <= end_day:
         if current_day.isoweekday() in allowed_days:
-            day_work_start = datetime.combine(current_day, w_start, tzinfo=timezone.utc)
-            day_work_end = datetime.combine(current_day, w_end, tzinfo=timezone.utc)
+            day_work_start = datetime.combine(current_day, w_start, tzinfo=zone).astimezone(timezone.utc)
+            day_work_end = datetime.combine(current_day, w_end, tzinfo=zone).astimezone(timezone.utc)
 
             effective_start = max(day_work_start, start_utc)
             effective_end = min(day_work_end, end_utc)
@@ -195,6 +202,7 @@ def allocate_task_slots(
     dependencies: Optional[Mapping[int, Sequence[int]]] = None,
     existing_scheduled_map: Optional[Dict[int, Dict[str, Any]]] = None,
     not_before: Optional[datetime | str] = None,
+    tz_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Deterministically allocate tasks into available time windows.
 
@@ -210,6 +218,7 @@ def allocate_task_slots(
       3. Due date (earlier deadlines first)
       4. Duration (fitting tasks efficiently)
     """
+    zone = resolve_zone(tz_name)
     if not tasks:
         return {
             "scheduled": [],
@@ -308,9 +317,9 @@ def allocate_task_slots(
             raw_due = task["due_date"]
             if isinstance(raw_due, str):
                 d_obj = date.fromisoformat(raw_due[:10])
-                due_limit = datetime.combine(d_obj, time(23, 59, 59), tzinfo=timezone.utc)
+                due_limit = datetime.combine(d_obj, time(23, 59, 59), tzinfo=zone).astimezone(timezone.utc)
             elif isinstance(raw_due, date) and not isinstance(raw_due, datetime):
-                due_limit = datetime.combine(raw_due, time(23, 59, 59), tzinfo=timezone.utc)
+                due_limit = datetime.combine(raw_due, time(23, 59, 59), tzinfo=zone).astimezone(timezone.utc)
             elif isinstance(raw_due, datetime):
                 due_limit = _ensure_utc(raw_due)
 

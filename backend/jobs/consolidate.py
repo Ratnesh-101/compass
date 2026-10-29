@@ -331,6 +331,9 @@ async def archive_stale_threads(
 
         summary = await summarize_messages(client, messages)
         emb = await get_embedding(summary)
+        if emb is None:
+            logger.warning(f"Embedding service unavailable for archived conv {cid}. Skipping memory_chunks insert.")
+            continue
 
         logger.info(f"    📦 Archiving conv {cid} ({len(messages)} msgs, last active {c['last_active_at'].date()}):")
         logger.info(f"       Summary: {summary[:120]}...")

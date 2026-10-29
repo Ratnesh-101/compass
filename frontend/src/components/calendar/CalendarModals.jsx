@@ -3,13 +3,14 @@ import { getCalendarExportUrl, quickConnectUser, fetchCalendarStatus, downloadAu
 
 import { Zap, X, Check, Calendar, Download, ExternalLink } from 'lucide-react'
 import { planCommitState } from '../../utils/scheduleHonesty'
+import Dialog from '../Dialog'
 
 export function ProposedPlanModal({ proposedPlan, onClose, onCommit, committing }) {
   if (!proposedPlan) return null
   const { canCommit, reasons } = planCommitState(proposedPlan)
 
   return (
-    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(27, 26, 23, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(3px)' }}>
+    <Dialog onClose={onClose} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(27, 26, 23, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(3px)' }}>
       <div style={{ width: '580px', maxWidth: '90vw', background: 'var(--bg-card)', borderRadius: 'var(--radius-card, 8px)', border: '1px solid var(--border)', boxShadow: '0 8px 30px rgba(0,0,0,0.12)', padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3 style={{ fontSize: '15px', fontWeight: '600', color: 'var(--text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -55,7 +56,7 @@ export function ProposedPlanModal({ proposedPlan, onClose, onCommit, committing 
           </button>
         </div>
       </div>
-    </div>
+    </Dialog>
   )
 }
 
@@ -75,7 +76,7 @@ export function QuickConnectModal({ show, onClose, quickEmailInput, setQuickEmai
   }
 
   return (
-    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(27, 26, 23, 0.45)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+    <Dialog onClose={onClose} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(27, 26, 23, 0.45)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
       <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-card, 8px)', padding: '24px', width: '100%', maxWidth: '420px', boxShadow: '0 8px 30px rgba(0,0,0,0.12)' }}>
         <h3 style={{ margin: '0 0 8px', color: 'var(--text-primary)', fontSize: '18px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <Zap size={18} strokeWidth={1.8} />
@@ -109,7 +110,7 @@ export function QuickConnectModal({ show, onClose, quickEmailInput, setQuickEmai
           </button>
         </div>
       </div>
-    </div>
+    </Dialog>
   )
 }
 
@@ -117,7 +118,7 @@ export function IcsExportModal({ show, onClose, activeDomain }) {
   if (!show) return null
 
   return (
-    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(27, 26, 23, 0.45)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+    <Dialog onClose={onClose} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(27, 26, 23, 0.45)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
       <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-card, 8px)', padding: '24px', width: '100%', maxWidth: '520px', boxShadow: '0 8px 30px rgba(0,0,0,0.12)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
           <h3 style={{ margin: 0, color: 'var(--text-primary)', fontSize: '18px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -163,6 +164,6 @@ export function IcsExportModal({ show, onClose, activeDomain }) {
           </button>
         </div>
       </div>
-    </div>
+    </Dialog>
   )
 }

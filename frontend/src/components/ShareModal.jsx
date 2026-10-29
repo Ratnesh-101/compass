@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Link2, X, Check, Copy, ExternalLink } from 'lucide-react'
 import { updateConversation } from '../api/client'
+import Dialog from './Dialog'
 
 export default function ShareModal({ isOpen, onClose, conversation, onConversationUpdated }) {
   const [copied, setCopied] = useState(false)
@@ -100,7 +101,7 @@ export default function ShareModal({ isOpen, onClose, conversation, onConversati
   }
 
   return (
-    <div
+    <Dialog onClose={onClose}
       onClick={onClose}
       style={{
         position: 'fixed',
@@ -394,7 +395,7 @@ export default function ShareModal({ isOpen, onClose, conversation, onConversati
           </div>
         )}
       </div>
-    </div>
+    </Dialog>
   )
 }
 

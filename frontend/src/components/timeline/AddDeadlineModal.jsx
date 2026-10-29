@@ -3,6 +3,7 @@ import { createTask, updateTask } from '../../api/client'
 import { DOMAIN_META } from './domainMeta'
 import { Calendar, GitFork, X, AlertCircle, AlertTriangle } from 'lucide-react'
 import Logo from '../Logo'
+import Dialog from '../Dialog'
 
 export default function AddDeadlineModal({ isOpen, onClose, onCreated, defaultDomain, tasks = [], customDomains = [], onOpenCompass }) {
   const [title, setTitle] = useState('')
@@ -160,7 +161,7 @@ export default function AddDeadlineModal({ isOpen, onClose, onCreated, defaultDo
   }
 
   return (
-    <div
+    <Dialog onClose={onClose}
       onClick={onClose}
       style={{
         position: 'fixed',
@@ -670,6 +671,6 @@ export default function AddDeadlineModal({ isOpen, onClose, onCreated, defaultDo
           </div>
         </form>
       </div>
-    </div>
+    </Dialog>
   )
 }

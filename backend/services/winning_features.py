@@ -34,13 +34,18 @@ from backend.services.company_intel_jobs import (
     _parse_json_safely,
 )
 from backend.services.intel_grounding import (  # noqa: F401  (re-exported for callers and tests)
+    ELLIPSIS,
     GENERIC_COMPANY_TOKENS,
+    ROLE_NONE,
+    ROLE_SIMILAR,
     STOPWORDS,
     _derive_confidence,
     _distinctive_company_tokens,
     _word_tokens,
     is_point_grounded,
+    role_relevance,
     sanitize_untrusted_text,
+    shape_point_text,
 )
 from backend.services.usage import record_usage
 
@@ -321,6 +326,7 @@ async def _summarize_with_model(
                     "content": "Your previous response was not valid JSON. Return ONLY a valid JSON object matching the requested schema with no extra text or markdown formatting."
                 })
 
+            t_call = time.perf_counter()
             resp = await asyncio.wait_for(
                 client.chat.completions.create(
                     model=model_name,
@@ -330,11 +336,12 @@ async def _summarize_with_model(
                 ),
                 timeout=18.0,
             )
+            call_dur = int((time.perf_counter() - t_call) * 1000)
             usage = getattr(resp, "usage", None)
             p_tok = getattr(usage, "prompt_tokens", 250) if usage else 250
             c_tok = getattr(usage, "completion_tokens", 150) if usage else 150
             tokens_recorded = p_tok + c_tok
-            record_usage(model_name, p_tok, c_tok, skill="company_intel")
+            record_usage(model_name, p_tok, c_tok, skill="company_intel", duration_ms=call_dur)
 
             raw_text = resp.choices[0].message.content or ""
             parsed = _parse_json_safely(raw_text)
@@ -607,17 +614,24 @@ async def generate_company_intel_brief(
 
                 point_text = point_text.replace("—", "-").replace("–", "-")
 
-                words = point_text.split()
-                if len(words) > 22:
-                    point_text = " ".join(words[:22])
-                    if not point_text.endswith("."):
-                        point_text += "."
+                truncated = False
+                if len(point_text.split()) > 22:
+                    shaped = shape_point_text(point_text, 22)
+                    if shaped is None:
+                        continue
+                    point_text, truncated = shaped["text"], shaped["truncated"]
 
-                if not is_point_grounded(point_text, sources_by_id[source_id], cleaned_sources):
+                if not is_point_grounded(point_text.rstrip(ELLIPSIS), sources_by_id[source_id], cleaned_sources):
                     logger.info("Dropping unsupported point for %s: %s", company, point_text)
                     continue
 
-                clean_points.append({"point": point_text, "source": source_id})
+                entry = {"point": point_text, "source": source_id, **({"truncated": True} if truncated else {})}
+                relevance = role_relevance(point_text, sources_by_id[source_id], role) if section_name == "role_context" else ""
+                if relevance == ROLE_NONE:
+                    continue
+                if relevance == ROLE_SIMILAR:
+                    entry["similar_role"] = True
+                clean_points.append(entry)
                 if len(clean_points) >= 3:
                     break
 

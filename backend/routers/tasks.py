@@ -40,6 +40,7 @@ from backend.routers.tasks_verification import (
     DEMO_TASK_TITLES,
     router as tasks_verification_router,
 )
+from backend.services.user_timezone import resolve_timezone_name
 from backend.services.task_service import (
     build_frontend_task,
     format_countdown,
@@ -314,6 +315,7 @@ async def get_frontend_tasks(
     request: Request,
     domain: Optional[str] = Query(None),
     include_demo: bool = Query(False),
+    tz: Optional[str] = Query(None, description="IANA timezone for overdue/due-today; unknown values fall back to UTC"),
 ):
     """Public frontend endpoint matching frontend/src/api/client.js format with per-account isolation."""
     try:
@@ -321,6 +323,7 @@ async def get_frontend_tasks(
         if not ident:
             return []
         user_id = ident.id
+        user_tz = resolve_timezone_name(tz) if tz else None
         pool = await get_pool()
         async with pool.acquire() as conn:
             show_demo = include_demo is True
@@ -333,7 +336,7 @@ async def get_frontend_tasks(
                     if t.get("is_demo") or trusted_url.startswith(DEMO_URL_PREFIX):
                         continue
                 proj_name = t.get("project", {}).get("name", "General") if t.get("project") else "General"
-                result.append(build_frontend_task(t, proj_name=proj_name))
+                result.append(build_frontend_task(t, proj_name=proj_name, user_tz_name=user_tz))
             return result
     except HTTPException:
         raise

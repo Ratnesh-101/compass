@@ -110,6 +110,8 @@
   --guide-pillar-bg: var(--bg-card-soft);
   --guide-divider: var(--divider);
   --guide-amber-text: #b45309;
+  /* Amber for TEXT (>= 4.5:1 on #ffffff, #f7f5ef, #f2eee6 and #fef3c7); --brand stays decorative */
+  --amber-text: #92400e;
   --guide-amber-border: var(--border);
   --guide-cyan-text: #0369a1;
   --guide-cyan-border: var(--border);
@@ -231,6 +233,7 @@
   --guide-pillar-bg: var(--bg-card-soft);
   --guide-divider: var(--divider);
   --guide-amber-text: #fbb03b;
+  --amber-text: #fbbf24; /* >= 4.5:1 on dark surfaces */
   --guide-amber-border: var(--border);
   --guide-cyan-text: #38bdf8;
   --guide-cyan-border: var(--border);
