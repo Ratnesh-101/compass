@@ -8,6 +8,7 @@ Provides authenticated endpoints for:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import uuid
@@ -30,9 +31,14 @@ from backend.services.company_intel_jobs import (
     run_intel_refresh_job,
 )
 from backend.services.rate_limiter import enforce_company_intel_guard
-from backend.services.career_file_parser import extract_resume_from_file_bytes, ResumeParseResult
+from backend.services.career_file_parser import (
+    MAX_RESUME_FILE_SIZE,
+    ResumeParseResult,
+    extract_resume_from_file_bytes,
+)
 
-from backend.dependencies import _get_current_identity, _get_or_create_user_id
+from backend.dependencies import _get_current_identity, _get_or_create_user_id, rate_limit
+from backend.services.resume_merge import merge_resume_content
 from backend.memory.career import (
     APPROVABLE_BATCH_STATUSES,
     approve_application_batch,
@@ -77,6 +83,7 @@ from backend.models_career import (
     OriginalResumeDocument,
     ResumeContent,
     ResumeOut,
+    ResumeParseUploadOut,
     ResumeParseUploadRequest,
     ResumeValidationReport,
     ResumeValidationStatus,
@@ -95,6 +102,7 @@ from backend.services.career_resume import (
     draft_truthful_cover_letter,
     generate_resume_docx,
     generate_resume_html,
+    analyze_extraction_diagnostics,
     parse_uploaded_resume_text,
     tailor_resume_for_opportunity,
     validate_resume_against_master,
@@ -375,7 +383,7 @@ async def analyze_github_endpoint(body: GitHubImportRequest, request: Request):
     )
 
 
-@router.post("/intelligence/external-profile", response_model=ResumeContent)
+@router.post("/intelligence/external-profile", response_model=ResumeContent, dependencies=[Depends(rate_limit)])
 async def ingest_external_profile_endpoint(body: ExternalProfileImportRequest, request: Request):
     """
     Ingests candidate-provided external profile information (pasted LinkedIn text or data export).
@@ -510,17 +518,27 @@ async def get_company_intel_job_endpoint(
 
 
 
-@router.post("/resumes/parse-upload", response_model=ResumeContent)
+@router.post("/resumes/parse-upload", response_model=ResumeParseUploadOut, dependencies=[Depends(rate_limit)])
 async def parse_resume_upload_endpoint(body: ResumeParseUploadRequest, request: Request):
     """
     Extract structured candidate data from uploaded resume text.
     Strictly preserves factual information without hallucination.
     """
     _get_or_create_user_id(request)
-    return parse_uploaded_resume_text(body.raw_text)
+    content = await asyncio.to_thread(parse_uploaded_resume_text, body.raw_text)
+    diag = analyze_extraction_diagnostics(content, body.raw_text)
+    confidence = dict(diag["field_confidence"])
+    confidence["overall"] = diag["overall_confidence"]
+    return ResumeParseUploadOut(
+        **content.model_dump(),
+        missing_fields=diag["missing_fields"],
+        ambiguous_fields=diag["ambiguous_fields"],
+        field_confidence=confidence,
+        overall_confidence=diag["overall_confidence"],
+    )
 
 
-@router.post("/resumes/parse-file", response_model=ResumeParseResult)
+@router.post("/resumes/parse-file", response_model=ResumeParseResult, dependencies=[Depends(rate_limit)])
 async def parse_resume_file_endpoint(
     request: Request,
     file: UploadFile = File(...),
@@ -532,8 +550,14 @@ async def parse_resume_file_endpoint(
     Returns structured content, diagnostic warnings, and field confidence for review.
     """
     user_id = _get_or_create_user_id(request)
-    content = await file.read()
-    result = extract_resume_from_file_bytes(
+    content = await file.read(MAX_RESUME_FILE_SIZE + 1)
+    if len(content) > MAX_RESUME_FILE_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail="File exceeds maximum allowed size of 5 MB.",
+        )
+    result = await asyncio.to_thread(
+        extract_resume_from_file_bytes,
         content,
         filename=file.filename or "uploaded_resume.pdf",
         content_type=file.content_type,
@@ -545,12 +569,12 @@ async def parse_resume_file_endpoint(
         )
 
     # Preserve original uploaded file text separately from generated resumes
-    if result.raw_text:
+    if result.full_text or result.raw_text:
         orig_doc = await save_original_resume_document(
             user_id=user_id,
             filename=result.filename,
             file_type=result.file_type,
-            raw_text=result.raw_text,
+            raw_text=result.full_text or result.raw_text,
             metadata={"page_count": result.page_count, "confidence": result.field_confidence},
         )
         result.original_document_id = orig_doc.id
@@ -558,7 +582,7 @@ async def parse_resume_file_endpoint(
     return result
 
 
-@router.post("/resumes/commit-extracted", response_model=ResumeOut)
+@router.post("/resumes/commit-extracted", response_model=ResumeOut, dependencies=[Depends(rate_limit)])
 async def commit_extracted_resume_endpoint(
     body: CommitExtractedResumeRequest,
     request: Request,
@@ -573,16 +597,22 @@ async def commit_extracted_resume_endpoint(
     reviewed_content.evidence_notes["review_timestamp"] = "CONFIRMED"
 
     if body.target == "master":
+        existing = await get_master_resume(user_id)
+        if existing is not None:
+            reviewed_content = merge_resume_content(existing.content, reviewed_content)
         return await upsert_master_resume(user_id, reviewed_content, "Master Resume")
     else:
         report = validate_resume_against_master(reviewed_content, reviewed_content)
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
         return await create_tailored_resume(
             user_id=user_id,
             opportunity_id=None,
-            title="Imported Resume Draft",
+            title=f"Imported Resume Draft ({stamp} UTC)",
             content=reviewed_content,
             validation_report=report,
-            validation_status=ResumeValidationStatus.READY_FOR_REVIEW,
+            validation_status=(
+                ResumeValidationStatus.READY_FOR_REVIEW if report.is_valid else ResumeValidationStatus.NEEDS_USER_INPUT
+            ),
         )
 
 
