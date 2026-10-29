@@ -253,6 +253,7 @@ html, body {
   line-height: 1.5;
   font-weight: 400;
   min-height: 100vh;
+  min-height: 100dvh;
   overflow-x: hidden;
   overscroll-behavior: none;
   -webkit-font-smoothing: antialiased;
@@ -293,7 +294,14 @@ small, .helper-text {
 #root {
   width: 100%;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
+}
+
+/* App shell: 100vh fallback first, 100dvh where supported (iOS Safari toolbar-aware) */
+.app-shell {
+  height: 100vh;
+  height: 100dvh;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1069,6 +1077,7 @@ textarea {
     left: 0 !important;
     bottom: 0 !important;
     height: 100vh !important;
+    height: 100dvh !important;
     width: 300px !important;
     max-width: 85vw !important;
     min-width: 260px !important;
@@ -1109,6 +1118,7 @@ textarea {
     width: 100% !important;
     max-width: 100vw !important;
     height: calc(100vh - 58px - env(safe-area-inset-bottom, 0px)) !important;
+    height: calc(100dvh - 58px - env(safe-area-inset-bottom, 0px)) !important;
     flex: 1 !important;
     overflow: hidden !important;
   }

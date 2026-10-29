@@ -33,7 +33,7 @@ def build_default_master_from_profile(profile: Optional[UserOpportunityProfileIn
                 institution=profile.university or "",
                 degree=profile.degree or "",
                 field_of_study=profile.degree_specialization or "",
-                end_year=profile.grad_year or "",
+                end_year=profile.grad_year or None,
             )
         )
 
@@ -227,10 +227,8 @@ def tailor_resume_for_opportunity(
     sorted_projects = sorted(master.projects, key=project_relevance_score, reverse=True)
 
     # 3. Form tailored content
-    summary_text = (
-        f"Undergraduate candidate focusing on {opportunity.category.replace('_', ' ').title()} "
-        f"and software engineering, applying for the {opportunity.role_title} role at {opportunity.company_name}."
-    )
+    # Never invent a summary: carry the master's own (verified) summary or leave it empty.
+    summary_text = master.summary or ""
 
     tailored_content = ResumeContent(
         full_name=master.full_name,

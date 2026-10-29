@@ -257,8 +257,15 @@ async def test_10_diverse_companies_and_5_consecutive_1password_runs():
         current_status="open_confirmed",
         source="test",
     )
+    # The sources must mention the target company (relevance filter), so use a 1Password source here.
+    pw_citation = {
+        "title": "1Password Overview",
+        "snippet": "1Password is a password manager and identity access provider.",
+        "url": "https://1password.com/about",
+        "domain": "1password.com",
+    }
     for i in range(5):
-        with patch("backend.services.winning_features.tavily_research.execute_deep_research", AsyncMock(return_value={"citations": [citation]})), \
+        with patch("backend.services.winning_features.tavily_research.execute_deep_research", AsyncMock(return_value={"citations": [pw_citation]})), \
              patch("backend.services.winning_features.get_openai_client", return_value=fake_client):
             brief = await generate_company_intel_brief(pw_opp, force_refresh=(i == 0))
             assert brief["status"] == "ready"

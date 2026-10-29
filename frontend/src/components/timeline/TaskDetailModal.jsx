@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { updateTask, verifyTaskDeadline } from '../../api/client'
+import { dueDateForInput, dueDatePatch } from '../../utils/scheduleHonesty'
 import { DOMAIN_META, getDomainMeta } from './domainMeta'
 import { Trash2, Edit2, Check, X, AlertTriangle, Search, RefreshCw, Clock } from 'lucide-react'
 
@@ -61,7 +62,7 @@ export default function TaskDetailModal({ task, onClose, onDelete, onUpdated }) 
       setEditTitle(task.title || '')
       setEditDomain(task.domain || 'general')
       setEditProject(task.project || '')
-      setEditDueDate(task.due_date || '')
+      setEditDueDate(dueDateForInput(task.due_date))
       setEditPriority(task.priority || 'medium')
       setEditStatus(task.status || 'open')
       setEditNotes(task.description || task.notes || '')
@@ -103,7 +104,7 @@ export default function TaskDetailModal({ task, onClose, onDelete, onUpdated }) 
         title: cleanTitle,
         domain: editDomain,
         project: editProject.trim() || 'General',
-        due_date: editDueDate || null,
+        ...dueDatePatch(task.due_date, editDueDate),
         priority: editPriority,
         status: editStatus,
         notes: editNotes.trim() || null,
@@ -122,7 +123,7 @@ export default function TaskDetailModal({ task, onClose, onDelete, onUpdated }) 
       setEditTitle(task.title || '')
       setEditDomain(task.domain || 'general')
       setEditProject(task.project || '')
-      setEditDueDate(task.due_date || '')
+      setEditDueDate(dueDateForInput(task.due_date))
       setEditPriority(task.priority || 'medium')
       setEditStatus(task.status || 'open')
       setEditNotes(task.description || task.notes || '')

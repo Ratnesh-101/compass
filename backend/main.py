@@ -343,8 +343,8 @@ async def company_intel_job_alias(opportunity_id: int, job_id: str, request: Req
     include_in_schema=False,
 )
 async def job_analysis_alias(opportunity_id: int, request: Request):
-    from backend.routers.career import get_job_analysis_report_endpoint
-    return await get_job_analysis_report_endpoint(opportunity_id, request)
+    from backend.routers.career import analyze_opportunity_job_endpoint
+    return await analyze_opportunity_job_endpoint(opportunity_id, request, custom_desc=None)
 
 
 @app.get("/")

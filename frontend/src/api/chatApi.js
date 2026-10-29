@@ -7,7 +7,9 @@ import {
   getGuestToken,
   setGuestSession,
   initGuestSession,
+  fetchWithTimeout,
 } from './baseClient.js'
+import { SEED_TIMEOUT_MS } from '../utils/firstRun.js'
 
 // When the Judge Persona workspace is visible, chat must see the same demo data the dashboard shows.
 let includeDemoInChat = false
@@ -426,6 +428,7 @@ export async function seedJudgeDemoPersona() {
         ...(guestToken ? { 'x-guest-token': guestToken } : {})
       },
       body: JSON.stringify({ tz }),
+      timeoutMs: SEED_TIMEOUT_MS,
     })
     if (!res.ok) {
       let errPayload = {}
@@ -470,19 +473,24 @@ export async function seedJudgeDemoPersona() {
  * Check if the current account/session has Judge Persona demo data active.
  * Returns { active: boolean, task_count: number } or null on non-ok/error.
  */
-export async function fetchDemoStatus() {
+export async function fetchDemoStatusResult() {
   try {
-    const res = await fetch(`${API_BASE}/api/demo/status`, {
+    const res = await fetchWithTimeout(`${API_BASE}/api/demo/status`, {
       method: 'GET',
       headers: getAuthHeaders(),
       credentials: 'include',
     })
-    if (!res.ok) return null
-    return await res.json()
+    if (!res.ok) return { ok: false, transient: true, data: null }
+    return { ok: true, transient: false, data: await res.json() }
   } catch (err) {
     console.warn('Fetch demo status error:', err)
-    return null
+    return { ok: false, transient: true, data: null }
   }
+}
+
+export async function fetchDemoStatus() {
+  const result = await fetchDemoStatusResult()
+  return result.ok ? result.data : null
 }
 
 /**
