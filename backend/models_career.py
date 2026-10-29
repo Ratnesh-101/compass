@@ -344,8 +344,9 @@ class GitHubRepoEvidence(BaseModel):
     description: Optional[str] = None
     primary_language: Optional[str] = None
     detected_technologies: List[str] = Field(default_factory=list)
-    has_tests: bool = False
-    has_ci_cd: bool = False
+    # None means unknown (the check could not be completed, e.g. rate limited or fork)
+    has_tests: Optional[bool] = False
+    has_ci_cd: Optional[bool] = False
     has_documentation: bool = False
     commit_count_estimate: Optional[int] = None
     analysis_timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -361,6 +362,8 @@ class GitHubProfileIntelligence(BaseModel):
     detected_skills: List[str] = Field(default_factory=list)
     evidence_summary: str = ""
     warnings: List[str] = Field(default_factory=list)
+    # "ok" | "partial" | "failed" (additive; failed means nothing could be analyzed)
+    status: str = "ok"
 
 
 class GitHubImportRequest(BaseModel):

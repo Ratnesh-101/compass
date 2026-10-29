@@ -394,7 +394,7 @@ async def export_resume_docx_endpoint(
 # Profile Intelligence Endpoints (GitHub, External Sources, Job Matching)
 # ===========================================================================
 
-@router.post("/intelligence/github", response_model=GitHubProfileIntelligence)
+@router.post("/intelligence/github", response_model=GitHubProfileIntelligence, dependencies=[Depends(rate_limit)])
 async def analyze_github_endpoint(body: GitHubImportRequest, request: Request):
     """
     Extracts verifiable engineering evidence from candidate's public GitHub profile.
