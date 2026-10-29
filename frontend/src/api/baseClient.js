@@ -1,6 +1,14 @@
 // Compass Base API Client
 // Handles base URL resolution, guest identity, user session, and common headers.
 
+import {
+  REQUEST_TIMEOUT_MS,
+  shouldRemintGuest,
+  canAttemptMint,
+  computeMintBackoffMs,
+  mapHealthPayload,
+} from '../utils/firstRun.js'
+
 export const RENDER_BACKEND_URL = 'https://compass-backend-qryu-vcfv.onrender.com'
 
 function clearObsoleteCookie() {
@@ -162,6 +170,53 @@ export function setGuestSession(guestId, guestToken) {
 }
 
 let inflightGuestSession = null
+let mintBlockedUntil = 0
+
+function emitWindowEvent(name, detail) {
+  try {
+    if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return
+    const CustomEventClass = typeof window.CustomEvent === 'function'
+      ? window.CustomEvent
+      : (typeof globalThis.CustomEvent === 'function' ? globalThis.CustomEvent : null)
+    if (CustomEventClass) window.dispatchEvent(new CustomEventClass(name, { detail }))
+  } catch {
+    /* ignore event dispatch failure */
+  }
+}
+
+/**
+ * fetch() with an AbortController timeout so a sleeping backend can never leave the UI
+ * spinning forever. Rejects with an Error whose code is 'timeout' and a user-safe message.
+ */
+export async function fetchWithTimeout(url, init = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController()
+  let timedOut = false
+  const timeoutId = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, timeoutMs)
+  try {
+    return await fetch(url, { ...init, signal: init.signal || controller.signal })
+  } catch (err) {
+    if (timedOut) {
+      const error = new Error('The server is taking too long to respond. It may still be waking up - please try again in a moment.')
+      error.code = 'timeout'
+      error.status = 0
+      throw error
+    }
+    throw err
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
+export function getGuestMintBlockedUntil() {
+  return mintBlockedUntil
+}
+
+export function resetGuestMintBackoff() {
+  mintBlockedUntil = 0
+}
 
 export function initGuestSession() {
   if (!inflightGuestSession) {
@@ -173,37 +228,69 @@ export function initGuestSession() {
 }
 
 async function runGuestSessionInit() {
+  const existingToken = getGuestToken()
+  if (existingToken) {
+    try {
+      const res = await fetchWithTimeout(`${API_BASE}/api/guest/session`, {
+        method: 'GET',
+        headers: { 'x-guest-token': existingToken },
+        credentials: 'include',
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (data.guest_id && data.guest_token) {
+          setGuestSession(data.guest_id, data.guest_token)
+          if (mintBlockedUntil) {
+            mintBlockedUntil = 0
+            emitWindowEvent('compass:service-recovered', {})
+          }
+          return data
+        }
+        return null
+      }
+      // Only a 401 proves the token is invalid. 5xx / 429 / etc. keep the existing guest.
+      if (!shouldRemintGuest(res.status)) return null
+    } catch (err) {
+      console.warn('[Compass] Guest session check failed; keeping existing session:', err)
+      return null
+    }
+  }
+  return mintGuestSession(existingToken)
+}
+
+async function mintGuestSession(staleToken) {
+  if (!canAttemptMint(Date.now(), mintBlockedUntil)) return null
   try {
-    const existingToken = getGuestToken()
-    const res = await fetch(`${API_BASE}/api/guest/session`, {
-      method: existingToken ? 'GET' : 'POST',
-      headers: existingToken ? { 'x-guest-token': existingToken } : {},
+    const res = await fetchWithTimeout(`${API_BASE}/api/guest/session`, {
+      method: 'POST',
       credentials: 'include',
     })
     if (res.ok) {
       const data = await res.json()
       if (data.guest_id && data.guest_token) {
+        // Another tab may have minted a guest while we waited: prefer theirs.
+        const current = getGuestToken()
+        if (current && current !== staleToken) {
+          return { guest_id: getGuestId(), guest_token: current }
+        }
         setGuestSession(data.guest_id, data.guest_token)
+        mintBlockedUntil = 0
+        emitWindowEvent('compass:service-recovered', {})
         return data
       }
     }
-    if (existingToken) {
-      const freshRes = await fetch(`${API_BASE}/api/guest/session`, {
-        method: 'POST',
-        credentials: 'include',
-      })
-      if (freshRes.ok) {
-        const data = await freshRes.json()
-        if (data.guest_id && data.guest_token) {
-          setGuestSession(data.guest_id, data.guest_token)
-          return data
-        }
-      }
-    }
+    noteMintFailure(res.headers?.get?.('retry-after'))
   } catch (err) {
-    console.warn('[Compass] Guest session init failed:', err)
+    console.warn('[Compass] Guest session mint failed:', err)
+    noteMintFailure(null)
   }
   return null
+}
+
+function noteMintFailure(retryAfterHeader) {
+  const waitMs = computeMintBackoffMs(retryAfterHeader)
+  mintBlockedUntil = Date.now() + waitMs
+  emitWindowEvent('compass:service-busy', { retryAt: mintBlockedUntil, waitMs })
 }
 
 export function getCurrentUserId() {
@@ -260,13 +347,16 @@ export function getAuthHeaders(extraHeaders = {}) {
  * - NEVER retry if the body is a stream or options.isStreaming is true.
  */
 export async function fetchWithGuestRetry(url, options = {}) {
+  const { timeoutMs, ...fetchOptions } = options
+  const send = (u, i) => (timeoutMs ? fetchWithTimeout(u, i, timeoutMs) : fetch(u, i))
+  options = fetchOptions
   const mergedHeaders = getAuthHeaders(options.headers || {})
   const init = {
     ...options,
     headers: mergedHeaders,
     credentials: options.credentials || 'include',
   }
-  let res = await fetch(url, init)
+  let res = await send(url, init)
   if ((res.status === 401 || res.status === 403) && !options._retried) {
     const hasAuthToken = typeof localStorage !== 'undefined' && Boolean(localStorage.getItem('compass_auth_token'))
     const hasAuthEmail = typeof localStorage !== 'undefined' && Boolean(localStorage.getItem('compass_user_email'))
@@ -296,7 +386,7 @@ export async function fetchWithGuestRetry(url, options = {}) {
     const guestData = await initGuestSession()
     if (guestData && (guestData.guest_token || guestData.token)) {
       const retryHeaders = getAuthHeaders(options.headers || {})
-      res = await fetch(url, {
+      res = await send(url, {
         ...options,
         headers: retryHeaders,
         credentials: options.credentials || 'include',
@@ -377,10 +467,7 @@ export async function checkBackendHealth(force = false) {
       }
 
       const data = await res.json()
-      if (data.db_connected || data.status === 'ok' || data.database === 'connected') {
-        return 'Live • Neon Connected'
-      }
-      return 'Live • Edge Connected'
+      return mapHealthPayload(data)
     } catch {
       return 'Waking up the server…'
     } finally {

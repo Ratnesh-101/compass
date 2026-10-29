@@ -24,6 +24,8 @@ logger = logging.getLogger("compass.routers.calendar")
 
 router = APIRouter(tags=["calendar"])
 
+ICS_EXCLUDED_STATUSES = frozenset({"done", "completed", "cancelled"})
+
 
 @router.get("/api/calendar/status")
 async def get_calendar_status_endpoint(request: Request):
@@ -85,6 +87,12 @@ async def commit_schedule_endpoint(body: CommitScheduleBody, ident: Identity = D
     if not handler:
         raise HTTPException(status_code=500, detail="Schedule commit skill not registered")
     result = await handler({**body.model_dump(), "user_id": ident.id}, pool)
+    data = result.get("data") or {}
+    if data.get("status") == "invalid":
+        raise HTTPException(
+            status_code=422,
+            detail={"detail": result.get("response"), "message": result.get("response"), "errors": data.get("errors", [])},
+        )
     return result
 
 
@@ -106,9 +114,15 @@ async def export_calendar_ics_endpoint(
     tasks = []
     if pool is not None:
         async with pool.acquire() as conn:
-            tasks = await structured.list_tasks(conn, domain=domain, user_id=target_user_id, scheduled_only=True)
-            if not tasks:
-                tasks = await structured.list_tasks(conn, domain=domain, user_id=target_user_id)
+            # Real tasks only: never export Judge Persona demo rows or finished work, and never fall back to "everything".
+            all_tasks = await structured.list_tasks(
+                conn, domain=domain, user_id=target_user_id, include_demo=False
+            )
+            tasks = [
+                t for t in all_tasks
+                if (t.get("status") or "open") not in ICS_EXCLUDED_STATUSES
+                and (t.get("scheduled_start") or t.get("due_date"))
+            ]
 
     ics_content = generate_ics_feed(tasks, calendar_name="Compass Tasks")
     return Response(
@@ -250,6 +264,11 @@ async def reactive_schedule_check_endpoint(
     return {
         "status": "reactive_replan_staged" if replan["rescheduled"] else "slipped_detected_no_slots",
         "run_id": run_id if replan["rescheduled"] else None,
+        "message": (
+            f"Detected {len(slipped)} slipped task(s); a re-plan is staged for your approval."
+            if replan["rescheduled"]
+            else f"Detected {len(slipped)} slipped task(s) but no free slots were found, so nothing was staged."
+        ),
         "slipped_count": len(slipped),
         "slipped_tasks": slipped,
         "replan": replan,

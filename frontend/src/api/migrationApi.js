@@ -1,20 +1,22 @@
 // Anonymous Guest Migration & Data Privacy API
 
-import { API_BASE, getAuthHeaders, setGuestSession } from './baseClient.js'
+import { API_BASE, getAuthHeaders, setGuestSession, fetchWithTimeout } from './baseClient.js'
+import { SEED_TIMEOUT_MS } from '../utils/firstRun.js'
 
 /**
  * Fetch migration status to check if unauthenticated guest data exists.
  */
 export async function fetchMigrationStatus() {
   try {
-    const res = await fetch(`${API_BASE}/api/migration/status`, {
+    const res = await fetchWithTimeout(`${API_BASE}/api/migration/status`, {
       headers: getAuthHeaders(),
       credentials: 'include',
     })
-    if (!res.ok) return { has_guest_data: false, guest_conversations_count: 0 }
+    // transient: true tells the caller the check did not complete and should be retried later
+    if (!res.ok) return { has_guest_data: false, guest_conversations_count: 0, transient: true }
     return await res.json()
   } catch {
-    return { has_guest_data: false, guest_conversations_count: 0 }
+    return { has_guest_data: false, guest_conversations_count: 0, transient: true }
   }
 }
 
@@ -38,11 +40,11 @@ export async function fetchMigrationConversations() {
  * Import all eligible guest conversations & memory into the authenticated account.
  */
 export async function importAllGuestData() {
-  const res = await fetch(`${API_BASE}/api/migration/import-all`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/migration/import-all`, {
     method: 'POST',
     headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     credentials: 'include',
-  })
+  }, SEED_TIMEOUT_MS)
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     throw new Error(err.detail || `Failed to import guest data (HTTP ${res.status})`)
@@ -54,7 +56,7 @@ export async function importAllGuestData() {
  * Import selected guest conversations into the authenticated account.
  */
 export async function importSelectedGuestConversations(conversationIds, importMemory = true) {
-  const res = await fetch(`${API_BASE}/api/migration/import-selected`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/migration/import-selected`, {
     method: 'POST',
     headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     credentials: 'include',
@@ -62,7 +64,7 @@ export async function importSelectedGuestConversations(conversationIds, importMe
       conversation_ids: conversationIds,
       import_memory: importMemory,
     }),
-  })
+  }, SEED_TIMEOUT_MS)
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     throw new Error(err.detail || `Failed to import selected conversations (HTTP ${res.status})`)
