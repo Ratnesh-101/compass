@@ -409,3 +409,35 @@ def test_cli_http_429_retry_after(monkeypatch):
     assert "429" in result.stderr
     assert "Retry-After: 45s" in result.stderr
 
+
+
+def test_cli_log_sends_tags_as_a_list_the_backend_accepts(monkeypatch):
+    """`compass log --tags a,b` must send a list: the backend model rejects a comma-separated string."""
+    from backend.models import LogMemoryRequest
+    from cli import assistant_cli
+
+    captured = {}
+
+    def fake_post(path: str, data: dict, headers=None) -> dict:
+        captured["path"] = path
+        captured["payload"] = data
+        return {"status": "ok"}
+
+    monkeypatch.setattr(assistant_cli, "_post", fake_post)
+    result = runner.invoke(app, ["log", "Remember the schema", "--domain", "code", "--tags", "test, contract,"])
+
+    assert result.exit_code == 0
+    assert captured["payload"]["tags"] == ["test", "contract"]
+    # the exact payload must validate against the real request model
+    assert LogMemoryRequest(**captured["payload"]).content == "Remember the schema"
+
+
+def test_cli_log_without_tags_sends_an_empty_list(monkeypatch):
+    from cli import assistant_cli
+
+    captured = {}
+    monkeypatch.setattr(assistant_cli, "_post", lambda path, data, headers=None: captured.update(data) or {"status": "ok"})
+    result = runner.invoke(app, ["log", "No tags here"])
+
+    assert result.exit_code == 0
+    assert captured["tags"] == []

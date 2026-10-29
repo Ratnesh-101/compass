@@ -108,7 +108,7 @@ def test_large_task_query_avoids_unbounded_dump():
     mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
 
     import asyncio
-    output = asyncio.run(handle_query_tasks({}, mock_pool))
+    output = asyncio.run(handle_query_tasks({"user_id": "roadmap_user"}, mock_pool))
 
     # Concise response with total count and top items
     assert "Found **369** task(s)" in output["response"]

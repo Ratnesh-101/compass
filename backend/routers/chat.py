@@ -81,6 +81,7 @@ async def chat(request: ChatRequest, req: Request, _token: str = Depends(verify_
         guest_id=guest_id,
         tone=request.tone,
         conv_mode=request.mode,
+        include_demo=request.include_demo,
     )
     return ChatResponse(**result)
 

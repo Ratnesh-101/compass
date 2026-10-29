@@ -20,6 +20,7 @@ from backend.dependencies import (
 )
 from backend.memory import structured
 from backend.memory.db import get_pool
+from backend.services.task_scope import DEMO_URL_PREFIX
 from backend.models import (
     CreateTaskRequest,
     DashboardResponse,
@@ -157,6 +158,7 @@ async def get_tasks(
 async def get_dashboard(
     request: Request,
     ref_date: Optional[date] = Query(None, description="Optional reference date for deterministic classification"),
+    include_demo: bool = Query(False),
     _ident: Identity = Depends(require_identity),
 ):
     """Aggregate live counts via SQL with strict per-account isolation."""
@@ -168,6 +170,7 @@ async def get_dashboard(
         for d in ("hackathon", "coursework", "code", "general")
     }
     target_date = ref_date or date.today()
+    show_demo = include_demo is True
 
     try:
         pool = await get_pool()
@@ -181,8 +184,9 @@ async def get_dashboard(
                     domains[d].project_count = r["count"]
 
             task_rows = await conn.fetch(
-                "SELECT domain, COUNT(*) AS count FROM tasks WHERE status NOT IN ('completed', 'done', 'cancelled') AND deleted_at IS NULL AND user_id = $1 GROUP BY domain",
+                "SELECT domain, COUNT(*) AS count FROM tasks WHERE status NOT IN ('completed', 'done', 'cancelled') AND deleted_at IS NULL AND user_id = $1 AND ($2::boolean OR COALESCE(trusted_event_url,'') NOT LIKE 'compass://demo-persona/%') GROUP BY domain",
                 user_id,
+                show_demo,
             )
             for r in task_rows:
                 d = r["domain"]
@@ -198,10 +202,12 @@ async def get_dashboard(
                   AND due_date IS NOT NULL
                   AND due_date >= $1
                   AND user_id = $2
+                  AND ($3::boolean OR COALESCE(trusted_event_url,'') NOT LIKE 'compass://demo-persona/%')
                 ORDER BY domain, due_date ASC
                 """,
                 target_date,
                 user_id,
+                show_demo,
             )
             for r in nearest_rows:
                 d = r["domain"]
@@ -241,11 +247,13 @@ async def get_timeline(
     domain: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    include_demo: bool = Query(False),
     _ident: Identity = Depends(require_identity),
 ):
     """Fetch ordered rows across tasks (created_at) and memory_chunks (created_at) filtered by domain with per-account isolation."""
     ident = _get_current_identity(request)
     user_id = ident.id if ident else _get_or_create_user_id(request)
+    show_demo = include_demo is True
 
     try:
         pool = await get_pool()
@@ -257,6 +265,7 @@ async def get_timeline(
                 WHERE ($1::text IS NULL OR t.domain = $1)
                   AND t.deleted_at IS NULL
                   AND t.user_id = $4
+                  AND ($5::boolean OR COALESCE(t.trusted_event_url,'') NOT LIKE 'compass://demo-persona/%')
 
                 UNION ALL
 
@@ -269,15 +278,15 @@ async def get_timeline(
                 ORDER BY created_at DESC
                 LIMIT $2 OFFSET $3
             """
-            rows = await conn.fetch(query, domain, limit, offset, user_id)
+            rows = await conn.fetch(query, domain, limit, offset, user_id, show_demo)
 
             count_query = """
                 SELECT (
-                    (SELECT COUNT(*) FROM tasks WHERE ($1::text IS NULL OR domain = $1) AND deleted_at IS NULL AND user_id = $2) +
+                    (SELECT COUNT(*) FROM tasks WHERE ($1::text IS NULL OR domain = $1) AND deleted_at IS NULL AND user_id = $2 AND ($3::boolean OR COALESCE(trusted_event_url,'') NOT LIKE 'compass://demo-persona/%')) +
                     (SELECT COUNT(*) FROM memory_chunks WHERE ($1::text IS NULL OR domain = $1) AND user_id = $2)
                 ) AS total
             """
-            total_count = await conn.fetchval(count_query, domain, user_id) or 0
+            total_count = await conn.fetchval(count_query, domain, user_id, show_demo) or 0
 
             entries = [
                 TimelineEntry(
@@ -304,7 +313,7 @@ async def get_timeline(
 async def get_frontend_tasks(
     request: Request,
     domain: Optional[str] = Query(None),
-    include_demo: bool = Query(True),
+    include_demo: bool = Query(False),
 ):
     """Public frontend endpoint matching frontend/src/api/client.js format with per-account isolation."""
     try:
@@ -314,13 +323,14 @@ async def get_frontend_tasks(
         user_id = ident.id
         pool = await get_pool()
         async with pool.acquire() as conn:
-            raw_tasks = await structured.list_tasks(conn, domain=domain, user_id=user_id)
+            show_demo = include_demo is True
+            raw_tasks = await structured.list_tasks(conn, domain=domain, user_id=user_id, include_demo=show_demo)
             result = []
             for t in raw_tasks:
-                if not include_demo:
+                if not show_demo:
                     trusted_url = str(t.get("trusted_event_url") or "").lower()
-                    # Use persona marker prefix so real user tasks whose urls contain the marker as a substring are not hidden
-                    if t.get("is_demo") or trusted_url.startswith("compass://demo-persona/"):
+                    # Persona marker prefix only, so real tasks whose urls merely contain the marker stay visible
+                    if t.get("is_demo") or trusted_url.startswith(DEMO_URL_PREFIX):
                         continue
                 proj_name = t.get("project", {}).get("name", "General") if t.get("project") else "General"
                 result.append(build_frontend_task(t, proj_name=proj_name))
