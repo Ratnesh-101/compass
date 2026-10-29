@@ -8,9 +8,10 @@ import CompassPanel from './components/CompassPanel'
 import AuthModal from './components/AuthModal'
 import SharedChatView from './components/SharedChatView'
 import DemoDataBanner from './components/DemoDataBanner'
-import { fetchDemoStatus, clearDemoPersona, setChatIncludeDemo } from './api/chatApi'
+import TabErrorBoundary from './components/TabErrorBoundary'
+import StatusNotices from './components/StatusNotices'
+import { fetchDemoStatusResult, clearDemoPersona, setChatIncludeDemo } from './api/chatApi'
 
-const CareerCopilot = React.lazy(() => import('./components/CareerCopilot'))
 import MigrationModal from './components/MigrationModal'
 import NebiusTelemetryModal from './components/NebiusTelemetryModal'
 import { getCustomDomains, removeCustomDomain, getDomainMeta } from './components/timeline/domainMeta'
@@ -20,14 +21,27 @@ import {
   fetchTasks,
   sendQueryToAssistant,
   fetchUsageSummary,
-  fetchCurrentUser,
+  fetchCurrentUserResult,
   initGuestSession,
   fetchMigrationStatus,
 } from './api/client'
 import { isDemoTask } from './utils/demoConstants'
 import { haveTasksChanged } from './utils/taskDiff'
+import {
+  identityActionFor,
+  isBackendOnline,
+  parseOAuthReturn,
+  stripOAuthParams,
+} from './utils/firstRun'
 
 const TASK_POLL_INTERVAL_MS = 8000
+const NOTICE_AUTO_DISMISS_MS = 10000
+const INITIAL_MESSAGES = [
+  {
+    role: 'assistant',
+    text: "Hey! I'm Compass. I can track tasks, recall code context, synthesize cross-domain roadmaps, and search the web. What's on your mind?"
+  }
+]
 
 export default function App() {
   const [tasks, setTasks] = useState([])
@@ -46,14 +60,18 @@ export default function App() {
   const [guestConversationsCount, setGuestConversationsCount] = useState(0)
   const [currentUser, setCurrentUser] = useState(null)
   const [showAuthModal, setShowAuthModal] = useState(false)
-  const [messages, setMessages] = useState([
-    {
-      role: 'assistant',
-      text: "Hey! I'm Compass. I can track tasks, recall code context, synthesize cross-domain roadmaps, and search the web. What's on your mind?"
-    }
-  ])
+  const [messages, setMessages] = useState(INITIAL_MESSAGES)
   const [isTyping, setIsTyping] = useState(false)
   const [pendingPrompt, setPendingPrompt] = useState(null)
+  const [notice, setNotice] = useState(null) // { type: 'success' | 'error' | 'info', text }
+  const [serviceBusy, setServiceBusy] = useState(false)
+  const [careerAttempt, setCareerAttempt] = useState(0)
+  // careerAttempt forces a fresh import() after a failed chunk load (React.lazy caches rejections)
+  const CareerCopilot = useMemo(
+    () => React.lazy(() => import('./components/CareerCopilot')),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [careerAttempt]
+  )
 
   const [theme, setTheme] = useState(() => {
     try {
@@ -213,19 +231,63 @@ export default function App() {
     return () => window.removeEventListener('compass:demo-persona-loaded', handleDemoLoaded)
   }, [selectedDomain, loadTasks])
 
-  // Check if account holds Judge Persona demo data on mount and activate if active
-  useEffect(() => {
-    let cancelled = false
-    fetchDemoStatus().then((result) => {
-      if (!cancelled && result && result.active === true) {
-        isDemoActiveRef.current = true
-        setIsDemoActive(true)
-      }
-    })
-    return () => {
-      cancelled = true
+  // Mounted flag + "this check completed" flags so a check that failed while the backend
+  // was asleep is re-run when the health poll flips to online.
+  const mountedRef = useRef(true)
+  const userCheckedRef = useRef(false)
+  const demoCheckedRef = useRef(false)
+  const migrationPendingRef = useRef(false)
+  const demoSeqRef = useRef(0)
+  const backendStatusRef = useRef('Waking up the server…')
+
+  // Check whether the account holds Judge Persona demo data; a transient failure is retried later
+  const checkDemoStatus = useCallback(async () => {
+    const seq = ++demoSeqRef.current
+    const result = await fetchDemoStatusResult()
+    if (!mountedRef.current || seq !== demoSeqRef.current) return
+    demoCheckedRef.current = result.ok
+    if (result.ok && result.data && result.data.active === true) {
+      isDemoActiveRef.current = true
+      setIsDemoActive(true)
     }
   }, [])
+
+  useEffect(() => {
+    mountedRef.current = true
+    checkDemoStatus()
+    return () => {
+      mountedRef.current = false
+    }
+  }, [checkDemoStatus])
+
+  // Surface the "service is busy" state from the guest-session mint backoff
+  useEffect(() => {
+    let timer = null
+    const onBusy = (e) => {
+      const retryAt = (e && e.detail && e.detail.retryAt) || Date.now() + 30000
+      setServiceBusy(true)
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => { initGuestSession() }, Math.max(0, retryAt - Date.now()) + 500)
+    }
+    const onRecovered = () => {
+      if (timer) clearTimeout(timer)
+      timer = null
+      setServiceBusy(false)
+    }
+    window.addEventListener('compass:service-busy', onBusy)
+    window.addEventListener('compass:service-recovered', onRecovered)
+    return () => {
+      if (timer) clearTimeout(timer)
+      window.removeEventListener('compass:service-busy', onBusy)
+      window.removeEventListener('compass:service-recovered', onRecovered)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!notice) return undefined
+    const t = setTimeout(() => setNotice(null), NOTICE_AUTO_DISMISS_MS)
+    return () => clearTimeout(t)
+  }, [notice])
 
 
   // Chat sees the demo workspace only while the dashboard shows it
@@ -238,47 +300,72 @@ export default function App() {
     loadTasks(selectedDomain)
   }, [selectedDomain, isDemoActive, loadTasks])
 
-  // Check URL query parameters on mount to prompt account selection or show OAuth errors
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    if (params.get('oauth_error') || params.get('select_account')) {
-      setShowAuthModal(true)
-    }
-  }, [])
-
-
-
   const checkMigration = useCallback(async () => {
     try {
       if (typeof window !== 'undefined' && window.sessionStorage?.getItem('compass_migration_dismissed') === '1') {
+        migrationPendingRef.current = false
         return
       }
       const status = await fetchMigrationStatus()
+      // transient: the check did not complete (backend asleep); retried when it comes online
+      migrationPendingRef.current = Boolean(status.transient)
       if (status.has_guest_data && status.guest_conversations_count > 0 && !status.skipped) {
         setGuestConversationsCount(status.guest_conversations_count)
         setShowMigrationModal(true)
       }
     } catch (e) {
+      migrationPendingRef.current = true
       console.warn('Migration status check skipped:', e)
     }
   }, [])
 
+  const clearStoredIdentity = useCallback(() => {
+    try {
+      localStorage.removeItem('compass_user_email')
+      localStorage.removeItem('compass_user_id')
+    } catch {
+      /* ignore localStorage access error */
+    }
+  }, [])
+
+  // Ask the server who we are. Only an explicit "not signed in" answer clears stored identity;
+  // a network error / 5xx / timeout keeps it and the check is retried when the backend is online.
+  const runUserCheck = useCallback(async () => {
+    const { status, user } = await fetchCurrentUserResult()
+    if (!mountedRef.current) return
+    userCheckedRef.current = status !== 'transient'
+    const action = identityActionFor(status)
+    if (action === 'set') {
+      setCurrentUser(user)
+      checkMigration()
+    } else if (action === 'clear') {
+      clearStoredIdentity()
+    }
+  }, [checkMigration, clearStoredIdentity])
+
   const handleUserChanged = useCallback(async (newEmail) => {
+    // Per-identity in-memory state must never leak across sign-in / sign-out
+    setMessages(INITIAL_MESSAGES)
+    setConversationId(null)
+    setPendingPrompt(null)
+    setTasks([])
+    setAllTasks([])
+    isDemoActiveRef.current = false
+    setIsDemoActive(false)
+    let outcome = { status: 'signed_out', user: null }
     if (newEmail) {
-      const u = await fetchCurrentUser()
-      if (u && (u.authenticated || u.email)) {
+      const { status, user: u } = await fetchCurrentUserResult()
+      userCheckedRef.current = status !== 'transient'
+      outcome = { status, user: u }
+      if (status === 'authenticated') {
         setCurrentUser(u)
         checkMigration()
-      } else {
+      } else if (status === 'unauthenticated') {
         // The server did not confirm a session: never fabricate a signed-in user.
-        try {
-          localStorage.removeItem('compass_user_email')
-          localStorage.removeItem('compass_user_id')
-        } catch {
-          /* ignore localStorage access error */
-        }
+        clearStoredIdentity()
         setCurrentUser(null)
       }
+      // transient: keep the stored identity; the health transition re-runs the check
     } else {
       setCurrentUser({ authenticated: false, email: '' })
       try {
@@ -289,24 +376,71 @@ export default function App() {
         /* ignore storage access error */
       }
     }
+    checkDemoStatus()
     loadTasks(selectedDomain)
     refreshUsage()
-  }, [loadTasks, selectedDomain, refreshUsage, checkMigration])
+    return outcome
+  }, [loadTasks, selectedDomain, refreshUsage, checkMigration, checkDemoStatus, clearStoredIdentity])
+
+  // Latest handleUserChanged for the one-shot OAuth-return effect below
+  const handleUserChangedRef = useRef(handleUserChanged)
+  handleUserChangedRef.current = handleUserChanged
+
+  // Handle the OAuth redirect outcome once: show it, confirm with the server, strip the params
+  useEffect(() => {
+    const ret = parseOAuthReturn(window.location.search)
+    if (ret.kind === 'none') return
+    try {
+      const cleaned = window.location.pathname + stripOAuthParams(window.location.search) + window.location.hash
+      window.history.replaceState(window.history.state, '', cleaned)
+    } catch {
+      /* ignore history access error */
+    }
+    if (ret.kind === 'select_account') {
+      setShowAuthModal(true)
+      return
+    }
+    if (ret.kind === 'error') {
+      setNotice({ type: 'error', text: ret.message })
+      setShowAuthModal(true)
+      return
+    }
+    handleUserChangedRef.current('oauth').then(({ status, user }) => {
+      if (!mountedRef.current) return
+      if (status === 'authenticated') {
+        setNotice({ type: 'success', text: `Signed in as ${user?.email || user?.user_id || 'your Google account'}` })
+      } else if (status === 'transient') {
+        setNotice({ type: 'info', text: 'Google sign-in finished, but the server is slow to confirm it. Checking again shortly.' })
+      } else {
+        setNotice({ type: 'error', text: 'Google sign-in finished, but we could not confirm your session. Please try again.' })
+      }
+    })
+  }, [])
+
+  // Apply a health status; when the backend comes (back) online re-run every one-shot check
+  // that could not complete while it was asleep.
+  const applyBackendStatus = useCallback((status) => {
+    const prev = backendStatusRef.current
+    backendStatusRef.current = status
+    setBackendStatus(status)
+    if (!isBackendOnline(prev) && isBackendOnline(status)) {
+      loadTasks(selectedDomainRef.current)
+      refreshUsage()
+      if (!userCheckedRef.current) runUserCheck()
+      if (!demoCheckedRef.current) checkDemoStatus()
+      if (migrationPendingRef.current) checkMigration()
+    }
+  }, [loadTasks, refreshUsage, runUserCheck, checkDemoStatus, checkMigration])
 
   const handleRetryConnection = useCallback(async () => {
-    setBackendStatus('Pinging backend…')
+    applyBackendStatus('Pinging backend…')
     try {
       const status = await checkBackendHealth(true)
-      setBackendStatus(status)
-      const isOk = status.toLowerCase().includes('neon') || status.toLowerCase().includes('live') || status.toLowerCase().includes('connected')
-      if (isOk) {
-        loadTasks(selectedDomain)
-        refreshUsage()
-      }
+      applyBackendStatus(status)
     } catch {
-      setBackendStatus('Waking up the server…')
+      applyBackendStatus('Waking up the server…')
     }
-  }, [loadTasks, refreshUsage, selectedDomain])
+  }, [applyBackendStatus])
 
   useEffect(() => {
     let isMounted = true
@@ -318,19 +452,9 @@ export default function App() {
     const pollHealth = async () => {
       try {
         const status = await checkBackendHealth()
-        if (isMounted) {
-          setBackendStatus(prev => {
-            const wasOnline = prev.toLowerCase().includes('neon') || prev.toLowerCase().includes('live') || prev.toLowerCase().includes('connected')
-            const isNowOnline = status.toLowerCase().includes('neon') || status.toLowerCase().includes('live') || status.toLowerCase().includes('connected')
-            if (!wasOnline && isNowOnline) {
-              loadTasks(selectedDomainRef.current)
-              refreshUsage()
-            }
-            return status
-          })
-        }
+        if (isMounted) applyBackendStatus(status)
       } catch {
-        if (isMounted) setBackendStatus('Waking up the server…')
+        if (isMounted) applyBackendStatus('Waking up the server…')
       }
     }
 
@@ -348,21 +472,7 @@ export default function App() {
     // Immediate initial sync
     pollHealth()
     refreshUsage()
-    fetchCurrentUser().then(u => {
-      if (!isMounted) return
-      if (u && (u.authenticated || (u.email && u.email.includes('@')))) {
-        setCurrentUser(u)
-        checkMigration()
-      } else {
-        // Server did not confirm a session: drop any stale local identity.
-        try {
-          localStorage.removeItem('compass_user_email')
-          localStorage.removeItem('compass_user_id')
-        } catch {
-          /* ignore localStorage access error */
-        }
-      }
-    })
+    runUserCheck()
 
     // Re-fetch tasks immediately when tab returns to foreground
     const handleVisibilityChange = () => {
@@ -495,7 +605,7 @@ export default function App() {
   }
 
   return (
-    <div style={{ display: 'flex', height: '100vh', width: '100%', background: 'var(--bg-app)', overflow: 'hidden', position: 'relative' }}>
+    <div className="app-shell" style={{ display: 'flex', width: '100%', background: 'var(--bg-app)', overflow: 'hidden', position: 'relative' }}>
       {/* Mobile Drawer Backdrop */}
       {mobileMenuOpen && (
         <div
@@ -615,6 +725,7 @@ export default function App() {
           </div>
         </header>
 
+        <TabErrorBoundary resetKey={activeTab}>
         {activeTab === 'dashboard' ? (
           <>
             {isDemoActive && <DemoDataBanner onReset={handleResetDemo} resetting={resettingDemo} />}
@@ -661,12 +772,14 @@ export default function App() {
             onOpenTelemetry={() => setShowTelemetryModal(true)}
           />
         ) : (activeTab === 'career' || activeTab === 'radar') ? (
-          <React.Suspense fallback={<div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading Career Copilot…</div>}>
-            <CareerCopilot
-              isDarkMode={theme === 'dark'}
-              onToggleDarkMode={toggleTheme}
-            />
-          </React.Suspense>
+          <TabErrorBoundary resetKey={activeTab} onRetry={() => setCareerAttempt((n) => n + 1)}>
+            <React.Suspense fallback={<div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading Career Copilot…</div>}>
+              <CareerCopilot
+                isDarkMode={theme === 'dark'}
+                onToggleDarkMode={toggleTheme}
+              />
+            </React.Suspense>
+          </TabErrorBoundary>
         ) : activeTab === 'calendar' ? (
           <CalendarView
             tasks={tasks}
@@ -710,6 +823,7 @@ export default function App() {
             onToggleDarkMode={toggleTheme}
           />
         )}
+        </TabErrorBoundary>
       </main>
 
       {/* Mobile Bottom Navigation Bar (< 768px) */}
@@ -745,6 +859,8 @@ export default function App() {
         }}
       />
 
+      <StatusNotices notice={notice} onDismissNotice={() => setNotice(null)} serviceBusy={serviceBusy} />
+
       <NebiusTelemetryModal
         isOpen={showTelemetryModal}
         onClose={() => setShowTelemetryModal(false)}
@@ -753,4 +869,4 @@ export default function App() {
       />
     </div>
   )
-}
+}
