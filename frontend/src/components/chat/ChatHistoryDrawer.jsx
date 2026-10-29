@@ -14,6 +14,7 @@ import {
   Trash2,
   Package
 } from 'lucide-react'
+import Dialog from '../Dialog'
 
 export default function ChatHistoryDrawer({
   isOpen,
@@ -444,7 +445,7 @@ export default function ChatHistoryDrawer({
 
       {/* Delete Confirmation Modal */}
       {confirmDeleteConv && (
-        <div
+        <Dialog onClose={() => setConfirmDeleteConv(null)}
           onClick={() => setConfirmDeleteConv(null)}
           style={{
             position: 'fixed',
@@ -518,7 +519,7 @@ export default function ChatHistoryDrawer({
               </button>
             </div>
           </div>
-        </div>
+        </Dialog>
       )}
     </>
   )

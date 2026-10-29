@@ -3,6 +3,7 @@ import { updateTask, verifyTaskDeadline } from '../../api/client'
 import { dueDateForInput, dueDatePatch } from '../../utils/scheduleHonesty'
 import { DOMAIN_META, getDomainMeta } from './domainMeta'
 import { Trash2, Edit2, Check, X, AlertTriangle, Search, RefreshCw, Clock } from 'lucide-react'
+import Dialog from '../Dialog'
 
 const inputStyle = {
   width: '100%',
@@ -133,7 +134,7 @@ export default function TaskDetailModal({ task, onClose, onDelete, onUpdated }) 
   }
 
   return (
-    <div
+    <Dialog onClose={onClose}
       onClick={onClose}
       style={{
         position: 'fixed',
@@ -584,6 +585,6 @@ export default function TaskDetailModal({ task, onClose, onDelete, onUpdated }) 
           </div>
         </div>
       </div>
-    </div>
+    </Dialog>
   )
 }

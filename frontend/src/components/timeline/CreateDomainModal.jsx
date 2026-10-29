@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { normalizeDomainKey, saveCustomDomain, getCustomDomains } from './domainMeta'
 import { X, Trash2 } from 'lucide-react'
+import Dialog from '../Dialog'
 
 const PRESET_ICONS = [
   '🎯', '🧠', '📝', '🔬', '⚡', '🎨', '🛠️', '💼',
@@ -89,19 +90,10 @@ export default function CreateDomainModal({
     onClose()
   }
 
-  const handleKeyDown = (e) => {
-    if (e.key === 'Escape') {
-      onClose()
-    }
-  }
-
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
+    <Dialog onClose={onClose}
       aria-labelledby="create-domain-title"
       onClick={onClose}
-      onKeyDown={handleKeyDown}
       style={{
         position: 'fixed',
         inset: 0,
@@ -454,6 +446,6 @@ export default function CreateDomainModal({
           </div>
         </form>
       </div>
-    </div>
+    </Dialog>
   )
 }

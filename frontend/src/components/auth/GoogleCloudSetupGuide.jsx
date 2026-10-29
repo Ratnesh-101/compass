@@ -11,7 +11,7 @@ export default function GoogleCloudSetupGuide() {
         padding: '14px',
       }}
     >
-      <div style={{ fontSize: '12px', fontWeight: '700', color: '#b45309', marginBottom: '10px' }}>
+      <div style={{ fontSize: '12px', fontWeight: '700', color: 'var(--amber-text)', marginBottom: '10px' }}>
         📋 One-time Google Cloud setup (5 minutes)
       </div>
       <ol style={{ fontSize: '11.5px', color: 'var(--text-secondary)', lineHeight: '1.8', margin: 0, paddingLeft: '18px' }}>

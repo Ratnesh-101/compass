@@ -1,5 +1,6 @@
 import React from 'react'
 import { FileText, X, Copy } from 'lucide-react'
+import Dialog from '../Dialog'
 
 export default function CoverLetterModal({
   activeLetterApp,
@@ -9,7 +10,7 @@ export default function CoverLetterModal({
   if (!activeLetterApp) return null
 
   return (
-    <div
+    <Dialog onClose={onClose}
       style={{
         position: 'fixed',
         inset: 0,
@@ -122,6 +123,6 @@ export default function CoverLetterModal({
           </button>
         </div>
       </div>
-    </div>
+    </Dialog>
   )
 }

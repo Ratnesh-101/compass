@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { analyzeGitHubProfile } from '../../api/careerApi'
+import Dialog from '../Dialog'
 
 export default function GitHubIntelligenceModal({
   show,
@@ -31,7 +32,7 @@ export default function GitHubIntelligenceModal({
   }
 
   return (
-    <div
+    <Dialog onClose={onClose}
       style={{
         position: 'fixed',
         inset: 0,
@@ -331,6 +332,6 @@ export default function GitHubIntelligenceModal({
           </button>
         </div>
       </div>
-    </div>
+    </Dialog>
   )
 }

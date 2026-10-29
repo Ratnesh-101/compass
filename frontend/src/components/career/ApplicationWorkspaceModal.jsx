@@ -56,6 +56,7 @@ import {
   DEFAULT_INTEL_COOLDOWN_SECONDS,
   NO_APPLICATION_URL_TEXT,
 } from '../../utils/careerUiHelpers.js'
+import Dialog from '../Dialog'
 
 const STATUS_LABELS = {
   discovered: 'Discovered',
@@ -859,7 +860,7 @@ export default function ApplicationWorkspaceModal({
   ]
 
   return (
-    <div
+    <Dialog onClose={onClose}
       id="application-workspace-backdrop"
       style={{
         position: 'fixed',
@@ -1268,7 +1269,7 @@ export default function ApplicationWorkspaceModal({
                                 borderRadius: '6px',
                                 border: '1px solid var(--border)',
                                 background: 'var(--bg-card)',
-                                color: 'var(--brand)',
+                                color: 'var(--amber-text)',
                                 fontSize: '11px',
                                 fontWeight: 600,
                               }}
@@ -1280,7 +1281,7 @@ export default function ApplicationWorkspaceModal({
                             <span>{formatAttemptTime(lastAttemptTime)}</span>
                           )}
                           {cooldownSeconds > 0 && (
-                            <span style={{ color: 'var(--brand)', fontSize: '11px', fontWeight: 600 }} aria-live="polite">
+                            <span style={{ color: 'var(--amber-text)', fontSize: '11px', fontWeight: 600 }} aria-live="polite">
                               Refresh available in {cooldownSeconds}s
                             </span>
                           )}
@@ -1457,7 +1458,7 @@ export default function ApplicationWorkspaceModal({
                             style={{
                               background: 'transparent',
                               border: 'none',
-                              color: 'var(--brand)',
+                              color: 'var(--amber-text)',
                               fontWeight: 600,
                               cursor: 'pointer',
                               padding: 0,
@@ -1567,7 +1568,7 @@ export default function ApplicationWorkspaceModal({
                                             padding: '0 4px',
                                             fontSize: '11px',
                                             fontWeight: 700,
-                                            color: 'var(--brand)',
+                                            color: 'var(--amber-text)',
                                             background: 'transparent',
                                             border: 'none',
                                             cursor: 'pointer',
@@ -1651,7 +1652,7 @@ export default function ApplicationWorkspaceModal({
                                       gap: '6px',
                                     }}
                                   >
-                                    <span style={{ fontWeight: 700, color: 'var(--brand)', flexShrink: 0 }}>[{src.id}]</span>
+                                    <span style={{ fontWeight: 700, color: 'var(--amber-text)', flexShrink: 0 }}>[{src.id}]</span>
                                     {safeUrl ? (
                                       <a
                                         href={safeUrl}
@@ -1824,12 +1825,12 @@ export default function ApplicationWorkspaceModal({
                           </div>
                         ) : (
                           <div style={{ padding: '12px', borderRadius: '8px', background: '#fffbeb', border: '1px solid #fde68a' }}>
-                            <div style={{ fontWeight: 700, fontSize: '12px', color: '#b45309', marginBottom: '6px' }}>
+                            <div style={{ fontWeight: 700, fontSize: '12px', color: '#92400e', marginBottom: '6px' }}>
                               ⚠️ Unverified or Missing Skills ({missingSkills.length})
                             </div>
                             <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                               {missingSkills.map((sk, i) => (
-                                <span key={i} style={{ background: '#ffffff', color: '#b45309', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, border: '1px solid #fde68a' }}>
+                                <span key={i} style={{ background: '#ffffff', color: '#92400e', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, border: '1px solid #fde68a' }}>
                                   {sk}
                                 </span>
                               ))}
@@ -1849,7 +1850,7 @@ export default function ApplicationWorkspaceModal({
                           borderRadius: '6px',
                           background: 'transparent',
                           border: '1px solid var(--border)',
-                          color: 'var(--brand)',
+                          color: 'var(--amber-text)',
                           fontSize: '11px',
                           fontWeight: 700,
                           cursor: 'pointer',
@@ -2619,6 +2620,6 @@ export default function ApplicationWorkspaceModal({
           </div>
         </div>
       </div>
-    </div>
+    </Dialog>
   )
 }

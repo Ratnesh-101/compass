@@ -1,5 +1,6 @@
 import React from 'react'
 import { ShieldCheck } from 'lucide-react'
+import Dialog from '../Dialog'
 
 export default function BatchApprovalModal({
   show,
@@ -20,7 +21,7 @@ export default function BatchApprovalModal({
   const isFormValid = attestationConfirmed && workAuthConfirmed && legalAccepted && !processing
 
   return (
-    <div
+    <Dialog onClose={onClose}
       style={{
         position: 'fixed',
         inset: 0,
@@ -151,6 +152,6 @@ export default function BatchApprovalModal({
           </button>
         </div>
       </div>
-    </div>
+    </Dialog>
   )
 }

@@ -746,7 +746,7 @@ export default function ResumeStudio() {
                   <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12.5px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '6px' }}>
                     <span>Full Name</span>
                     {fullName.trim().toLowerCase() === 'compass candidate' && (
-                      <span style={{ fontSize: '11px', color: '#b45309', background: '#fef3c7', padding: '2px 8px', borderRadius: '4px', fontWeight: '600' }}>
+                      <span style={{ fontSize: '11px', color: '#92400e', background: '#fef3c7', padding: '2px 8px', borderRadius: '4px', fontWeight: '600' }}>
                         ⚠️ Placeholder, please replace
                       </span>
                     )}
@@ -763,7 +763,7 @@ export default function ResumeStudio() {
                   <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12.5px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '6px' }}>
                     <span>Contact Email</span>
                     {email.trim().toLowerCase() === 'candidate@compass.local' && (
-                      <span style={{ fontSize: '11px', color: '#b45309', background: '#fef3c7', padding: '2px 8px', borderRadius: '4px', fontWeight: '600' }}>
+                      <span style={{ fontSize: '11px', color: '#92400e', background: '#fef3c7', padding: '2px 8px', borderRadius: '4px', fontWeight: '600' }}>
                         ⚠️ Placeholder, please replace
                       </span>
                     )}

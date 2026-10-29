@@ -13,7 +13,7 @@ export const STEP_STYLES = {
     border: '#d97706',
     icon: '🔍',
     label: 'Checking your data',
-    labelColor: '#b45309',
+    labelColor: 'var(--amber-text)',
   },
   observe: {
     bg: 'rgba(16, 185, 129, 0.08)',
@@ -76,7 +76,7 @@ export const STEP_STYLES = {
     border: '#f59e0b',
     icon: '🔄',
     label: 'Replanning',
-    labelColor: '#b45309',
+    labelColor: 'var(--amber-text)',
   },
 }
 
@@ -214,7 +214,7 @@ export function ReportCard({ reportCard }) {
           padding: '2px 10px',
           borderRadius: '12px',
           background: reportCard.abstained ? 'rgba(245, 158, 11, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-          color: reportCard.abstained ? '#b45309' : '#059669',
+          color: reportCard.abstained ? 'var(--amber-text)' : '#059669',
         }}>
           {reportCard.abstained ? 'Needs more info' : 'Completed'}
         </span>
@@ -311,7 +311,7 @@ export default function StepCard({ step, index: _index }) {
             )}
           </div>
           {step.metadata.verdict.must_cut_hours > 0 && (
-            <div style={{ marginTop: '8px', color: '#b45309', fontSize: '12px' }}>
+            <div style={{ marginTop: '8px', color: 'var(--amber-text)', fontSize: '12px' }}>
               ✂️ You'll need to cut about <strong>{step.metadata.verdict.must_cut_hours}h</strong> of work to stay realistic.
             </div>
           )}
@@ -336,7 +336,7 @@ export default function StepCard({ step, index: _index }) {
           borderRadius: '8px',
           padding: '10px 14px',
           marginBottom: '8px',
-          color: '#b45309',
+          color: 'var(--amber-text)',
           fontSize: '13px',
           fontWeight: '500',
           display: 'flex',

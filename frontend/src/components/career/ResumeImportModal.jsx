@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react'
 import { parseResumeFile } from '../../api/careerApi'
+import Dialog from '../Dialog'
 
 export default function ResumeImportModal({
   show,
@@ -40,7 +41,7 @@ export default function ResumeImportModal({
   }
 
   return (
-    <div
+    <Dialog onClose={onClose}
       style={{
         position: 'fixed',
         inset: 0,
@@ -215,6 +216,6 @@ export default function ResumeImportModal({
           </button>
         </div>
       </div>
-    </div>
+    </Dialog>
   )
 }

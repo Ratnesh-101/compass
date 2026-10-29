@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { Zap, X, RefreshCw, Copy, Check, Award } from 'lucide-react'
+import Dialog from './Dialog'
 
 export default function NebiusTelemetryModal({ isOpen, onClose, usageStats, onRefresh }) {
   const [copied, setCopied] = useState(false)
@@ -86,7 +87,7 @@ export default function NebiusTelemetryModal({ isOpen, onClose, usageStats, onRe
   }
 
   return (
-    <div
+    <Dialog onClose={onClose}
       onClick={onClose}
       style={{
         position: 'fixed',
@@ -364,6 +365,6 @@ export default function NebiusTelemetryModal({ isOpen, onClose, usageStats, onRe
           </div>
         </div>
       </div>
-    </div>
+    </Dialog>
   )
 }

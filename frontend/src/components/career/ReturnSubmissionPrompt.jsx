@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { markApplied } from '../../api/careerApi'
+import Dialog from '../Dialog'
 
 export default function ReturnSubmissionPrompt({ onSubmissionConfirmed }) {
   const [pendingPrompt, setPendingPrompt] = useState(null)
@@ -73,7 +74,7 @@ export default function ReturnSubmissionPrompt({ onSubmissionConfirmed }) {
   }
 
   return (
-    <div
+    <Dialog
       id="return-submission-prompt-backdrop"
       style={{
         position: 'fixed',
@@ -168,6 +169,6 @@ export default function ReturnSubmissionPrompt({ onSubmissionConfirmed }) {
           {confirming ? 'Confirming…' : 'Yes, applied'}
         </button>
       </div>
-    </div>
+    </Dialog>
   )
 }

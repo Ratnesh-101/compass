@@ -83,7 +83,7 @@ export default function RunHistoryDrawer({
                   padding: '2px 8px',
                   borderRadius: '10px',
                   background: r.status === 'completed' ? 'rgba(16, 185, 129, 0.15)' : r.status === 'paused' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(100, 116, 139, 0.15)',
-                  color: r.status === 'completed' ? '#059669' : r.status === 'paused' ? '#b45309' : 'var(--text-muted)',
+                  color: r.status === 'completed' ? '#059669' : r.status === 'paused' ? 'var(--amber-text)' : 'var(--text-muted)',
                 }}>
                   {r.status === 'completed' ? 'Completed' : r.status === 'paused' ? 'Needs approval' : 'In progress'}
                 </span>

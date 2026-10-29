@@ -7,6 +7,7 @@ import {
 } from '../api/client'
 import { X, Check, Lock } from 'lucide-react'
 import Logo from './Logo'
+import Dialog from './Dialog'
 
 export default function MigrationModal({
   isOpen,
@@ -59,21 +60,6 @@ export default function MigrationModal({
       console.warn('[Migration] Skip notification failed:', err)
     })
   }, [onClose, view, handleDone])
-
-  // Close dialog on Escape key when interactive (not importing)
-  useEffect(() => {
-    if (!isOpen) return
-    const handleKeyDown = (e) => {
-      if (e.key === 'Escape' && view !== 'importing') {
-        e.preventDefault()
-        handleSkip()
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [isOpen, view, handleSkip])
 
   // Fetch conversations list when switching to select view
   const handleOpenSelect = async () => {
@@ -148,7 +134,7 @@ export default function MigrationModal({
   if (!isOpen) return null
 
   return (
-    <div
+    <Dialog onClose={handleSkip} closeOnEscape={view !== 'importing'}
       style={{
         position: 'fixed',
         inset: 0,
@@ -662,6 +648,6 @@ export default function MigrationModal({
           )}
         </div>
       </div>
-    </div>
+    </Dialog>
   )
 }
