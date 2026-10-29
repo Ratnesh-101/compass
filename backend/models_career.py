@@ -10,6 +10,7 @@ import json
 from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 from pydantic import BaseModel, Field, field_validator
 
 from backend.models_radar import OpportunityOut
@@ -175,6 +176,14 @@ class SaveResumeRequest(BaseModel):
 
 class ResumeParseUploadRequest(BaseModel):
     raw_text: str = Field(max_length=200000)
+
+
+class ResumeParseUploadOut(ResumeContent):
+    """Parsed resume content plus additive extraction diagnostics."""
+    missing_fields: List[str] = Field(default_factory=list)
+    ambiguous_fields: List[str] = Field(default_factory=list)
+    field_confidence: Dict[str, float] = Field(default_factory=dict)
+    overall_confidence: Optional[float] = None
 
 
 class CoverLetterOut(BaseModel):
@@ -368,10 +377,34 @@ class ExternalProfileSource(str, Enum):
     OFFICIAL_API = "OFFICIAL_API"
 
 
+def safe_http_url(value: Optional[str]) -> Optional[str]:
+    """Return the stripped URL when it is a well-formed http(s) URL with a host, else None."""
+    if not value:
+        return None
+    candidate = value.strip()
+    try:
+        parsed = urlparse(candidate)
+    except ValueError:
+        return None
+    if parsed.scheme.lower() not in ("http", "https") or not parsed.hostname:
+        return None
+    return candidate
+
+
 class ExternalProfileImportRequest(BaseModel):
     source_type: ExternalProfileSource
-    raw_content: str
+    raw_content: str = Field(max_length=200000)
     source_url: Optional[str] = None
+
+    @field_validator("source_url")
+    @classmethod
+    def _source_url_must_be_http(cls, value: Optional[str]) -> Optional[str]:
+        if value is None or not value.strip():
+            return None
+        safe = safe_http_url(value)
+        if safe is None:
+            raise ValueError("source_url must be a valid http:// or https:// URL")
+        return safe
 
 
 # ===========================================================================

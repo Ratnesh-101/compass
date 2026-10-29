@@ -7,8 +7,10 @@ Never silently saves or overwrites the master resume without explicit user confi
 """
 from __future__ import annotations
 
+import codecs
 import io
 import logging
+import zipfile
 from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field
 
@@ -22,12 +24,20 @@ MAX_RESUME_FILE_SIZE = 5 * 1024 * 1024
 
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md"}
 
+# Only the first pages of a PDF are parsed; a resume never needs more.
+MAX_PDF_PAGES = 15
+# Guards against zip-bomb style DOCX uploads (checked from zip metadata before opening).
+MAX_DOCX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024
+MAX_DOCX_ENTRIES = 2000
+
 
 class ResumeParseResult(BaseModel):
     success: bool
     filename: str
     file_type: str
     raw_text: str = ""
+    # Complete extracted text for server-side provenance storage; never sent to the client.
+    full_text: str = Field(default="", exclude=True)
     extracted_content: Optional[ResumeContent] = None
     page_count: Optional[int] = None
     confidence_warning: Optional[str] = None
@@ -63,20 +73,74 @@ def is_docx_parser_available() -> bool:
         return False
 
 
+def _decode_text_bytes(data: bytes) -> str:
+    """Decode uploaded text: UTF-16 (BOM), UTF-8 (BOM stripped), else Windows-1252."""
+    if data.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        try:
+            return data.decode("utf-16")
+        except UnicodeDecodeError:
+            pass
+    try:
+        return data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return data.decode("cp1252", errors="replace")
+
+
+def _check_docx_archive(file_bytes: bytes) -> Optional[str]:
+    """Return an error message when the DOCX zip metadata looks like a zip bomb, else None."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
+            infos = zf.infolist()
+    except zipfile.BadZipFile:
+        return None  # python-docx reports the malformed file with its own message
+    if len(infos) > MAX_DOCX_ENTRIES:
+        return f"DOCX file has too many entries ({len(infos)} entries; limit {MAX_DOCX_ENTRIES})."
+    total = sum(info.file_size for info in infos)
+    if total > MAX_DOCX_UNCOMPRESSED_BYTES:
+        return (
+            f"DOCX file expands to {total // (1024 * 1024)} MB uncompressed; "
+            f"the limit is {MAX_DOCX_UNCOMPRESSED_BYTES // (1024 * 1024)} MB."
+        )
+    return None
+
+
+def _page_cap_warnings(total_pages: int) -> List[str]:
+    if total_pages > MAX_PDF_PAGES:
+        return [f"PDF has {total_pages} pages; only the first {MAX_PDF_PAGES} were parsed."]
+    return []
+
+
+def _decrypt_with_empty_password(reader: Any) -> bool:
+    """Owner-password-only PDFs open with an empty user password; True when decryption worked."""
+    try:
+        return bool(reader.decrypt(""))
+    except Exception as exc:
+        logger.debug("PDF empty-password decrypt failed: %s", exc)
+        return False
+
+
 def _build_success_result(
     filename: str,
     file_type: str,
     full_text: str,
     page_count: Optional[int] = None,
+    extra_warnings: Optional[List[str]] = None,
 ) -> ResumeParseResult:
     """Helper to assemble truthful extraction results with diagnostics."""
     parsed_content = parse_uploaded_resume_text(full_text)
     diag = analyze_extraction_diagnostics(parsed_content, full_text)
+    extra = list(extra_warnings or [])
     warning = None
     if not parsed_content.skills and not parsed_content.education:
         warning = "Standard skills or education sections were not clearly identified. Please review the extracted data."
     elif diag.get("missing_fields"):
         warning = f"Missing fields detected: {', '.join(diag['missing_fields'])}."
+    if extra:
+        warning = " ".join([w for w in [warning, *extra] if w])
+    field_confidence = dict(diag.get("field_confidence", {}))
+    overall = float(diag.get("overall_confidence", 0.0))
+    field_confidence["overall"] = overall
+    field_confidence["overall_confidence"] = overall
 
     return ResumeParseResult(
         success=True,
@@ -84,13 +148,14 @@ def _build_success_result(
         file_type=file_type,
         page_count=page_count,
         raw_text=full_text[:3000],
+        full_text=full_text,
         extracted_content=parsed_content,
         confidence_warning=warning,
         requires_user_review=True,
         missing_fields=diag.get("missing_fields", []),
-        ambiguous_fields=diag.get("ambiguous_fields", []),
+        ambiguous_fields=[*diag.get("ambiguous_fields", []), *extra],
         field_conflicts=diag.get("field_conflicts", []),
-        field_confidence=diag.get("field_confidence", {}),
+        field_confidence=field_confidence,
         links_detected=parsed_content.relevant_links,
     )
 
@@ -103,7 +168,7 @@ def _extract_pdf_with_pdfplumber(file_bytes: bytes, filename: str) -> ResumePars
         chunks: List[str] = []
         with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
             total_pages = len(pdf.pages)
-            for page in pdf.pages:
+            for page in pdf.pages[:MAX_PDF_PAGES]:
                 text = page.extract_text() or ""
                 if text.strip():
                     chunks.append(text.strip())
@@ -116,7 +181,13 @@ def _extract_pdf_with_pdfplumber(file_bytes: bytes, filename: str) -> ResumePars
                 page_count=total_pages,
                 error_message="PDF contains no extractable text. Please ensure the file contains selectable text.",
             )
-        return _build_success_result(filename=filename, file_type=".pdf", full_text=full_text, page_count=total_pages)
+        return _build_success_result(
+            filename=filename,
+            file_type=".pdf",
+            full_text=full_text,
+            page_count=total_pages,
+            extra_warnings=_page_cap_warnings(total_pages),
+        )
     except Exception as e:
         return ResumeParseResult(
             success=False,
@@ -183,7 +254,7 @@ def extract_resume_from_file_bytes(
                     file_type=ext,
                     error_message="File appears to be binary and cannot be read as text.",
                 )
-            text = file_bytes.decode("utf-8", errors="replace").strip()
+            text = _decode_text_bytes(file_bytes).strip()
             if not text:
                 return ResumeParseResult(
                     success=False,
@@ -210,6 +281,9 @@ def extract_resume_from_file_bytes(
                 error_message="DOCX parser (python-docx) is not installed in the environment.",
             )
         import docx
+        archive_error = _check_docx_archive(file_bytes)
+        if archive_error:
+            return ResumeParseResult(success=False, filename=filename, file_type=".docx", error_message=archive_error)
         try:
             doc = docx.Document(io.BytesIO(file_bytes))
             paragraphs = []
@@ -264,7 +338,7 @@ def extract_resume_from_file_bytes(
             reader = pypdf.PdfReader(stream)
 
             # Check encryption
-            if reader.is_encrypted:
+            if reader.is_encrypted and not _decrypt_with_empty_password(reader):
                 return ResumeParseResult(
                     success=False,
                     filename=filename,
@@ -286,6 +360,8 @@ def extract_resume_from_file_bytes(
             has_images = False
 
             for idx, page in enumerate(reader.pages):
+                if idx >= MAX_PDF_PAGES:
+                    break
                 try:
                     p_text = page.extract_text() or ""
                     if p_text.strip():
@@ -299,7 +375,7 @@ def extract_resume_from_file_bytes(
                 try:
                     import pdfplumber
                     with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-                        for page in pdf.pages:
+                        for page in pdf.pages[:MAX_PDF_PAGES]:
                             t = page.extract_text() or ""
                             if t.strip():
                                 extracted_chunks.append(t.strip())
@@ -331,7 +407,13 @@ def extract_resume_from_file_bytes(
                 )
 
             # Parse structured content truthfully
-            return _build_success_result(filename=filename, file_type=".pdf", full_text=full_text, page_count=total_pages)
+            return _build_success_result(
+                filename=filename,
+                file_type=".pdf",
+                full_text=full_text,
+                page_count=total_pages,
+                extra_warnings=_page_cap_warnings(total_pages),
+            )
 
         except pypdf.errors.PdfReadError as pre:
             return ResumeParseResult(
