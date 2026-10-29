@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException
 
-from backend.models_career import CareerApplicationStatus
+from backend.models_career import CareerApplicationStatus, ResumeValidationStatus
 from backend.models_radar import EligibilityClassification
 from backend.services.radar_eligibility import evaluate_eligibility
 from backend.services.career_resume import tailor_resume_for_opportunity, draft_truthful_cover_letter
@@ -41,6 +41,19 @@ USER_DAILY_LIMIT = 5
 GUEST_DAILY_LIMIT = 2
 GLOBAL_DAILY_LIMIT = 100
 WINDOW_SECONDS = 86400  # 24 hours
+
+
+# Only applications still in these states may be auto-drafted; anything further along
+# (reviewed, approved, submitted, interview, ...) is the user's and is never touched.
+AUTO_PREPARE_ELIGIBLE_STATUSES = {
+    CareerApplicationStatus.SAVED,
+    CareerApplicationStatus.DISCOVERED,
+    CareerApplicationStatus.ELIGIBILITY_CHECKED,
+    CareerApplicationStatus.PREPARING,
+    CareerApplicationStatus.ELIGIBILITY_REVIEW,
+    CareerApplicationStatus.NEEDS_INFORMATION,
+    CareerApplicationStatus.RESUME_DRAFT,
+}
 
 
 def _clean_old_timestamps(timestamps: List[float], now: float) -> List[float]:
@@ -125,6 +138,8 @@ async def execute_auto_prepare_for_user(user_id: str) -> Dict[str, Any]:
         get_master_resume,
         get_or_create_career_application,
         create_tailored_resume,
+        delete_tailored_resume,
+        link_resume_if_unlinked,
         update_career_application,
         log_application_event,
     )
@@ -196,16 +211,25 @@ async def execute_auto_prepare_for_user(user_id: str) -> Dict[str, Any]:
     for opp in eligible_opps:
         app = await get_or_create_career_application(user_id, opp.id)
 
-        # Idempotency check:
-        # If application already has a tailored resume and private notes record this profile version, skip!
-        app_notes = app.private_notes or ""
+        # Never overwrite user work: skip anything that already has a resume, a cover letter or
+        # notes, or that has moved past the pre-review states. This does not rely on the
+        # (user-editable) notes tag being intact.
         expected_tag = f"[auto_prep_v:{profile_version}]"
-        if app.resume_id and expected_tag in app_notes:
+        app_notes = app.private_notes or ""
+        has_existing_work = bool(
+            app.resume_id or (app.cover_letter or "").strip() or app_notes.strip()
+        )
+        if app.status not in AUTO_PREPARE_ELIGIBLE_STATUSES or has_existing_work:
+            up_to_date = bool(app.resume_id and expected_tag in app_notes)
             prepared_results.append({
                 "opportunity_id": opp.id,
                 "company_name": opp.company_name,
-                "status": "already_up_to_date",
-                "message": "Draft already tailored for current master profile version.",
+                "status": "already_up_to_date" if up_to_date else "skipped_existing_work",
+                "message": (
+                    "Draft already tailored for current master profile version."
+                    if up_to_date
+                    else "Skipped: this application already has a resume, cover letter, notes or has progressed; it was not modified."
+                ),
             })
             continue
 
@@ -234,13 +258,25 @@ async def execute_auto_prepare_for_user(user_id: str) -> Dict[str, Any]:
         # Truthful cover letter
         letter_text, _, _ = draft_truthful_cover_letter(c, opp)
 
-        # Attach to application with non-mutating review status
-        note_text = f"Draft: review before use {expected_tag}"
-        updated_app = await update_career_application(app.id, user_id, {
-            "resume_id": tailored.id,
+        # Attach only while the application still has no resume (conditional, race-safe)
+        review_status = (
+            CareerApplicationStatus.READY_FOR_REVIEW.value
+            if val_status == ResumeValidationStatus.READY_FOR_REVIEW
+            else CareerApplicationStatus.RESUME_VALIDATION_FAILED.value
+        )
+        linked = await link_resume_if_unlinked(app.id, user_id, tailored.id, review_status)
+        if linked is None:
+            await delete_tailored_resume(tailored.id, user_id)
+            prepared_results.append({
+                "opportunity_id": opp.id,
+                "company_name": opp.company_name,
+                "status": "skipped_existing_work",
+                "message": "Skipped: a resume was attached concurrently; it was not modified.",
+            })
+            continue
+        await update_career_application(app.id, user_id, {
             "cover_letter": letter_text,
-            "status": CareerApplicationStatus.READY_FOR_REVIEW.value,
-            "private_notes": note_text,
+            "private_notes": f"Draft: review before use {expected_tag}",
         })
 
         await log_application_event(app.id, "auto_prepared_draft", {

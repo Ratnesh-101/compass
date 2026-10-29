@@ -2,9 +2,11 @@ import React from 'react'
 import { getCalendarExportUrl, quickConnectUser, fetchCalendarStatus, downloadAuthedFile } from '../../api/client'
 
 import { Zap, X, Check, Calendar, Download, ExternalLink } from 'lucide-react'
+import { planCommitState } from '../../utils/scheduleHonesty'
 
 export function ProposedPlanModal({ proposedPlan, onClose, onCommit, committing }) {
   if (!proposedPlan) return null
+  const { canCommit, reasons } = planCommitState(proposedPlan)
 
   return (
     <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(27, 26, 23, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(3px)' }}>
@@ -32,16 +34,24 @@ export function ProposedPlanModal({ proposedPlan, onClose, onCommit, committing 
             </div>
           ))}
         </div>
+        {reasons.length > 0 && (
+          <div id="proposed-plan-unplaced" style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
+            <strong>{canCommit ? 'Not placed' : 'Nothing could be placed'}</strong>
+            <ul style={{ margin: '4px 0 0', paddingLeft: '18px' }}>
+              {reasons.map((r, i) => <li key={i}>{r}</li>)}
+            </ul>
+          </div>
+        )}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '8px' }}>
           <button onClick={onClose} className="btn-touch-target btn-secondary" style={{ padding: '8px 16px', borderRadius: 'var(--radius-btn, 6px)', fontSize: '13px', fontWeight: '500', minHeight: '44px' }}>Cancel</button>
           <button
             id="btn-confirm-commit-schedule"
             onClick={onCommit}
-            disabled={committing}
+            disabled={committing || !canCommit}
             className="btn-touch-target btn-primary-amber"
-            style={{ padding: '8px 20px', borderRadius: 'var(--radius-btn, 6px)', fontSize: '13px', fontWeight: '600', cursor: committing ? 'wait' : 'pointer', minHeight: '44px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            style={{ padding: '8px 20px', borderRadius: 'var(--radius-btn, 6px)', fontSize: '13px', fontWeight: '600', cursor: committing ? 'wait' : (canCommit ? 'pointer' : 'not-allowed'), minHeight: '44px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
             <Check size={14} strokeWidth={1.8} />
-            <span>{committing ? 'Committing...' : 'Approve & Commit to Google Calendar'}</span>
+            <span>{committing ? 'Committing...' : 'Approve & Commit Schedule'}</span>
           </button>
         </div>
       </div>
@@ -119,10 +129,10 @@ export function IcsExportModal({ show, onClose, activeDomain }) {
           </button>
         </div>
         <p style={{ color: 'var(--text-secondary)', fontSize: '13px', lineHeight: '1.5', margin: '0 0 16px' }}>
-          Because direct Google Calendar API write requires registered Google Cloud OAuth credentials, you can sync all your scheduled tasks into your Google Calendar right now in 2 easy steps:
+          Download your schedule as a file and import it into Google Calendar. This is a one-time import: later changes in Compass need a fresh download.
         </p>
         <div style={{ background: 'var(--bg-card-soft)', border: '1px solid var(--border)', borderRadius: 'var(--radius-card, 8px)', padding: '14px', marginBottom: '16px' }}>
-          <h4 style={{ margin: '0 0 8px', color: 'var(--text-primary)', fontSize: '13px', fontWeight: '600' }}>Option 1: Instant 1-Click File Import (Recommended)</h4>
+          <h4 style={{ margin: '0 0 8px', color: 'var(--text-primary)', fontSize: '13px', fontWeight: '600' }}>Import a .ics file</h4>
           <ol style={{ margin: '0 0 10px', paddingLeft: '18px', color: 'var(--text-primary)', fontSize: '13px', lineHeight: '1.6' }}>
             <li>
               Click below to download the <code style={{ color: 'var(--accent)', background: 'var(--bg-card)', padding: '2px 4px', borderRadius: '4px' }}>compass_schedule.ics</code> file:
@@ -142,25 +152,6 @@ export function IcsExportModal({ show, onClose, activeDomain }) {
             <li>Click <b>Import</b>, select the downloaded file, and click <b>Import</b>.</li>
             <li>All scheduled tasks immediately appear in your Google Calendar!</li>
           </ol>
-          <div style={{ borderTop: '1px solid var(--border)', paddingTop: '12px', marginTop: '12px' }}>
-            <h4 style={{ margin: '0 0 8px', color: 'var(--text-primary)', fontSize: '13px', fontWeight: '600' }}>Option 2: Live Auto-Sync via Calendar Subscription URL</h4>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '12px', margin: '0 0 8px' }}>
-              In Google Calendar &gt; <b>Other calendars (+)</b> &gt; <b>From URL</b>, paste this feed URL:
-            </p>
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <input readOnly value={`${window.location.origin}/api/calendar/export.ics`} style={{ flex: 1, padding: '8px 10px', borderRadius: 'var(--radius-btn, 6px)', background: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-primary)', fontSize: '12px', minHeight: '38px' }} />
-              <button
-                onClick={(e) => {
-                  navigator.clipboard.writeText(`${window.location.origin}/api/calendar/export.ics`)
-                  e.target.innerText = 'Copied! ✓'
-                  setTimeout(() => { e.target.innerText = 'Copy' }, 2000)
-                }}
-                className="btn-touch-target btn-secondary"
-                style={{ padding: '8px 14px', borderRadius: 'var(--radius-btn, 6px)', fontSize: '12px', fontWeight: '600', cursor: 'pointer', minHeight: '38px' }}>
-                Copy
-              </button>
-            </div>
-          </div>
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
           <a href="https://calendar.google.com" target="_blank" rel="noreferrer" className="btn-touch-target btn-secondary" style={{ padding: '8px 16px', borderRadius: 'var(--radius-btn, 6px)', fontSize: '13px', fontWeight: '500', textDecoration: 'none', minHeight: '44px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>

@@ -116,6 +116,7 @@ KNOWN_ROUTE_METADATA = {
     ("/api/career/intelligence/external-profile", "POST"): ("_get_current_identity", "Ingest external profile data", "test_career_copilot.py"),
     ("/api/career/intelligence/github", "POST"): ("_get_current_identity", "Analyze GitHub profile intelligence", "test_career_copilot.py"),
     ("/api/career/opportunities/{opportunity_id}/job-analysis", "GET"): ("_get_current_identity", "Analyze job requirements", "test_career_copilot.py"),
+    ("/api/career/opportunities/{opportunity_id}/job-analysis", "POST"): ("_get_current_identity", "Analyze job requirements (POST, long descriptions)", "test_career_copilot.py"),
     ("/api/career/resumes", "GET"): ("_get_current_identity", "List user resumes", "test_career_e2e_workflow.py"),
     ("/api/career/resumes/commit-extracted", "POST"): ("_get_current_identity", "Commit extracted resume data", "test_career_e2e_workflow.py"),
     ("/api/career/resumes/master", "GET"): ("_get_current_identity", "Get master resume profile", "test_career_e2e_workflow.py"),

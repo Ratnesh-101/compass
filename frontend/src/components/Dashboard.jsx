@@ -603,7 +603,7 @@ export default function Dashboard({
             <button
               type="button"
               id="dashboard-btn-load-judge-persona"
-              onClick={handleSeedJudgePersona}
+              onClick={() => handleSeedJudgePersona(false)}
               disabled={seedingPersona}
               className="btn-secondary"
               title="Explicit 1-Click Demo: Populates sample multi-domain tasks and vector memory for hackathon judges"

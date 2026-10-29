@@ -101,7 +101,98 @@ export function formatJobLocation({
   return 'Location unspecified'
 }
 
-export function cleanOpportunity(opportunity) {
+const STALE_AFTER_DAYS = 3
+const MS_PER_DAY = 86400000
+
+// Date-only values ("2026-10-24") are calendar dates: parse them as UTC so they never shift a day
+// in western timezones. Full timestamps go through the normal Date parser.
+export function parseVerificationDate(value) {
+  const clean = cleanText(value)
+  if (!clean) return null
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(clean)
+  const d = dateOnly
+    ? new Date(Date.UTC(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3])))
+    : new Date(clean)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
+function utcDayNumber(d) {
+  return Math.floor(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) / MS_PER_DAY)
+}
+
+// Whole UTC calendar days between the verification date and now (never negative); null if unparsable.
+export function daysSinceVerified(value, now = new Date()) {
+  const d = parseVerificationDate(value)
+  if (!d) return null
+  return Math.max(0, utcDayNumber(now) - utcDayNumber(d))
+}
+
+export function isStaleVerification(value, now = new Date()) {
+  const days = daysSinceVerified(value, now)
+  return days !== null && days > STALE_AFTER_DAYS
+}
+
+export function lastCheckedText(value, now = new Date()) {
+  const days = daysSinceVerified(value, now)
+  if (days === null) return null
+  if (days === 0) return 'Last checked today'
+  if (days === 1) return 'Last checked 1 day ago'
+  return `Last checked ${days} days ago`
+}
+
+const AMBER_BADGE = {
+  bg: 'rgba(245, 166, 35, 0.1)',
+  text: 'var(--brand-dark, #b47507)',
+  border: 'rgba(245, 166, 35, 0.3)',
+}
+
+// A listing only earns the green "Verified open" chip while its last check is recent.
+export function getVerificationBadge(status, lastVerifiedAt, now = new Date()) {
+  if (status === 'OPEN_CONFIRMED') {
+    if (isStaleVerification(lastVerifiedAt, now)) {
+      return { label: 'Stale - re-verify before applying', ...AMBER_BADGE }
+    }
+    return {
+      label: 'Verified open',
+      bg: 'rgba(28, 138, 98, 0.08)',
+      text: 'var(--domain-code, #1c8a62)',
+      border: 'rgba(28, 138, 98, 0.25)',
+    }
+  }
+  return null
+}
+
+export function getEligibilityBadge(classification) {
+  switch (classification) {
+    case 'ELIGIBLE':
+      return {
+        label: 'Eligible',
+        bg: 'rgba(28, 138, 98, 0.08)',
+        text: 'var(--domain-code, #1c8a62)',
+        border: 'rgba(28, 138, 98, 0.25)',
+      }
+    case 'POTENTIAL_MATCH':
+    case 'POTENTIALLY_ELIGIBLE':
+      return { label: 'Possible match', ...AMBER_BADGE }
+    case 'INELIGIBLE':
+      return {
+        label: 'Not eligible',
+        bg: 'var(--danger-bg, #fdeaea)',
+        text: 'var(--danger-text, #b91c1c)',
+        border: 'rgba(185, 28, 28, 0.25)',
+      }
+    case 'INSUFFICIENT_INFORMATION':
+    default:
+      return {
+        label: 'Eligibility unconfirmed',
+        bg: 'var(--bg-card-soft)',
+        text: 'var(--text-muted)',
+        border: 'var(--border)',
+      }
+  }
+}
+
+export function cleanOpportunity(opportunity, now = new Date()) {
   if (!opportunity || typeof opportunity !== 'object') {
     return {
       company: 'Company',
@@ -131,12 +222,7 @@ export function cleanOpportunity(opportunity) {
   let verificationBadge
   switch (opportunity.current_status) {
     case 'OPEN_CONFIRMED':
-      verificationBadge = {
-        label: 'Verified open',
-        bg: 'rgba(28, 138, 98, 0.08)',
-        text: 'var(--domain-code, #1c8a62)',
-        border: 'rgba(28, 138, 98, 0.25)',
-      }
+      verificationBadge = getVerificationBadge('OPEN_CONFIRMED', opportunity.last_verified_at, now)
       break
     case 'UPCOMING_CONFIRMED':
     case 'ANNOUNCED':
@@ -165,42 +251,7 @@ export function cleanOpportunity(opportunity) {
   }
 
   // Eligibility Badge: exactly one eligibility chip
-  let eligibilityBadge
-  switch (opportunity.eligibility_classification) {
-    case 'ELIGIBLE':
-      eligibilityBadge = {
-        label: 'Eligible',
-        bg: 'rgba(28, 138, 98, 0.08)',
-        text: 'var(--domain-code, #1c8a62)',
-        border: 'rgba(28, 138, 98, 0.25)',
-      }
-      break
-    case 'POTENTIAL_MATCH':
-    case 'POTENTIALLY_ELIGIBLE':
-      eligibilityBadge = {
-        label: 'Eligible',
-        bg: 'rgba(245, 166, 35, 0.1)',
-        text: 'var(--brand-dark, #b47507)',
-        border: 'rgba(245, 166, 35, 0.3)',
-      }
-      break
-    case 'INELIGIBLE':
-      eligibilityBadge = {
-        label: 'Not eligible',
-        bg: 'var(--danger-bg, #fdeaea)',
-        text: 'var(--danger-text, #b91c1c)',
-        border: 'rgba(185, 28, 28, 0.25)',
-      }
-      break
-    case 'INSUFFICIENT_INFORMATION':
-    default:
-      eligibilityBadge = {
-        label: 'Eligibility unconfirmed',
-        bg: 'var(--bg-card-soft)',
-        text: 'var(--text-muted)',
-        border: 'var(--border)',
-      }
-  }
+  const eligibilityBadge = getEligibilityBadge(opportunity.eligibility_classification)
 
   // Restrictions (Drop separate "Location: India" tag per rule 4)
   const restrictions = []
@@ -248,17 +299,6 @@ export function cleanOpportunity(opportunity) {
   }
 
   const rawVerified = opportunity.last_verified_at
-  let verifiedStr = null
-  if (cleanText(rawVerified)) {
-    try {
-      const d = new Date(rawVerified)
-      if (!isNaN(d.getTime())) {
-        verifiedStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-      }
-    } catch {
-      /* ignore */
-    }
-  }
 
   // Source name: clean, no JobSpy
   const rawSource =
@@ -267,7 +307,7 @@ export function cleanOpportunity(opportunity) {
     (opportunity.official_source_confirmed ? 'Official Careers Site' : null)
   const sourceName = cleanSource(rawSource)
 
-  // One line footer: e.g. "Posted 23 Oct, checked 24 Oct via Glassdoor"
+  // One line footer: e.g. "Posted Oct 23, Last checked 2 days ago via Glassdoor"
   const footerParts = []
   if (postedStr) {
     footerParts.push(`Posted ${postedStr}`)
@@ -275,8 +315,9 @@ export function cleanOpportunity(opportunity) {
     footerParts.push('Posting date unrecorded')
   }
 
-  if (verifiedStr) {
-    footerParts.push(`checked ${verifiedStr}`)
+  const checkedText = lastCheckedText(rawVerified, now)
+  if (checkedText) {
+    footerParts.push(checkedText)
   }
 
   let footerLine = footerParts.join(', ')

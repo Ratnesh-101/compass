@@ -41,6 +41,18 @@ async def _new_opportunity() -> int:
 
 
 async def _approved_app(client: AsyncClient, headers: dict) -> tuple[int, str]:
+    # Batch approval requires a validated resume + cover letter, so seed a master with real identity.
+    seeded = await client.put(
+        "/api/career/resumes/master",
+        headers=headers,
+        json={
+            "full_name": "Fixes Tester",
+            "email": "fixes@example.com",
+            "skills": ["Python"],
+            "education": [{"institution": "Test University", "degree": "B.Tech", "end_year": 2027}],
+        },
+    )
+    assert seeded.status_code == 200
     opp_id = await _new_opportunity()
     app_id = (await client.post(f"/api/career/applications/{opp_id}", headers=headers)).json()["id"]
     await client.patch(
