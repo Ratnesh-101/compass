@@ -345,3 +345,63 @@ async def test_streaming_mid_stream_model_error(client: AsyncClient, monkeypatch
     assert len(error_events) == 1
     assert error_events[0]["terminal"] is True
 
+
+@pytest.mark.asyncio
+async def test_streaming_tool_done_payload_serializes_datetime(client: AsyncClient, monkeypatch):
+    """Regression test: verify done event serializes data containing datetime/date objects without raising TypeError."""
+    from datetime import datetime, date, timezone
+
+    class MockStream:
+        def __aiter__(self):
+            return self._gen()
+
+        async def _gen(self):
+            choice = MagicMock()
+            choice.delta.content = None
+            choice.delta.tool_calls = [MagicMock()]
+            choice.finish_reason = "tool_calls"
+            chunk = MagicMock()
+            chunk.choices = [choice]
+            chunk.usage = None
+            yield chunk
+
+        async def aclose(self):
+            pass
+
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = AsyncMock(return_value=MockStream())
+    monkeypatch.setattr("backend.services.chat_stream.openai.AsyncOpenAI", lambda **kwargs: mock_client)
+    monkeypatch.setattr("backend.services.chat_stream.is_schedule_or_agent_intent", lambda msg: False)
+    monkeypatch.setattr("backend.services.rate_limiter.enforce_rate_limit", AsyncMock())
+    monkeypatch.setattr("backend.dependencies.rate_limit", AsyncMock())
+    monkeypatch.setattr(
+        "backend.orchestrator.handle_message",
+        AsyncMock(return_value={
+            "response": "Here are your tasks.",
+            "skill_used": "query_tasks",
+            "data": [
+                {
+                    "id": 1,
+                    "title": "Buy milk",
+                    "due_date": date(2026, 10, 30),
+                    "created_at": datetime(2026, 10, 29, 10, 0, 0, tzinfo=timezone.utc),
+                    "updated_at": datetime(2026, 10, 29, 10, 5, 0, tzinfo=timezone.utc),
+                }
+            ],
+        }),
+    )
+
+    events = []
+    payload = {"message": "What are my tasks?"}
+    async with client.stream("POST", "/api/chat/stream", json=payload, timeout=15.0) as resp:
+        assert resp.status_code == 200
+        async for line in resp.aiter_lines():
+            if line.startswith("data: "):
+                events.append(json.loads(line[6:]))
+
+    done_events = [e for e in events if e.get("type") == "done"]
+    assert len(done_events) == 1
+    assert done_events[0]["skill_used"] == "query_tasks"
+    assert len(done_events[0]["tasks"]) == 1
+    assert done_events[0]["tasks"][0]["title"] == "Buy milk"
+    assert not any(e.get("type") == "error" for e in events)

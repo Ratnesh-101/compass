@@ -385,7 +385,7 @@ async def generate_chat_events(
                     done_payload['evidence'] = evidence
             if result.get('is_truncated') or (isinstance(raw_data, dict) and raw_data.get('is_truncated')):
                 done_payload['is_truncated'] = True
-            yield f"data: {json.dumps(done_payload)}\n\n"
+            yield f"data: {json.dumps(done_payload, default=str)}\n\n"
             _schedule_stream_persistence(conv_id, message, response_text, user_id, guest_id, skill_used, evidence=done_payload.get('evidence'))
             return
 
@@ -650,7 +650,7 @@ async def generate_chat_events(
                     done_payload2['evidence'] = evidence2
             if result.get('is_truncated') or (isinstance(raw_data2, dict) and raw_data2.get('is_truncated')):
                 done_payload2['is_truncated'] = True
-            yield f"data: {json.dumps(done_payload2)}\n\n"
+            yield f"data: {json.dumps(done_payload2, default=str)}\n\n"
             _schedule_stream_persistence(conv_id, message, response_text, user_id, guest_id, skill_used, evidence=done_payload2.get('evidence'))
             return
 
@@ -695,7 +695,7 @@ async def generate_chat_events(
                     done_payload_orchestrator['evidence'] = ev
             if result.get('is_truncated') or (isinstance(raw_data_orch, dict) and raw_data_orch.get('is_truncated')):
                 done_payload_orchestrator['is_truncated'] = True
-            yield f"data: {json.dumps(done_payload_orchestrator)}\n\n"
+            yield f"data: {json.dumps(done_payload_orchestrator, default=str)}\n\n"
             _schedule_stream_persistence(conv_id, message, response_text, user_id, guest_id, skill_used)
             return
 
