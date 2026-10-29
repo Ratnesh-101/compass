@@ -164,6 +164,8 @@ class TailorResumeRequest(BaseModel):
     opportunity_id: int
     custom_title: Optional[str] = None
     target_skills_emphasis: Optional[List[str]] = None
+    # When set, the new tailored resume is also linked to this (owner-scoped) application.
+    application_id: Optional[int] = None
 
 
 class SaveResumeRequest(BaseModel):
@@ -233,6 +235,8 @@ class UpdateApplicationStatusRequest(BaseModel):
     form_answers: Optional[Dict[str, Any]] = None
     cover_letter: Optional[str] = Field(default=None, max_length=50000)
     target_deadline: Optional[date] = None
+    # Explicitly clear the deadline (omitting target_deadline leaves it unchanged).
+    clear_target_deadline: bool = False
     private_notes: Optional[str] = Field(default=None, max_length=20000)
 
     @field_validator("form_answers")
@@ -340,8 +344,9 @@ class GitHubRepoEvidence(BaseModel):
     description: Optional[str] = None
     primary_language: Optional[str] = None
     detected_technologies: List[str] = Field(default_factory=list)
-    has_tests: bool = False
-    has_ci_cd: bool = False
+    # None means unknown (the check could not be completed, e.g. rate limited or fork)
+    has_tests: Optional[bool] = False
+    has_ci_cd: Optional[bool] = False
     has_documentation: bool = False
     commit_count_estimate: Optional[int] = None
     analysis_timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -357,6 +362,8 @@ class GitHubProfileIntelligence(BaseModel):
     detected_skills: List[str] = Field(default_factory=list)
     evidence_summary: str = ""
     warnings: List[str] = Field(default_factory=list)
+    # "ok" | "partial" | "failed" (additive; failed means nothing could be analyzed)
+    status: str = "ok"
 
 
 class GitHubImportRequest(BaseModel):
@@ -421,6 +428,10 @@ class JobMatchEvidence(BaseModel):
     confidence: float = 1.0
 
 
+class JobAnalysisRequest(BaseModel):
+    custom_description: Optional[str] = Field(None, max_length=20000)
+
+
 class JobAnalysisReport(BaseModel):
     opportunity_id: int
     role_title: str
@@ -441,6 +452,8 @@ class JobAnalysisReport(BaseModel):
     partial_skills: List[str] = Field(default_factory=list)
     gap_actions: List[Dict[str, Any]] = Field(default_factory=list)
     has_complete_profile: bool = True
+    # False when the posting lists no recognisable skills (match_score is then not meaningful)
+    score_available: bool = True
     profile_missing_message: Optional[str] = None
     formula_explanation: str = "Skill overlap estimate = (matched + 0.5 * partial) / total required skills"
 

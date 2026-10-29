@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import InternshipRadar from './InternshipRadar'
 import ApplicationCenter from './career/ApplicationCenter'
 import DarkModeToggle from './DarkModeToggle'
+import RadarProfileModal from './radar/RadarProfileModal'
 
 const ResumeStudio = React.lazy(() => import('./career/ResumeStudio'))
 
@@ -9,9 +10,18 @@ export default function CareerCopilot({ isDarkMode, onToggleDarkMode }) {
   const [activeSubTab, setActiveSubTab] = useState('radar') // 'radar' | 'resumes' | 'applications'
   const [profileRefreshTrigger, setProfileRefreshTrigger] = useState(0)
   const [notification, setNotification] = useState(null)
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false)
 
   const handleNavigateToResumeStudio = () => {
     setActiveSubTab('resumes')
+  }
+
+  const handleOpenProfileModal = () => setIsProfileModalOpen(true)
+  const handleCloseProfileModal = () => setIsProfileModalOpen(false)
+
+  // The modal saves via the radar profile API and closes itself; reload the radar profile and stat cards.
+  const handleProfileUpdated = () => {
+    setProfileRefreshTrigger(prev => prev + 1)
   }
 
   const handleRefreshComplete = () => {
@@ -110,8 +120,8 @@ export default function CareerCopilot({ isDarkMode, onToggleDarkMode }) {
           <button
             type="button"
             className="btn-secondary"
-            onClick={handleNavigateToResumeStudio}
-            title="Manage candidate profile and master resume in Resume Studio"
+            onClick={handleOpenProfileModal}
+            title="Edit your candidate profile (year of study, graduation year, skills)"
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -264,7 +274,7 @@ export default function CareerCopilot({ isDarkMode, onToggleDarkMode }) {
             onRefreshComplete={handleRefreshComplete}
             onRefreshError={handleRefreshError}
             onNavigateToResumeStudio={handleNavigateToResumeStudio}
-            onOpenProfile={handleNavigateToResumeStudio}
+            onOpenProfile={handleOpenProfileModal}
           />
         )}
         {activeSubTab === 'resumes' && (
@@ -276,6 +286,14 @@ export default function CareerCopilot({ isDarkMode, onToggleDarkMode }) {
           <ApplicationCenter onNavigateToResumeStudio={handleNavigateToResumeStudio} />
         )}
       </div>
+
+      {isProfileModalOpen && (
+        <RadarProfileModal
+          isOpen
+          onClose={handleCloseProfileModal}
+          onProfileUpdated={handleProfileUpdated}
+        />
+      )}
     </div>
   )
 }

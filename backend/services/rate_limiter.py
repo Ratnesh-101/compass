@@ -490,8 +490,48 @@ def check_identity_daily_cap(
     return True, 0
 
 
+def peek_identity_daily_cap(identity_id: str, action: str, cap: int) -> Tuple[bool, int]:
+    """Like check_identity_daily_cap but read-only: does not count the request (UTC day)."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    current = _DAILY_ACTION_USAGE.get(now.date().isoformat(), {}).get(f"{identity_id}:{action}", 0)
+    if current < cap:
+        return True, 0
+    midnight = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+    return False, max(1, int((midnight - now).total_seconds()))
+
+
+COMPANY_INTEL_GUEST_DAILY_CAP = 10
+
+
+def make_company_intel_cap_charger(request: Request):
+    """Return a callable that counts one guest company-intel request, or None for exempt identities.
+
+    The guard only checks the cap; the count is taken when paid work actually starts, so cache hits
+    and workspace opens never consume the guest's daily allowance.
+    """
+    identity_id = getattr(request.state, "intel_cap_identity", None)
+    if not identity_id:
+        return None
+
+    def _charge() -> None:
+        allowed, retry_after = check_identity_daily_cap(identity_id, "company_intel", cap=COMPANY_INTEL_GUEST_DAILY_CAP)
+        if not allowed:
+            raise HTTPException(
+                status_code=429,
+                detail={"detail": "Daily cap of 10 company intelligence briefs reached for this session. Please try again tomorrow.", "code": "daily_cap_exceeded"},
+                headers={"Retry-After": str(retry_after)},
+            )
+
+    return _charge
+
+
 async def enforce_company_intel_guard(request: Request) -> None:
-    """Cost guard for /company-intel: rate limit + 10/day guest cap (admin exempt)."""
+    """Cost guard for /company-intel: rate limit + 10/day guest cap check (admin exempt).
+
+    The guest cap is only checked here; it is counted when paid work starts (see
+    make_company_intel_cap_charger).
+    """
     from backend.config import get_settings
     from backend.dependencies import _get_current_identity
     settings = get_settings()
@@ -534,7 +574,8 @@ async def enforce_company_intel_guard(request: Request) -> None:
 
     # 2. Daily cap (10/day for guests)
     if is_guest:
-        allowed, retry_after = check_identity_daily_cap(identity_id, "company_intel", cap=10)
+        allowed, retry_after = peek_identity_daily_cap(identity_id, "company_intel", cap=COMPANY_INTEL_GUEST_DAILY_CAP)
+        request.state.intel_cap_identity = identity_id
         if not allowed:
             raise HTTPException(
                 status_code=429,

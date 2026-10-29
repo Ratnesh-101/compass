@@ -34,7 +34,23 @@ async def _new_opportunity() -> int:
     )
 
 
+async def _seed_valid_master(client: AsyncClient, headers: dict) -> None:
+    """A master with real identity + education, so prepared resumes pass validation (READY_FOR_REVIEW)."""
+    resp = await client.put(
+        "/api/career/resumes/master",
+        headers=headers,
+        json={
+            "full_name": "Hardening Tester",
+            "email": "hardening@example.com",
+            "skills": ["Python", "FastAPI"],
+            "education": [{"institution": "Test University", "degree": "B.Tech", "end_year": 2027}],
+        },
+    )
+    assert resp.status_code == 200
+
+
 async def _new_app(client: AsyncClient, headers: dict) -> tuple[int, int]:
+    await _seed_valid_master(client, headers)
     opp_id = await _new_opportunity()
     resp = await client.post(f"/api/career/applications/{opp_id}", headers=headers)
     assert resp.status_code == 200
@@ -238,6 +254,10 @@ async def test_prepare_does_not_downgrade_submitted_application(client: AsyncCli
     # Batch prepare creates a bare application with no resume attached.
     prep = await client.post("/api/career/batches/prepare", headers=headers, json={"opportunity_ids": [opp_id]})
     app_id = prep.json()["applications"][0]["id"]
+    # SAVED cannot jump straight to SUBMITTED any more; reach a state that may be marked applied.
+    assert (await client.patch(
+        f"/api/career/applications/{app_id}", headers=headers, json={"status": "READY_FOR_REVIEW"}
+    )).status_code == 200
     assert (await client.post(f"/api/career/applications/{app_id}/mark-applied", headers=headers)).status_code == 200
 
     resp = await client.post(

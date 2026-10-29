@@ -269,7 +269,7 @@ async def test_analyze_github_profile_success():
         owned = next(r for r in intel.analyzed_repos if r.repo_name == "super-service")
         assert owned.is_fork is False
         assert owned.has_tests is True
-        assert owned.has_ci_cd is True
+        assert owned.has_ci_cd is False  # bare Dockerfile is not CI/CD
         assert owned.primary_language is not None
         assert "Go" in owned.primary_language
 

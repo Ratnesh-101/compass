@@ -73,7 +73,7 @@ export default function GitHubIntelligenceModal({
               🐙 GitHub Profile Intelligence & Project Evidence
             </h3>
             <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--text-muted, #64748b)' }}>
-              Verifies repository ownership, tech stacks, test coverage, and CI/CD pipelines via official GitHub APIs.
+              Detects repository ownership, languages, test files, and CI configuration from public GitHub repository metadata.
             </p>
           </div>
           <button
@@ -121,7 +121,7 @@ export default function GitHubIntelligenceModal({
           </div>
 
           <details style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-            <summary style={{ cursor: 'pointer', fontWeight: '600' }}>🔑 Optional GitHub Token (for rate limits or private repos)</summary>
+            <summary style={{ cursor: 'pointer', fontWeight: '600' }}>🔑 Optional GitHub Token (raises rate limits; only public repos are analyzed)</summary>
             <div style={{ marginTop: '8px' }}>
               <input
                 type="password"
@@ -131,7 +131,7 @@ export default function GitHubIntelligenceModal({
                 style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px' }}
               />
               <p style={{ margin: '4px 0 0', fontSize: '11px', color: 'var(--text-muted)' }}>
-                Only read:public_repo permission is needed. All external text is strictly sanitized against prompt-injection.
+                No scopes are needed (public data only). The token is sent only to api.github.com and is never saved. All external text is strictly sanitized against prompt-injection.
               </p>
             </div>
           </details>
@@ -154,7 +154,25 @@ export default function GitHubIntelligenceModal({
             </div>
           )}
 
-          {intel && (
+          {intel && intel.analyzed_repos?.length === 0 && (
+            <div role="alert" style={{ background: '#fee2e2', color: '#991b1b', padding: '12px 14px', borderRadius: '8px', fontSize: '12px', marginBottom: '14px' }}>
+              <strong>Nothing could be analyzed.</strong>{' '}
+              {intel.warnings?.length > 0 ? 'See the details below.' : 'No repositories were returned for this account.'}
+            </div>
+          )}
+
+          {intel && intel.warnings?.length > 0 && (
+            <div role="alert" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #f59e0b', padding: '10px 14px', borderRadius: '8px', fontSize: '12px', marginBottom: '14px' }}>
+              <strong>Warnings</strong>
+              <ul style={{ margin: '6px 0 0', paddingLeft: '18px' }}>
+                {intel.warnings.map((w, idx) => (
+                  <li key={idx}>{w}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {intel && intel.analyzed_repos?.length > 0 && (
             <div>
               {/* Summary Card */}
               <div style={{ background: 'var(--bg-card-soft)', padding: '14px', borderRadius: '10px', marginBottom: '16px', border: '1px solid var(--border)' }}>
@@ -169,7 +187,7 @@ export default function GitHubIntelligenceModal({
                 {intel.detected_skills?.length > 0 && (
                   <div>
                     <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '4px' }}>
-                      Verified Technologies Found in Repos:
+                      Technologies detected in your own repositories:
                     </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' }}>
                       {intel.detected_skills.map((s, idx) => (
@@ -177,6 +195,9 @@ export default function GitHubIntelligenceModal({
                           {s}
                         </span>
                       ))}
+                    </div>
+                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '8px' }}>
+                      Detected from repository metadata (languages by code size). This is not proof of proficiency.
                     </div>
                     {onImportSkillsToMaster && (
                       <button
@@ -193,7 +214,7 @@ export default function GitHubIntelligenceModal({
                           cursor: 'pointer',
                         }}
                       >
-                        + Add Verified Skills to Master Profile
+                        + Add detected skills
                       </button>
                     )}
                   </div>
@@ -226,16 +247,21 @@ export default function GitHubIntelligenceModal({
                           color: repo.is_owned ? '#166534' : '#475569',
                         }}
                       >
-                        {repo.is_owned ? '👑 Original Author' : '🍴 Fork'}
+                        {repo.is_owned ? 'Original repository' : '🍴 Fork'}
                       </span>
                       {repo.has_tests && (
                         <span style={{ fontSize: '10px', fontWeight: '700', padding: '2px 6px', borderRadius: '10px', background: '#e0f2fe', color: '#0369a1' }}>
-                          ✓ Tests Verified
+                          ✓ Test files found
                         </span>
                       )}
                       {repo.has_ci_cd && (
                         <span style={{ fontSize: '10px', fontWeight: '700', padding: '2px 6px', borderRadius: '10px', background: '#fae8ff', color: '#86198f' }}>
-                          ✓ CI/CD Pipeline
+                          ✓ CI workflow found
+                        </span>
+                      )}
+                      {(repo.has_tests === null || repo.has_ci_cd === null) && !repo.is_fork && (
+                        <span style={{ fontSize: '10px', fontWeight: '700', padding: '2px 6px', borderRadius: '10px', background: '#fef3c7', color: '#92400e' }}>
+                          Tests/CI unknown
                         </span>
                       )}
                     </div>
@@ -254,10 +280,18 @@ export default function GitHubIntelligenceModal({
                     ))}
                   </div>
 
+                  {repo.is_fork && (
+                    <p style={{ margin: '0 0 8px', fontSize: '11px', fontWeight: '700', color: '#92400e' }}>
+                      Fork - not your original work
+                    </p>
+                  )}
+
                   {onImportRepoToMaster && (
                     <button
                       type="button"
-                      onClick={() => onImportRepoToMaster(repo)}
+                      disabled={repo.is_fork}
+                      title={repo.is_fork ? 'Forks cannot be imported as your own project' : undefined}
+                      onClick={() => !repo.is_fork && onImportRepoToMaster(repo)}
                       style={{
                         background: 'transparent',
                         border: '1px solid var(--border)',
@@ -266,7 +300,8 @@ export default function GitHubIntelligenceModal({
                         borderRadius: '6px',
                         fontSize: '11px',
                         fontWeight: '600',
-                        cursor: 'pointer',
+                        cursor: repo.is_fork ? 'not-allowed' : 'pointer',
+                        opacity: repo.is_fork ? 0.5 : 1,
                       }}
                     >
                       + Import as Master Profile Project
