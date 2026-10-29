@@ -19,6 +19,7 @@ import logging
 import re
 import time
 from typing import Any, Dict, List, Optional, Set
+from urllib.parse import urlparse
 import uuid
 
 logger = logging.getLogger("compass.services.company_intel_jobs")
@@ -266,8 +267,8 @@ def build_job_posting_fallback(
         priorities.append(s0.replace("—", "-").replace("–", "-"))
 
     domain = "job posting"
-    if canonical_url and "//" in canonical_url:
-        domain = canonical_url.split("//")[-1].split("/")[0]
+    if canonical_url:
+        domain = urlparse(canonical_url).netloc or "job posting"
 
     sources_out = [
         {

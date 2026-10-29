@@ -120,7 +120,7 @@ async def test_sources_only_fallback_when_model_times_out():
         assert brief.get("fallback_label") == "Sources found, summary unavailable"
         assert brief.get("reason") == "model_timeout"
         assert len(brief["sources"]) == 1
-        assert "stripe.com" in brief["sources"][0]["domain"]
+        assert brief["sources"][0]["domain"] == "stripe.com"
 
 
 @pytest.mark.asyncio
