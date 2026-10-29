@@ -69,14 +69,12 @@ test('ExtractionReviewModal: Controlled inputs use local text states and do not 
 // Item 2: Unauthenticated API call triggers 401 in Handoff Kit
 // ---------------------------------------------------------------------------
 test('HandoffKitDrawer: fetches handoff-kit with auth headers and credentials include', () => {
-  const src = readComponent('career/HandoffKitDrawer.jsx')
-
-  // Must import getAuthHeaders
-  assert.match(src, /import\s*\{[^}]*getAuthHeaders[^}]*\}\s*from\s*['"]\.\.\/\.\.\/api\/baseClient(\.js)?['"]/,
-    'HandoffKitDrawer must import getAuthHeaders from baseClient')
+  const drawer = readComponent('career/HandoffKitDrawer.jsx')
+  assert.match(drawer, /fetchHandoffKit/, 'HandoffKitDrawer must load the kit through the shared careerApi helper')
+  const src = fs.readFileSync(new URL('../src/api/careerApi.js', import.meta.url), 'utf8')
 
   // Must include auth headers and credentials: include
-  assert.match(src, /headers:\s*getAuthHeaders\(\{\s*['"]Accept['"]:\s*['"]application\/json['"]\s*\}\)/,
+  assert.match(src, /headers:\s*getAuthHeaders\(\{\s*['"]?Accept['"]?:\s*['"]application\/json['"]\s*\}\)/,
     'HandoffKit fetch must pass getAuthHeaders')
   assert.match(src, /credentials:\s*['"]include['"]/,
     'HandoffKit fetch must pass credentials: include')
@@ -216,8 +214,8 @@ test('ResumeStudio: Truthful Cover Letter tab provides a Save button', () => {
   const clSection = src.slice(clTabIdx)
 
   // Must have Save button inside cover letter section invoking handleSave
-  assert.match(clSection, /<button[^>]*onClick=\{handleSave\}[\s\S]*?>[\s\S]*?Save Cover Letter/,
-    'Cover letter footer must include a Save button invoking handleSave')
+  assert.match(clSection, /<button[^>]*onClick=\{handleSaveResume\}[\s\S]*?>[\s\S]*?Save Cover Letter/,
+    'Cover letter footer must include a Save button invoking the defined handleSaveResume')
   assert.match(clSection, /📋\s*Copy to Clipboard/,
     'Cover letter footer must retain Copy to Clipboard button')
 })

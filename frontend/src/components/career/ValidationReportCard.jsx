@@ -1,13 +1,21 @@
 import React from 'react'
+import { getValidationCardState } from '../../utils/careerUiHelpers'
 
 export default function ValidationReportCard({ validationReport }) {
   if (!validationReport) return null
 
-  const status = validationReport.status || (validationReport.is_valid ? 'CONSISTENT WITH MASTER' : 'INCONSISTENT WITH MASTER')
-  const isNotEnoughData = status === 'NOT ENOUGH DATA'
-  const isConsistent = status === 'CONSISTENT WITH MASTER'
+  const cardState = getValidationCardState(validationReport)
+  const { isNotEnoughData, isConsistent, isIncomplete, missingFields, warnings } = cardState
 
-  const badgeConfig = isNotEnoughData
+  const badgeConfig = isIncomplete
+    ? {
+        label: cardState.incompleteLabel,
+        bg: '#fee2e2',
+        color: '#991b1b',
+        tooltip: 'The resume is missing required details, so it cannot be treated as ready.',
+        explanation: cardState.hint,
+      }
+    : isNotEnoughData
     ? {
         label: 'NOT ENOUGH DATA',
         bg: '#fef3c7',
@@ -56,6 +64,34 @@ export default function ValidationReportCard({ validationReport }) {
       <p style={{ margin: '0 0 12px 0', fontSize: '12px', color: 'var(--text-secondary)' }}>
         ℹ️ {badgeConfig.explanation}
       </p>
+
+      {/* Missing required fields */}
+      {missingFields.length > 0 && (
+        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', padding: '10px 12px', marginBottom: '12px' }}>
+          <div style={{ fontWeight: '700', color: '#991b1b', fontSize: '12px', marginBottom: '4px' }}>
+            Missing fields:
+          </div>
+          <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12px', color: '#b91c1c' }}>
+            {missingFields.map((field, idx) => (
+              <li key={idx}>{field}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Warnings */}
+      {warnings.length > 0 && (
+        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', padding: '10px 12px', marginBottom: '12px' }}>
+          <div style={{ fontWeight: '700', color: '#92400e', fontSize: '12px', marginBottom: '4px' }}>
+            Warnings:
+          </div>
+          <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12px', color: '#b45309' }}>
+            {warnings.map((warning, idx) => (
+              <li key={idx}>{warning}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Unsupported Claims Alert */}
       {validationReport.unsupported_claims && validationReport.unsupported_claims.length > 0 && (
