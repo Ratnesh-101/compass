@@ -430,3 +430,40 @@ def test_non_http_official_application_url_is_dropped(bad):
 def test_http_official_application_url_is_kept():
     assert _opp(official_application_url="https://acme.test/apply").official_application_url == "https://acme.test/apply"
     assert _opp(official_application_url="http://acme.test/apply").official_application_url == "http://acme.test/apply"
+
+
+# --- 9. async refresh jobs (company_intel_jobs) ---------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_refresh_job_passes_paid_work_callback_to_generator():
+    from backend.services import company_intel_jobs as jobs
+
+    job = await jobs.create_job(881, "Acme Robotics", "Backend Intern")
+    charge = MagicMock()
+    gen = AsyncMock(return_value={"status": "ready", "sources": []})
+    with patch("backend.memory.radar.get_opportunity_by_id", AsyncMock(return_value=_opp(opp_id=881))), \
+         patch("backend.services.winning_features.generate_company_intel_brief", gen):
+        await jobs.run_intel_refresh_job(job["job_id"], 881, None, charge)
+    assert gen.call_args.kwargs["on_paid_work"] is charge
+    assert (await jobs.get_job(job["job_id"]))["status"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_refresh_job_reports_structured_reason_when_refused_by_cooldown():
+    from backend.services import company_intel_jobs as jobs
+
+    job = await jobs.create_job(882, "Acme Robotics", "Backend Intern")
+    winning_features._LAST_INTEL_REFRESH[882] = __import__("time").time()
+    with patch("backend.memory.radar.get_opportunity_by_id", AsyncMock(return_value=_opp(opp_id=882))):
+        await jobs.run_intel_refresh_job(job["job_id"], 882)
+    done = await jobs.get_job(job["job_id"])
+    assert done["status"] == "failed"
+    assert done["reason"] == "intel_refresh_cooldown"
+    assert "wait" in done["error"].lower()
+
+
+def test_single_is_point_grounded_implementation():
+    from backend.services import company_intel_jobs as jobs
+
+    assert jobs.is_point_grounded is winning_features.is_point_grounded
+    assert jobs.STOPWORDS is winning_features.STOPWORDS

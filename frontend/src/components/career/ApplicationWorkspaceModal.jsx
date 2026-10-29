@@ -31,6 +31,8 @@ import {
   getResumeExportDocxUrl,
   fetchJobAnalysis,
   fetchCompanyIntel,
+  refreshCompanyIntelJob,
+  getCompanyIntelJobStatus,
 } from '../../api/careerApi'
 import { downloadAuthedFile, openAuthedHtml } from '../../api/baseClient.js'
 
@@ -107,9 +109,47 @@ function formatAttemptTime(isoString) {
   try {
     const d = new Date(isoString)
     if (isNaN(d.getTime())) return ''
-    return `Last attempt ${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+    const now = new Date()
+    const isToday =
+      d.getDate() === now.getDate() &&
+      d.getMonth() === now.getMonth() &&
+      d.getFullYear() === now.getFullYear()
+    const timeStr = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    if (isToday) {
+      return `Last attempt today, ${timeStr}`
+    }
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    return `Last attempt ${d.getDate()} ${monthNames[d.getMonth()]}, ${timeStr}`
   } catch {
     return ''
+  }
+}
+
+function getIntelErrorMessage(reason, fallbackError) {
+  switch (reason) {
+    case 'search_failed':
+    case 'search_quota':
+      return 'Search service is temporarily unavailable. Please try refreshing again shortly.'
+    case 'search_timeout':
+      return 'Search took too long to respond. Please try refreshing again.'
+    case 'model_failed':
+      return 'Summary service is temporarily unavailable. Please try refreshing again.'
+    case 'model_timeout':
+      return 'Summary took too long to generate. Please try refreshing again.'
+    case 'model_bad_output':
+      return 'Could not format company intelligence correctly. Please try refreshing again.'
+    case 'no_sources':
+      return 'We could not find enough reliable information about this company.'
+    case 'auth_failed':
+      return 'Service authentication issue. Please try again later.'
+    case 'job_lost':
+      return 'Server restarted or research session expired. Please refresh intel again.'
+    case 'storage_failed':
+      return 'Could not save intelligence data. Please try refreshing again.'
+    case 'backend_unreachable':
+      return 'Network issue. Please check your connection and try again.'
+    default:
+      return fallbackError || "We couldn't generate company intel right now. Please try again with Refresh Intel."
   }
 }
 
@@ -210,6 +250,7 @@ export default function ApplicationWorkspaceModal({
   // Company Intel state
   const [companyIntel, setCompanyIntel] = useState(null)
   const [loadingIntel, setLoadingIntel] = useState(false)
+  const [coldStartPending, setColdStartPending] = useState(false)
   const [intelError, setIntelError] = useState(null)
   const [lastAttemptTime, setLastAttemptTime] = useState(null)
   const [sourcesExpanded, setSourcesExpanded] = useState(false)
@@ -219,6 +260,15 @@ export default function ApplicationWorkspaceModal({
   const lastIntelRefreshTimeRef = useRef(0)
   const companyIntelRef = useRef(null)
   const loadingIntelRef = useRef(false)
+  const coldStartTimerRef = useRef(null)
+
+  useEffect(() => {
+    return () => {
+      if (coldStartTimerRef.current) {
+        clearTimeout(coldStartTimerRef.current)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     companyIntelRef.current = companyIntel
@@ -244,22 +294,105 @@ export default function ApplicationWorkspaceModal({
     setLoadingIntel(true)
     setIntelError(null)
     setRefreshCooldownNotice('')
+    setColdStartPending(false)
+    if (coldStartTimerRef.current) clearTimeout(coldStartTimerRef.current)
+    coldStartTimerRef.current = setTimeout(() => {
+      setColdStartPending(true)
+    }, 5000)
+
     try {
-      const intel = await fetchCompanyIntel(opportunity.id, isRefresh)
-      setCompanyIntel(intel)
-      if (intel?.status === 'error' || intel?.error) {
-        setIntelError(intel.error || "We couldn't generate company intel right now. Please try again.")
-        setLastAttemptTime(new Date().toISOString())
+      if (isRefresh) {
+        let job = null
+        try {
+          job = await refreshCompanyIntelJob(opportunity.id)
+        } catch (postErr) {
+          console.warn('Async refresh job creation failed, falling back to sync fetch:', postErr)
+        }
+
+        if (job?.status === 'done' && job?.result) {
+          setCompanyIntel(job.result)
+          if (job.result.status === 'error' || job.result.error) {
+            setIntelError(getIntelErrorMessage(job.result.reason, job.result.error))
+            setLastAttemptTime(new Date().toISOString())
+          }
+        } else if (job?.job_id) {
+          const maxAttempts = 30
+          let attempt = 0
+          let finished = false
+          let consecutivePollErrors = 0
+
+          while (attempt < maxAttempts && !finished) {
+            await new Promise((r) => setTimeout(r, 2000))
+            if (document.visibilityState === 'hidden') {
+              break
+            }
+            attempt++
+            try {
+              const statusData = await getCompanyIntelJobStatus(opportunity.id, job.job_id)
+              consecutivePollErrors = 0
+              if (statusData?.status === 'done' && statusData?.result) {
+                setCompanyIntel(statusData.result)
+                if (statusData.result.status === 'error' || statusData.result.error) {
+                  setIntelError(getIntelErrorMessage(statusData.result.reason, statusData.result.error))
+                  setLastAttemptTime(new Date().toISOString())
+                }
+                finished = true
+                break
+              } else if (statusData?.status === 'failed') {
+                const msg = getIntelErrorMessage(statusData.reason, statusData.error)
+                setIntelError(msg)
+                setLastAttemptTime(new Date().toISOString())
+                finished = true
+                break
+              }
+            } catch (pollErr) {
+              consecutivePollErrors++
+              console.warn('Job poll error:', pollErr)
+              if (consecutivePollErrors >= 3) {
+                setIntelError('Connection to research service lost. Please refresh intel again.')
+                setLastAttemptTime(new Date().toISOString())
+                finished = true
+                break
+              }
+            }
+          }
+
+          if (!finished) {
+            setIntelError('Research took too long to complete. Please try refreshing again.')
+            setLastAttemptTime(new Date().toISOString())
+          }
+        } else {
+          const intel = await fetchCompanyIntel(opportunity.id, true)
+          setCompanyIntel(intel)
+          if (intel?.status === 'error' || intel?.error) {
+            setIntelError(getIntelErrorMessage(intel.reason, intel.error))
+            setLastAttemptTime(new Date().toISOString())
+          }
+        }
+      } else {
+        const intel = await fetchCompanyIntel(opportunity.id, false)
+        setCompanyIntel(intel)
+        if (intel?.status === 'error' || intel?.error) {
+          setIntelError(getIntelErrorMessage(intel.reason, intel.error))
+          setLastAttemptTime(new Date().toISOString())
+        }
       }
     } catch (err) {
       console.warn('Could not load company intelligence:', err)
       setLastAttemptTime(new Date().toISOString())
+      const reasonCode = err?.status === 429 ? 'search_quota' : 'backend_unreachable'
+      const errMsg = getIntelErrorMessage(reasonCode, err.message)
       if (!companyIntelRef.current) {
-        setIntelError("We couldn't generate company intel right now. Please try again.")
+        setIntelError(errMsg)
       } else {
         showNotification('Could not refresh intelligence report. Please try again.', 'error')
       }
     } finally {
+      if (coldStartTimerRef.current) {
+        clearTimeout(coldStartTimerRef.current)
+        coldStartTimerRef.current = null
+      }
+      setColdStartPending(false)
       loadingIntelRef.current = false
       setLoadingIntel(false)
       if (isRefresh && refreshBtnRef.current) {
@@ -1048,6 +1181,21 @@ export default function ApplicationWorkspaceModal({
                               {companyIntel.confidence} confidence
                             </span>
                           )}
+                          {isReady && companyIntel?.fallback_label && (
+                            <span
+                              style={{
+                                padding: '2px 8px',
+                                borderRadius: '6px',
+                                border: '1px solid var(--border)',
+                                background: 'var(--bg-card)',
+                                color: 'var(--brand)',
+                                fontSize: '11px',
+                                fontWeight: 600,
+                              }}
+                            >
+                              {companyIntel.fallback_label}
+                            </span>
+                          )}
                           {isError && !isShowingOlderBrief && lastAttemptTime && (
                             <span>{formatAttemptTime(lastAttemptTime)}</span>
                           )}
@@ -1103,6 +1251,29 @@ export default function ApplicationWorkspaceModal({
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }} aria-busy="true">
                         <div
                           style={{
+                            padding: '12px 16px',
+                            borderRadius: '6px',
+                            background: 'var(--bg-app)',
+                            border: '1px solid var(--border)',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '4px',
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <RefreshCw size={14} className="spin" style={{ color: 'var(--brand)', flexShrink: 0 }} aria-hidden="true" />
+                            <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                              Researching {opportunity?.company_name || 'company'}...
+                            </span>
+                          </div>
+                          {coldStartPending && (
+                            <span style={{ fontSize: '12px', color: 'var(--text-secondary)', marginLeft: '24px' }}>
+                              Waking up the server, this can take up to a minute
+                            </span>
+                          )}
+                        </div>
+                        <div
+                          style={{
                             padding: '16px',
                             borderRadius: '6px',
                             background: 'var(--bg-app)',
@@ -1147,10 +1318,23 @@ export default function ApplicationWorkspaceModal({
                           border: '1px solid var(--border)',
                           textAlign: 'center',
                         }}
+                        role="alert"
+                        aria-live="assertive"
                       >
-                        <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-secondary)' }}>
-                          {companyIntel?.error || intelError || "We couldn't generate company intel right now. Please try again with Refresh Intel."}
+                        <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                          {intelError || companyIntel?.error || "We couldn't generate company intel right now. Please try again with Refresh Intel."}
                         </p>
+                        <button
+                          type="button"
+                          onClick={() => loadCompanyIntelData(true)}
+                          disabled={loadingIntel || Boolean(refreshCooldownNotice)}
+                          className="radar-card-btn radar-card-btn-secondary"
+                          style={{ margin: '0 auto', display: 'inline-flex', alignItems: 'center', gap: '6px', minHeight: '36px', padding: '6px 14px' }}
+                          aria-label="Refresh company intelligence"
+                        >
+                          <RefreshCw size={13} className={loadingIntel ? 'spin' : ''} aria-hidden="true" />
+                          <span>Refresh Intel</span>
+                        </button>
                       </div>
                     ) : isEmptyInfo && !isShowingOlderBrief ? (
                       /* Empty / Not enough info state */
