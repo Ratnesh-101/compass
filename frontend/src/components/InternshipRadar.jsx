@@ -342,6 +342,7 @@ export default function InternshipRadar({
         stats={stats}
         profile={profile}
         onOpenProfile={handleGoToResumeStudio}
+        onNavigateToResumeStudio={handleGoToResumeStudio}
         onSelectTab={setActiveTab}
       />
 
