@@ -13,6 +13,7 @@ class ChatRequest(BaseModel):
     message: str
     conversation_id: Optional[str] = None
     tone: Optional[str] = None
+    include_demo: bool = False
     mode: Optional[str] = None
     specialist_id: Optional[str] = None
     specialistId: Optional[str] = None
@@ -259,6 +260,7 @@ class StreamChatRequest(BaseModel):
     conversation_id: Optional[str] = None
     domain: Optional[str] = None
     tone: Optional[str] = None
+    include_demo: bool = False
     mode: Optional[str] = None
     specialist_id: Optional[str] = None
     specialistId: Optional[str] = None

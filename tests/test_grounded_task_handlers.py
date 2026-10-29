@@ -60,7 +60,7 @@ async def test_single_task_contains_actual_title():
         }
     ]
     pool = _create_mock_pool(fixtures)
-    res = await handle_query_coursework_tasks({}, pool)
+    res = await handle_query_coursework_tasks({"user_id": "grounded_user"}, pool)
 
     assert "Logisim ALU Arithmetic Core Lab" in res["response"]
     assert "RISC-V reports and Logisim labs" not in res["response"]
@@ -92,7 +92,7 @@ async def test_multiple_tasks_produce_grounded_summary():
         },
     ]
     pool = _create_mock_pool(fixtures)
-    res = await handle_query_coursework_tasks({}, pool)
+    res = await handle_query_coursework_tasks({"user_id": "grounded_user"}, pool)
 
     assert "CS 61C RISC-V Pipeline Emulation" in res["response"]
     assert "CS 189 Ridge Regression Assignment" in res["response"]
@@ -116,7 +116,7 @@ async def test_actual_deadline_reflected_correctly():
         }
     ]
     pool = _create_mock_pool(fixtures)
-    res = await handle_get_hackathon_deadlines({}, pool)
+    res = await handle_get_hackathon_deadlines({"user_id": "grounded_user"}, pool)
 
     assert "Nebius Token Factory Demo Submission" in res["response"]
     assert "2026-11-04" in res["response"]
@@ -156,7 +156,7 @@ async def test_conflicting_deadlines_from_task_records():
         {"id": 2, "title": "CS 61C Homework", "domain": "coursework", "due_date": "2026-10-25", "status": "open"},
     ]
     pool = _create_mock_pool(fixtures)
-    res = await handle_query_coursework_tasks({}, pool)
+    res = await handle_query_coursework_tasks({"user_id": "grounded_user"}, pool)
 
     resp = res["response"]
     assert "2026-10-20" in resp
@@ -174,7 +174,7 @@ async def test_distinct_tasks_not_misidentified_as_conflicts():
         {"id": 2, "title": "CS 61C Lab 2", "domain": "coursework", "due_date": "2026-10-27", "status": "open"},
     ]
     pool = _create_mock_pool(fixtures)
-    res = await handle_query_coursework_tasks({}, pool)
+    res = await handle_query_coursework_tasks({"user_id": "grounded_user"}, pool)
 
     resp = res["response"]
     assert "Conflicting Deadline Information Detected" not in resp
@@ -188,12 +188,12 @@ async def test_distinct_tasks_not_misidentified_as_conflicts():
 @pytest.mark.asyncio
 async def test_empty_results_truthful_response():
     pool = _create_mock_pool([])
-    res_cw = await handle_query_coursework_tasks({}, pool)
+    res_cw = await handle_query_coursework_tasks({"user_id": "grounded_user"}, pool)
     assert "Found 0 matching coursework task(s)" in res_cw["response"]
     assert res_cw["data"]["tasks"] == []
     assert res_cw["data"]["count"] == 0
 
-    res_hack = await handle_get_hackathon_deadlines({}, pool)
+    res_hack = await handle_get_hackathon_deadlines({"user_id": "grounded_user"}, pool)
     assert "Found 0 active hackathon deliverable(s)" in res_hack["response"]
     assert res_hack["data"]["tasks"] == []
     assert res_hack["data"]["count"] == 0
@@ -206,7 +206,7 @@ async def test_empty_results_truthful_response():
 async def test_missing_optional_fields_no_crash():
     fixtures = [{"id": 999, "title": "Minimal Bare Task"}]
     pool = _create_mock_pool(fixtures)
-    res = await handle_query_coursework_tasks({}, pool)
+    res = await handle_query_coursework_tasks({"user_id": "grounded_user"}, pool)
 
     assert "Minimal Bare Task" in res["response"]
     assert "No due date" in res["response"]
@@ -223,7 +223,7 @@ async def test_large_result_sets_bounded():
         for i in range(1, 45)
     ]
     pool = _create_mock_pool(fixtures)
-    res = await handle_query_coursework_tasks({}, pool)
+    res = await handle_query_coursework_tasks({"user_id": "grounded_user"}, pool)
 
     resp = res["response"]
     assert "Found **44** task(s)" in resp
@@ -240,7 +240,7 @@ async def test_large_result_sets_bounded():
 @pytest.mark.asyncio
 async def test_tool_failure_reported_truthfully():
     pool = _create_failing_pool("connection refused at port 5432")
-    res_cw = await handle_query_coursework_tasks({}, pool)
+    res_cw = await handle_query_coursework_tasks({"user_id": "grounded_user"}, pool)
 
     assert res_cw["success"] is False
     assert "Failed to retrieve coursework tasks" in res_cw["response"]
@@ -248,7 +248,7 @@ async def test_tool_failure_reported_truthfully():
     assert res_cw["error"] == "database_error"
     assert res_cw["data"]["tasks"] == []
 
-    res_hack = await handle_get_hackathon_deadlines({}, pool)
+    res_hack = await handle_get_hackathon_deadlines({"user_id": "grounded_user"}, pool)
     assert res_hack["success"] is False
     assert "Failed to retrieve hackathon deadlines" in res_hack["response"]
     assert res_hack["error"] == "database_error"
@@ -277,10 +277,10 @@ async def test_task_mutation_and_confirmation_gates():
 
     # Missing task_id check
     pool = _create_mock_pool([])
-    res_up = await handle_update_task_status({}, pool)
+    res_up = await handle_update_task_status({"user_id": "grounded_user"}, pool)
     assert res_up["response"] == "Missing task_id."
 
-    res_del = await handle_delete_task({}, pool)
+    res_del = await handle_delete_task({"user_id": "grounded_user"}, pool)
     assert res_del["response"] == "Missing task_id."
 
 
@@ -385,6 +385,7 @@ async def test_conversational_recall_d4_empty_database():
     ]
     pool = _create_mock_pool([])  # 0 tasks in DB
     res = await handle_query_tasks({
+        "user_id": "grounded_user",
         "user_message": "When is that demo video due again?",
         "history": history,
         "memory_context": "- Review RISC-V pipeline hazards lecture (coursework) | Due: 2026-09-03 | 60m | medium",
@@ -406,6 +407,7 @@ async def test_conversational_recall_calendar_date_and_time():
     ]
     pool = _create_mock_pool([])
     res = await handle_query_tasks({
+        "user_id": "grounded_user",
         "user_message": "When is the project proposal due?",
         "history": history,
     }, pool)
@@ -422,6 +424,7 @@ async def test_conversational_recall_preserves_wording_without_this_friday():
     ]
     pool = _create_mock_pool([])
     res = await handle_query_tasks({
+        "user_id": "grounded_user",
         "user_message": "When is that demo video due again?",
         "history": history,
     }, pool)
@@ -438,6 +441,7 @@ async def test_conversational_recall_multiple_plausible_deadlines_clarification(
     ]
     pool = _create_mock_pool([])
     res = await handle_query_tasks({
+        "user_id": "grounded_user",
         "user_message": "When is that demo video due again?",
         "history": history,
     }, pool)
@@ -459,6 +463,7 @@ async def test_conversational_recall_db_conflict_explains_discrepancy():
     ]
     pool = _create_mock_pool(db_tasks)
     res = await handle_query_tasks({
+        "user_id": "grounded_user",
         "user_message": "When is the demo video due?",
         "history": history,
     }, pool)
@@ -483,6 +488,7 @@ async def test_daily_roadmap_b1_headings_and_prioritization():
     ]
     pool = _create_mock_pool(tasks)
     res = await handle_query_tasks({
+        "user_id": "grounded_user",
         "user_message": "I have 6 tasks needing attention today. Please analyze my deadlines and suggest an optimal step-by-step roadmap for today.",
         "intent": "roadmap",
     }, pool)
@@ -501,6 +507,7 @@ async def test_immediate_prioritization_overdue_b2():
     ]
     pool = _create_mock_pool(tasks)
     res = await handle_query_tasks({
+        "user_id": "grounded_user",
         "user_message": "What should I work on first right now?",
     }, pool)
 

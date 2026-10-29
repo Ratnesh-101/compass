@@ -215,6 +215,7 @@ async def test_handle_add_task_proactive_conflict_response():
                     "domain": "hackathon",
                     "due_date": "2026-10-04",
                     "priority": "urgent",
+                    "user_id": "conflict_user",
                 },
                 pool=mock_pool,
             )

@@ -7,6 +7,7 @@ import logging
 import re
 from datetime import datetime, date, timedelta
 
+from backend.services.task_scope import list_chat_tasks
 from backend.skills.registry import register_skill
 
 logger = logging.getLogger("compass.skills.tasks")
@@ -421,7 +422,7 @@ async def handle_query_tasks(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
 
     try:
         async with pool.acquire() as conn:
-            tasks = await structured.list_tasks(conn, domain=domain, status=status, user_id=user_id)
+            tasks = await list_chat_tasks(conn, args, domain=domain, status=status)
     except Exception as e:
         logger.error("Failed to query tasks: %s", e)
         clean_msg = _safe_error_message("Failed to retrieve tasks", e)
@@ -593,7 +594,7 @@ async def handle_query_coursework_tasks(args: Dict[str, Any], pool: Any) -> Dict
 
     try:
         async with pool.acquire() as conn:
-            tasks = await structured.list_tasks(conn, domain="coursework", status=status, user_id=user_id)
+            tasks = await list_chat_tasks(conn, args, domain="coursework", status=status)
     except Exception as e:
         logger.error("Failed to query coursework tasks: %s", e)
         clean_msg = _safe_error_message("Failed to retrieve coursework tasks", e)
@@ -665,7 +666,7 @@ async def handle_get_hackathon_deadlines(args: Dict[str, Any], pool: Any) -> Dic
 
     try:
         async with pool.acquire() as conn:
-            tasks = await structured.list_tasks(conn, domain="hackathon", user_id=user_id)
+            tasks = await list_chat_tasks(conn, args, domain="hackathon")
     except Exception as e:
         logger.error("Failed to query hackathon deadlines: %s", e)
         clean_msg = _safe_error_message("Failed to retrieve hackathon deadlines", e)
@@ -746,7 +747,7 @@ async def handle_add_task(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
     try:
         user_id = args.get("user_id")
         async with pool.acquire() as conn:
-            existing_tasks = await structured.list_tasks(conn, user_id=user_id)
+            existing_tasks = await list_chat_tasks(conn, args)
             exact_matches = [
                 t for t in existing_tasks
                 if t["title"].strip().lower() == title.lower()
@@ -993,7 +994,7 @@ async def handle_detect_deadline_conflicts(args: Dict[str, Any], pool: Any) -> D
     cutoff = today + timedelta(days=days)
     user_id = args.get("user_id")
     async with pool.acquire() as conn:
-        tasks = await structured.list_tasks(conn, status="open", user_id=user_id)
+        tasks = await list_chat_tasks(conn, args, status="open")
 
     by_date: Dict[str, List[Dict[str, Any]]] = {}
     for t in tasks:

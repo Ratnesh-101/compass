@@ -275,15 +275,16 @@ async def test_detect_deadline_conflicts_skill():
     tomorrow_str = tomorrow_date.isoformat()
     t1_title = f"Test Hackathon Deadline {uuid.uuid4().hex[:6]}"
     t2_title = f"Test Coursework Exam {uuid.uuid4().hex[:6]}"
+    owner = f"gap_closure_{uuid.uuid4().hex[:8]}"
 
     async with pool.acquire() as conn:
-        t1 = await structured.create_task(conn, domain="hackathon", title=t1_title, due_date=tomorrow_date, priority="urgent")
-        t2 = await structured.create_task(conn, domain="coursework", title=t2_title, due_date=tomorrow_date, priority="high")
+        t1 = await structured.create_task(conn, domain="hackathon", title=t1_title, due_date=tomorrow_date, priority="urgent", user_id=owner)
+        t2 = await structured.create_task(conn, domain="coursework", title=t2_title, due_date=tomorrow_date, priority="high", user_id=owner)
         id1 = t1["id"]
         id2 = t2["id"]
 
     try:
-        result = await dispatch_skill("detect_deadline_conflicts", {"days_ahead": 3}, pool)
+        result = await dispatch_skill("detect_deadline_conflicts", {"days_ahead": 3, "user_id": owner}, pool)
         assert "response" in result
         assert "data" in result
         data = result["data"]

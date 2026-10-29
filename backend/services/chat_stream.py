@@ -176,6 +176,7 @@ async def generate_chat_events(
     conv_id = req.conversation_id or str(uuid.uuid4())
     message = req.message.strip()
     req_tone = getattr(req, "tone", None)
+    req_include_demo = bool(getattr(req, "include_demo", False))
     effective_tone = "detailed" if (req_tone == "balanced" and is_long_form_request(message)) else req_tone
     yield ": ping\n\n"
 
@@ -237,8 +238,9 @@ async def generate_chat_events(
                     return []
                 async with pool.acquire() as conn:
                     return await conn.fetch(
-                        "SELECT title, domain, due_date, status, priority FROM tasks WHERE status != 'completed' AND deleted_at IS NULL AND user_id = $1 ORDER BY due_date ASC NULLS LAST LIMIT 8",
+                        "SELECT title, domain, due_date, status, priority FROM tasks WHERE status != 'completed' AND deleted_at IS NULL AND user_id = $1 AND ($2::boolean OR COALESCE(trusted_event_url,'') NOT LIKE 'compass://demo-persona/%') ORDER BY due_date ASC NULLS LAST LIMIT 8",
                         user_id,
+                        req_include_demo,
                     )
 
             async def _load_facts():
@@ -368,6 +370,7 @@ async def generate_chat_events(
                 history=history_items if history_items else None,
                 memory_context=memory_context if memory_context else None,
                 tone=effective_tone,
+                include_demo=req_include_demo,
                 persist=False,
                 target_message_id=target_msg_id,
                 target_message_content=target_msg_content,
@@ -472,6 +475,7 @@ async def generate_chat_events(
                 memory_context=memory_context if memory_context else None,
                 persist=False,
                 tone=effective_tone,
+                include_demo=req_include_demo,
                 conv_mode=getattr(req, "mode", None),
             )
             response_text = result.get("response", "")
@@ -661,6 +665,7 @@ async def generate_chat_events(
                 target_message_id=target_msg_id,
                 target_message_content=target_msg_content,
                 tone=effective_tone,
+                include_demo=req_include_demo,
                 conv_mode=getattr(req, "mode", None),
             )
             response_text = result.get("response", "")
@@ -728,6 +733,7 @@ async def generate_chat_events(
                 memory_context=memory_context if memory_context else None,
                 persist=False,
                 tone=effective_tone,
+                include_demo=req_include_demo,
                 conv_mode=getattr(req, "mode", None),
             )
             response_text = result.get("response", "")

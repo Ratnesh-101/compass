@@ -147,7 +147,7 @@ async def test_seed_judge_demo_persona_and_fetch_tasks(client: AsyncClient, monk
         assert len(seed_data["task_ids"]) >= 7
 
         # 3. Retrieve tasks for frontend timeline display
-        tasks_resp = await client.get("/api/tasks", headers=headers)
+        tasks_resp = await client.get("/api/tasks?include_demo=true", headers=headers)
         assert tasks_resp.status_code == 200
         tasks = tasks_resp.json()
         assert isinstance(tasks, list)

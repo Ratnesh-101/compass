@@ -7,7 +7,7 @@ Coordinates routing via Nemotron-3 Nano and execution of structured database ope
 import time
 import uuid
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Optional, Dict, Any
 
 from backend.router import route_message
@@ -16,6 +16,22 @@ from backend.memory import structured, conversations
 
 logger = logging.getLogger("compass.orchestrator")
 _DELETE_CANDIDATE_LIMIT = 3
+_FINISHED_STATUSES = ("completed", "done", "cancelled")
+
+
+def _apply_delete_status_filter(tasks: list, status_filter: Optional[str]) -> list:
+    """Narrow delete candidates by a status word ("overdue" / "completed"); no-op without one."""
+    if status_filter == "overdue":
+        today = datetime.now(timezone.utc).date()
+        return [
+            t for t in tasks
+            if t.get("due_date") is not None
+            and t["due_date"] < today
+            and t.get("status") not in _FINISHED_STATUSES
+        ]
+    if status_filter == "completed":
+        return [t for t in tasks if t.get("status") in ("completed", "done")]
+    return tasks
 _ORDINAL_INDEX = {
     "1": 0, "first one": 0, "the first one": 0,
     "2": 1, "second one": 1, "the second one": 1,
@@ -68,6 +84,7 @@ async def handle_message(
     memory_context: Optional[str] = None,
     persist: bool = True,
     tone: Optional[str] = None,
+    include_demo: bool = False,
     conv_mode: Optional[str] = None,
     pre_routed_skill: Optional[str] = None,
     pre_routed_args: Optional[Dict[str, Any]] = None,
@@ -112,10 +129,12 @@ async def handle_message(
                         SELECT title, domain, due_date, status, priority, duration_minutes
                         FROM tasks
                         WHERE status != 'completed' AND deleted_at IS NULL AND user_id = $1
+                          AND ($2::boolean OR COALESCE(trusted_event_url,'') NOT LIKE 'compass://demo-persona/%')
                         ORDER BY due_date ASC NULLS LAST, priority DESC
                         LIMIT 8
                         """,
-                        user_id
+                        user_id,
+                        bool(include_demo),
                     )
                 else:
                     active_tasks = []
@@ -239,6 +258,8 @@ async def handle_message(
         args["target_message_content"] = target_message_content
     if tone and isinstance(args, dict):
         args["tone"] = tone
+    if isinstance(args, dict):
+        args["include_demo"] = bool(include_demo)
     if conv_mode and isinstance(args, dict):
         args["conv_mode"] = conv_mode
     if memory_context and isinstance(args, dict) and "memory_context" not in args:
@@ -380,7 +401,7 @@ async def handle_message(
             get_all_active_tasks_for_user,
             list_nearest_active_titles,
         )
-        from backend.services.delete_target import normalize_delete_target
+        from backend.services.delete_target import parse_delete_target
         pool = active_pool or await get_pool()
         is_clear = bool(args.get("clear_all")) if isinstance(args, dict) else False
         del_query = (args.get("query") if isinstance(args, dict) else "") or message
@@ -392,7 +413,7 @@ async def handle_message(
             all_active = []
             if pool:
                 async with pool.acquire() as conn:
-                    all_active = await get_all_active_tasks_for_user(conn, owner_identity)
+                    all_active = await get_all_active_tasks_for_user(conn, owner_identity, include_demo=include_demo)
                     if not all_active:
                         resp_msg = "You have 0 active tasks in your schedule."
                         ret_data = {"count": 0, "tasks": []}
@@ -410,23 +431,31 @@ async def handle_message(
                         resp_msg = f"⚠️ Are you sure you want to clear all {len(all_active)} active tasks from your schedule? Please reply 'Confirm' or click Confirm below."
                         ret_data = {"pending_action": pending, "tasks": all_active}
         else:
-            specific_query, is_generic = normalize_delete_target(del_query)
+            parsed_target = parse_delete_target(del_query)
+            specific_query, is_generic = parsed_target.text, parsed_target.is_generic
             if pool:
                 async with pool.acquire() as conn:
                     if is_generic:
-                        matches = await get_all_active_tasks_for_user(conn, owner_identity)
+                        matches = await get_all_active_tasks_for_user(conn, owner_identity, include_demo=include_demo)
                     else:
-                        matches = await search_active_tasks_for_delete(conn, owner_identity, specific_query)
+                        matches = await search_active_tasks_for_delete(
+                            conn, owner_identity, specific_query, include_demo=include_demo
+                        )
                         raw_query = " ".join((del_query or "").lower().split())
                         if not matches and raw_query and raw_query != specific_query:
                             # e.g. a title like "Fix deadline bug" whose generic words were stripped
-                            matches = await search_active_tasks_for_delete(conn, owner_identity, raw_query)
+                            matches = await search_active_tasks_for_delete(
+                                conn, owner_identity, raw_query, include_demo=include_demo
+                            )
+                    matches = _apply_delete_status_filter(matches, parsed_target.status_filter)
                     if not matches:
                         if is_generic:
                             resp_msg = "You have no active tasks to delete."
                             ret_data = {"count": 0}
                         else:
-                            nearest = await list_nearest_active_titles(conn, owner_identity, limit=5)
+                            nearest = await list_nearest_active_titles(
+                                conn, owner_identity, limit=5, include_demo=include_demo
+                            )
                             resp_msg = "I couldn't find an active task with that name."
                             if nearest:
                                 resp_msg += " Your active tasks:\n" + "\n".join(

@@ -163,6 +163,6 @@ async def test_summarize_day_communicates_total_task_count():
     with patch("backend.memory.structured.list_tasks", new_callable=AsyncMock, return_value=large_task_set), \
          patch("backend.config.get_settings") as mock_settings:
         mock_settings.return_value.NEBIUS_API_KEY = None
-        result = await handle_summarize_day({}, mock_pool)
+        result = await handle_summarize_day({"user_id": "summary_user"}, mock_pool)
         assert result["data"]["total"] == 369
         assert "369" in result["response"]

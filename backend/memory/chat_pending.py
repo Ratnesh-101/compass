@@ -12,6 +12,8 @@ from typing import Any, Dict, List, Optional
 import json
 import logging
 
+from backend.services.task_scope import demo_sql_predicate
+
 logger = logging.getLogger("compass.memory.chat_pending")
 
 
@@ -217,6 +219,8 @@ async def search_active_tasks_for_delete(
     conn: Any,
     owner_identity: str,
     query: str,
+    *,
+    include_demo: bool = False,
 ) -> List[Dict[str, Any]]:
     """Search for non-deleted tasks matching the user's delete query.
     
@@ -231,15 +235,17 @@ async def search_active_tasks_for_delete(
     if clean_q.isdigit():
         task_id = int(clean_q)
         row = await conn.fetchrow(
-            """
+            f"""
             SELECT id, title, domain, due_date, status, priority, user_id
             FROM tasks
             WHERE id = $1
               AND (user_id = $2 OR (user_id IS NULL AND $2 IS NULL))
               AND deleted_at IS NULL
+              AND ($3::boolean OR {demo_sql_predicate()})
             """,
             task_id,
             owner_identity,
+            bool(include_demo),
         )
         return [dict(row)] if row else []
 
@@ -247,11 +253,12 @@ async def search_active_tasks_for_delete(
     # LIKE wildcards in the user text are escaped with '!' so they match literally.
     like_q = clean_q.replace("!", "!!").replace("%", "!%").replace("_", "!_")
     rows = await conn.fetch(
-        """
+        f"""
         SELECT id, title, domain, due_date, status, priority, user_id
         FROM tasks
         WHERE (user_id = $1 OR (user_id IS NULL AND $1 IS NULL))
           AND deleted_at IS NULL
+          AND ($4::boolean OR {demo_sql_predicate()})
           AND (
             LOWER(title) = LOWER($2)
             OR LOWER(title) LIKE '%' || LOWER($3) || '%' ESCAPE '!'
@@ -264,6 +271,7 @@ async def search_active_tasks_for_delete(
         owner_identity,
         clean_q,
         like_q,
+        bool(include_demo),
     )
     return [dict(r) for r in rows]
 
@@ -272,19 +280,23 @@ async def list_nearest_active_titles(
     conn: Any,
     owner_identity: str,
     limit: int = 5,
+    *,
+    include_demo: bool = False,
 ) -> List[Dict[str, Any]]:
     """Up to ``limit`` active tasks of this owner, soonest due first (for "no match" replies)."""
     rows = await conn.fetch(
-        """
+        f"""
         SELECT id, title, domain, due_date, status, priority, user_id
         FROM tasks
         WHERE (user_id = $1 OR (user_id IS NULL AND $1 IS NULL))
           AND deleted_at IS NULL
+          AND ($3::boolean OR {demo_sql_predicate()})
         ORDER BY due_date ASC NULLS LAST, id ASC
         LIMIT $2
         """,
         owner_identity,
         limit,
+        bool(include_demo),
     )
     return [dict(r) for r in rows]
 
@@ -292,16 +304,20 @@ async def list_nearest_active_titles(
 async def get_all_active_tasks_for_user(
     conn: Any,
     owner_identity: str,
+    *,
+    include_demo: bool = False,
 ) -> List[Dict[str, Any]]:
     """Get all non-deleted active tasks for clear_schedule confirmation."""
     rows = await conn.fetch(
-        """
+        f"""
         SELECT id, title, domain, due_date, status, priority, user_id
         FROM tasks
         WHERE (user_id = $1 OR (user_id IS NULL AND $1 IS NULL))
           AND deleted_at IS NULL
+          AND ($2::boolean OR {demo_sql_predicate()})
         ORDER BY due_date ASC NULLS LAST, id ASC
         """,
         owner_identity,
+        bool(include_demo),
     )
     return [dict(r) for r in rows]

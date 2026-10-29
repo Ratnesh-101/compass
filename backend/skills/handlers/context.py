@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional, Tuple
 import logging
 
 from backend.services.ownership import scope_owner
+from backend.services.task_scope import list_chat_tasks
 from backend.skills.registry import register_skill
 
 logger = logging.getLogger("compass.skills.context")
@@ -157,7 +158,7 @@ async def handle_summarize_day(args: Dict[str, Any], pool: Any) -> Dict[str, Any
     settings = get_settings()
     user_id = args.get("user_id")
     async with pool.acquire() as conn:
-        tasks = await structured.list_tasks(conn, status="open", user_id=user_id)
+        tasks = await list_chat_tasks(conn, args, status="open")
 
     by_domain: Dict[str, int] = {}
     for t in tasks:
@@ -236,7 +237,7 @@ async def handle_summarize_across_domains(args: Dict[str, Any], pool: Any) -> Di
     user_id = args.get("user_id")
     chunk_owner = scope_owner(user_id)
     async with pool.acquire() as conn:
-        tasks = await structured.list_tasks(conn, status="open", user_id=user_id)
+        tasks = await list_chat_tasks(conn, args, status="open")
         projects = await structured.list_projects(conn)
         try:
             code_chunks = await conn.fetch(

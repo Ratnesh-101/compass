@@ -193,8 +193,12 @@ async def list_tasks(
     scheduled_only: bool = False,
     unscheduled_only: bool = False,
     user_id: Optional[str] = None,
+    include_demo: bool = True,
 ) -> list[dict]:
-    """Query tasks with optional filters and per-account isolation."""
+    """Query tasks with optional filters and per-account isolation.
+
+    Judge Persona demo rows are included unless ``include_demo`` is False.
+    """
     query = """
         SELECT t.id, t.domain, t.title, t.due_date, t.status, t.priority, t.notes, t.trusted_event_url,
                t.duration_minutes, t.scheduled_start, t.scheduled_end, t.is_fixed, t.recurrence_rule,
@@ -210,6 +214,7 @@ async def list_tasks(
           AND ($5::date IS NULL OR t.due_date <= $5)
           AND (NOT $6::boolean OR t.scheduled_start IS NOT NULL)
           AND (NOT $7::boolean OR t.scheduled_start IS NULL)
+          AND ($8::boolean OR (COALESCE(t.trusted_event_url,'') NOT LIKE 'compass://demo-persona/%'))
         ORDER BY t.scheduled_start ASC NULLS LAST, t.due_date ASC NULLS LAST, t.id ASC
     """
     rows = await conn.fetch(
@@ -221,6 +226,7 @@ async def list_tasks(
         due_before,
         bool(scheduled_only),
         bool(unscheduled_only),
+        bool(include_demo),
     )
     results = []
     for r in rows:
