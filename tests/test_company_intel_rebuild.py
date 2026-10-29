@@ -30,6 +30,7 @@ from backend.services.winning_features import (
     _parse_json_safely,
     _COMPANY_INTEL_CACHE,
     _LAST_INTEL_REFRESH,
+    _daily_intel_tavily_usage,
 )
 
 
@@ -38,9 +39,11 @@ def clear_intel_cache():
     """Clear memory caches and cooldowns between tests."""
     _COMPANY_INTEL_CACHE.clear()
     _LAST_INTEL_REFRESH.clear()
+    _daily_intel_tavily_usage.clear()
     yield
     _COMPANY_INTEL_CACHE.clear()
     _LAST_INTEL_REFRESH.clear()
+    _daily_intel_tavily_usage.clear()
 
 
 @pytest.fixture
@@ -71,8 +74,14 @@ async def test_1_1password_realistic_snippets_ready_state(mock_opp):
         {
             "title": "1Password Extended Access Management Overview",
             "snippet": "Securing unmanaged devices and SaaS applications. 1Password Extended Access Management secures every sign-in to every app from any device.",
-            "url": "https://1password.com/eam",
-            "domain": "1password.com",
+            "url": "https://securityweek.com/1password-eam",
+            "domain": "securityweek.com",
+        },
+        {
+            "title": "TechCrunch: 1Password expands to identity",
+            "snippet": "1Password has expanded beyond password management into enterprise identity security solutions.",
+            "url": "https://techcrunch.com/1password-expansion",
+            "domain": "techcrunch.com",
         },
     ]
 
@@ -101,7 +110,7 @@ async def test_1_1password_realistic_snippets_ready_state(mock_opp):
         assert brief["summary"] != ""
         assert len(brief["priorities"]) == 1
         assert brief["priorities"][0]["source"] == 1
-        assert len(brief["sources"]) == 2
+        assert len(brief["sources"]) == 3
         assert brief["confidence"] == "high"
 
 
@@ -178,7 +187,7 @@ async def test_4_fenced_json_handled_and_invalid_json_gives_error_state(mock_opp
     assert parsed is not None
     assert parsed["summary"] == "1Password provides secret key encrypted vaults."
 
-    # Part B: Invalid JSON twice gives error state, not "not enough information"
+    # Part B: Invalid JSON twice gives sources-only fallback state with retained links
     broken_client = MagicMock()
     broken_client.chat.completions.create = AsyncMock(
         return_value=MagicMock(
@@ -191,9 +200,10 @@ async def test_4_fenced_json_handled_and_invalid_json_gives_error_state(mock_opp
          patch("backend.services.winning_features.get_openai_client", return_value=broken_client):
 
         brief = await generate_company_intel_brief(mock_opp)
-        assert brief["status"] == "error"
-        assert "couldn't generate company intel" in brief["error"]
-        assert brief["summary"] == ""
+        assert brief["status"] == "ready"
+        assert brief.get("is_sources_only") is True
+        assert brief.get("fallback_label") == "Sources found, summary unavailable"
+        assert len(brief["sources"]) == 1
 
 
 # 5. Tavily error, timeout, empty list, and rate limit: each gives the right state
@@ -386,3 +396,44 @@ async def test_9_prompt_injection_isolation(mock_opp):
 
         sys_msg = next((m["content"] for m in captured_prompt if m["role"] == "system"), "")
         assert "UNTRUSTED SCRAPED WEB DATA" in sys_msg
+
+
+# 10. Confidence rating: never High for single source or single domain
+@pytest.mark.asyncio
+async def test_10_confidence_rating_never_high_for_single_source(mock_opp):
+    mock_opp.id = 99
+    # Case A: 1 source only (even if LLM returns "high") -> confidence must be "low"
+    single_source = [
+        {"title": "1Password Overview", "snippet": "Secures passwords for millions of enterprise users worldwide.", "url": "https://1password.com", "domain": "1password.com"}
+    ]
+    mock_llm_json = {
+        "summary": "1Password provides password management.",
+        "priorities": [{"point": "Secures passwords for millions of enterprise users worldwide.", "source": 1}],
+        "role_context": [],
+        "challenges": [],
+        "talking_points": [],
+        "confidence": "high",  # Model claims high
+    }
+    mock_resp = MagicMock(choices=[MagicMock(message=MagicMock(content=json.dumps(mock_llm_json)))])
+    fake_client = MagicMock()
+    fake_client.chat.completions.create = AsyncMock(return_value=mock_resp)
+
+    with patch("backend.services.winning_features.tavily_research.execute_deep_research", AsyncMock(return_value={"citations": single_source})), \
+         patch("backend.services.winning_features.get_openai_client", return_value=fake_client):
+        brief_single = await generate_company_intel_brief(mock_opp, force_refresh=True)
+        assert brief_single["confidence"] == "low"
+
+    # Case B: 2 sources from different domains -> confidence must be "medium"
+    _LAST_INTEL_REFRESH[mock_opp.id] = 0.0
+    two_sources_diff_domains = [
+        {"title": "1Password Blog", "snippet": "Extended Access Management secures SaaS applications.", "url": "https://1password.com/blog", "domain": "1password.com"},
+        {"title": "TechCrunch Profile", "snippet": "1Password enterprise valuation exceeds 6 billion dollars.", "url": "https://techcrunch.com/1pass", "domain": "techcrunch.com"},
+    ]
+    mock_llm_json["priorities"].append({"point": "Extended Access Management secures SaaS applications.", "source": 1})
+    mock_resp.choices = [MagicMock(message=MagicMock(content=json.dumps(mock_llm_json)))]
+
+    with patch("backend.services.winning_features.tavily_research.execute_deep_research", AsyncMock(return_value={"citations": two_sources_diff_domains})), \
+         patch("backend.services.winning_features.get_openai_client", return_value=fake_client):
+        brief_two = await generate_company_intel_brief(mock_opp, force_refresh=True)
+        assert brief_two["confidence"] == "medium"
+

@@ -1,5 +1,5 @@
 /**
- * Compass — Career Copilot API Client.
+ * Compass - Career Copilot API Client.
  * Communicates with /api/career/* endpoints for:
  * - Master & tailored resume management
  * - Factual validation reports & HTML export
@@ -267,6 +267,41 @@ export async function fetchCompanyIntel(opportunityId, refresh = false) {
     credentials: 'include',
   })
   if (!res.ok) throw new Error(`Failed to fetch company intelligence: ${res.statusText}`)
+  return res.json()
+}
+
+export async function refreshCompanyIntelJob(opportunityId) {
+  await ensureSession()
+  const res = await fetch(`${API_BASE}/opportunities/${opportunityId}/company-intel/refresh`, {
+    method: 'POST',
+    headers: getJsonHeaders(),
+    credentials: 'include',
+  })
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}))
+    const msg = (typeof errData?.detail === 'object' ? errData.detail.detail : errData?.detail) || `Refresh failed: ${res.statusText}`
+    const error = new Error(msg)
+    error.status = res.status
+    error.data = errData
+    throw error
+  }
+  return res.json()
+}
+
+export async function getCompanyIntelJobStatus(opportunityId, jobId) {
+  await ensureSession()
+  const res = await fetch(`${API_BASE}/opportunities/${opportunityId}/company-intel/jobs/${jobId}`, {
+    headers: getAuthHeaders(),
+    credentials: 'include',
+  })
+  if (res.status === 404) {
+    return {
+      status: 'failed',
+      reason: 'job_lost',
+      error: 'Server restarted or research session expired. Please refresh intel again.',
+    }
+  }
+  if (!res.ok) throw new Error(`Job status check failed: ${res.statusText}`)
   return res.json()
 }
 
