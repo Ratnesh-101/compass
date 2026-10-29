@@ -13,6 +13,7 @@ from backend.memory import structured
 from backend.models import CreateTaskRequest, FrontendTaskOut
 
 from backend.services.deadline_classifier import classify_deadline
+from backend.services.task_scope import DEMO_URL_PREFIX
 
 logger = logging.getLogger("compass.services.task_service")
 
@@ -32,6 +33,20 @@ def format_countdown(due_date: Optional[date], ref_date: Optional[date] = None) 
         return f"1d left ({day_name})"
     else:
         return f"{delta}d left ({day_name})"
+
+
+def _emit_due_date(row: dict[str, Any], due_d: Any, s_end: Any) -> Optional[str]:
+    """Serialize the deadline. Never substitute the scheduled slot for a real user's deadline.
+
+    Exception: Judge Persona demo rows have no time-of-day deadline column, so the seed data
+    carries the hour-precision deadline in scheduled_end; keep surfacing it for those rows only.
+    """
+    trusted_url = str(row.get("trusted_event_url") or "")
+    if s_end is not None and hasattr(s_end, "isoformat") and trusted_url.startswith(DEMO_URL_PREFIX):
+        return s_end.isoformat()
+    if due_d is not None and hasattr(due_d, "isoformat"):
+        return due_d.isoformat()
+    return str(due_d) if due_d else None
 
 
 def build_frontend_task(
@@ -88,11 +103,8 @@ def build_frontend_task(
         scheduled_end=s_end.isoformat() if (s_end is not None and hasattr(s_end, "isoformat")) else (str(s_end) if s_end else None),
         is_fixed=bool(row.get("is_fixed", False)),
         description=row.get("notes") or row.get("description"),
-        due_date=(
-            s_end.isoformat()
-            if (s_end is not None and hasattr(s_end, "isoformat"))
-            else (due_d.isoformat() if (due_d is not None and hasattr(due_d, "isoformat")) else (str(due_d) if due_d else None))
-        ),
+        # The REAL deadline; the planned slot lives only in scheduled_start/scheduled_end.
+        due_date=_emit_due_date(row, due_d, s_end),
         cognitive_conflict=cognitive_conflict,
     )
 

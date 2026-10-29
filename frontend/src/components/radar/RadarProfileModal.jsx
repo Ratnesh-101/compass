@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { fetchRadarProfile, updateRadarProfile } from '../../api/radarApi.js'
+import { validateProfileForm, buildProfilePayload } from '../../utils/careerUiHelpers.js'
 
 const ROLE_OPTIONS = [
   'Artificial Intelligence and Machine Learning',
@@ -48,26 +49,24 @@ function RadarProfileModalContent({
   isSaving = false,
   onProfileUpdated,
 }) {
-  const [degree, setDegree] = useState(profile?.degree || 'B.Tech')
-  const [specialization, setSpecialization] = useState(
-    profile?.degree_specialization || 'Computer Science & Engineering'
-  )
+  const [degree, setDegree] = useState(profile?.degree || '')
+  const [specialization, setSpecialization] = useState(profile?.degree_specialization || '')
   const [university, setUniversity] = useState(profile?.university || '')
-  const [academicYear, setAcademicYear] = useState(profile?.academic_year || 2)
-  const [gradYear, setGradYear] = useState(profile?.grad_year || 2027)
-  const [gradMonth, setGradMonth] = useState(profile?.grad_month || 6)
-  const [cgpa, setCgpa] = useState(profile?.cgpa !== undefined && profile?.cgpa !== null ? String(profile.cgpa) : '8.5')
+  const [academicYear, setAcademicYear] = useState(profile?.academic_year ?? '')
+  const [gradYear, setGradYear] = useState(profile?.grad_year ?? '')
+  const [gradMonth, setGradMonth] = useState(profile?.grad_month ?? '')
+  const [cgpa, setCgpa] = useState(profile?.cgpa !== undefined && profile?.cgpa !== null ? String(profile.cgpa) : '')
   const [cgpaScale, setCgpaScale] = useState(profile?.cgpa_scale || 10.0)
-  const [activeBacklogs, setActiveBacklogs] = useState(profile?.active_backlogs ?? 0)
-  const [countryOfStudy, setCountryOfStudy] = useState(profile?.country_of_study || 'India')
+  const [activeBacklogs, setActiveBacklogs] = useState(profile?.active_backlogs ?? '')
+  const [countryOfStudy, setCountryOfStudy] = useState(profile?.country_of_study || '')
   const [preferredArrangements, setPreferredArrangements] = useState(
-    profile?.preferred_work_arrangements || ['remote', 'hybrid', 'onsite']
+    profile?.preferred_work_arrangements || []
   )
   const [preferredRoles, setPreferredRoles] = useState(
-    profile?.preferred_roles || [ROLE_OPTIONS[0], ROLE_OPTIONS[2]]
+    profile?.preferred_roles || []
   )
   const [skillsStr, setSkillsStr] = useState(
-    (profile?.skills || ['Python', 'PyTorch', 'Data Structures', 'C++']).join(', ')
+    (profile?.skills || []).join(', ')
   )
 
   const [savingInternal, setSavingInternal] = useState(false)
@@ -86,7 +85,7 @@ function RadarProfileModalContent({
     if (p.cgpa !== undefined && p.cgpa !== null) setCgpa(String(p.cgpa))
     if (p.cgpa_scale !== undefined && p.cgpa_scale !== null) setCgpaScale(Number(p.cgpa_scale))
     if (p.active_backlogs !== undefined && p.active_backlogs !== null) setActiveBacklogs(Number(p.active_backlogs))
-    if (p.country_of_study !== undefined) setCountryOfStudy(p.country_of_study || 'India')
+    if (p.country_of_study !== undefined) setCountryOfStudy(p.country_of_study || '')
     if (Array.isArray(p.preferred_work_arrangements)) setPreferredArrangements(p.preferred_work_arrangements)
     if (Array.isArray(p.preferred_roles)) setPreferredRoles(p.preferred_roles)
     if (Array.isArray(p.skills)) setSkillsStr(p.skills.join(', '))
@@ -147,6 +146,7 @@ function RadarProfileModalContent({
   }
 
   const isBusy = isSaving || savingInternal
+  const isFormComplete = validateProfileForm({ degree, academicYear, gradYear, cgpa, cgpaScale }) === null
 
   const handleSubmit = async e => {
     e.preventDefault()
@@ -154,53 +154,19 @@ function RadarProfileModalContent({
 
     setErrorMessage(null)
 
-    // Client-side validation
-    if (!degree.trim()) {
-      setErrorMessage('Please specify your Current Degree (e.g. B.Tech, B.E., BS).')
+    // Client-side validation (shared with the Save button's disabled state)
+    const formValues = {
+      degree, specialization, university, academicYear, gradYear, gradMonth, cgpa, cgpaScale,
+      activeBacklogs, countryOfStudy, preferredArrangements, preferredRoles, skillsStr,
+    }
+    const validationError = validateProfileForm(formValues)
+    if (validationError) {
+      setErrorMessage(validationError)
       return
     }
 
-    const parsedGradYear = Number(gradYear)
-    if (isNaN(parsedGradYear) || parsedGradYear < 2024 || parsedGradYear > 2035) {
-      setErrorMessage('Graduation Year must be between 2024 and 2035.')
-      return
-    }
-
-    const parsedAcademicYear = Number(academicYear)
-    if (isNaN(parsedAcademicYear) || parsedAcademicYear < 1 || parsedAcademicYear > 5) {
-      setErrorMessage('Academic Year must be between 1 and 5.')
-      return
-    }
-
-    if (!countryOfStudy.trim()) {
-      setErrorMessage('Please specify your Country of Study.')
-      return
-    }
-
-    const skillsList = skillsStr
-      .split(',')
-      .map(s => s.trim())
-      .filter(Boolean)
-
-    const parsedCgpa = cgpa.trim() ? parseFloat(cgpa) : null
-    const parsedScale = parseFloat(cgpaScale) || 10.0
-
-    const payload = {
-      degree: degree.trim(),
-      degree_specialization: specialization.trim(),
-      university: university.trim(),
-      academic_year: parsedAcademicYear,
-      grad_year: parsedGradYear,
-      grad_month: Number(gradMonth) || 6,
-      cgpa: parsedCgpa,
-      cgpa_scale: parsedScale,
-      active_backlogs: Number(activeBacklogs) || 0,
-      country_of_study: countryOfStudy.trim(),
-      country_of_residence: countryOfStudy.trim(),
-      preferred_work_arrangements: preferredArrangements,
-      preferred_roles: preferredRoles,
-      skills: skillsList,
-    }
+    // Only fields the user actually filled are sent; nothing is invented.
+    const payload = buildProfilePayload(formValues)
 
     setSavingInternal(true)
     try {
@@ -453,7 +419,7 @@ function RadarProfileModalContent({
               <select
                 id="profile-academic-year"
                 value={academicYear}
-                onChange={e => setAcademicYear(Number(e.target.value))}
+                onChange={e => setAcademicYear(e.target.value === '' ? '' : Number(e.target.value))}
                 style={{
                   width: '100%',
                   padding: '9px 12px',
@@ -465,6 +431,7 @@ function RadarProfileModalContent({
                   boxSizing: 'border-box',
                 }}
               >
+                <option value="">Select year of study</option>
                 <option value={1}>1st Year (Freshman)</option>
                 <option value={2}>2nd Year (Sophomore)</option>
                 <option value={3}>3rd Year (Junior)</option>
@@ -511,7 +478,7 @@ function RadarProfileModalContent({
               <select
                 id="profile-grad-month"
                 value={gradMonth}
-                onChange={e => setGradMonth(Number(e.target.value))}
+                onChange={e => setGradMonth(e.target.value === '' ? '' : Number(e.target.value))}
                 style={{
                   width: '100%',
                   padding: '9px 12px',
@@ -523,6 +490,7 @@ function RadarProfileModalContent({
                   boxSizing: 'border-box',
                 }}
               >
+                <option value="">Not set</option>
                 {MONTH_NAMES.map((m, idx) => (
                   <option key={m} value={idx + 1}>
                     {m}
@@ -572,7 +540,7 @@ function RadarProfileModalContent({
                 type="number"
                 step="0.01"
                 min="0"
-                max="100"
+                max={cgpaScale}
                 value={cgpa}
                 onChange={e => setCgpa(e.target.value)}
                 placeholder="e.g. 8.5"
@@ -630,7 +598,7 @@ function RadarProfileModalContent({
                 min="0"
                 max="20"
                 value={activeBacklogs}
-                onChange={e => setActiveBacklogs(Number(e.target.value))}
+                onChange={e => setActiveBacklogs(e.target.value)}
                 style={{
                   width: '100%',
                   padding: '9px 12px',
@@ -759,7 +727,7 @@ function RadarProfileModalContent({
             </button>
             <button
               type="submit"
-              disabled={isBusy}
+              disabled={isBusy || !isFormComplete}
               style={{
                 padding: '10px 20px',
                 borderRadius: '8px',
@@ -768,8 +736,8 @@ function RadarProfileModalContent({
                 border: 'none',
                 fontWeight: 600,
                 fontSize: '13px',
-                cursor: isBusy ? 'not-allowed' : 'pointer',
-                opacity: isBusy ? 0.7 : 1,
+                cursor: isBusy || !isFormComplete ? 'not-allowed' : 'pointer',
+                opacity: isBusy || !isFormComplete ? 0.6 : 1,
               }}
             >
               {isBusy ? 'Saving Profile…' : 'Save Profile'}

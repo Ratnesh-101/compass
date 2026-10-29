@@ -21,6 +21,70 @@ from backend.models_radar import OpportunityOut
 logger = logging.getLogger("compass.services.career_job_match")
 
 
+_MAX_HEADER_CHARS = 60
+
+_HEADER_PHRASES: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    ("preferred", ("preferred qualifications", "desired qualifications", "preferred", "bonus", "bonus points", "nice to have", "nice-to-have", "nice to haves", "pluses", "a plus")),
+    ("mandatory", ("basic qualifications", "minimum qualifications", "required qualifications", "must have", "must haves", "requirements", "minimum requirements", "qualifications")),
+    ("responsibilities", ("responsibilities", "what you will do", "what you'll do", "the role", "job description", "key responsibilities")),
+    ("skills", ("skills required", "tech stack", "technologies", "required skills")),
+)
+
+_PREFERRED_MARKERS = ("plus", "nice to have", "nice-to-have", "bonus", "preferred")
+
+
+def _section_for_header(line: str) -> Optional[str]:
+    """Return the section a line introduces, only for short standalone header lines."""
+    if len(line) > _MAX_HEADER_CHARS:
+        return None
+    has_colon = line.rstrip().endswith(":")
+    bare = line.strip().strip("#*_ ").rstrip(":").strip("*_ ").lower()
+    for section, phrases in _HEADER_PHRASES:
+        for phrase in phrases:
+            if bare == phrase or (has_colon and phrase in bare):
+                return section
+    return None
+
+
+def _is_word_char(ch: str) -> bool:
+    return ch.isalnum() or ch == "_"
+
+
+def contains_term(text: str, term: str) -> bool:
+    """Word-boundary containment (no regex): 'java' does not match 'javascript', 'sql' not 'postgresql'."""
+    term = term.strip().lower()
+    if not term:
+        return False
+    hay = text.lower()
+    start = 0
+    while True:
+        idx = hay.find(term, start)
+        if idx < 0:
+            return False
+        end = idx + len(term)
+        before_ok = idx == 0 or not _is_word_char(hay[idx - 1])
+        after = hay[end] if end < len(hay) else ""
+        after_next = hay[end + 1] if end + 1 < len(hay) else ""
+        after_ok = not (
+            after
+            and (_is_word_char(after) or (after in "+#" and not term.endswith(("+", "#"))) or (after == "." and _is_word_char(after_next)))
+        )
+        if before_ok and after_ok:
+            return True
+        start = idx + 1
+
+
+def _dedupe_skills(skills: List[str]) -> List[str]:
+    seen: Set[str] = set()
+    out: List[str] = []
+    for s in skills:
+        key = s.strip().lower()
+        if key and key not in seen:
+            seen.add(key)
+            out.append(s.strip())
+    return out
+
+
 def extract_job_sections(job_text: str) -> Dict[str, List[str]]:
     """
     Extracts structured requirements from raw job description text.
@@ -36,19 +100,17 @@ def extract_job_sections(job_text: str) -> Dict[str, List[str]]:
     current_section = "overview"
 
     for line in lines:
-        line_low = line.lower()
-        if any(h in line_low for h in ("basic qualifications", "minimum qualifications", "required qualifications", "must have", "requirements")):
-            current_section = "mandatory"
+        header = _section_for_header(line)
+        if header:
+            current_section = header
             continue
-        elif any(h in line_low for h in ("preferred qualifications", "desired qualifications", "bonus", "nice to have", "plus")):
-            current_section = "preferred"
-            continue
-        elif any(h in line_low for h in ("responsibilities", "what you will do", "what you'll do", "the role", "job description")):
-            current_section = "responsibilities"
-            continue
-        elif any(h in line_low for h in ("skills required", "tech stack", "technologies")):
-            current_section = "skills"
-            continue
+        head, colon, tail = line.partition(":")
+        if colon and tail.strip():
+            inline_header = _section_for_header(head + ":")
+            if inline_header:
+                # "Skills required: Python, Docker" - header and items on one line
+                current_section = inline_header
+                line = tail.strip()
 
         clean_item = line.strip(" -*•·")
         if not clean_item or len(clean_item) < 3:
@@ -96,19 +158,24 @@ def analyze_job_and_match(
     responsibilities = sections["responsibilities"]
 
     # Gather explicit required skills from opportunity requirements model if present
-    req_skills: Set[str] = set()
+    explicit: List[str] = []
     if opportunity.requirements and opportunity.requirements.required_skills:
-        req_skills.update(s.strip() for s in opportunity.requirements.required_skills if s.strip())
-    req_skills.update(sections["skills"])
+        explicit.extend(s.strip() for s in opportunity.requirements.required_skills if s.strip())
+    explicit.extend(sections["skills"])
+    req_skills = _dedupe_skills(explicit)
 
-    # If no explicit skills found in section headers, scan for standard tech keywords in description
+    # If no explicit skills found in section headers, scan for standard tech keywords in description.
+    # A keyword only counts as required when at least one mention is not flagged as preferred/bonus.
     if not req_skills:
         common_tech = ["Python", "JavaScript", "React", "Node.js", "PostgreSQL", "FastAPI", "Docker", "Git", "SQL", "C++", "Java", "AWS", "PyTorch"]
+        text_lines = [ln for ln in full_text.splitlines() if ln.strip()]
         for tech in common_tech:
-            if re.search(r"(?<![A-Za-z0-9_])" + re.escape(tech) + r"(?![A-Za-z0-9_])", full_text, re.IGNORECASE):
-                req_skills.add(tech)
+            mentions = [ln for ln in text_lines if contains_term(ln, tech)]
+            if any(not any(m in ln.lower() for m in _PREFERRED_MARKERS) for ln in mentions):
+                req_skills.append(tech)
+        req_skills = _dedupe_skills(req_skills)
 
-    skills_list = sorted(list(req_skills))
+    skills_list = sorted(req_skills, key=str.lower)
 
     # Check if candidate profile is complete
     is_empty_profile = (
@@ -149,6 +216,7 @@ def analyze_job_and_match(
             partial_skills=[],
             gap_actions=gap_actions,
             has_complete_profile=False,
+            score_available=bool(skills_list),
             profile_missing_message="Complete your profile to view skill overlap analysis. No verified skills found.",
             formula_explanation="Skill overlap estimate = (matched + 0.5 * partial) / total required skills",
         )
@@ -183,7 +251,7 @@ def analyze_job_and_match(
                     confidence=1.0,
                 )
             )
-        elif s_low in master_projects_text or s_low in learning_skills_norm:
+        elif contains_term(master_projects_text, s_low) or s_low in learning_skills_norm:
             partial_skills.append(skill)
             source = "learning list" if s_low in learning_skills_norm else "project implementations"
             matches.append(
@@ -256,8 +324,12 @@ def analyze_job_and_match(
     total_eval = max(len(skills_list), 1)
     skill_overlap = round(min(100.0, ((len(matched_skills) + 0.5 * len(partial_skills)) / total_eval) * 100.0), 1)
 
+    score_available = bool(skills_list)
+
     # Transparent, non-promising verdict
-    if skill_overlap >= 80:
+    if not score_available:
+        verdict = "No explicit skills are listed in this posting, so a skill-match score is not available."
+    elif skill_overlap >= 80:
         verdict = f"Skill overlap estimate: {skill_overlap}%. High requirement coverage with {len(matched_skills)} verified and {len(partial_skills)} partial competencies."
     elif skill_overlap >= 50:
         verdict = f"Skill overlap estimate: {skill_overlap}%. Moderate requirement coverage: core skills verified with {len(missing_skills)} actionable skill gaps."
@@ -287,6 +359,7 @@ def analyze_job_and_match(
         partial_skills=partial_skills,
         gap_actions=gap_actions,
         has_complete_profile=True,
+        score_available=score_available,
         profile_missing_message=None,
         formula_explanation="Skill overlap estimate = (matched + 0.5 * partial) / total required skills",
     )

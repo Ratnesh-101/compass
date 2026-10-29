@@ -1,16 +1,29 @@
 import React from 'react'
 import { Target, Sparkles, Clock, Star, ClipboardList } from 'lucide-react'
+import { getProfileBannerInfo } from '../../utils/radarProfileBanner'
 
 export default function RadarOverviewCards({
   stats,
   profile,
   onOpenProfile,
+  onNavigateToResumeStudio = null,
   onSelectTab,
   error = null,
   onRetry = null,
 }) {
-  const missingProfileFields = profile?.missing_fields_limiting_eligibility || []
-  const hasIncompleteProfile = missingProfileFields.includes('academic_year') || missingProfileFields.includes('grad_year')
+  const banner = getProfileBannerInfo(profile)
+  const hasIncompleteProfile = banner.show
+  const goToResumeStudio = onNavigateToResumeStudio || onOpenProfile
+  const buttonStyle = {
+    padding: '6px 14px',
+    borderRadius: 'var(--radius-btn, 6px)',
+    background: 'var(--brand)',
+    color: 'var(--accent-text, #1b1a17)',
+    border: 'none',
+    fontWeight: 600,
+    fontSize: '12px',
+    cursor: 'pointer',
+  }
 
   if (error) {
     return (
@@ -62,29 +75,25 @@ export default function RadarOverviewCards({
             <Target size={18} strokeWidth={1.8} color="var(--brand)" />
             <div>
               <div style={{ fontWeight: 600, fontSize: '14px' }}>
-                Complete your Candidate Profile in Resume Studio
+                {banner.title}
               </div>
               <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                Update your academic qualifications, skills, and graduation cohort in Resume Studio to unlock deterministic eligibility.
+                {banner.body}
               </div>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onOpenProfile}
-            style={{
-              padding: '6px 14px',
-              borderRadius: 'var(--radius-btn, 6px)',
-              background: 'var(--brand)',
-              color: 'var(--accent-text, #1b1a17)',
-              border: 'none',
-              fontWeight: 600,
-              fontSize: '12px',
-              cursor: 'pointer',
-            }}
-          >
-            Manage in Resume Studio
-          </button>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {banner.missingAcademicYear && (
+              <button type="button" onClick={onOpenProfile} style={buttonStyle}>
+                Open Candidate Profile
+              </button>
+            )}
+            {banner.missingGradYear && (
+              <button type="button" onClick={goToResumeStudio} style={buttonStyle}>
+                Manage in Resume Studio
+              </button>
+            )}
+          </div>
         </div>
       )}
 

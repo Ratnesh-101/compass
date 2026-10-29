@@ -1,7 +1,16 @@
-import React from 'react'
+import React, { useState } from 'react'
+import { copyTextSafely, displayKitValue } from '../../utils/careerUiHelpers'
 
 export default function HandoffKitModal({ activeKit, onClose }) {
+  const [copyState, setCopyState] = useState(null)
+
   if (!activeKit) return null
+
+  const handleCopyLetter = async () => {
+    const ok = await copyTextSafely(activeKit.cover_letter)
+    setCopyState(ok ? 'copied' : 'failed')
+    setTimeout(() => setCopyState(null), 2000)
+  }
 
   return (
     <div
@@ -46,7 +55,7 @@ export default function HandoffKitModal({ activeKit, onClose }) {
             {activeKit.company_name}: {activeKit.role_title}
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-            Target Deadline: {activeKit.deadline || 'Rolling recruitment'}
+            Target Deadline: {activeKit.deadline || '(not provided)'}
           </div>
         </div>
 
@@ -66,10 +75,7 @@ export default function HandoffKitModal({ activeKit, onClose }) {
               </div>
               <button
                 type="button"
-                onClick={() => {
-                  navigator.clipboard?.writeText(activeKit.cover_letter)
-                  alert('Cover letter copied!')
-                }}
+                onClick={handleCopyLetter}
                 style={{
                   background: 'transparent',
                   border: '1px solid var(--border)',
@@ -80,7 +86,7 @@ export default function HandoffKitModal({ activeKit, onClose }) {
                   cursor: 'pointer',
                 }}
               >
-                📋 Copy Letter
+                {copyState === 'copied' ? '✓ Copied' : copyState === 'failed' ? 'Copy failed' : '📋 Copy Letter'}
               </button>
             </div>
             <div style={{ fontSize: '12px', color: 'var(--text-primary)', whiteSpace: 'pre-wrap', maxHeight: '140px', overflowY: 'auto', fontFamily: 'monospace' }}>
@@ -95,8 +101,8 @@ export default function HandoffKitModal({ activeKit, onClose }) {
           </div>
           {Object.entries(activeKit.prefilled_answers || {}).map(([key, val], idx) => (
             <div key={idx} style={{ marginBottom: '8px', fontSize: '12px' }}>
-              <div style={{ color: 'var(--text-muted)', textTransform: 'capitalize' }}>{key.replace('_', ' ')}:</div>
-              <div style={{ fontWeight: '600', color: 'var(--text-primary)', marginTop: '2px' }}>{val}</div>
+              <div style={{ color: 'var(--text-muted)', textTransform: 'capitalize' }}>{key.replace(/_/g, ' ')}:</div>
+              <div style={{ fontWeight: '600', color: 'var(--text-primary)', marginTop: '2px' }}>{displayKitValue(val)}</div>
             </div>
           ))}
         </div>
@@ -113,6 +119,7 @@ export default function HandoffKitModal({ activeKit, onClose }) {
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+          {activeKit.portal_url && (
           <a
             href={activeKit.portal_url}
             target="_blank"
@@ -132,6 +139,7 @@ export default function HandoffKitModal({ activeKit, onClose }) {
           >
             Open Official Portal ↗
           </a>
+          )}
         </div>
       </div>
     </div>

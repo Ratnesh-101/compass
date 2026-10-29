@@ -18,6 +18,7 @@ import ValidationReportCard from './ValidationReportCard'
 import ResumeImportModal from './ResumeImportModal'
 import ExtractionReviewModal from './ExtractionReviewModal'
 import ExternalProfileImportModal from './ExternalProfileImportModal'
+import { getResumeKindLabel, copyTextSafely } from '../../utils/careerUiHelpers'
 
 const GitHubIntelligenceModal = React.lazy(() => import('./GitHubIntelligenceModal'))
 
@@ -115,14 +116,17 @@ export default function ResumeStudio() {
     setError(null)
     try {
       const parsed = await parseUploadResume(importText)
+      // Never invent a confidence or an empty missing-field list: pass through only what the backend sent.
+      const extracted = parsed?.extracted_content || parsed
       const fakeResult = {
         success: true,
         filename: 'Pasted Text Document',
         file_type: '.txt',
         raw_text: importText,
-        extracted_content: parsed,
-        missing_fields: [],
-        field_confidence: { overall: 0.85 },
+        extracted_content: extracted,
+        ...(Array.isArray(parsed?.missing_fields) ? { missing_fields: parsed.missing_fields } : {}),
+        ...(parsed?.field_confidence ? { field_confidence: parsed.field_confidence } : {}),
+        ...(parsed?.overall_confidence !== undefined ? { overall_confidence: parsed.overall_confidence } : {}),
       }
       setParseResult(fakeResult)
       setShowImportModal(false)
@@ -157,6 +161,10 @@ export default function ResumeStudio() {
   // GitHub Intelligence imports
   const handleImportGitHubRepo = async (repo) => {
     if (!masterResume?.content) return
+    if (repo?.is_fork || repo?.fork) {
+      const keep = window.confirm(`"${repo.repo_name}" is a fork, so the work may not be yours. Import it anyway?`)
+      if (!keep) return
+    }
     try {
       const currentProjects = masterResume.content.projects || []
       const newProject = {
@@ -180,7 +188,7 @@ export default function ResumeStudio() {
       const list = await fetchResumes()
       setResumesList(list)
       setSaveSuccess(true)
-      alert(`✓ Repository "${repo.repo_name}" imported into Master Profile projects!`)
+      setExportToast({ message: `Repository "${repo.repo_name}" imported into Master Profile projects.`, type: 'success' })
     } catch (err) {
       setError(err.message || 'Failed to import repository')
     }
@@ -204,7 +212,7 @@ export default function ResumeStudio() {
       const list = await fetchResumes()
       setResumesList(list)
       setSaveSuccess(true)
-      alert(`✓ Added ${skills.length} verified technologies to Master Profile!`)
+      setExportToast({ message: `Added ${skills.length} verified technologies to Master Profile.`, type: 'success' })
     } catch (err) {
       setError(err.message || 'Failed to import skills')
     }
@@ -529,7 +537,7 @@ export default function ResumeStudio() {
                         {res.title}
                       </div>
                       <div style={{ fontSize: '11.5px', color: isSelected ? 'var(--primary, #2563eb)' : 'var(--text-secondary)', fontWeight: isSelected ? '600' : '400', marginTop: '2px' }}>
-                        {res.is_master ? '★ Master Source of Truth' : `v${res.version} Tailored`}
+                        {res.is_master ? '★ Master Source of Truth' : `${getResumeKindLabel(res)} · v${res.version}`}
                       </div>
                     </div>
                     <span
@@ -902,9 +910,11 @@ export default function ResumeStudio() {
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
                 <button
                   type="button"
-                  onClick={() => {
-                    navigator.clipboard?.writeText(coverLetterText)
-                    alert('Cover letter copied to clipboard!')
+                  onClick={async () => {
+                    const ok = await copyTextSafely(coverLetterText)
+                    setExportToast(ok
+                      ? { message: 'Cover letter copied to clipboard.', type: 'success' }
+                      : { message: 'Copy failed. Select the text and copy it manually.', type: 'error' })
                   }}
                   style={{
                     background: 'var(--bg-card-soft)',
@@ -919,7 +929,7 @@ export default function ResumeStudio() {
                 </button>
                 <button
                   type="button"
-                  onClick={handleSave}
+                  onClick={handleSaveResume}
                   disabled={saving}
                   style={{
                     background: 'var(--primary, #2563eb)',
@@ -979,9 +989,10 @@ export default function ResumeStudio() {
             success: true,
             filename: `External Source (${source})`,
             file_type: 'profile_import',
-            extracted_content: content,
-            missing_fields: [],
-            field_confidence: { overall: 0.9 },
+            extracted_content: content?.extracted_content || content,
+            ...(Array.isArray(content?.missing_fields) ? { missing_fields: content.missing_fields } : {}),
+            ...(content?.field_confidence ? { field_confidence: content.field_confidence } : {}),
+            ...(content?.overall_confidence !== undefined ? { overall_confidence: content.overall_confidence } : {}),
           })
           setShowExtractionModal(true)
         }}
