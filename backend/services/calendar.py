@@ -16,6 +16,11 @@ import logging
 
 from backend.config import get_settings
 from backend.services.scheduler import _ensure_utc, TimeWindow
+from backend.services.calendar_ics import (  # noqa: F401  (re-exported for existing importers)
+    _format_ics_dt,
+    date_only_value,
+    generate_ics_feed,
+)
 
 logger = logging.getLogger("compass.calendar")
 
@@ -147,6 +152,64 @@ async def disconnect_calendar_connection(pool: Any, user_id: str = "default_user
     return True
 
 
+READONLY_WRITE_ERROR = (
+    "Compass is connected read-only: Google refused to create events "
+    "(missing write permission). Reconnect after enabling calendar write access."
+)
+NOT_CONNECTED_ERROR = "Google Calendar is not connected. Connect your Google account to create events."
+FREEBUSY_AUTH_ERROR = "Google rejected the stored calendar access. Reconnect your Google account."
+
+
+def _simulation_allowed() -> bool:
+    """Simulated Google responses exist only in development and test, never in production."""
+    return (get_settings().ENVIRONMENT or "").lower() in ("development", "test")
+
+
+async def _fetch_google_busy(
+    pool: Any, user_id: str, start_utc: datetime, end_utc: datetime
+) -> tuple[List[Dict[str, Any]], Optional[str], bool]:
+    """Read primary-calendar busy blocks. Returns (blocks, error_or_None, connected)."""
+    import httpx
+
+    token = await get_valid_access_token_for_user(pool, user_id)
+    if not token:
+        return [], None, False
+    if token.startswith("mock_"):
+        return [], None, True
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(
+                "https://www.googleapis.com/calendar/v3/freeBusy",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "timeMin": start_utc.isoformat(),
+                    "timeMax": end_utc.isoformat(),
+                    "items": [{"id": "primary"}],
+                },
+            )
+    except Exception as e:
+        logger.warning(f"Google freeBusy request failed: {e}")
+        return [], "Could not reach Google Calendar.", False
+    if resp.status_code in (401, 403):
+        return [], FREEBUSY_AUTH_ERROR, False
+    if resp.status_code != 200:
+        return [], f"Google Calendar returned HTTP {resp.status_code} when reading your availability.", False
+    primary_busy = resp.json().get("calendars", {}).get("primary", {}).get("busy", [])
+    blocks = [
+        {
+            "id": f"gcal-live-{b.get('start')}",
+            "title": "Google Calendar Commitment",
+            "start": _ensure_utc(b.get("start")).isoformat(),
+            "end": _ensure_utc(b.get("end")).isoformat(),
+            "source": "google_calendar",
+            "is_fixed": True,
+        }
+        for b in primary_busy
+    ]
+    logger.info(f"Loaded {len(blocks)} live Google Calendar busy blocks")
+    return blocks, None, True
+
+
 async def get_calendar_freebusy(
     start_dt: datetime | str,
     end_dt: datetime | str,
@@ -154,10 +217,13 @@ async def get_calendar_freebusy(
     user_id: str = "default_user",
     include_simulated: bool = True,
     task_user_id: Optional[str] = None,
+    calendar_errors: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """Query busy blocks within a date range.
 
     `task_user_id`, when set, restricts the Compass task blocks to that owner.
+    `calendar_errors`, when given, collects human-readable reasons the live Google
+    read failed so callers can show them instead of silently showing an empty week.
 
     Combines:
     1. Fixed/already scheduled tasks from PostgreSQL `tasks`.
@@ -204,54 +270,17 @@ async def get_calendar_freebusy(
         except Exception as e:
             logger.warning(f"Error fetching scheduled tasks from DB: {e}")
 
-    # 2. Check for live Google Calendar connection
+    # 2. Live Google Calendar freeBusy (token is refreshed when needed; failures are reported)
     has_live_connection = False
     if pool is not None:
-        try:
-            from backend.services.oauth import decrypt_token
-            import httpx
-            async with pool.acquire() as conn:
-                row = await conn.fetchrow(
-                    """
-                    SELECT access_token, account_email
-                    FROM calendar_connections
-                    WHERE user_id = $1 AND provider = 'google'
-                    """,
-                    user_id,
-                )
-                if row and row["access_token"]:
-                    decrypted_token = decrypt_token(row["access_token"])
-                    if decrypted_token and not decrypted_token.startswith("mock_"):
-                        # Attempt genuine Google Calendar freebusy query
-                        async with httpx.AsyncClient(timeout=5.0) as client:
-                            fb_resp = await client.post(
-                                "https://www.googleapis.com/calendar/v3/freeBusy",
-                                headers={"Authorization": f"Bearer {decrypted_token}"},
-                                json={
-                                    "timeMin": start_utc.isoformat(),
-                                    "timeMax": end_utc.isoformat(),
-                                    "items": [{"id": "primary"}],
-                                },
-                            )
-                            if fb_resp.status_code == 200:
-                                fb_data = fb_resp.json()
-                                primary_busy = fb_data.get("calendars", {}).get("primary", {}).get("busy", [])
-                                for b in primary_busy:
-                                    busy_blocks.append({
-                                        "id": f"gcal-live-{b.get('start')}",
-                                        "title": "Google Calendar Commitment",
-                                        "start": _ensure_utc(b.get("start")).isoformat(),
-                                        "end": _ensure_utc(b.get("end")).isoformat(),
-                                        "source": "google_calendar",
-                                        "is_fixed": True,
-                                    })
-                                has_live_connection = True
-                                logger.info(f"Loaded {len(primary_busy)} live Google Calendar busy blocks")
-                    elif decrypted_token and decrypted_token.startswith("mock_"):
-                        # In simulated OAuth mode, acknowledge authenticated status
-                        has_live_connection = True
-        except Exception as e:
-            logger.warning(f"Live Google Calendar freebusy query failed, falling back to simulated: {e}")
+        live_blocks, fb_error, has_live_connection = await _fetch_google_busy(
+            pool, user_id, start_utc, end_utc
+        )
+        busy_blocks.extend(live_blocks)
+        if fb_error:
+            logger.warning(f"Live Google Calendar freebusy query failed: {fb_error}")
+            if calendar_errors is not None:
+                calendar_errors.append(fb_error)
 
     # 3. Simulated Google Calendar events (honest fallback for hackathon demo & offline testing)
     # Strictly forbidden and disabled when ENVIRONMENT is unset or 'production' (requires development mode)
@@ -358,6 +387,11 @@ async def get_valid_access_token_for_user(
         return None
 
 
+def _failed_event(error: str, http_status: Optional[int] = None) -> Dict[str, Any]:
+    """A failed live create: no event id, never a fake one."""
+    return {"id": None, "status": "failed", "htmlLink": None, "mode": "error", "error": error, "http_status": http_status}
+
+
 async def create_google_calendar_event(
     access_token: str,
     title: str,
@@ -367,12 +401,19 @@ async def create_google_calendar_event(
     domain: str = "general",
     priority: str = "medium",
     calendar_id: str = "primary",
+    all_day: bool = False,
 ) -> Dict[str, Any]:
-    """Create an event on the user's Google Calendar via Google Calendar REST API."""
+    """Create an event on the user's Google Calendar via Google Calendar REST API.
+
+    Returns mode "live" only when Google confirmed the creation. A refusal or network
+    error returns mode "error" with an `error` text and id None. "simulated" is returned
+    only in development/test for mock tokens (and the no-token case there).
+    """
     import httpx
 
-    # If mock token in simulated mode, provide realistic simulated response
     if not access_token or access_token.startswith("mock_"):
+        if not _simulation_allowed():
+            return _failed_event(NOT_CONNECTED_ERROR)
         sim_id = f"gcal_sim_{uuid.uuid4().hex[:12]}"
         return {
             "id": sim_id,
@@ -386,11 +427,15 @@ async def create_google_calendar_event(
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
     }
+    if all_day:
+        start_field, end_field = {"date": start_iso[:10]}, {"date": end_iso[:10]}
+    else:
+        start_field, end_field = {"dateTime": start_iso}, {"dateTime": end_iso}
     body = {
         "summary": f"[Compass] {title}",
         "description": description or f"Scheduled automatically by Compass Autonomous AI Copilot\nDomain: {domain}\nPriority: {priority}",
-        "start": {"dateTime": start_iso},
-        "end": {"dateTime": end_iso},
+        "start": start_field,
+        "end": end_field,
         "reminders": {
             "useDefault": True,
         },
@@ -399,37 +444,29 @@ async def create_google_calendar_event(
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(url, headers=headers, json=body)
-            if resp.status_code in (200, 201):
-                data = resp.json()
-                logger.info(f"Successfully created live Google Calendar event: {data.get('id')}")
-                return {
-                    "id": data.get("id"),
-                    "status": "confirmed",
-                    "htmlLink": data.get("htmlLink"),
-                    "mode": "live",
-                }
-            logger.warning(f"Google Calendar create event API returned HTTP {resp.status_code}: {resp.text}")
-            # Fallback to simulated mapping so workflow doesn't fail
-            return {
-                "id": f"gcal_fallback_{uuid.uuid4().hex[:10]}",
-                "status": "confirmed",
-                "htmlLink": "https://calendar.google.com/calendar",
-                "mode": "fallback",
-            }
     except Exception as e:
         logger.error(f"Error calling Google Calendar API: {e}")
+        return _failed_event("Could not reach Google Calendar. Try again shortly.")
+
+    if resp.status_code in (200, 201):
+        data = resp.json()
+        logger.info(f"Successfully created live Google Calendar event: {data.get('id')}")
         return {
-            "id": f"gcal_fallback_{uuid.uuid4().hex[:10]}",
+            "id": data.get("id"),
             "status": "confirmed",
-            "htmlLink": "https://calendar.google.com/calendar",
-            "mode": "fallback",
+            "htmlLink": data.get("htmlLink"),
+            "mode": "live",
         }
+    logger.warning(f"Google Calendar create event API returned HTTP {resp.status_code}")
+    if resp.status_code in (401, 403):
+        return _failed_event(READONLY_WRITE_ERROR, resp.status_code)
+    return _failed_event(f"Google Calendar rejected the event (HTTP {resp.status_code}).", resp.status_code)
 
 
 async def link_calendar_event(
     task_id: int,
-    start_dt: datetime | str,
-    end_dt: datetime | str,
+    start_dt: datetime | str | date,
+    end_dt: datetime | str | date,
     title: str,
     pool: Any = None,
     calendar_id: str = "primary",
@@ -437,14 +474,24 @@ async def link_calendar_event(
     domain: str = "general",
     priority: str = "medium",
     notes: str = "",
+    all_day: bool = False,
 ) -> Dict[str, Any]:
-    """Create an event in Google Calendar and persist mapping in calendar_event_links."""
-    start_iso = _ensure_utc(start_dt).isoformat()
-    end_iso = _ensure_utc(end_dt).isoformat()
+    """Create an event in Google Calendar and record it in calendar_event_links.
+
+    `status` is "synced" (live event created), "simulated" (dev/test only),
+    "not_connected" or "failed". The link row is written only for live events, so a
+    refused or simulated create never looks like a synced event. `live_created`
+    is True only when Google confirmed the creation.
+    """
+    if all_day:
+        start_iso = (date_only_value(start_dt) or _ensure_utc(start_dt).date()).isoformat()
+        end_iso = (date_only_value(end_dt) or _ensure_utc(end_dt).date()).isoformat()
+    else:
+        start_iso = _ensure_utc(start_dt).isoformat()
+        end_iso = _ensure_utc(end_dt).isoformat()
 
     access_token = await get_valid_access_token_for_user(pool, user_id) if pool else None
-    
-    # Create event via Google Calendar API (or simulated fallback)
+
     g_res = await create_google_calendar_event(
         access_token=access_token or "",
         title=title,
@@ -454,11 +501,13 @@ async def link_calendar_event(
         domain=domain,
         priority=priority,
         calendar_id=calendar_id,
+        all_day=all_day,
     )
-    google_event_id = g_res.get("id") or f"gcal_evt_{task_id}_{uuid.uuid4().hex[:8]}"
-    html_link = g_res.get("htmlLink")
+    mode = g_res.get("mode", "error")
+    google_event_id = g_res.get("id")
+    live_created = mode == "live" and bool(google_event_id)
 
-    if pool is not None:
+    if live_created and pool is not None:
         try:
             async with pool.acquire() as conn:
                 await conn.execute(
@@ -475,16 +524,69 @@ async def link_calendar_event(
         except Exception as e:
             logger.warning(f"Failed to record calendar_event_links for task {task_id}: {e}")
 
+    if live_created:
+        status = "synced"
+    elif mode == "simulated":
+        status = "simulated"
+    elif g_res.get("error") == NOT_CONNECTED_ERROR:
+        status = "not_connected"
+    else:
+        status = "failed"
+
     return {
-        "status": "synced",
+        "status": status,
+        "live_created": live_created,
         "task_id": task_id,
         "google_event_id": google_event_id,
         "calendar_id": calendar_id,
         "start": start_iso,
         "end": end_iso,
+        "all_day": all_day,
         "title": title,
-        "html_link": html_link,
-        "mode": g_res.get("mode", "simulated"),
+        "html_link": g_res.get("htmlLink"),
+        "mode": mode,
+        "error": g_res.get("error"),
+    }
+
+
+SYNCABLE_TASKS_SQL = """
+    SELECT id, title, domain, priority, notes, duration_minutes, due_date, scheduled_start, scheduled_end
+    FROM tasks
+    WHERE user_id = $1
+      AND deleted_at IS NULL
+      AND COALESCE(status, 'open') NOT IN ('done', 'completed', 'cancelled')
+      AND COALESCE(trusted_event_url, '') NOT LIKE $2
+      AND (
+        (scheduled_start IS NOT NULL AND scheduled_end IS NOT NULL)
+        OR due_date IS NOT NULL
+      )
+    ORDER BY COALESCE(scheduled_start, due_date) ASC
+"""
+
+
+def summarize_calendar_outcome(live_created: int, error_count: int, simulated: int, not_connected: int, first_error: Optional[str]) -> str:
+    """Honest one-line outcome: 'Synced N tasks' only for events Google really created."""
+    parts: List[str] = []
+    if live_created:
+        parts.append(f"Synced {live_created} task{'s' if live_created != 1 else ''} to your Google Calendar.")
+    if error_count:
+        parts.append(f"{error_count} could not be created. {first_error or ''}".strip())
+    if simulated:
+        parts.append(f"Simulated {simulated} task{'s' if simulated != 1 else ''} (demo mode, nothing was sent to Google).")
+    if not_connected and not live_created and not error_count:
+        parts.append(f"{NOT_CONNECTED_ERROR} Use the .ics export to import your schedule instead.")
+    return " ".join(parts) or "Nothing to sync: no open scheduled tasks or deadlines."
+
+
+def tally_link_results(results: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """Counts and first error across link_calendar_event results."""
+    failed = [r for r in results if r.get("status") == "failed"]
+    return {
+        "live_created": sum(1 for r in results if r.get("live_created")),
+        "error_count": len(failed),
+        "simulated_count": sum(1 for r in results if r.get("status") == "simulated"),
+        "not_connected_count": sum(1 for r in results if r.get("status") == "not_connected"),
+        "calendar_error": next((r["error"] for r in failed if r.get("error")), None),
     }
 
 
@@ -492,7 +594,13 @@ async def sync_all_tasks_to_google_calendar(
     pool: Any,
     user_id: str = "default_user",
 ) -> Dict[str, Any]:
-    """Synchronize all scheduled tasks and deadlines to the user's Google Calendar."""
+    """Create Google Calendar events for the user's open real tasks (demo and finished rows excluded).
+
+    Tasks with a scheduled slot become timed events; tasks with only a due date become
+    all-day events on that date.
+    """
+    from backend.services.task_scope import DEMO_URL_PREFIX
+
     if pool is None:
         return {"success": False, "count": 0, "message": "Database not connected"}
 
@@ -500,35 +608,21 @@ async def sync_all_tasks_to_google_calendar(
         return {"success": True, "count": 0, "message": "No user ID provided"}
 
     async with pool.acquire() as conn:
-        tasks = await conn.fetch(
-            """
-            SELECT id, title, domain, priority, notes, duration_minutes, due_date, scheduled_start, scheduled_end
-            FROM tasks
-            WHERE user_id = $1
-              AND deleted_at IS NULL
-              AND (
-                (scheduled_start IS NOT NULL AND scheduled_end IS NOT NULL)
-                OR due_date IS NOT NULL
-              )
-            ORDER BY COALESCE(scheduled_start, due_date) ASC
-            """,
-            user_id,
-        )
+        tasks = await conn.fetch(SYNCABLE_TASKS_SQL, user_id, f"{DEMO_URL_PREFIX}%")
 
     access_token = await get_valid_access_token_for_user(pool, user_id)
     token_is_live = bool(access_token and not access_token.startswith("mock_"))
 
-    synced_events = []
-    live_count = 0
-    simulated_count = 0
+    synced_events: List[Dict[str, Any]] = []
     for t in tasks:
-        start_dt = t["scheduled_start"]
-        end_dt = t["scheduled_end"]
-        if not start_dt or not end_dt:
-            due = _ensure_utc(t["due_date"])
-            dur = t.get("duration_minutes") or 60
-            start_dt = due - timedelta(minutes=dur)
-            end_dt = due
+        start_dt = t.get("scheduled_start")
+        end_dt = t.get("scheduled_end")
+        all_day = not start_dt or not end_dt
+        if all_day:
+            due = date_only_value(t.get("due_date"))
+            if due is None:
+                continue
+            start_dt, end_dt = due, due + timedelta(days=1)
 
         res = await link_calendar_event(
             task_id=t["id"],
@@ -540,110 +634,39 @@ async def sync_all_tasks_to_google_calendar(
             domain=t["domain"],
             priority=t["priority"],
             notes=t["notes"] or "",
+            all_day=all_day,
         )
         synced_events.append(res)
-        if res.get("mode") == "live":
-            live_count += 1
-        else:
-            simulated_count += 1
 
-    # Update last_synced_at timestamp on user connection
-    try:
-        async with pool.acquire() as conn:
-            await conn.execute(
-                """
-                UPDATE calendar_connections
-                SET last_synced_at = now()
-                WHERE (user_id = $1 OR account_email = $1) AND provider = 'google'
-                """,
-                user_id,
-            )
-    except Exception as e:
-        logger.warning(f"Could not update last_synced_at: {e}")
+    tally = tally_link_results(synced_events)
 
-    is_live = token_is_live and live_count > 0
-    if token_is_live:
-        if live_count > 0:
-            msg = f"Successfully synced {live_count} tasks directly to Google Calendar API."
-        else:
-            msg = "Google Calendar is live connected, but there were no scheduled tasks or deadlines to sync."
-            is_live = True
-    else:
-        msg = (
-            f"Slotted {simulated_count} tasks in Compass (Demo Mode). Because live Google OAuth credentials are not connected, "
-            f"use 'Export .ics Feed' to subscribe, or connect your Google Account for live synchronization."
-        )
+    if tally["live_created"]:
+        try:
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    UPDATE calendar_connections
+                    SET last_synced_at = now()
+                    WHERE (user_id = $1 OR account_email = $1) AND provider = 'google'
+                    """,
+                    user_id,
+                )
+        except Exception as e:
+            logger.warning(f"Could not update last_synced_at: {e}")
 
     return {
-        "success": True,
+        "success": tally["error_count"] == 0,
         "count": len(synced_events),
-        "live_count": live_count,
-        "simulated_count": simulated_count,
-        "is_live": is_live,
-        "message": msg,
+        "live_created": tally["live_created"],
+        "live_count": tally["live_created"],
+        "simulated_count": tally["simulated_count"],
+        "error_count": tally["error_count"],
+        "calendar_error": tally["calendar_error"],
+        "is_live": token_is_live and tally["live_created"] > 0,
+        "message": summarize_calendar_outcome(
+            tally["live_created"], tally["error_count"], tally["simulated_count"],
+            tally["not_connected_count"], tally["calendar_error"],
+        ),
         "events": synced_events,
         "user_id": user_id,
     }
-
-
-# ---------------------------------------------------------------------------
-# RFC 5545 iCalendar (.ics) Feed Generator
-# ---------------------------------------------------------------------------
-
-def _format_ics_dt(dt: datetime | str | date) -> str:
-    """Format datetime as UTC iCalendar string (YYYYMMDDTHHMMSSZ)."""
-    utc_dt = _ensure_utc(dt)
-    return utc_dt.strftime("%Y%m%dT%H%M%SZ")
-
-
-def generate_ics_feed(
-    tasks: Sequence[Dict[str, Any]],
-    calendar_name: str = "Compass Focus Schedule",
-) -> str:
-    """Generate RFC 5545 compliant iCalendar string for calendar export or subscription."""
-    now_stamp = _format_ics_dt(datetime.now(timezone.utc))
-
-    lines = [
-        "BEGIN:VCALENDAR",
-        "VERSION:2.0",
-        "PRODID:-//Compass Autonomous Agent//Dynamic Scheduler 2.0//EN",
-        "CALSCALE:GREGORIAN",
-        "METHOD:PUBLISH",
-        f"X-WR-CALNAME:{calendar_name}",
-        "X-WR-TIMEZONE:UTC",
-    ]
-
-    for t in tasks:
-        start = t.get("scheduled_start") or t.get("due_date")
-        end = t.get("scheduled_end") or start
-        if not start or not end:
-            continue
-
-        task_id = t.get("id") or uuid.uuid4().hex[:8]
-        title = (t.get("title") or "Untitled Task").replace("\n", " ").replace(";", "\\;").replace(",", "\\,")
-        domain = t.get("domain", "general")
-        priority = t.get("priority", "medium")
-        notes = (t.get("notes") or "").replace("\n", "\\n").replace(";", "\\;")
-        desc = f"Domain: {domain}\\nPriority: {priority}"
-        if notes:
-            desc += f"\\nNotes: {notes}"
-
-        dt_start_str = _format_ics_dt(start)
-        dt_end_str = _format_ics_dt(end)
-
-        lines.extend([
-            "BEGIN:VEVENT",
-            f"UID:compass-task-{task_id}@compass.ai",
-            f"DTSTAMP:{now_stamp}",
-            f"DTSTART:{dt_start_str}",
-            f"DTEND:{dt_end_str}",
-            f"SUMMARY:[{domain.upper()}] {title}",
-            f"DESCRIPTION:{desc}",
-            "STATUS:CONFIRMED",
-            f"CATEGORIES:{domain.upper()}",
-            "TRANSP:OPAQUE",
-            "END:VEVENT",
-        ])
-
-    lines.append("END:VCALENDAR")
-    return "\r\n".join(lines) + "\r\n"

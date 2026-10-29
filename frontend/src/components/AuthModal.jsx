@@ -24,7 +24,11 @@ import {
   safeHref,
 } from '../api/client'
 
+import { isEmailSignInEnabled } from '../utils/firstRun'
 import GoogleCloudSetupGuide from './auth/GoogleCloudSetupGuide'
+
+// Email quick-connect only exists on development servers; production leads with Google.
+const emailSignInEnabled = isEmailSignInEnabled(import.meta.env)
 
 export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged }) {
   const [loading, setLoading] = useState(false)
@@ -233,7 +237,7 @@ export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged 
                 boxShadow: activeEmail ? '0 0 8px #10b981' : 'none'
               }} />
               <span style={{ fontSize: '12px', color: activeEmail ? '#059669' : 'var(--text-muted)', fontWeight: '600' }}>
-                {activeEmail ? 'Isolated Memory Active' : 'Unauthenticated'}
+                {currentUser?.authenticated ? 'Isolated Memory Active' : 'Unauthenticated'}
               </span>
             </div>
           </div>
@@ -296,6 +300,60 @@ export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged 
               flexDirection: 'column',
               gap: '16px'
             }}>
+              {/* Google OAuth Button */}
+              <div style={{ textAlign: 'center' }}>
+                {oauthStatus?.configured ? (
+                  <a
+                    href={safeHref(getGoogleOAuthConnectUrl(true))}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      padding: '10px 20px',
+                      borderRadius: 'var(--radius-btn, 6px)',
+                      background: 'var(--bg-card)',
+                      border: '1px solid var(--border)',
+                      color: 'var(--text-primary)',
+                      fontSize: '13px',
+                      fontWeight: '700',
+                      textDecoration: 'none'
+                    }}
+                  >
+                    <Key size={15} strokeWidth={1.8} />
+                    <span>Sign in with Google OAuth</span>
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setError('Google OAuth is not configured in .env (GOOGLE_CLIENT_ID missing). See the setup instructions below.')}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      padding: '10px 20px',
+                      borderRadius: 'var(--radius-btn, 6px)',
+                      background: 'var(--bg-card)',
+                      border: '1px solid var(--border)',
+                      color: 'var(--text-muted)',
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <Key size={15} strokeWidth={1.8} />
+                    <span>Sign in with Google (Setup Required)</span>
+                  </button>
+                )}
+              </div>
+
+              {emailSignInEnabled && (
+                <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: '2px 0' }}>
+                <div style={{ flex: 1, height: '1px', background: 'var(--border)' }} />
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>OR</span>
+                <div style={{ flex: 1, height: '1px', background: 'var(--border)' }} />
+              </div>
+
               {/* Instant Email Sign-In */}
               <div>
                 <div style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '4px' }}>
@@ -372,57 +430,8 @@ export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged 
                 </div>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: '2px 0' }}>
-                <div style={{ flex: 1, height: '1px', background: 'var(--border)' }} />
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>OR</span>
-                <div style={{ flex: 1, height: '1px', background: 'var(--border)' }} />
-              </div>
-
-              {/* Google OAuth Button */}
-              <div style={{ textAlign: 'center' }}>
-                {oauthStatus?.configured ? (
-                  <a
-                    href={safeHref(getGoogleOAuthConnectUrl(true))}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      padding: '10px 20px',
-                      borderRadius: 'var(--radius-btn, 6px)',
-                      background: 'var(--bg-card)',
-                      border: '1px solid var(--border)',
-                      color: 'var(--text-primary)',
-                      fontSize: '13px',
-                      fontWeight: '700',
-                      textDecoration: 'none'
-                    }}
-                  >
-                    <Key size={15} strokeWidth={1.8} />
-                    <span>Sign in with Google OAuth</span>
-                  </a>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setError('Google OAuth is not configured in .env (GOOGLE_CLIENT_ID missing). Use Instant Sign-In above or see setup instructions below.')}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      padding: '10px 20px',
-                      borderRadius: 'var(--radius-btn, 6px)',
-                      background: 'var(--bg-card)',
-                      border: '1px solid var(--border)',
-                      color: 'var(--text-muted)',
-                      fontSize: '13px',
-                      fontWeight: '600',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <Key size={15} strokeWidth={1.8} />
-                    <span>Sign in with Google (Setup Required)</span>
-                  </button>
-                )}
-              </div>
+                </>
+              )}
             </div>
           )}
         </div>

@@ -39,6 +39,7 @@ from backend.services.career_resume import (
 )
 from backend.services.career_submission import (
     compute_batch_content_hash,
+    load_batch_apps_data,
     execute_batch_submission,
     get_batch_lock,
     verify_batch_approval_token,
@@ -206,11 +207,7 @@ async def handle_submit_approved_application_batch(args: Dict[str, Any], pool: A
                 "error": "Submission rejected: this batch is already processing or is no longer in APPROVED status.",
             }
         try:
-            apps_data = []
-            for aid in batch.get("application_ids", []):
-                app_rec = await get_career_application_by_id(aid, user_id)
-                if app_rec:
-                    apps_data.append(app_rec.model_dump())
+            apps_data = await load_batch_apps_data(user_id, batch.get("application_ids", []))
             token = batch.get("approval_token")
             if not token:
                 await release_application_batch_claim(batch_id, user_id, "APPROVED")

@@ -10,7 +10,6 @@ import {
   Search,
   MapPin,
   Settings,
-  RefreshCw,
 } from 'lucide-react'
 
 const CATEGORIES = [
@@ -57,8 +56,7 @@ export default function RadarFilters({
   workArrangement,
   onWorkArrangementChange,
   onOpenProfile,
-  onSync,
-  isSyncing,
+  lastRefreshed,
 }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '20px' }}>
@@ -236,7 +234,7 @@ export default function RadarFilters({
           <button
             type="button"
             onClick={onOpenProfile}
-            title="Manage candidate profile in Resume Studio"
+            title="Edit your candidate profile"
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -255,28 +253,11 @@ export default function RadarFilters({
             <span>Candidate Profile</span>
           </button>
 
-          <button
-            type="button"
-            onClick={onSync}
-            disabled={isSyncing}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '9px 14px',
-              borderRadius: 'var(--radius-btn, 6px)',
-              border: 'none',
-              background: 'var(--brand)',
-              color: 'var(--accent-text, #1b1a17)',
-              fontSize: '13px',
-              fontWeight: 600,
-              cursor: isSyncing ? 'not-allowed' : 'pointer',
-              opacity: isSyncing ? 0.7 : 1,
-            }}
-          >
-            <RefreshCw size={15} strokeWidth={1.8} className={isSyncing ? 'spin' : ''} />
-            <span>{isSyncing ? 'Syncing…' : 'Sync Sources'}</span>
-          </button>
+          {lastRefreshed && (
+            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+              Listings last refreshed {lastRefreshed.toLocaleDateString()}
+            </span>
+          )}
         </div>
       </div>
     </div>

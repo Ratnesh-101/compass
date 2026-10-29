@@ -116,7 +116,7 @@ def test_radar_profile_modal_immediate_close_and_error_preservation():
 
     # 4. Verify duplicate submission prevention
     assert "if (isBusy) return" in modal_code
-    assert "disabled={isBusy}" in modal_code
+    assert "disabled={isBusy || !isFormComplete}" in modal_code
 
 
 def test_career_copilot_save_ux_and_navigation():
