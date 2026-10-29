@@ -29,8 +29,8 @@
    Compass connects tasks, code architecture decisions, and academic coursework into a single persistent memory layer (PostgreSQL + pgvector). It combines tiered open-source LLM routing with deterministic capacity arithmetic and a human confirmation gate that blocks any database mutation until explicitly approved.
 
 3. **How does the architecture enable it?**  
-   - **Frontend**: Vite + React 18 dashboard and native terminal CLI.
-   - **API & Routing**: FastAPI backend with NVIDIA Nemotron-3 Nano for sub-400ms skill dispatching.
+   - **Frontend**: Vite + React 19 dashboard and native terminal CLI.
+   - **API & Routing**: FastAPI backend with NVIDIA Nemotron-3 Nano for intent routing and skill dispatching.
    - **Reasoning**: ReAct multi-step agent (Nemotron-3 Super) with 4 specialist domain assistants.
    - **Memory & Grounding**: Neon PostgreSQL + pgvector HNSW cosine search for 768-dim semantic retrieval, paired with Tavily web intelligence for live epistemic verification.
    - **State Safety**: Mutating actions pause at an authenticated confirmation gate with full audit logging and 1-click undo.
@@ -45,8 +45,8 @@ As dual-degree engineering students balancing rigorous university coursework (em
 
 #### What It Does
 Compass is an autonomous productivity agent and conversational copilot with persistent memory across three partitioned domains: **Hackathons**, **Code**, and **Coursework**. Accessible via both a sleek dark-mode web dashboard and a native terminal CLI, Compass:
-1. **Intelligently Routes & Executes Skills (<400ms)**: Uses **NVIDIA Nemotron-3 Nano** to parse user intent into structured skills (`add_task`, `query_tasks`, `log_code_context`, `verify_deadline`) without brittle regex or JSON parsing errors.
-2. **Maintains Dense Semantic Code & Lecture Memory**: Generates 768-dimensional Matryoshka-truncated embeddings via `Qwen/Qwen3-Embedding-8B` on Nebius Token Factory, indexing snippets in Neon Serverless PostgreSQL with `pgvector` HNSW cosine indexing for sub-5ms semantic search.
+1. **Routes & Executes Skills**: Uses **NVIDIA Nemotron-3 Nano** to parse user intent into structured skills (`add_task`, `query_tasks`, `log_code_context`, `verify_deadline`) without brittle regex or JSON parsing errors.
+2. **Maintains Dense Semantic Code & Lecture Memory**: Generates 768-dimensional Matryoshka-truncated embeddings via `Qwen/Qwen3-Embedding-8B` on Nebius Token Factory, indexing snippets in Neon Serverless PostgreSQL with `pgvector` HNSW cosine indexing for semantic search.
 3. **Reasoning with Human-in-the-Loop Confirmation**: Features an autonomous **ReAct (Reason + Act)** planner powered by **NVIDIA Nemotron-3 Super (120B)**. Read-only queries execute instantly, while state-mutating actions (`add_task`, `edit_task`, `delete_task`, `ingest_url`) halt at a confirmation gate requiring explicit user approval.
 4. **Synthesizes Executive Roadmaps**: Reserved for **NVIDIA Nemotron-3 Ultra (550B)**, which aggregates cross-domain tasks and identifies deadline conflicts, balancing coursework with hackathon deliverables.
 5. **Real-Time Web Intelligence & Anti-Hallucination**: Integrates a complete 3-tool Tavily web intelligence suite:
@@ -57,41 +57,40 @@ Compass is an autonomous productivity agent and conversational copilot with pers
 6. **ChatGPT-Style Chat Management & Public Share Links**: Full conversation lifecycle (Pin, Rename, Archive, Delete modal) and 1-click viral public share URLs (`/?share=<id>`) so collaborators and judges can view conversations without logins.
 
 #### How We Built It
-- **AI Inference (100% Nebius Token Factory)**:
-  - `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`: Sub-400ms intent routing & native function calling.
+- **AI Inference (all through Nebius Token Factory; see the README section "Built with NVIDIA Nemotron on Nebius Token Factory" for the file-level map)**:
+  - `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`: Intent routing & native function calling (`backend/router.py`).
   - `nvidia/nemotron-3-super-120b-a12b`: Deep skill reasoning and technical code retrieval synthesis.
   - `nvidia/Nemotron-3-Ultra-550b-a55b`: Multi-domain executive roadmap synthesis.
   - `Qwen/Qwen3-Embedding-8B`: 768-dim dense semantic vector embeddings.
 - **Database Layer**: Neon Serverless PostgreSQL 16 with `pgvector` HNSW cosine index (`<->`) and pooled connections.
 - **Backend Architecture**: FastAPI, Python 3.12, Uvicorn, and Server-Sent Events (SSE) token streaming, deployed on Render with 24/7 keep-alive monitoring.
-- **Frontend Architecture**: React 18, Vite, Vanilla CSS design system, deployed on Vercel with same-origin edge rewrites (immune to client-side ad-blockers).
+- **Frontend Architecture**: React 19, Vite, Vanilla CSS design system, deployed on Vercel with same-origin edge rewrites (immune to client-side ad-blockers).
 - **Web Intelligence**: Tavily Async API featuring 3 specialized tools (`search_web`, `ingest_url`, `verify_deadline`) with prompt injection sanitization and credit tracking in `tavily_usage_log`.
 
 #### Challenges We Ran Into
-1. **The 2,000-Dimension pgvector HNSW Limit**: `Qwen3-Embedding-8B` produces 4,096-dimensional vectors by default, which exceed pgvector's HNSW index limit. We implemented Matryoshka dimension truncation down to 768 dimensions with L2 normalization, fitting the index and achieving 100% Top-1 recall in retrieval benchmarks.
+1. **The 2,000-Dimension pgvector HNSW Limit**: `Qwen3-Embedding-8B` produces 4,096-dimensional vectors by default, which exceed pgvector's HNSW index limit. We implemented Matryoshka dimension truncation down to 768 dimensions with L2 normalization, fitting the index. `scripts/validate_embeddings.py` checks retrieval on a small known corpus.
 2. **Preventing LLM Hallucination & Stale Data on Dynamic Hackathon Rules**: LLM knowledge cutoffs cannot know if a deadline was extended, and stored database dates go stale. We paired Nemotron with Tavily's 3-tool suite: `search_web` (for grounded answers on epistemic abstention), `ingest_url` (for persistent web memory with confirm-gated vector chunking), and `verify_deadline` (for proactive staleness detection against live sources).
 3. **Safe Autonomous Agent Mutations**: Multi-step agents can easily corrupt user data if allowed to run mutations unchecked. We engineered a strict Human-in-the-Loop confirmation gate with state recovery and audit logging (`agent_audit_log`) supporting full 1-click undo.
 
 #### Accomplishments That We're Proud Of
-- **195 Automated Tests**: 195 automated tests across 20 test suites verifying memory, agent loops, security hardening, endpoints, and CLI commands.
-- **Blended Model Economics**: Squeezed 106 full-turn evaluations into just **$0.019** on Nebius Token Factory by dispatching 85% of queries to Nano and PostgreSQL directly.
-- **Zero-Friction Evaluation**: Judges can immediately use the live web app and API without setting up accounts or providing API keys.
+- **1,734 Automated Tests**: 1,734 tests in 141 test files (`pytest --collect-only -q`) covering memory, agent loops, security hardening, endpoints, and CLI commands.
+- **Tiered Model Economics**: Routing runs on the smallest Nemotron model; per-call token cost is priced in `backend/config.py` and logged for the `/api/telemetry` summary.
+- **Zero-Friction Evaluation**: Judges can use the live web app with an automatic anonymous guest session, with no account or API key.
 - **ChatGPT-Quality UX**: Complete chat management with sidebar context menus and instant shareable public links.
 
 #### What We Learned
-- Hierarchical open-source model routing outperforms a single monolithic model in both latency and economics.
-- Epistemic abstention (`[ABSTAIN]`) paired with targeted web retrieval effectively eliminates hallucination in time-sensitive agent workflows.
+- Routing each step to the smallest model that fits keeps the large models for the few steps that need them.
+- Epistemic abstention (`[ABSTAIN]`) paired with targeted web retrieval reduces made-up answers in time-sensitive agent workflows.
 
 #### What's Next for Compass
-- Multi-calendar synchronization (Google Calendar, Apple iCal).
+- Multi-calendar support beyond the current Google Calendar free/busy and event creation.
 - Automated GitHub commit webhooks to log architecture changes passively into vector memory.
-- Activating the prepared Nebius Serverless Compute manifests (`deploy/`) once tenant billing verification clears.
+- Nebius Serverless Endpoint/Job manifests exist in `deploy/` but are not deployed; production runs on Render, Vercel and Neon. Deploying them is a possible next step.
 
 #### Team & Contributors
-- **Rhythm**: Backend Architecture, Database Schema, and Nebius Token Factory Tool Registration
-- **Nandani**: Frontend Web Dashboard, Real-Time Context Stream UI, and Chat Interface
-- **Kunal**: Frontend UI Contributor (Timeline Modernizations, UI Components & Refinements per PR #8 & #11)
-- **Ratnesh Singh** (VIT+IIT): System Integration, Deployment Engineering (Render, Vercel, Nebius Manifests), and Terminal CLI
+- **Ratnesh Singh**: Backend, AI & integration lead. FastAPI backend, DB schema and migrations, tiered Nemotron routing on Nebius Token Factory, ReAct agent and confirmation gate, Tavily tools, Career Copilot, deployment (Render, Vercel, Neon), terminal CLI
+- **Nandani**: Frontend engineering. Web dashboard, chat interface and streaming UI, specialist agent panel, chat management and share links
+- **Kunal**: Frontend design. Timeline and calendar UI, mobile responsiveness, design tokens and UI polish
 
 ---
 
@@ -126,7 +125,7 @@ Compass registers three dedicated Tavily web intelligence tools, cleanly separat
 - `verify_deadline` (proactive staleness detection against live sources): Compares stored database deadlines against live contest web sources to detect schedule drift (e.g., catching a 15-day drift between an old October 15 stored task and the live October 30 Devpost deadline) rather than trusting stale database timestamps forever.
 
 #### 4. Isolated Credit Accounting
-Tavily search and extract calls are partitioned into `tavily_usage_log`, tracking external API credits and costs separately from LLM GPU token costs.
+Tavily search and extract calls are partitioned into `tavily_usage_log`, tracking external API credits and costs separately from LLM token costs.
 
 ---
 
@@ -167,7 +166,7 @@ Tavily search and extract calls are partitioned into `tavily_usage_log`, trackin
    - *Constructive Suggestion*: The native 4,096-dimension output is too large for standard `pgvector` HNSW indexes (<2,000 dims). Providing a native `dimensions` query parameter in the Token Factory embedding endpoint (standard Matryoshka slicing) would prevent developers from having to perform manual slicing and L2 re-normalization in client code.
 3. **Nemotron-3 Ultra (550B) Context-Escalation Performance**:
    - *Praise*: Synthesis quality across multi-domain structured payloads was remarkably thorough, identifying subtle schedule conflicts that smaller models missed.
-   - *Constructive Suggestion*: Adding streaming support (`stream=True`) for Ultra in Token Factory with lower initial time-to-first-token (TTFT) would significantly enhance interactive executive summary user experiences.
+   - *Constructive Suggestion*: Lower time-to-first-token on Ultra would improve interactive executive summaries.
 
 ---
 

@@ -2,9 +2,8 @@
 
 > **Your one AI that remembers every hackathon, repo, and deadline — so you don't have to.**
 
-[![MIT License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue.svg?logo=python&logoColor=white)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.142%2B-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.162-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![React 19](https://img.shields.io/badge/React-19-61DAFB.svg?logo=react&logoColor=black)](https://react.dev/)
 [![Vite 8](https://img.shields.io/badge/Vite-8-646CFF.svg?logo=vite&logoColor=white)](https://vitejs.dev/)
 [![CI](https://github.com/Ratnesh-101/compass/actions/workflows/ci.yml/badge.svg)](https://github.com/Ratnesh-101/compass/actions/workflows/ci.yml)
@@ -13,19 +12,52 @@
 [![Tavily](https://img.shields.io/badge/Tavily-Web%20Intelligence-4A90E2.svg)](https://tavily.com/)
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-compass--farmlytics.vercel.app-success.svg?logo=vercel&logoColor=white)](https://compass-farmlytics.vercel.app)
 
+**[Live app](https://compass-farmlytics.vercel.app)** · **[Demo video](YOUTUBE_LINK_HERE)** · [![MIT License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) · [API health](https://compass-backend-qryu-vcfv.onrender.com/health) · [Demo script](docs/demo_script.md)
+
 Compass is a persistent-memory AI copilot that bridges your tasks, hackathon deadlines, coursework, code context, and career pipeline into one unified, agent-driven workspace. Instead of serving as a stateless chat prompt, Compass reasons across all your work domains, queries live web sources, validates candidate eligibility, tailors verifiable resumes, and halts at strict human confirmation gates before mutating data or submitting applications.
 
-## 🌟 Winning Intelligence Features
+### Try it as a judge
 
-Compass goes beyond simple AI integration to provide a high-fidelity career engine:
+Open the [live app](https://compass-farmlytics.vercel.app); no signup, login or API key is needed. On first load the browser silently requests an anonymous guest session from `POST /api/guest/session` (an HMAC-signed token kept in a cookie and local storage) and everything you create is isolated to that guest. The backend runs on a free Render instance, so the first request after a period of inactivity can be slow while it wakes. Guest access is rate-limited (5 new guest sessions per IP per hour, 25 Tavily credits per guest per day) and guest data is kept for 30 days. Things to try: ask the chat *"What is the official submission deadline for the Nebius x NVIDIA AI Hackathon?"* (memory abstains, then Tavily search), add a task and watch the confirmation gate, or open the Career tab. The 1-click demo-persona seeding endpoint is disabled in production.
 
-- **Strict Eligibility Mapping:** Rigorously matches candidate skills, education, and graduation timelines against job requirements with deterministic rule-based explainability.
-- **Actionable Gap Analysis:** Transforms "Ineligible" results into a growth roadmap, identifying specific missing qualifications and suggesting real-world bridge actions.
-- **Company Intelligence Briefs:** Researches target employers via Tavily with 24-hour caching and dedicated sub-budgets to generate "War Room" briefs highlighting technical pain points.
-- **ATS Parsing Simulation (Estimate):** Simulates machine-parsing of resumes to estimate potential keyword gaps and formatting concerns.
-- **Predictive Hiring Radar:** Leverages historical cycle data to forecast upcoming internship windows for top-tier companies.
+## Built with NVIDIA Nemotron on Nebius Token Factory
 
-**[🌐 Live Web Application](https://compass-farmlytics.vercel.app)** · **[🔌 API Health Endpoint](https://compass-backend-qryu-vcfv.onrender.com/health)** · **[🎥 Demo Video Walkthrough Script](docs/demo_script.md)**
+All LLM inference and embeddings in Compass go through **Nebius Token Factory** using the OpenAI-compatible API (`NEBIUS_BASE_URL`, default `https://api.tokenfactory.nebius.com/v1/`). Model IDs are configurable in `backend/config.py` and the table below lists the defaults and where each is called (verified against the code).
+
+| Model | What it does in Compass | Called from |
+| :--- | :--- | :--- |
+| `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` (`ROUTER_MODEL`) | Intent routing with native function calling on each chat turn; answers from the specialist agents | `route_message()` in `backend/router.py`; `_synthesize_specialist_response()` in `backend/agents/specialist.py` |
+| `nvidia/nemotron-3-super-120b-a12b` (`SKILL_MODEL`, `REASONING_MODEL`) | ReAct agent steps, the plan critic, and the Planner role in feasibility triage | `backend/agent.py` (reasoning loop), `backend/agent_critic.py`, `backend/agents/feasibility.py` |
+| `nvidia/Nemotron-3-Ultra-550b-a55b` (`SYNTHESIS_MODEL`) | Forced final synthesis for long agent runs, daily and cross-domain summaries, and the adversarial Realist role in feasibility triage | `backend/agent_synthesis.py`, `summarize_across_domains` in `backend/skills/handlers/context.py`, `backend/agents/feasibility.py` |
+| `Qwen/Qwen3-Embedding-8B` (`EMBEDDING_MODEL`) | 768-dimension embeddings for the pgvector memory store | `get_embedding()` in `backend/services/embeddings.py`, used by `backend/memory/vector.py` |
+
+### Where Token Factory helped
+
+- **One endpoint for everything.** Chat completions, tool/function calling, SSE streaming and embeddings all use one OpenAI-compatible base URL and one API key, so the backend uses the stock `openai` SDK with no provider-specific code.
+- **Swapping tiers per call.** The model is a per-call argument, so each step picks the smallest model that fits: Nano for routing, Super for multi-step reasoning, Ultra only for synthesis. Changing a tier is an environment variable, not a code change.
+- **Cost visibility.** Per-call token usage is priced in `backend/config.py` (per 1M tokens: Nano $0.06 in / $0.24 out, Super $0.30 / $0.90, Ultra $0.80 / $2.40, Qwen embedding $0.02 in) and recorded for the public `/api/telemetry` summary.
+
+### Other Nebius services
+
+Compass uses **only Token Factory** from Nebius in production. The backend is deployed on Render, the frontend on Vercel and the database on Neon. `deploy/serverless_endpoint.yaml` and `deploy/serverless_job.yaml` are Nebius Serverless Endpoint and Job manifests we prepared, but they are **not deployed or active**, and `deploy/postgres_cluster.md` is a plan, not a running cluster.
+
+### Tavily integration
+
+Tavily powers three skills, registered in `backend/skills/schemas_web.py` and implemented in `backend/skills/handlers/web.py`. Tavily tools only run when `TAVILY_ENABLED=true` and `TAVILY_API_KEY` is set.
+
+| Skill | Behavior | Implementation |
+| :--- | :--- | :--- |
+| `search_web` | Live search, forced by the agent loop (`backend/agent.py`) after the model abstains with `[ABSTAIN]`; results are fenced as untrusted content | `handle_search_web` in `backend/skills/handlers/web.py`; client in `backend/services/tavily.py` |
+| `ingest_url` | Extracts a page, chunks and embeds it into vector memory; **confirmation-gated** and undoable | `handle_ingest_url` in `backend/skills/handlers/web.py` |
+| `verify_deadline` | Compares a stored deadline against live web sources to flag drift | `handle_verify_deadline` in `backend/skills/handlers/web.py`; logic in `backend/services/tavily_deadline.py` |
+
+## Key Features
+
+- **Eligibility mapping:** Matches candidate skills, education and graduation timelines against job requirements with deterministic, rule-based explanations.
+- **Gap analysis:** Turns an "Ineligible" result into a list of the specific missing qualifications and suggested next steps.
+- **Company intelligence briefs:** Researches target employers via Tavily with 24-hour caching and a dedicated credit sub-budget.
+- **ATS parsing simulation (estimate):** Estimates keyword gaps and formatting concerns in a resume.
+- **Hiring radar:** Uses historical cycle data to forecast likely internship windows, labeled as predictions.
 
 ---
 
@@ -46,11 +78,11 @@ Modern developers and students work across fragmented environments that do not c
 
 ## System Architecture
 
-Compass pairs a high-performance FastAPI backend with a React 19 frontend, persistent Neon PostgreSQL database with `pgvector`, a cost-optimized 3-tier model hierarchy on Nebius Token Factory, and Tavily real-time web intelligence:
+Compass pairs a FastAPI backend with a React 19 frontend, persistent Neon PostgreSQL database with `pgvector`, a 3-tier model hierarchy on Nebius Token Factory, and Tavily real-time web intelligence:
 
 ```mermaid
 graph TD
-    User["User (React 19 Web App / Typer Terminal CLI)"] -->|Vercel Edge HMAC Proxy| Router["FastAPI Backend (Nebius Nemotron-3 Nano 30B Router)"]
+    User["User (React 19 Web App / Typer Terminal CLI)"] -->|Vercel Edge HMAC Proxy| Router["FastAPI Backend (Nemotron-3 Nano 30B Router)"]
     
     Router -->|Conversational Tasks| ReAct["Autonomous ReAct Agent Loop"]
     Router -->|Domain Specialists| Specialists["Specialist Team (Coursework, Research, Calendar, Memory)"]
@@ -104,7 +136,7 @@ graph TD
 ### 4. 📊 Feasibility Engine & Dynamic Scheduling
 - **Deterministic Capacity Arithmetic**: Analyzes demand hours versus effective availability across a configurable safety margin (e.g. 80% nominal capacity) without delegating arithmetic to LLM guesswork.
 - **Automated Triage Generation**: When work is mathematically infeasible, produces a triage proposal categorizing tasks into *Keep*, *Defer*, or *Drop*.
-- **Google Calendar Sync**: Bidirectional slot allocation, ICS feed generation, and conflict detection between technical sprints and academic meetings.
+- **Google Calendar (optional)**: With Google OAuth configured, reads free/busy to place work slots and creates calendar events for scheduled tasks; ICS export is available without it.
 
 ### 5. 🎯 Career Copilot (5th Navigation Tab)
 A comprehensive system for internship discovery, verified eligibility analysis, truthful resume tailoring, and controlled application submission:
@@ -134,19 +166,11 @@ A comprehensive system for internship discovery, verified eligibility analysis, 
 
 ---
 
-## AI Model Architecture & Routing
+## AI Model Routing
 
-Compass routes requests across a 3-tier model hierarchy on **Nebius Token Factory**, optimizing for latency, reasoning depth, and cost efficiency:
+Requests are routed across a 3-tier model hierarchy plus an embedding model, all on **Nebius Token Factory**. The model table, with the exact file and function that calls each model, is in [Built with NVIDIA Nemotron on Nebius Token Factory](#built-with-nvidia-nemotron-on-nebius-token-factory) above.
 
-| Model ID | Role | Responsibilities | When Invoked |
-| :--- | :--- | :--- | :--- |
-| `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` | **Intent Router & Parameter Extractor** | Lightweight routing, skill parameter parsing, and greeting triage | Every incoming user turn |
-| `nvidia/nemotron-3-super-120b-a12b` | **Skill Reasoning & Plan Critic** | ReAct agent steps, specialist agent execution, and structured reasoning | Multi-step agent workflows & specialist queries |
-| `nvidia/Nemotron-3-Ultra-550b-a55b` | **Cross-Domain Strategic Synthesis** | Complex multi-domain summaries and trade-off evaluations | `summarize_across_domains` tool |
-| `Qwen/Qwen3-Embedding-8B` | **Dense Vector Embeddings** | 768-dimensional dense embeddings for semantic search | Code context, notes, and ingested web documents |
-
-### Token Economics
-By resolving over 85% of standard interactions via Nemotron-3 Nano and direct PostgreSQL queries, Compass eliminates unnecessary large-model invocations. Multi-step reasoning is escalated to Super 120B only when required, and Ultra 550B is reserved strictly for high-context cross-domain synthesis.
+In short: Nemotron-3 Nano handles routing and specialist answers, Super handles multi-step agent reasoning, and Ultra is used only for synthesis. Many requests are answered directly from PostgreSQL after routing, without a large-model call. Per-call token usage and cost are recorded (see `backend/services/usage.py`) and summarized at `GET /api/telemetry`.
 
 ---
 
@@ -154,11 +178,11 @@ By resolving over 85% of standard interactions via Nemotron-3 Nano and direct Po
 
 | Layer | Technologies | Role in System |
 | :--- | :--- | :--- |
-| **Frontend UI** | React 19 (`^19.3.0`), Vite 8 (`^8.3.3`), Lucide Icons, Vanilla CSS | Responsive client with dark/light themes, real-time SSE streaming, and mobile navigation |
+| **Frontend UI** | React 19 (`^19.3.1`), Vite 8 (`^8.3.4`), Lucide Icons, Vanilla CSS | Responsive client with dark/light themes, real-time SSE streaming, and mobile navigation |
 | **Edge Reverse Proxy** | Vercel Edge Middleware (`@vercel/edge`) | Same-origin API rewrites and HMAC request signature enforcement |
-| **Backend API** | FastAPI (`>=0.142.2`), Python 3.12+, Uvicorn, Pydantic 2 | Asynchronous REST API, ReAct agent loop, and WebSocket/SSE streaming endpoints |
+| **Backend API** | FastAPI (`0.162.0`), Python 3.12, Uvicorn, Pydantic 2 | Asynchronous REST API, ReAct agent loop, and SSE streaming endpoints |
 | **Database** | PostgreSQL 16, `pgvector`, HNSW Indexing on **Neon Cloud** | Relational state storage, vector semantic search, and audit trail tables |
-| **Model Hosting** | **Nebius Token Factory** | OpenAI-compatible inference endpoints for Nemotron-3 and Qwen embedding models |
+| **Model Hosting** | **Nebius Token Factory** | OpenAI-compatible inference and embeddings for the Nemotron-3 and Qwen3 models (see above) |
 | **Web Research** | **Tavily Async API** (`tavily-python`) | Authoritative domain searching, full-page extraction, and deadline staleness detection |
 | **Terminal Client** | Python Typer (`cli/assistant_cli.py`), Rich | Interactive terminal REPL, task logging, and CLI agent control |
 | **Security & Auth** | Python `cryptography`, HMAC-SHA256, JWT | OAuth token encryption, session hashing, guest session minting, and SSRF filtering |
@@ -198,7 +222,7 @@ compass/
 │   │   ├── radar_prediction.py  # Historical hiring cycle forecasting
 │   │   ├── radar_verifier.py   # HTTP & Tavily live verification with prompt-injection fencing
 │   │   └── tavily_pipeline.py   # Deep research pipeline, query decomposition, & evidence ledger
-│   └── skills/                  # Registered tool schemas and execution handlers
+│   └── skills/                  # Registered tool schemas and execution handlers (incl. Tavily web skills)
 ├── frontend/
 │   ├── src/
 │   │   ├── components/
@@ -220,7 +244,7 @@ compass/
 │   └── vite.config.js
 ├── cli/
 │   └── assistant_cli.py         # Typer + Rich terminal client
-├── tests/                       # 472 automated tests across 50 test suites
+├── tests/                       # 1,734 automated tests across 141 test files
 │   ├── test_career_copilot.py   # Resume validation, batch gates, & career endpoints
 │   ├── test_internship_radar.py # Eligibility rules, cycle forecasting, & radar endpoints
 │   ├── test_security_hardening.py# SSRF defenses, HMAC signatures, & IDOR boundaries
@@ -237,11 +261,11 @@ compass/
 ## Quick Start
 
 ### Prerequisites
-- **Python 3.12+**
-- **Node.js 18+** and `npm`
+- **Python 3.12** (CI and the Docker image use 3.12; the code targets 3.11 or newer)
+- **Node.js 20+** and `npm` (the Dockerfile and CI use Node 20)
 - **PostgreSQL 16** with `pgvector` extension (or a free cloud database from [Neon](https://neon.tech))
 - **Nebius Token Factory API Key** ([nebius.com](https://nebius.com/))
-- **Tavily API Key** ([tavily.com](https://tavily.com/)) *(Optional — web search tools gracefully abstain if omitted)*
+- **Tavily API Key** ([tavily.com](https://tavily.com/)) *(Optional — web search tools stay off unless `TAVILY_ENABLED=true` and a key are set)*
 
 ### 1. Clone & Configure Environment
 ```bash
@@ -251,7 +275,7 @@ cd compass
 # Copy environment template
 cp .env.example .env
 ```
-Edit `.env` to configure your `NEBIUS_API_KEY`, `AUTH_TOKEN`, and `DATABASE_URL`.
+Edit `.env` to set `NEBIUS_API_KEY`, `AUTH_TOKEN`, and `DATABASE_URL`, and add `ENVIRONMENT=development` for local work (the default is `production`, which is stricter about secrets and identity headers). Every variable is described in the [Environment Variables Reference](#environment-variables-reference).
 
 ### 2. Install Backend & CLI
 ```bash
@@ -283,21 +307,21 @@ run_local.bat
 # Linux / macOS
 chmod +x run_local.sh && ./run_local.sh
 
-# Docker Compose (Backend + Frontend + local PostgreSQL with pgvector)
+# Docker Compose (local pgvector PostgreSQL + backend on :8000 + frontend on :5173)
 docker compose up
 ```
 
 **Option B — Manual Launch (Separate Terminals):**
 ```bash
-# Terminal 1: Backend API (port 8000)
-python -m uvicorn backend.main:app --port 8000 --reload
+# Terminal 1: Backend API (port 8000); on Windows PowerShell use $env:ENVIRONMENT="development"
+ENVIRONMENT=development python -m uvicorn backend.main:app --port 8000 --reload
 
 # Terminal 2: Frontend Client (port 5173)
 cd frontend
 npm run dev
 ```
 
-Visit **[http://localhost:5173](http://localhost:5173)** in your browser. All visitors receive an isolated anonymous guest session with no initial login required.
+Visit **[http://localhost:5173](http://localhost:5173)** in your browser. Visitors receive an isolated anonymous guest session automatically; no login is required. `run_local.sh` and `run_local.bat` install dependencies, create `.env` from `.env.example` if missing, and start both servers with `ENVIRONMENT=development`; the Docker Compose backend uses `AUTH_TOKEN=dev-token` unless overridden and runs with the default `ENVIRONMENT=production`.
 
 ### 5. Using the Terminal CLI
 ```bash
@@ -327,19 +351,26 @@ compass agent "Propose a triage schedule for coursework and hackathons"
 | `NEBIUS_API_KEY` | **Yes** | Backend | Authenticates inference requests to Nebius Token Factory | `your_nebius_api_key_here` |
 | `AUTH_TOKEN` | **Yes** | Backend | Master administrative bearer token | `generate_secure_random_token_here` |
 | `DATABASE_URL` | **Yes** | Backend | Neon PostgreSQL connection URI with SSL mode | `postgresql://user:pass@host/db?sslmode=require` |
+| `DATABASE_URL_UNPOOLED` | No | Backend | Direct (non-pooled) connection string, used where a pooler is unsuitable | same format as `DATABASE_URL` |
+| `TEST_DATABASE_URL` | Tests | Backend | Local Postgres used by pytest; must differ from `DATABASE_URL` and be on an allow-listed host (default allow-list: `localhost`) | `postgresql://user:pass@localhost:5432/compass_test` |
 | `NEBIUS_BASE_URL` | No | Backend | Nebius Token Factory base API endpoint | `https://api.tokenfactory.nebius.com/v1/` |
 | `ROUTER_MODEL` | No | Backend | Model identifier for intent routing | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` |
 | `SKILL_MODEL` | No | Backend | Model identifier for ReAct & specialist reasoning | `nvidia/nemotron-3-super-120b-a12b` |
+| `REASONING_MODEL` | No | Backend | Model for the ReAct reasoning loop (defaults to the Super model) | `nvidia/nemotron-3-super-120b-a12b` |
 | `SYNTHESIS_MODEL` | No | Backend | Model identifier for multi-domain synthesis | `nvidia/Nemotron-3-Ultra-550b-a55b` |
 | `EMBEDDING_MODEL` | No | Backend | Model identifier for dense vector embeddings | `Qwen/Qwen3-Embedding-8B` |
 | `EMBEDDING_DIMENSION` | No | Backend | Dimensionality of embeddings in pgvector table | `768` |
 | `TAVILY_API_KEY` | Optional | Backend | API key for Tavily live web intelligence | `tvly-your_key_here` |
-| `TAVILY_ENABLED` | Optional | Backend | Master flag to toggle Tavily search tools | `true` or `false` |
+| `TAVILY_ENABLED` | Optional | Backend | Master flag for Tavily tools; **defaults to `false`** in `backend/config.py`, so set `true` together with a key | `true` or `false` |
+| `TAVILY_ABSTAIN_FIRST` | No | Backend | Search memory first and escalate to the web only after an abstention (default `true`) | `true` |
+| `ENABLE_DEMO_SEEDING` | No | Backend | Allows the demo-persona seeding endpoint in production (default `false`) | `false` |
+| `LOG_LEVEL` / `PORT` | No | Backend | Log verbosity (default `INFO`) and listen port (default `8000`) | `INFO` / `8000` |
 | `EDGE_HMAC_SECRET` | Production | Both | Shared HMAC secret between Vercel edge proxy and Render | Generate via `openssl rand -hex 32` |
 | `TOKEN_ENCRYPTION_KEY` | Production | Backend | 32-byte key for AES encryption of stored OAuth secrets | Generate via `openssl rand -hex 32` |
 | `GUEST_SIGNING_SECRET` | Production | Backend | Cryptographic secret for signing guest session JWTs | Generate via `openssl rand -hex 32` |
 | `GOOGLE_CLIENT_ID` | Optional | Backend | Google OAuth Client ID for Calendar integration | `your_client_id.apps.googleusercontent.com` |
 | `GOOGLE_CLIENT_SECRET`| Optional | Backend | Google OAuth Client Secret for Calendar integration | `your_client_secret_here` |
+| `GOOGLE_REDIRECT_URI` | Optional | Backend | OAuth callback URL (defaults to the production Vercel URL; override locally) | `http://localhost:5173/api/calendar/callback` |
 
 > 🔒 **Security Notice:** All API keys and secrets belong exclusively in backend environment configuration. Secrets are never exposed to the Vite browser bundle.
 
@@ -375,13 +406,20 @@ Compass: Calls `submit_approved_application_batch`.
 
 ## Testing & Quality Assurance
 
-Compass features **472 automated tests** across 50 dedicated test suites covering unit logic, integration paths, security hardening, and end-to-end user workflows:
+Compass has **1,734 automated tests** in 141 test files (`pytest --collect-only -q`) covering unit logic, integration paths, security hardening, and user workflows. Tests run only against a local PostgreSQL: set `TEST_DATABASE_URL` to a localhost database that differs from `DATABASE_URL`, otherwise pytest refuses to start.
+
+```bash
+export TEST_DATABASE_URL=postgresql://user:pass@localhost:5432/compass_test
+export ENVIRONMENT=test
+```
+
+
 
 ```bash
 # Run the complete test suite
 pytest -v
 
-# Run Career Copilot & Internship Radar tests (fast, ~3.5s)
+# Run Career Copilot & Internship Radar tests
 pytest tests/test_career_copilot.py tests/test_internship_radar.py -v
 
 # Run Security Hardening tests (SSRF, HMAC signatures, IDOR isolation)
@@ -399,7 +437,7 @@ pytest tests/test_demo_flow.py tests/test_model_check.py -v
 cd frontend
 npm run build
 ```
-*Compiles all 1,953 application modules cleanly with Vite in under 1 second.*
+Frontend unit tests use Node's built-in runner: `cd frontend && node --test tests/*.test.mjs`.
 
 ---
 
@@ -450,7 +488,7 @@ compass admin-undo --run-id <run_id>       # Revert last state mutation
 
 Compass is deployed using continuous integration and deployment pipelines targeting provider-native cloud environments:
 
-- **Frontend (Vercel)**: Deployed as a high-performance single-page application at [compass-farmlytics.vercel.app](https://compass-farmlytics.vercel.app). Employs edge middleware to sign forwarded client IP headers with `EDGE_HMAC_SECRET` and proxies `/api/*` traffic to the backend.
+- **Frontend (Vercel)**: Deployed as a single-page application at [compass-farmlytics.vercel.app](https://compass-farmlytics.vercel.app). Employs edge middleware to sign forwarded client IP headers with `EDGE_HMAC_SECRET` and proxies `/api/*` traffic to the backend.
 - **Backend API (Render)**: Deployed as a Dockerized web service on Render with health checks at `/health`. Enforces strict production fail-closed security for database connections and API secret validation.
 - **Database (Neon Cloud)**: Serverless PostgreSQL 16 with `pgvector` extension and automated schema migrations managed in `backend/memory/db.py`.
 
@@ -488,8 +526,8 @@ For comprehensive deployment topologies, zero-downtime database migration proced
 - **[API Contract & Specifications](docs/api_contract.md)** — OpenAPI endpoint specifications
 - **[Walkthrough & Demo Script](docs/demo_script.md)** — Step-by-step video recording guide
 - **[Contributing Guidelines](CONTRIBUTING.md)** — Local development setup and coding standards
-- **[Nebius Platform Feedback](NEBIUS_PLATFORM_FEEDBACK.md)** — In-depth developer experience feedback and benchmarks
-- **[Hackathon Submission Kit](SUBMISSION_KIT.md)** — Submission details, Tavily integration justification, and benchmark logs
+- **[Nebius Platform Feedback](NEBIUS_PLATFORM_FEEDBACK.md)** — Developer experience feedback on Token Factory and the Nemotron models
+- **[Hackathon Submission Kit](SUBMISSION_KIT.md)** — Submission details and Tavily integration justification
 
 ---
 
@@ -498,8 +536,8 @@ For comprehensive deployment topologies, zero-downtime database migration proced
 **Track**: Best Apps and Agents — Nebius × NVIDIA Global AI Hackathon 2026
 
 **Special Category Highlights**:
-- *Best Use of Tavily ($3,000)* — Grounded epistemic abstention, multi-query evidence ledger, deadline staleness verification, and prompt-injection fencing.
-- *Most Valuable Feedback Award* — Exhaustive developer experience feedback and model performance benchmarks documented in [NEBIUS_PLATFORM_FEEDBACK.md](NEBIUS_PLATFORM_FEEDBACK.md).
+- *Best Use of Tavily ($3,000)* — Abstain-then-search grounding, deadline staleness verification, confirmation-gated URL ingestion, and prompt-injection fencing.
+- *Most Valuable Feedback Award* — Developer experience feedback on Token Factory and the Nemotron models, documented in [NEBIUS_PLATFORM_FEEDBACK.md](NEBIUS_PLATFORM_FEEDBACK.md).
 
 ---
 
@@ -507,10 +545,9 @@ For comprehensive deployment topologies, zero-downtime database migration proced
 
 | Member | Role | Primary Contributions |
 | :--- | :--- | :--- |
-| **Rhythm** | Backend Architecture | Database schemas, SQL migrations, Nebius Token Factory model integration |
-| **Nandani** | Frontend Engineering | Web dashboard, real-time context streaming UI, and conversational chat interfaces |
-| **Kunal** | Frontend Design | Timeline feed styling, mobile responsiveness, and shared design tokens |
-| **Ratnesh Singh** | Full-Stack & System Integration | Career Copilot implementation, deployment engineering (Render, Vercel, Neon), ReAct agent, and terminal CLI |
+| **Ratnesh Singh** | Backend, AI & integration lead | FastAPI backend, DB schema and migrations, tiered Nemotron routing on Nebius Token Factory, ReAct agent and confirmation gate, Tavily tools, Career Copilot, deployment (Render, Vercel, Neon), terminal CLI |
+| **Nandani** | Frontend engineering | Web dashboard, chat interface and streaming UI, specialist agent panel, chat management and share links |
+| **Kunal** | Frontend design | Timeline and calendar UI, mobile responsiveness, design tokens and UI polish |
 
 ---
 
