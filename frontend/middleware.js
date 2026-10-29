@@ -1,6 +1,7 @@
 // Vercel Edge Middleware / Proxy Signer
 // Signs proxy requests to Compass backend with an HMAC SHA-256 edge signature
 // over the current timestamp, allowing backend to safely trust parts[-2] in XFF.
+// Signing is skipped (fail closed) when EDGE_HMAC_SECRET is unset; there is no built-in default secret.
 
 import { next } from '@vercel/edge'
 
@@ -23,17 +24,25 @@ async function hmacSha256(secret, message) {
     .join('')
 }
 
-export default async function middleware(request) {
-  const secret = process.env.EDGE_HMAC_SECRET || process.env.VERCEL_EDGE_SECRET || 'compass_vercel_edge_hmac_secret_2026'
-  const xff = request.headers.get('x-forwarded-for') || ''
-  const clientIp = xff ? xff.split(',')[0].trim() : (request.ip || '127.0.0.1')
-  const timestamp = Math.floor(Date.now() / 1000).toString()
+export async function buildEdgeSignature(secret, clientIp, nowSeconds) {
+  const timestamp = String(nowSeconds)
   const payload = `${clientIp}|${timestamp}`
   const signature = await hmacSha256(secret, payload)
-  const edgeSigHeader = `${clientIp}|${timestamp}|${signature}`
+  return `${clientIp}|${timestamp}|${signature}`
+}
 
+export default async function middleware(request) {
   const requestHeaders = new Headers(request.headers)
-  requestHeaders.set('x-compass-edge-sig', edgeSigHeader)
+  requestHeaders.delete('x-compass-edge-sig')
+
+  const secret = (process.env.EDGE_HMAC_SECRET || process.env.VERCEL_EDGE_SECRET || '').trim()
+  if (secret) {
+    const xff = request.headers.get('x-forwarded-for') || ''
+    const clientIp = xff ? xff.split(',')[0].trim() : (request.ip || '127.0.0.1')
+    const nowSeconds = Math.floor(Date.now() / 1000)
+    const edgeSigHeader = await buildEdgeSignature(secret, clientIp, nowSeconds)
+    requestHeaders.set('x-compass-edge-sig', edgeSigHeader)
+  }
 
   return next({
     request: {
