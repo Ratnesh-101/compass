@@ -25,7 +25,7 @@ from backend.services import winning_features
 from backend.services.rate_limiter import enforce_company_intel_guard
 from backend.services.career_file_parser import extract_resume_from_file_bytes, ResumeParseResult
 
-from backend.dependencies import _get_current_identity, _get_or_create_user_id
+from backend.dependencies import _get_current_identity, _get_or_create_user_id, rate_limit
 from backend.memory.career import (
     APPROVABLE_BATCH_STATUSES,
     approve_application_batch,
@@ -353,7 +353,7 @@ async def export_resume_docx_endpoint(
 # Profile Intelligence Endpoints (GitHub, External Sources, Job Matching)
 # ===========================================================================
 
-@router.post("/intelligence/github", response_model=GitHubProfileIntelligence)
+@router.post("/intelligence/github", response_model=GitHubProfileIntelligence, dependencies=[Depends(rate_limit)])
 async def analyze_github_endpoint(body: GitHubImportRequest, request: Request):
     """
     Extracts verifiable engineering evidence from candidate's public GitHub profile.
