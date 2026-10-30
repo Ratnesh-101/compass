@@ -42,6 +42,7 @@ async def dispatch_specialist_endpoint(request_data: dict, request: Request):
         relevant_context=relevant_context,
         allowed_tools=allowed_tools,
         user_id=ident.id,
+        include_demo=request_data.get("include_demo") is True,
     )
     result = await SpecialistDispatcher.dispatch(spec_req, pool=pool)
     return result.model_dump()

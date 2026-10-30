@@ -6,9 +6,13 @@ hidden unless a caller explicitly asks for them. Owner scoping is mandatory here
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from typing import Any, Dict, List, Optional
 
 DEMO_URL_PREFIX = "compass://demo-persona/"
+
+# Set once per agent run from the request; the step executor copies it into every tool call.
+AGENT_INCLUDE_DEMO: ContextVar[bool] = ContextVar("AGENT_INCLUDE_DEMO", default=False)
 
 
 def demo_sql_predicate(alias: str = "") -> str:

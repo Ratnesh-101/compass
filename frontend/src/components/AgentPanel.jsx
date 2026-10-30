@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { Check } from 'lucide-react'
 import { getAuthHeaders, API_BASE } from '../api/client'
+import { buildAgentRunBody, buildFeasibilityBody } from '../utils/requestBodies'
 import StepCard, { STEP_STYLES, friendlyTool } from './agent/StepCard'
 import ConfirmationGate from './agent/ConfirmationGate'
 import ActivityFeed from './agent/ActivityFeed'
@@ -180,17 +181,7 @@ export default function AgentPanel({ onTaskMutated, conversationId }) {
 
       const isFeasibility = !payload.action && (/feasibility|can i finish|what i drop|what to drop|what should i drop|triage|days left|working \d+ hours/i.test(payload.goal || ''))
       const endpoint = isFeasibility ? `${apiBase}/api/agent/feasibility` : `${apiBase}/api/agent/run`
-      let reqBody = reqPayload
-      if (isFeasibility) {
-        const goalStr = payload.goal || ''
-        const daysMatch = goalStr.match(/(\d+)\s*days?/i)
-        const hoursMatch = goalStr.match(/(\d+(?:\.\d+)?)\s*hours?/i)
-        reqBody = {
-          days: daysMatch ? parseInt(daysMatch[1]) : 5,
-          hours_per_day: hoursMatch ? parseFloat(hoursMatch[1]) : 4.0,
-          domain: null,
-        }
-      }
+      const reqBody = isFeasibility ? buildFeasibilityBody(payload) : buildAgentRunBody(reqPayload)
 
       const response = await fetch(endpoint, {
         method: 'POST',

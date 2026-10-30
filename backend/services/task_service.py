@@ -120,7 +120,7 @@ async def handle_create_task(conn, req: CreateTaskRequest, user_id: Optional[str
     dom_clean = structured.normalize_domain(req.domain)
     proj_name = req.project.strip() if req.project else "General"
 
-    existing_tasks = await structured.list_tasks(conn, user_id=user_id)
+    existing_tasks = await structured.list_tasks(conn, user_id=user_id, include_demo=False)
     exact_matches = [
         t for t in existing_tasks
         if t["title"].strip().lower() == title.lower()

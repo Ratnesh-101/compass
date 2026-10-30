@@ -49,6 +49,7 @@ class SpecialistRequest(BaseModel):
     relevant_context: Optional[Dict[str, Any]] = None
     allowed_tools: Optional[List[str]] = None
     user_id: Optional[str] = None  # set by the server from the caller's identity, never from the client
+    include_demo: bool = False
 
 
 class SpecialistResult(BaseModel):
@@ -266,10 +267,12 @@ async def run_research_specialist(
                     WHERE deleted_at IS NULL
                       AND domain IN ('hackathon', 'general', 'code')
                       AND ($1::text IS NULL OR lower(user_id) = lower($1::text))
+                      AND ($2::boolean OR COALESCE(trusted_event_url,'') NOT LIKE 'compass://demo-persona/%')
                     ORDER BY due_date ASC NULLS LAST
                     LIMIT 10
                     """,
                     scope_owner(request.user_id),
+                    bool(request.include_demo),
                 )
                 findings["tracked_deliverables"] = [
                     {
@@ -337,10 +340,12 @@ async def run_calendar_specialist(
                     WHERE deleted_at IS NULL
                       AND status != 'completed'
                       AND ($1::text IS NULL OR lower(user_id) = lower($1::text))
+                      AND ($2::boolean OR COALESCE(trusted_event_url,'') NOT LIKE 'compass://demo-persona/%')
                     ORDER BY due_date ASC NULLS LAST, priority DESC
                     LIMIT 15
                     """,
                     scope_owner(request.user_id),
+                    bool(request.include_demo),
                 )
                 findings["active_deadlines_and_tasks"] = [
                     {
@@ -483,6 +488,8 @@ class SpecialistDispatcher:
                 user_goal=request.user_goal,
                 relevant_context=request.relevant_context,
                 allowed_tools=request.allowed_tools,
+                user_id=request.user_id,
+                include_demo=request.include_demo,
             )
 
         task_created_header = ""
@@ -554,6 +561,7 @@ async def run_specialist_task(
     allowed_tools: Optional[List[str]] = None,
     pool: Any = None,
     user_id: Optional[str] = None,
+    include_demo: bool = False,
 ) -> Dict[str, Any]:
     """Canonical helper function for delegating a specialized task, scoped to `user_id` when given."""
     req_cap = (capability or "auto-dispatcher").lower().strip()
@@ -566,6 +574,7 @@ async def run_specialist_task(
         relevant_context=relevant_context,
         allowed_tools=allowed_tools,
         user_id=user_id,
+        include_demo=include_demo,
     )
     result = await SpecialistDispatcher.dispatch(request, pool=pool)
     return result.model_dump()

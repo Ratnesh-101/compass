@@ -4,6 +4,17 @@ import { API_BASE, getAuthHeaders, getCurrentUserId, setCurrentUserId, safeHref,
 import { getUserTimeZone } from '../utils/userTimezone.js'
 import { classifyAuthMe } from '../utils/firstRun.js'
 import { commitErrorText } from '../utils/scheduleHonesty.js'
+import {
+  buildProposeScheduleBody,
+  buildCommitScheduleBody,
+  buildReactiveCheckBody,
+} from '../utils/requestBodies.js'
+
+export {
+  buildProposeScheduleBody,
+  buildCommitScheduleBody,
+  buildReactiveCheckBody,
+}
 
 export async function fetchCalendarStatus() {
   try {
@@ -145,10 +156,7 @@ export async function fetchCalendarAvailability(startDate, endDate) {
 }
 
 export async function proposeSchedule({ targetDate, domain, taskIds } = {}) {
-  const payload = {}
-  if (targetDate) payload.target_date = targetDate
-  if (domain && domain !== 'all') payload.domain = domain
-  if (taskIds && taskIds.length > 0) payload.task_ids = taskIds
+  const payload = buildProposeScheduleBody({ targetDate, domain, taskIds })
 
   const res = await fetch(`${API_BASE}/api/schedule/propose?${new URLSearchParams({ tz: getUserTimeZone() })}`, {
     method: 'POST',
@@ -164,7 +172,7 @@ export async function commitSchedule(assignments, rationale = 'Committed via Sch
   const res = await fetch(`${API_BASE}/api/schedule/commit`, {
     method: 'POST',
     headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ assignments, rationale }),
+    body: JSON.stringify(buildCommitScheduleBody(assignments, rationale)),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
@@ -199,7 +207,7 @@ export function getCalendarExportUrl(domain) {
 
 
 export async function checkReactiveSchedule(currentTime = null) {
-  const body = currentTime ? { current_time: currentTime } : {}
+  const body = buildReactiveCheckBody(currentTime)
   const res = await fetch(`${API_BASE}/api/schedule/reactive-check?${new URLSearchParams({ tz: getUserTimeZone() })}`, {
     method: 'POST',
     headers: getAuthHeaders({ 'Content-Type': 'application/json' }),

@@ -98,6 +98,7 @@ async def get_tasks(
     project: Optional[str] = Query(None, description="Filter by project name"),
     status: Optional[str] = Query(None),
     due_before: Optional[str] = Query(None, description="ISO date YYYY-MM-DD"),
+    include_demo: bool = Query(False),
     _ident: Identity = Depends(require_identity),
 ):
     """Query tasks with optional filters from database with strict per-account isolation."""
@@ -132,6 +133,7 @@ async def get_tasks(
                 status=status,
                 due_before=due_date_parsed,
                 user_id=user_id,
+                include_demo=include_demo is True,
             )
             tasks = [
                 TaskOut(

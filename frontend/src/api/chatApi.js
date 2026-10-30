@@ -15,6 +15,10 @@ import { chatRequestFields, makeRequestId } from '../utils/chatRequest.js'
 // When the Judge Persona workspace is visible, chat must see the same demo data the dashboard shows.
 let includeDemoInChat = false
 
+export function getChatIncludeDemo() {
+  return includeDemoInChat
+}
+
 export function setChatIncludeDemo(active) {
   includeDemoInChat = Boolean(active)
 }

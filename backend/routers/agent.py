@@ -57,6 +57,8 @@ async def agent_run(req: AgentRequest, request: Request):
 
     async def agent_event_generator():
         import asyncio
+        from backend.services.task_scope import AGENT_INCLUDE_DEMO
+        AGENT_INCLUDE_DEMO.set(bool(req.include_demo))
         try:
             async for step in run_agent(
                 goal=req.goal,
@@ -509,6 +511,7 @@ async def agent_feasibility(request: Request, req: FeasibilityRequest):
                 pool, days=days, hours_per_day=hours,
                 domain=req.domain,
                 user_id=user_id,
+                include_demo=req.include_demo,
             ):
                 yield f"data: {json.dumps(ev)}\n\n"
         except Exception:

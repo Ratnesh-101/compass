@@ -284,6 +284,7 @@ class AgentRequest(BaseModel):
     enable_critic: Optional[bool] = True
     conversation_id: Optional[str] = None
     run_id: Optional[str] = None
+    include_demo: bool = False
 
 
 class AgentConfirmRequest(BaseModel):
@@ -302,17 +303,20 @@ class FeasibilityRequest(BaseModel):
     days: Optional[int] = 5
     hours_per_day: Optional[float] = 4.0
     domain: Optional[str] = None
+    include_demo: bool = False
 
 
 class ProposeScheduleBody(BaseModel):
     target_date: Optional[str] = None
     domain: Optional[str] = None
     task_ids: Optional[List[int]] = None
+    include_demo: bool = False
 
 
 class CommitScheduleBody(BaseModel):
     assignments: List[Dict[str, Any]]
     rationale: Optional[str] = "Committed via Compass Schedule API"
+    include_demo: bool = False
 
 
 class UpdatePreferencesBody(BaseModel):
@@ -348,4 +352,5 @@ class ReactiveCheckBody(BaseModel):
     event_type: str = "task_rescheduled"
     task_id: Optional[int] = None
     current_time: Optional[str] = None
+    include_demo: bool = False
 

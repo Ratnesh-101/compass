@@ -486,7 +486,8 @@ async def public_chat(req: PublicChatRequest, request: Request, _rl: None = Depe
         spec_start = time.perf_counter()
         pool = await get_pool()
         spec_result = await run_specialist_task(
-            capability=valid_id, user_goal=msg, pool=pool, user_id=ident.id if ident else None
+            capability=valid_id, user_goal=msg, pool=pool, user_id=ident.id if ident else None,
+            include_demo=bool(getattr(req, "include_demo", False)),
         )
         spec_duration = int((time.perf_counter() - spec_start) * 1000)
         resp_text = spec_result.get("summary", f"Specialist analysis completed for '{msg}'.")
