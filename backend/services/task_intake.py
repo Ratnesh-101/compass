@@ -15,7 +15,7 @@ from typing import Any, Dict, Optional
 
 from backend.memory import conversations, structured
 from backend.memory.chat_pending import resolve_chat_pending_action
-from backend.services.task_intake_parse import MAX_ITEMS, ParsedIntake, parse_task_list
+from backend.services.task_intake_parse import MAX_ITEMS, IntakeItem, ParsedIntake, parse_task_list
 from backend.services.task_time import request_timezone, resolve_due
 
 logger = logging.getLogger("compass.services.task_intake")
@@ -109,12 +109,15 @@ async def _persist(persist: bool, pool: Any, conv_id: str, user_id: Optional[str
 
 
 async def handle_intake_preview(*, message: str, conv_id: str, owner_identity: str, user_id: Optional[str],
-                                guest_id: Optional[str], persist: bool, active_pool: Any, start_time: float) -> Dict[str, Any]:
+                                guest_id: Optional[str], persist: bool, active_pool: Any, start_time: float,
+                                items: Optional[list] = None) -> Dict[str, Any]:
     """Orchestrator entry: parse the pasted list and store a pending preview (no task is written)."""
     from backend.memory.db import get_pool
 
     tz_name = request_timezone.get() or "UTC"
-    parsed = parse_task_list(message)
+    parsed = (
+        ParsedIntake(tuple(IntakeItem(**d) for d in items), len(items), ()) if items else parse_task_list(message)
+    )
     success, data, reply = False, None, NOT_A_LIST_REPLY
     pool = active_pool or await get_pool()
     if parsed and parsed.items and pool:
@@ -142,6 +145,19 @@ def clarification_result(conv_id: str, start_time: float, message: str) -> Dict[
     return {
         "conversation_id": conv_id, "response": reply, "message": reply, "skill_used": "add_task",
         "success": False, "data": {"error": "needs_task_details"}, "verifiable": False,
+        "routing_latency_ms": int((time.perf_counter() - start_time) * 1000),
+    }
+
+
+def implicit_task_result(conv_id: str, start_time: float, title: str) -> Dict[str, Any]:
+    """Reply when the model inferred a task from chatter: ask first, write nothing."""
+    reply = (
+        f"I haven't added anything. Do you want me to add \"{title}\" as a task? "
+        f"If so, tell me when it's due, for example: \"add task {title} tomorrow 5pm\"."
+    )
+    return {
+        "conversation_id": conv_id, "response": reply, "message": reply, "skill_used": "add_task",
+        "success": False, "data": {"error": "needs_confirmation"}, "verifiable": False,
         "routing_latency_ms": int((time.perf_counter() - start_time) * 1000),
     }
 

@@ -1,0 +1,8 @@
+# Regression suite for chat task intake. Run: npx promptfoo@latest eval -c promptfooconfig.yaml
+# Offline: no model or database is called (a placeholder API key keeps routing deterministic).
+description: Compass chat task intake - questions never create tasks, commands and pasted lists do
+prompts:
+  - "{{message}}"
+providers:
+  - id: file://eval/promptfoo_provider.py
+tests: file://eval/promptfoo_tests.py:generate_tests

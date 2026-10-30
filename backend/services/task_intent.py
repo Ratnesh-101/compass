@@ -67,6 +67,11 @@ def mentions_task_creation(message: str) -> bool:
     return bool(_CREATION_PHRASE.search(message or ""))
 
 
+def has_explicit_task_phrase(message: str) -> bool:
+    """The user literally asked to add/remind/schedule something, as opposed to the model inferring it."""
+    return mentions_task_creation(message) or bool(re.search(r"\bremind me\b", message or "", re.IGNORECASE))
+
+
 def strict_command_title(message: str) -> str:
     """Title captured from what follows the creation phrase; '' when there is none."""
     from backend.router_helpers import _extract_task_creation_args
@@ -111,6 +116,11 @@ def is_capability_question(message: str) -> bool:
 
 def is_intake_intent(message: str) -> bool:
     """Messages handled deterministically before any model call: pasted task lists or capability asks."""
+    from backend.services.task_intake_llm import looks_like_prose_task_list
     from backend.services.task_intake_parse import parse_task_list
 
-    return is_capability_question(message) or parse_task_list(message) is not None
+    return (
+        is_capability_question(message)
+        or parse_task_list(message) is not None
+        or looks_like_prose_task_list(message)
+    )

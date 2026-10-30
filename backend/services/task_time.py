@@ -11,7 +11,7 @@ import contextvars
 import logging
 import re
 from dataclasses import dataclass
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
@@ -112,6 +112,44 @@ def format_due_label(day: Optional[date], due_at: Optional[datetime], tz_name: s
     return f"{label}, {format_clock(local.timetz())} ({tz_name})"
 
 
+_NUMERIC_DATE = re.compile(r"^\d{1,4}[/.\-]\d{1,2}([/.\-]\d{1,4})?$")
+MAX_DUE_HORIZON_DAYS = 800
+
+
+def _fallback_date(text: str, tz_name: str, now_utc: Optional[datetime]) -> Optional[date]:
+    """Date from the dateparser library for phrasings our own parser does not know ("the 3rd", "in two weeks").
+
+    Only an explicit day is accepted (a bare time is never turned into "today"), ambiguous numeric
+    dates like 10/11 are refused, and results far in the past or future are discarded.
+    """
+    if _NUMERIC_DATE.match(text.strip()):
+        return None  # day/month order is ambiguous; ask instead of guessing
+    try:
+        import dateparser
+
+        zone = ZoneInfo(tz_name)
+        now_local = (now_utc or datetime.now(timezone.utc)).astimezone(zone)
+        parsed = dateparser.parse(
+            text,
+            languages=["en"],
+            settings={
+                "TIMEZONE": tz_name,
+                "RETURN_AS_TIMEZONE_AWARE": True,
+                "PREFER_DATES_FROM": "future",
+                "RELATIVE_BASE": now_local.replace(tzinfo=None),
+                "REQUIRE_PARTS": ["day"],
+            },
+        )
+    except Exception as e:
+        logger.debug("dateparser fallback failed for %r: %s", text, e)
+        return None
+    if parsed is None:
+        return None
+    day = parsed.astimezone(zone).date()
+    today = now_local.date()
+    return day if today - timedelta(days=1) <= day <= today + timedelta(days=MAX_DUE_HORIZON_DAYS) else None
+
+
 @dataclass(frozen=True)
 class ResolvedDue:
     due_date: Optional[date]
@@ -122,13 +160,16 @@ class ResolvedDue:
 
 def resolve_due(text: Optional[str], tz_name: str, now_utc: Optional[datetime] = None) -> ResolvedDue:
     """Resolve free-form due text ("Today, 9:00 PM", "Tomorrow", "In 4 days") in tz_name."""
-    from backend.router_helpers import _parse_natural_date
+    from backend.router_helpers import _parse_natural_date, _parse_time
 
     clean = (text or "").strip()
     zone_name = pick_timezone(tz_name, None)
     if not clean:
         return ResolvedDue(None, None, "no due date", None)
     day, time_24, _ = _parse_natural_date(clean, today=local_today(zone_name, now_utc))
+    if day is None:
+        day = _fallback_date(clean, zone_name, now_utc)
+        time_24 = _parse_time(clean.lower())[0] if day else None
     if day is None:
         return ResolvedDue(None, None, "no due date", clean)
     clock = clock_from_24h(time_24)

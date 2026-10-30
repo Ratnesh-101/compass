@@ -37,6 +37,18 @@ def normalize_request_id(raw: Any) -> Optional[str]:
     return None
 
 
+def may_mutate(message: Any) -> bool:
+    """False for messages that cannot change data (plain chat sends no tools), so they skip the claim."""
+    from backend.router_helpers import is_pending_action_cancel, is_pending_action_confirm, is_undo_request, message_needs_tools
+    from backend.services.task_intent import is_intake_intent
+
+    text = message if isinstance(message, str) else ""
+    return (
+        message_needs_tools(text) or is_pending_action_confirm(text) or is_pending_action_cancel(text)
+        or is_undo_request(text) or is_intake_intent(text)
+    )
+
+
 def is_replayable(result: Dict[str, Any]) -> bool:
     from backend.agent_types import MUTATING_TOOLS
 
@@ -137,7 +149,7 @@ async def run_chat_request(
     """Run one chat turn with the user's timezone in context and at-most-once mutation semantics."""
     bound = inspect.signature(core).bind_partial(*args, **kwargs).arguments
     owner = bound.get("user_id") or bound.get("guest_id") or "default_user"
-    rid = normalize_request_id(request_id)
+    rid = normalize_request_id(request_id) if may_mutate(bound.get("message")) else None
     pool = bound.get("pool")
     if rid or not is_valid_timezone(tz):
         pool = await _usable_pool(pool)

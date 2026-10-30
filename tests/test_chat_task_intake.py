@@ -309,13 +309,13 @@ async def test_confirm_retry_with_the_same_request_id_replays_the_five_tasks(cle
 
 @pytest.mark.asyncio
 async def test_a_cancelled_request_still_stores_its_result_so_retry_does_not_duplicate(clean_state):
-    async def slow_core(**kwargs):
+    async def slow_core(conversation_id=None, message="", user_id=None, guest_id=None, pool=None, **kwargs):
         async with clean_state.acquire() as conn:
-            await structured.create_task(conn, domain="general", title="Cancelled mid-flight", user_id=OWNER)
+            await structured.create_task(conn, domain="general", title="Cancelled mid-flight", user_id=user_id)
         await asyncio.sleep(0.3)  # the client disconnects while the reply is still being produced
         return {"conversation_id": CONV, "response": "Done! Added task", "skill_used": "add_task", "success": True, "data": None}
 
-    with patch("backend.orchestrator._handle_message_core", side_effect=slow_core):
+    with patch("backend.orchestrator._handle_message_core", new=slow_core):
         first = asyncio.ensure_future(_send("add task cancelled mid-flight", request_id="req-cancel-001"))
         await asyncio.sleep(0.1)
         first.cancel()

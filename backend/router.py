@@ -37,6 +37,7 @@ from backend.router_helpers import (
     is_external_project_request,
     _current_today,
 )
+from backend.services.task_intake_llm import extract_prose_tasks, llm_available, looks_like_prose_task_list
 from backend.services.task_intake_parse import parse_task_list
 from backend.services.task_intent import CAPABILITY_REPLY, is_capability_question
 
@@ -161,6 +162,18 @@ async def _external_answer_or_none(
     return await _answer_external_project_request(client, message, history)
 
 
+async def _prose_task_items(message: str) -> list[dict]:
+    """Tasks extracted from a prose list by one validated model call; [] on any failure."""
+    from dataclasses import asdict
+
+    try:
+        items = await extract_prose_tasks(get_openai_client(), settings.ROUTER_MODEL, message)
+    except Exception as e:
+        logger.warning("Prose task extraction failed (%s); falling back to normal routing", type(e).__name__)
+        return []
+    return [asdict(i) for i in items]
+
+
 async def route_message(
     message: str,
     history: Optional[list[dict[str, str]]] = None,
@@ -187,6 +200,10 @@ async def route_message(
         return "undo", {"message": message}, ""
     if parse_task_list(message) is not None:
         return "add_tasks_preview", {"message": message}, ""
+    if looks_like_prose_task_list(message) and llm_available(settings.NEBIUS_API_KEY):
+        prose_items = await _prose_task_items(message)
+        if prose_items:
+            return "add_tasks_preview", {"message": message, "items": prose_items}, ""
     if is_capability_question(message):
         return None, None, CAPABILITY_REPLY
     if is_explicit_task_creation(message):

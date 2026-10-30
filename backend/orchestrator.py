@@ -636,15 +636,21 @@ async def _handle_message_core(
         return await handle_intake_preview(
             message=message, conv_id=conv_id, owner_identity=owner_identity, user_id=user_id,
             guest_id=guest_id, persist=persist, active_pool=active_pool, start_time=start_time,
+            items=args.get("items") if isinstance(args, dict) else None,
         )
 
     # 2b. Skill Execution: add_task
     if skill_name == "add_task" and args:
-        from backend.services.task_intent import blocks_task_creation, title_problem
+        from backend.services.task_intent import blocks_task_creation, has_explicit_task_phrase, title_problem
         title = str(args.get("title") or "").strip()
         if blocks_task_creation(message) or title_problem(title):
             from backend.services.task_intake import clarification_result
             return clarification_result(conv_id, start_time, message)
+        if pre_routed_skill == "add_task" and not has_explicit_task_phrase(message):
+            from backend.services.intent_gate import classify_task_intent
+            from backend.services.task_intake import implicit_task_result
+            if await classify_task_intent(message) is False:
+                return implicit_task_result(conv_id, start_time, title)
         domain = args.get("domain") or "general"
         project_name = args.get("project")
         due_str = args.get("due_date")
