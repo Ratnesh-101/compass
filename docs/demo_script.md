@@ -1,5 +1,6 @@
 # Compass — 3-Minute Demo Video Script
 
+> **Published video**: [https://youtu.be/TSO7xV_5ZHw](https://youtu.be/TSO7xV_5ZHw)  
 > **Target Duration**: 2 minutes 44 seconds (Devpost Hard Ceiling: ≤ 3:00 | Safety Buffer: 16s)  
 > **Presenter**: Calm, confident, technical pace (85 – 110 wpm).  
 > **Setup**: Split screen or browser with [https://compass-farmlytics.vercel.app](https://compass-farmlytics.vercel.app) and terminal with `compass status`.

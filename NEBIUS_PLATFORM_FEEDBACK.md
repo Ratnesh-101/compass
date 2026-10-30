@@ -1,6 +1,7 @@
 # ⚡ Nebius Platform & NVIDIA Model Feedback Report
 > **Submission for the Most Valuable Feedback Award ($100 + NVIDIA Swag)**  
 > **Project**: [Compass](https://github.com/Ratnesh-101/compass) — The AI Copilot That Remembers Every Hackathon, Repo, and Deadline  
+> **Demo video**: [https://youtu.be/TSO7xV_5ZHw](https://youtu.be/TSO7xV_5ZHw)  
 > **Authors**: Ratnesh Singh, Nandani, Kunal  
 > **Environment**: Production FastAPI + Neon Serverless PostgreSQL (`pgvector`) + Vite/React 19 Dashboard  
 > **Evaluated Infrastructure**: Nebius Token Factory (`https://api.tokenfactory.nebius.com/v1/`) & NVIDIA Nemotron models  
