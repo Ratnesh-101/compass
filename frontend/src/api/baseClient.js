@@ -68,6 +68,7 @@ export let API_BASE = resolveInitialApiBase()
 export function safeHref(url) {
   if (!url || typeof url !== 'string') return '#'
   const trimmed = url.trim()
+  // eslint-disable-next-line no-control-regex
   const sanitized = trimmed.replace(/[\x00-\x1f\x7f\s]+/g, '')
   if (/^(?:javascript|vbscript|data):/i.test(sanitized)) {
     return '#'
