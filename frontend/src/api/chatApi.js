@@ -10,7 +10,7 @@ import {
   fetchWithTimeout,
 } from './baseClient.js'
 import { SEED_TIMEOUT_MS } from '../utils/firstRun.js'
-import { chatRequestFields } from '../utils/chatRequest.js'
+import { chatRequestFields, makeRequestId } from '../utils/chatRequest.js'
 
 // When the Judge Persona workspace is visible, chat must see the same demo data the dashboard shows.
 let includeDemoInChat = false
@@ -24,12 +24,12 @@ export function setChatIncludeDemo(active) {
  * Passes conversation_id for multi-turn memory.
  * Returns { response, conversation_id } on success.
  */
-export async function sendQueryToAssistant(prompt, conversationId, tone = null, mode = null, specialistId = null) {
+export async function sendQueryToAssistant(prompt, conversationId, tone = null, mode = null, specialistId = null, requestId = null) {
   try {
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 45000)
 
-    const body = { message: prompt, ...chatRequestFields() }
+    const body = { message: prompt, ...chatRequestFields(requestId || makeRequestId()) }
     if (includeDemoInChat) {
       body.include_demo = true
     }

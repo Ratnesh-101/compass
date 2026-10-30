@@ -1,10 +1,32 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { describeIntakeItem } from '../../utils/chatRequest'
 
 // Preview of several pasted tasks. Nothing is saved until the user confirms.
 export default function IntakePreviewCard({ pendingAction, onConfirm, onCancel }) {
+  const [busy, setBusy] = useState(false)
   const items = Array.isArray(pendingAction?.items) ? pendingAction.items : []
   const count = items.length || pendingAction?.count || 0
+
+  const handleConfirm = async () => {
+    if (busy) return
+    setBusy(true)
+    try {
+      await onConfirm?.()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleCancel = async () => {
+    if (busy) return
+    setBusy(true)
+    try {
+      await onCancel?.()
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div
       className="chat-intake-preview-card"
@@ -37,8 +59,9 @@ export default function IntakePreviewCard({ pendingAction, onConfirm, onCancel }
           type="button"
           id="btn-intake-confirm"
           className="btn-primary"
-          style={{ padding: '4px 14px', minHeight: '30px', fontSize: '12px', borderRadius: '4px', cursor: 'pointer', fontWeight: '600' }}
-          onClick={onConfirm}
+          disabled={busy}
+          style={{ padding: '4px 14px', minHeight: '30px', fontSize: '12px', borderRadius: '4px', cursor: busy ? 'not-allowed' : 'pointer', fontWeight: '600' }}
+          onClick={handleConfirm}
         >
           Add all {count}
         </button>
@@ -46,8 +69,9 @@ export default function IntakePreviewCard({ pendingAction, onConfirm, onCancel }
           type="button"
           id="btn-intake-cancel"
           className="btn-secondary"
-          style={{ padding: '4px 14px', minHeight: '30px', fontSize: '12px', borderRadius: '4px', cursor: 'pointer' }}
-          onClick={onCancel}
+          disabled={busy}
+          style={{ padding: '4px 14px', minHeight: '30px', fontSize: '12px', borderRadius: '4px', cursor: busy ? 'not-allowed' : 'pointer' }}
+          onClick={handleCancel}
         >
           Cancel
         </button>
