@@ -787,17 +787,12 @@ async def _handle_message_core(
                     project_id = proj.get("id")
 
                 task_record = await structured.create_task(
-                    conn,
-                    domain=domain,
-                    title=title,
-                    project_id=project_id,
-                    due_date=due_date,
-                    status=status,
-                    priority=priority,
-                    notes=notes,
-                    user_id=task_owner,
-                    due_at=due_at,
+                    conn, domain=domain, title=title, project_id=project_id,
+                    due_date=due_date, status=status, priority=priority,
+                    notes=notes, user_id=task_owner, due_at=due_at,
                 )
+                from backend.services.chat_idempotency import record_committed_outcome
+                record_committed_outcome(task_record, conv_id=conv_id)
         except Exception as e:
             logger.error(f"add_task failed — database unavailable: {e}", exc_info=True)
             latency_ms = int((time.perf_counter() - start_time) * 1000)

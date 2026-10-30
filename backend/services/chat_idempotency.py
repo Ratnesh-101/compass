@@ -9,6 +9,8 @@ cannot both create tasks.
 from __future__ import annotations
 
 import asyncio
+import contextvars
+import hashlib
 import inspect
 import json
 import logging
@@ -32,8 +34,16 @@ IN_FLIGHT_REPLY = "That request is still being processed. Give it a moment, then
 
 def normalize_request_id(raw: Any) -> Optional[str]:
     """A safe request id, or None (the request then runs without idempotency)."""
-    if isinstance(raw, str) and REQUEST_ID_PATTERN.match(raw.strip()):
-        return raw.strip()
+    if not isinstance(raw, str):
+        return None
+    val = raw.strip()
+    if not val:
+        return None
+    if len(val) > 64:
+        hashed = hashlib.sha256(val.encode("utf-8")).hexdigest()
+        val = f"req_{hashed[:40]}"
+    if REQUEST_ID_PATTERN.match(val):
+        return val
     return None
 
 
@@ -65,6 +75,42 @@ def committed_summary(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return {"skill_used": result.get("skill_used"), "count": count}
 
 
+_committed_outcome: contextvars.ContextVar[Optional[Dict[str, Any]]] = contextvars.ContextVar(
+    "_committed_outcome", default=None
+)
+
+
+def record_committed_outcome(
+    task_record: Optional[Dict[str, Any]] = None,
+    *,
+    task_ids: Optional[list] = None,
+    reply_text: Optional[str] = None,
+    conv_id: Optional[str] = None,
+    skill_used: str = "add_task",
+    data: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Record that task mutation(s) were committed so post-creation failures replay on retry."""
+    task_id = task_record.get("id") if isinstance(task_record, dict) else None
+    ids = task_ids or ([task_id] if task_id is not None else [])
+    text = reply_text
+    if not text:
+        title = (task_record.get("title") if isinstance(task_record, dict) else None) or "task"
+        text = f"Done! Added task '{title}'."
+    payload: Dict[str, Any] = {
+        "conversation_id": conv_id,
+        "response": text,
+        "message": text,
+        "skill_used": skill_used,
+        "success": True,
+        "status": "committed",
+        "data": data or task_record or {"task_ids": ids},
+        "task_ids": ids,
+        "verifiable": False,
+        "routing_latency_ms": 0,
+    }
+    _committed_outcome.set(payload)
+
+
 async def _claim(conn: Any, owner: str, request_id: str) -> Tuple[str, Optional[Dict[str, Any]]]:
     inserted = await conn.fetchval(
         "INSERT INTO chat_request_log (owner_identity, request_id) VALUES ($1, $2) "
@@ -79,7 +125,7 @@ async def _claim(conn: Any, owner: str, request_id: str) -> Tuple[str, Optional[
         "SELECT state, response FROM chat_request_log WHERE owner_identity = $1 AND request_id = $2",
         owner, request_id,
     )
-    if row and row["state"] == "done" and row["response"] is not None:
+    if row and row["state"] in ("done", "committed") and row["response"] is not None:
         stored = row["response"]
         return REPLAY, json.loads(stored) if isinstance(stored, str) else stored
     # Take over a claim whose worker died (stale), otherwise report it as still running.
@@ -98,7 +144,7 @@ async def peek_replay(pool: Any, owner: str, request_id: Optional[str]) -> Optio
     try:
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT response FROM chat_request_log WHERE owner_identity = $1 AND request_id = $2 AND state = 'done'",
+                "SELECT response FROM chat_request_log WHERE owner_identity = $1 AND request_id = $2 AND state IN ('done', 'committed')",
                 owner, request_id,
             )
         stored = row["response"] if row else None
@@ -119,10 +165,18 @@ async def _finish(pool: Any, owner: str, request_id: str, result: Optional[Dict[
                     owner, request_id, json.dumps(result, default=str),
                 )
             else:
-                await conn.execute(
-                    "DELETE FROM chat_request_log WHERE owner_identity = $1 AND request_id = $2 AND state = 'pending'",
-                    owner, request_id,
-                )
+                committed = _committed_outcome.get()
+                if committed is not None:
+                    await conn.execute(
+                        "UPDATE chat_request_log SET state = 'committed', response = $3::jsonb "
+                        "WHERE owner_identity = $1 AND request_id = $2",
+                        owner, request_id, json.dumps(committed, default=str),
+                    )
+                else:
+                    await conn.execute(
+                        "DELETE FROM chat_request_log WHERE owner_identity = $1 AND request_id = $2 AND state = 'pending'",
+                        owner, request_id,
+                    )
     except Exception as e:
         logger.error("Could not finalize chat request %s: %s", request_id, e)
 
@@ -173,6 +227,7 @@ async def run_chat_request(
         claimed = state == CLAIMED
 
     token = request_timezone.set(await resolve_effective_timezone(pool, owner, tz))
+    token_outcome = _committed_outcome.set(None)
 
     async def run_and_finish() -> Dict[str, Any]:
         result: Optional[Dict[str, Any]] = None
@@ -190,6 +245,7 @@ async def run_chat_request(
         return await asyncio.shield(work)
     finally:
         request_timezone.reset(token)
+        _committed_outcome.reset(token_outcome)
 
 
 def _sse(payload: Dict[str, Any]) -> str:
