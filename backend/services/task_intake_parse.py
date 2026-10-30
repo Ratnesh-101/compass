@@ -36,7 +36,7 @@ _BULLET = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+(\S.*)$")
 _LIST_INTENT = re.compile(r"\b(?:add|create|schedule|track|remind)\b|\bto-?dos?\b", re.IGNORECASE)
 _DURATION_HOURS = re.compile(r"^(\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours)$", re.IGNORECASE)
 _DURATION_MINUTES = re.compile(r"^(\d+)\s*(?:m|min|mins|minute|minutes)$", re.IGNORECASE)
-_BULLET_DUE_SPLIT = re.compile(r"\s+(?:-|–|—|@|by|due|on)\s+|\s*[(,]\s*", re.IGNORECASE)
+_BULLET_DUE_SPLIT = re.compile(r"\s[-–—@]\s|\s(?:by|due|on)\s|[(,]", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -156,7 +156,7 @@ def _parse_bullets(message: str, lines: list[str]) -> Optional[ParsedIntake]:
             last = delimiters[-1]
             candidate = text[last.end():].rstrip(") ").strip()
             if candidate and resolve_due(candidate, "UTC").due_date is not None:
-                title, due_text = text[:last.start()].strip(), candidate
+                title, due_text = text[:last.start()].rstrip(" (").strip(), candidate
         if title_problem(title):
             skipped.append(text[:80])
             continue
