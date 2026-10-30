@@ -826,8 +826,11 @@ def _validate_trusted_origin(request: Request) -> bool:
     if not origin:
         # Direct CLI / same-origin requests without origin header (e.g. backend curl/postman)
         return True
-    origin_clean = origin.rstrip("/")
-    allowed = set(s.rstrip("/") for s in getattr(settings, "CORS_ORIGINS", []))
+    parsed = urllib.parse.urlparse(origin.strip())
+    if not parsed.scheme or not parsed.netloc:
+        return False
+    origin_key = f"{parsed.scheme}://{parsed.netloc}".lower().rstrip("/")
+    allowed = set(s.lower().rstrip("/") for s in getattr(settings, "CORS_ORIGINS", []))
     allowed.update({
         "http://localhost:5173", "http://127.0.0.1:5173",
         "http://localhost:3000", "http://127.0.0.1:3000",
@@ -836,7 +839,7 @@ def _validate_trusted_origin(request: Request) -> bool:
         "https://compass-backend-qryu.onrender.com",
         "https://compass-backend-qryu-vcfv.onrender.com",
     })
-    return any(origin_clean.startswith(a) for a in allowed)
+    return origin_key in allowed
 
 
 @router.post("/api/calendar/sync-now")
