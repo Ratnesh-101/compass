@@ -606,14 +606,11 @@ async def handle_query_coursework_tasks(args: Dict[str, Any], pool: Any) -> Dict
         }
 
     matching_tasks = tasks
-    if course:
-        c_clean = course.strip().lower()
-        matching_tasks = [
-            t for t in tasks
-            if c_clean in t.get("title", "").lower()
-            or (t.get("project_name") and c_clean in t["project_name"].lower())
-            or (t.get("notes") and c_clean in t["notes"].lower())
-        ]
+    c_clean = (course or "").strip().lower()
+    if c_clean:
+        by_course = [t for t in tasks if any(c_clean in str(t.get(k) or "").lower() for k in ("title", "project_name", "notes"))]
+        # A label nothing matches (the agent often passes "coursework") must not hide every coursework task.
+        matching_tasks, course = (by_course, course) if by_course else (tasks, None)
 
     # Check for contradictory / conflicting deadline information
     conflict = detect_deadline_discrepancies(
