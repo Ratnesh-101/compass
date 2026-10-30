@@ -439,7 +439,7 @@ async def run_agent(
 
                         if wait_for_confirmation:
                             evt = asyncio.Event()
-                            outcome: Dict[str, Any] = {}
+                            outcome: Dict[str, Any] = {"owner": user_id}
                             _PENDING_CONFIRMATION_EVENTS[run_id] = (evt, outcome)
 
                             try:

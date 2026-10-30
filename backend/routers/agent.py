@@ -36,14 +36,30 @@ async def agent_run(req: AgentRequest, request: Request):
     """Stream the agent's ReAct execution trace via SSE."""
     from backend.agent import run_agent, _PENDING_CONFIRMATION_EVENTS, count_active_agent_runs, MAX_CONCURRENT_AGENT_RUNS
 
+    agent_ident = _get_current_identity(request)
+    agent_is_guest = bool(agent_ident and agent_ident.is_guest)
+    agent_user_id = _get_or_create_user_id(request)
+    is_admin = bool(agent_ident and agent_ident.is_admin)
+
     if req.run_id and req.run_id in _PENDING_CONFIRMATION_EVENTS and hasattr(req, "action") and req.action:
         evt, outcome = _PENDING_CONFIRMATION_EVENTS[req.run_id]
+        owner = outcome.get("owner")
+        if owner and not is_admin and owner.lower() != agent_user_id.lower():
+            raise HTTPException(status_code=403, detail="Forbidden: You do not own this active agent run.")
         outcome["action"] = req.action
         outcome["feedback"] = getattr(req, "feedback", None) or ""
         evt.set()
         return {"status": "ok", "message": f"Action '{req.action}' delivered to active run {req.run_id}."}
 
     pool = await get_pool()
+
+    if req.run_id and pool:
+        from backend.agent import get_agent_run
+        existing = await get_agent_run(pool, req.run_id)
+        if existing:
+            run_owner = (existing.get("user_id") or "").strip().lower()
+            if run_owner and not is_admin and run_owner != agent_user_id.lower():
+                raise HTTPException(status_code=403, detail="Forbidden: You do not own this agent run.")
 
     if not getattr(req, "action", None) and not req.run_id:
         active_count = await count_active_agent_runs(pool)
@@ -52,10 +68,6 @@ async def agent_run(req: AgentRequest, request: Request):
                 status_code=429,
                 detail=f"Concurrent active agent runs cap reached ({active_count}/{MAX_CONCURRENT_AGENT_RUNS}). Please complete or wait for existing runs to finish.",
             )
-
-    agent_ident = _get_current_identity(request)
-    agent_is_guest = bool(agent_ident and agent_ident.is_guest)
-    agent_user_id = _get_or_create_user_id(request)
 
     async def agent_event_generator():
         import asyncio
