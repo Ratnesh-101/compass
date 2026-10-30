@@ -1,20 +1,9 @@
 import React, { useState } from 'react'
 import { splitOnLineBreaks } from '../../utils/markdownBreaks'
 import { isHorizontalRule } from '../../utils/markdownRules'
+import { sanitizeUrl } from '../../utils/safeUrl'
 
-/**
- * Validates and sanitizes a link URL to prevent script injection (XSS).
- * Only allows https:, http:, and mailto: protocols.
- */
-function sanitizeUrl(url) {
-  if (!url || typeof url !== 'string') return null
-  const trimmed = url.trim()
-  const lower = trimmed.toLowerCase()
-  if (lower.startsWith('https://') || lower.startsWith('http://') || lower.startsWith('mailto:')) {
-    return trimmed
-  }
-  return null
-}
+export { sanitizeUrl }
 
 /**
  * Parses inline formatting:

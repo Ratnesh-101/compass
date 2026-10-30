@@ -68,11 +68,20 @@ export let API_BASE = resolveInitialApiBase()
 export function safeHref(url) {
   if (!url || typeof url !== 'string') return '#'
   const trimmed = url.trim()
-  if (/^(?:javascript|vbscript|data):/i.test(trimmed)) {
+  const sanitized = trimmed.replace(/[\x00-\x1f\x7f\s]+/g, '')
+  if (/^(?:javascript|vbscript|data):/i.test(sanitized)) {
     return '#'
   }
-  if (trimmed.startsWith('https://') || trimmed.startsWith('http://') || (trimmed.startsWith('/') && !trimmed.startsWith('//'))) {
+  if (trimmed.startsWith('/') && !trimmed.startsWith('//') && !trimmed.startsWith('/\\')) {
     return trimmed
+  }
+  if (trimmed.startsWith('https://') || trimmed.startsWith('http://')) {
+    try {
+      const parsed = new URL(trimmed)
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return trimmed
+    } catch {
+      return '#'
+    }
   }
   return '#'
 }
