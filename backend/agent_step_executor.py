@@ -81,6 +81,9 @@ async def execute_agent_tool_step(
         if user_id and isinstance(tool_args, dict):
             # Never let model- or client-supplied args choose the owner.
             tool_args["user_id"] = user_id
+        if isinstance(tool_args, dict):
+            from backend.services.task_scope import AGENT_INCLUDE_DEMO
+            tool_args["include_demo"] = AGENT_INCLUDE_DEMO.get()
         try:
             prev_state = None
             affected_id = None

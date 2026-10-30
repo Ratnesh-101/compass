@@ -218,6 +218,7 @@ async def get_calendar_freebusy(
     include_simulated: bool = True,
     task_user_id: Optional[str] = None,
     calendar_errors: Optional[List[str]] = None,
+    include_demo: bool = False,
 ) -> List[Dict[str, Any]]:
     """Query busy blocks within a date range.
 
@@ -250,11 +251,13 @@ async def get_calendar_freebusy(
                       AND scheduled_start < $2
                       AND scheduled_end > $1
                       AND ($3::text IS NULL OR lower(user_id) = lower($3::text))
+                      AND ($4::boolean OR COALESCE(trusted_event_url,'') NOT LIKE 'compass://demo-persona/%')
                     ORDER BY scheduled_start ASC
                     """,
                     start_utc,
                     end_utc,
                     task_user_id,
+                    bool(include_demo),
                 )
                 for r in rows:
                     busy_blocks.append({

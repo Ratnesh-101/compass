@@ -205,7 +205,8 @@ async def generate_chat_events(
         from backend.agents.specialist import run_specialist_task
         pool = await _resolve_pool()
         spec_result = await run_specialist_task(
-            capability=valid_id, user_goal=message, pool=pool, user_id=user_id or guest_id
+            capability=valid_id, user_goal=message, pool=pool, user_id=user_id or guest_id,
+            include_demo=req_include_demo,
         )
         response_text = spec_result.get("summary", f"Specialist analysis completed for '{message}'.")
 
