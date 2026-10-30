@@ -68,11 +68,21 @@ export let API_BASE = resolveInitialApiBase()
 export function safeHref(url) {
   if (!url || typeof url !== 'string') return '#'
   const trimmed = url.trim()
-  if (/^(?:javascript|vbscript|data):/i.test(trimmed)) {
+  // eslint-disable-next-line no-control-regex
+  const sanitized = trimmed.replace(/[\x00-\x1f\x7f\s]+/g, '')
+  if (/^(?:javascript|vbscript|data):/i.test(sanitized)) {
     return '#'
   }
-  if (trimmed.startsWith('https://') || trimmed.startsWith('http://') || (trimmed.startsWith('/') && !trimmed.startsWith('//'))) {
+  if (trimmed.startsWith('/') && !trimmed.startsWith('//') && !trimmed.startsWith('/\\')) {
     return trimmed
+  }
+  if (trimmed.startsWith('https://') || trimmed.startsWith('http://')) {
+    try {
+      const parsed = new URL(trimmed)
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return trimmed
+    } catch {
+      return '#'
+    }
   }
   return '#'
 }
@@ -567,10 +577,15 @@ export async function openAuthedHtml(url, { printOnLoad = true, popup = null } =
   }
 
   const html = await res.text()
+  const cspMeta = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src data: https: blob:; font-src data: https:; script-src \'none\';">'
+  const sandboxedHtml = /<head[^>]*>/i.test(html)
+    ? html.replace(/<head[^>]*>/i, (m) => `${m}\n  ${cspMeta}`)
+    : `${cspMeta}\n${html}`
+
   const urlHelper = (typeof window !== 'undefined' ? window.URL : null) || globalThis.URL || URL
   const doc = typeof document !== 'undefined' ? document : (typeof globalThis !== 'undefined' ? globalThis.document : null)
   if (urlHelper && typeof urlHelper.createObjectURL === 'function') {
-    const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+    const blob = new Blob([sandboxedHtml], { type: 'text/html;charset=utf-8' })
     const blobUrl = urlHelper.createObjectURL(blob)
 
     if (popup && typeof popup.close === 'function' && !popup.closed) {
@@ -615,7 +630,7 @@ function renderInHiddenIframe(blobUrl, printOnLoad) {
   iframe.style.height = '0'
   iframe.style.border = '0'
   iframe.style.visibility = 'hidden'
-  try { iframe.setAttribute('sandbox', 'allow-modals allow-same-origin') } catch { /* ignore */ }
+  try { iframe.setAttribute('sandbox', 'allow-modals') } catch { /* ignore */ }
   document.body.appendChild(iframe)
 
   iframe.onload = () => {

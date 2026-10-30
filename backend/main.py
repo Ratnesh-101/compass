@@ -354,11 +354,23 @@ async def root_redirect(request: Request):
     query_str = request.url.query
     query_suffix = f"?{query_str}" if query_str else ""
     referer = request.headers.get("referer") or request.headers.get("origin")
+    allowed = set(s.lower().rstrip("/") for s in getattr(settings, "CORS_ORIGINS", []))
+    allowed.update({
+        "http://localhost:5173", "http://127.0.0.1:5173",
+        "http://localhost:3000", "http://127.0.0.1:3000",
+        "https://compass-farmlytics.vercel.app",
+        "https://compass-kappa-nine.vercel.app",
+        "https://compass-backend-qryu.onrender.com",
+        "https://compass-backend-qryu-vcfv.onrender.com",
+    })
+
     if referer:
-        parsed = urllib.parse.urlparse(referer)
+        parsed = urllib.parse.urlparse(referer.strip())
         if parsed.scheme and parsed.netloc:
-            target = f"{parsed.scheme}://{parsed.netloc}/{query_suffix}"
-            return RedirectResponse(url=target)
+            origin_key = f"{parsed.scheme}://{parsed.netloc}".lower().rstrip("/")
+            if origin_key in allowed:
+                target = f"{origin_key}/{query_suffix}"
+                return RedirectResponse(url=target)
 
     frontend_url = "http://localhost:5173" if settings.is_development() else "https://compass-kappa-nine.vercel.app"
     return RedirectResponse(url=f"{frontend_url}/{query_suffix}")

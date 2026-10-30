@@ -285,6 +285,8 @@ class AgentRequest(BaseModel):
     conversation_id: Optional[str] = None
     run_id: Optional[str] = None
     include_demo: bool = False
+    action: Optional[str] = None
+    feedback: Optional[str] = None
 
 
 class AgentConfirmRequest(BaseModel):

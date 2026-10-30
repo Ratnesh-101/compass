@@ -48,6 +48,7 @@ async def execute_agent_tool_step(
     abstain_first: bool,
     search_web_unlocked: bool,
     tools_used: List[str],
+    is_guest: bool = False,
 ) -> Tuple[AgentStep, str, bool, Dict[str, Any], Dict[str, Any]]:
     """Execute a skill tool and return the resulting observe step, tool output, and updated web search unlock flag."""
     from backend.skills import SKILL_REGISTRY
@@ -57,8 +58,8 @@ async def execute_agent_tool_step(
 
     if func_name in SKILL_REGISTRY:
         from backend.skills.registry import GUEST_DISALLOWED_TOOLS
-        is_guest = bool(user_id and str(user_id).startswith("guest_"))
-        if is_guest and func_name in GUEST_DISALLOWED_TOOLS:
+        guest_flag = is_guest or bool(user_id and str(user_id).startswith("guest_"))
+        if guest_flag and func_name in GUEST_DISALLOWED_TOOLS:
             denied_msg = f"Permission denied: Guest sessions are forbidden from executing high-risk or external side-effect tool '{func_name}'. Please sign in."
             logger.warning("Blocked guest execution of tool '%s' for identity %s", func_name, user_id)
             return (
@@ -81,6 +82,8 @@ async def execute_agent_tool_step(
         if user_id and isinstance(tool_args, dict):
             # Never let model- or client-supplied args choose the owner.
             tool_args["user_id"] = user_id
+        if is_guest and isinstance(tool_args, dict):
+            tool_args["is_guest"] = True
         if isinstance(tool_args, dict):
             from backend.services.task_scope import AGENT_INCLUDE_DEMO
             tool_args["include_demo"] = AGENT_INCLUDE_DEMO.get()

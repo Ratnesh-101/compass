@@ -61,6 +61,7 @@ async def run_agent(
     conversation_id: Optional[str] = None,
     user_id: Optional[str] = None,
     tone: Optional[str] = None,
+    is_guest: bool = False,
 ) -> AsyncGenerator[AgentStep, None]:
     """Core ReAct agent loop yielding AgentStep objects for real-time SSE streaming."""
     if settings is None:
@@ -440,7 +441,7 @@ async def run_agent(
 
                         if wait_for_confirmation:
                             evt = asyncio.Event()
-                            outcome: Dict[str, Any] = {}
+                            outcome: Dict[str, Any] = {"owner": user_id}
                             _PENDING_CONFIRMATION_EVENTS[run_id] = (evt, outcome)
 
                             try:
@@ -525,6 +526,7 @@ async def run_agent(
                     abstain_first=abstain_first,
                     search_web_unlocked=search_web_unlocked,
                     tools_used=tools_used,
+                    is_guest=is_guest,
                 )
                 step_num += 1
                 obs_step.step_number = step_num
