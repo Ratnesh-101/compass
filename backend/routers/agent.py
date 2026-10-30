@@ -53,6 +53,8 @@ async def agent_run(req: AgentRequest, request: Request):
                 detail=f"Concurrent active agent runs cap reached ({active_count}/{MAX_CONCURRENT_AGENT_RUNS}). Please complete or wait for existing runs to finish.",
             )
 
+    agent_ident = _get_current_identity(request)
+    agent_is_guest = bool(agent_ident and agent_ident.is_guest)
     agent_user_id = _get_or_create_user_id(request)
 
     async def agent_event_generator():
@@ -73,6 +75,7 @@ async def agent_run(req: AgentRequest, request: Request):
                 wait_for_confirmation=getattr(req, "wait_for_confirmation", False),
                 conversation_id=req.conversation_id,
                 user_id=agent_user_id,
+                is_guest=agent_is_guest,
             ):
                 if await request.is_disconnected():
                     logger.info("Client disconnected from agent SSE stream; terminating run %s", req.run_id)

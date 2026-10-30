@@ -60,6 +60,7 @@ async def run_agent(
     conversation_id: Optional[str] = None,
     user_id: Optional[str] = None,
     tone: Optional[str] = None,
+    is_guest: bool = False,
 ) -> AsyncGenerator[AgentStep, None]:
     """Core ReAct agent loop yielding AgentStep objects for real-time SSE streaming."""
     if settings is None:
@@ -523,6 +524,7 @@ async def run_agent(
                     abstain_first=abstain_first,
                     search_web_unlocked=search_web_unlocked,
                     tools_used=tools_used,
+                    is_guest=is_guest,
                 )
                 step_num += 1
                 obs_step.step_number = step_num
