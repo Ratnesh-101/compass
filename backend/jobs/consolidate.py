@@ -442,7 +442,7 @@ async def check_slipped_schedules(conn: asyncpg.Connection, pool: Any = None, dr
     from backend.services.scheduler import find_slipped_tasks, replan_slipped_tasks, get_available_windows
     from backend.services.calendar import get_calendar_freebusy
 
-    tasks = await list_tasks(conn)
+    tasks = await list_tasks(conn, include_demo=False)
     slipped = find_slipped_tasks(tasks)
     if not slipped:
         logger.info("  [5/5] Slipped schedule check: 0 tasks slipped past end time.")

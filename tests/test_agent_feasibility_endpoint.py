@@ -8,7 +8,7 @@ from backend.dependencies import generate_guest_token
 @pytest.mark.asyncio
 async def test_feasibility_endpoint_allows_guest_token(monkeypatch):
     """Verify /api/agent/feasibility accepts valid guest token without server AUTH_TOKEN."""
-    async def mock_review(pool, days, hours_per_day, domain, user_id):
+    async def mock_review(pool, days, hours_per_day, domain, user_id, include_demo=False):
         yield {"type": "step", "content": "Analyzing workload"}
         yield {"type": "done", "content": "Feasible"}
 

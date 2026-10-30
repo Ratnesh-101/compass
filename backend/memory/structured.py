@@ -194,11 +194,11 @@ async def list_tasks(
     scheduled_only: bool = False,
     unscheduled_only: bool = False,
     user_id: Optional[str] = None,
-    include_demo: bool = True,
+    include_demo: bool = False,
 ) -> list[dict]:
     """Query tasks with optional filters and per-account isolation.
 
-    Judge Persona demo rows are included unless ``include_demo`` is False.
+    Judge Persona demo rows are hidden unless ``include_demo`` is True.
     """
     query = """
         SELECT t.id, t.domain, t.title, t.due_date, t.status, t.priority, t.notes, t.trusted_event_url,

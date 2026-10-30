@@ -48,7 +48,7 @@ async def handle_get_calendar_availability(args: Dict[str, Any], pool: Any) -> D
     calendar_errors: List[str] = []
     busy = await get_calendar_freebusy(
         start_dt, end_dt, pool=pool, user_id=user_id or "default_user", task_user_id=scoped_owner,
-        calendar_errors=calendar_errors,
+        calendar_errors=calendar_errors, include_demo=bool(args.get("include_demo", False)),
     )
 
     prefs: Dict[str, Any] = {"work_start_time": "09:00:00", "work_end_time": "18:00:00", "work_days": [1, 2, 3, 4, 5], "buffer_minutes": 15}
@@ -118,6 +118,7 @@ async def handle_propose_schedule(args: Dict[str, Any], pool: Any) -> Dict[str, 
     tz_name = resolve_timezone_name(args.get("timezone"))
     zone = resolve_zone(tz_name)
 
+    include_demo = bool(args.get("include_demo", False))
     now = datetime.now(timezone.utc)
     if target_date_str:
         try:
@@ -139,15 +140,16 @@ async def handle_propose_schedule(args: Dict[str, Any], pool: Any) -> Dict[str, 
             prefs = await get_scheduling_preferences(conn, user_id=user_id or "default_user")
             dep_map = await get_all_dependencies_map(conn)
             if task_ids:
-                all_tasks = await list_tasks(conn, domain=domain, user_id=scoped_owner)
+                all_tasks = await list_tasks(conn, domain=domain, user_id=scoped_owner, include_demo=include_demo)
                 id_set = set(task_ids)
                 tasks = [t for t in all_tasks if t["id"] in id_set]
             else:
-                tasks = await list_tasks(conn, domain=domain, status="open", user_id=scoped_owner)
+                tasks = await list_tasks(conn, domain=domain, status="open", user_id=scoped_owner, include_demo=include_demo)
     tasks = [t for t in tasks if str(t.get("status") or "").lower() not in INACTIVE_TASK_STATUSES]
 
     busy = await get_calendar_freebusy(
-        start_dt, end_dt, pool=pool, user_id=user_id or "default_user", task_user_id=scoped_owner
+        start_dt, end_dt, pool=pool, user_id=user_id or "default_user", task_user_id=scoped_owner,
+        include_demo=include_demo,
     )
     raw_buf = prefs.get("buffer_minutes", 15)
     buffer_minutes = int(raw_buf) if isinstance(raw_buf, (int, str)) else 15
@@ -399,14 +401,15 @@ async def handle_detect_schedule_conflicts(args: Dict[str, Any], pool: Any) -> D
     dep_map: Dict[int, List[int]] = {}
     if pool is not None:
         async with pool.acquire() as conn:
-            tasks = await list_tasks(conn, user_id=scoped_owner)
+            tasks = await list_tasks(conn, user_id=scoped_owner, include_demo=bool(args.get("include_demo", False)))
             dep_map = await get_all_dependencies_map(conn)
 
     # External busy intervals
     ext_events: List[Dict[str, Any]] = []
     if pool is not None:
         all_busy = await get_calendar_freebusy(
-            s_dt, e_dt, pool=pool, user_id=user_id or "default_user", task_user_id=scoped_owner
+            s_dt, e_dt, pool=pool, user_id=user_id or "default_user", task_user_id=scoped_owner,
+            include_demo=bool(args.get("include_demo", False)),
         )
         ext_events = [b for b in all_busy if b.get("source") != "compass_task"]
 

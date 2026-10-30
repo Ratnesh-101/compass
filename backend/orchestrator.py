@@ -680,7 +680,7 @@ async def _handle_message_core(
             pool = await get_pool()
             async with pool.acquire() as conn:
                 task_owner = user_id or guest_id
-                existing_tasks = await structured.list_tasks(conn, user_id=task_owner) if task_owner else []
+                existing_tasks = await structured.list_tasks(conn, user_id=task_owner, include_demo=bool(args.get("include_demo", False))) if task_owner else []
                 exact_matches = [
                     t for t in existing_tasks
                     if t["title"].strip().lower() == title.strip().lower()
