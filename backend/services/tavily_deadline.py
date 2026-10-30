@@ -27,6 +27,16 @@ DATE_PATTERN = re.compile(
 )
 
 
+def whole_word_window(content: str, start: int, end: int) -> str:
+    """Slice content[start:end] without leaving a half-word at either edge."""
+    window = content[start:end]
+    if start > 0 and not content[start - 1].isspace() and not window[:1].isspace():
+        window = window.split(" ", 1)[1] if " " in window else ""
+    if end < len(content) and not content[end].isspace() and not window[-1:].isspace():
+        window = window.rsplit(" ", 1)[0] if " " in window else ""
+    return window.strip()
+
+
 def parse_date_candidate(text: str, default_year: Optional[int] = None) -> Optional[date]:
     """Parse standard date candidate strings in both Month-Day and Day-Month formats."""
     clean = re.sub(r"(\d+)(st|nd|rd|th)", r"\1", text.strip())
@@ -94,7 +104,7 @@ def extract_dates_from_results(
                 key = (parsed.isoformat(), url)
                 if key not in seen:
                     seen.add(key)
-                    snippet = content[ctx_start:ctx_end].strip()
+                    snippet = whole_word_window(content, ctx_start, ctx_end)
                     extracted.append({
                         "date": parsed,
                         "date_str": parsed.isoformat(),

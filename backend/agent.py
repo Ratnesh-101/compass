@@ -16,7 +16,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple, cast
 
 from openai import AsyncOpenAI
 
-from backend.agent_confirm_nudge import NUDGE_MESSAGE, should_nudge_for_tool_call
+from backend.agent_confirm_nudge import nudge_messages, should_nudge_for_tool_call
 from backend.agent_critic import _run_critic_pass, execute_confirmed_actions
 from backend.agent_escalation import evaluate_abstention_and_web_escalation
 from backend.agent_persistence import (
@@ -561,8 +561,7 @@ async def run_agent(
 
                 if should_nudge_for_tool_call(reply, tools_used, confirm_nudges, MUTATING_TOOLS):
                     confirm_nudges += 1
-                    messages.append({"role": "assistant", "content": reply})
-                    messages.append({"role": "user", "content": NUDGE_MESSAGE})
+                    messages.extend(nudge_messages(reply))
                     continue
 
                 if enable_critic and reply:
