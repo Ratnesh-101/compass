@@ -12,7 +12,7 @@
 [![Tavily](https://img.shields.io/badge/Tavily-Web%20Intelligence-4A90E2.svg)](https://tavily.com/)
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-compass--farmlytics.vercel.app-success.svg?logo=vercel&logoColor=white)](https://compass-farmlytics.vercel.app)
 
-**[Live app](https://compass-farmlytics.vercel.app)** · **[Demo video](https://youtu.be/scCQnyRQleY)** · [![MIT License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) · [API health](https://compass-backend-qryu-vcfv.onrender.com/health) · [Demo script](docs/demo_script.md)
+**[Live app](https://compass-farmlytics.vercel.app)** · **[Demo video](https://youtu.be/TSO7xV_5ZHw)** · [![MIT License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) · [API health](https://compass-backend-qryu-vcfv.onrender.com/health) · [Demo script](docs/demo_script.md)
 
 Compass is a persistent-memory AI copilot that bridges your tasks, hackathon deadlines, coursework, code context, and career pipeline into one unified, agent-driven workspace. Instead of serving as a stateless chat prompt, Compass reasons across all your work domains, queries live web sources, validates candidate eligibility, tailors verifiable resumes, and halts at strict human confirmation gates before mutating data or submitting applications.
 
