@@ -108,8 +108,9 @@ def format_due_label(day: Optional[date], due_at: Optional[datetime], tz_name: s
     label = f"{day.strftime('%a %b')} {day.day}"
     if due_at is None:
         return label
-    local = due_at.astimezone(ZoneInfo(pick_timezone(tz_name, None)))
-    return f"{label}, {format_clock(local.timetz())} ({tz_name})"
+    valid_tz = pick_timezone(tz_name, None)
+    local = due_at.astimezone(ZoneInfo(valid_tz))
+    return f"{label}, {format_clock(local.timetz())} ({valid_tz})"
 
 
 _NUMERIC_DATE = re.compile(r"^\d{1,4}[/.\-]\d{1,2}([/.\-]\d{1,4})?$")
