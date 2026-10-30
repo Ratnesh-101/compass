@@ -16,6 +16,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple, cast
 
 from openai import AsyncOpenAI
 
+from backend.agent_confirm_nudge import NUDGE_MESSAGE, should_nudge_for_tool_call
 from backend.agent_critic import _run_critic_pass, execute_confirmed_actions
 from backend.agent_escalation import evaluate_abstention_and_web_escalation
 from backend.agent_persistence import (
@@ -94,6 +95,7 @@ async def run_agent(
     total_run_cost_usd: float = 0.0
     is_abstained: bool = False
     web_escalation_used: bool = False
+    confirm_nudges: int = 0
     forced_tool_choice: Optional[Any] = None
     active_replan_diff: Optional[Dict[str, Any]] = None
     abstain_first: bool = getattr(settings, "TAVILY_ABSTAIN_FIRST", False)
@@ -553,6 +555,12 @@ async def run_agent(
                     forced_tool_choice = {"type": "function", "function": {"name": "search_web"}}
                     yield eval_step
                     accumulated_steps.append(eval_step)
+                    continue
+
+                if should_nudge_for_tool_call(reply, tools_used, confirm_nudges, MUTATING_TOOLS):
+                    confirm_nudges += 1
+                    messages.append({"role": "assistant", "content": reply})
+                    messages.append({"role": "user", "content": NUDGE_MESSAGE})
                     continue
 
                 if enable_critic and reply:
