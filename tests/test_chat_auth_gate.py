@@ -2,13 +2,17 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from backend.main import app
 from backend.dependencies import generate_guest_token
+from backend.config import get_settings
 
 
 @pytest.mark.asyncio
-async def test_unauthenticated_post_api_chat_rejected():
+async def test_unauthenticated_post_api_chat_rejected(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.setattr(settings, "GUEST_SIGNING_SECRET", "test-secret-12345678901234567890")
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # Completely unauthenticated request
+        # Completely unauthenticated request in production
         resp = await client.post(
             "/api/chat",
             json={"message": "Hello without token"},
@@ -20,6 +24,10 @@ async def test_unauthenticated_post_api_chat_rejected():
 async def test_guest_post_api_chat_accepted(monkeypatch):
     from unittest.mock import AsyncMock
     from backend import orchestrator
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.setattr(settings, "GUEST_SIGNING_SECRET", "test-secret-12345678901234567890")
 
     # Mock handle_message so we don't call real Nebius
     mock_handle = AsyncMock(return_value={

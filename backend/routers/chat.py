@@ -462,7 +462,7 @@ async def get_memory_overview(request: Request):
 async def public_chat(req: PublicChatRequest, request: Request, _rl: None = Depends(rate_limit)):
     """Executes orchestrator.handle_message(), records usage, and returns response and latency."""
     ident = _get_current_identity(request)
-    if not ident:
+    if not ident and _settings.is_production():
         raise HTTPException(
             status_code=401,
             detail="Authentication required: active session or valid guest token required",
