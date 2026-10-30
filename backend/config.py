@@ -10,7 +10,10 @@ import logging
 import os
 from functools import lru_cache
 from typing import Any
-from pydantic import field_validator
+import secrets
+from pydantic import field_validator, model_validator
+
+_PER_PROCESS_DEV_EDGE_SECRET: str = secrets.token_hex(32)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -58,7 +61,7 @@ class Settings(BaseSettings):
     TRUST_CF_CONNECTING_IP: bool = True
     TRUST_TRUE_CLIENT_IP: bool = False
     TRUSTED_PROXY_CIDR_RESOLUTION: bool = False
-    EDGE_HMAC_SECRET: str = "compass_vercel_edge_hmac_secret_2026"
+    EDGE_HMAC_SECRET: str = ""
     VERCEL_EDGE_SECRET: str | None = None
 
     # --- Rate Limiter & Abuse Protection ---
@@ -128,7 +131,23 @@ class Settings(BaseSettings):
         env = (getattr(self, "ENVIRONMENT", "") or "").lower().strip()
         if not env:
             return True  # Fail-closed default: unset behaves as production
-        return env in ("production", "prod", "staging", "stage")
+        return env in ("production", "prod", "staging", "stage") or (
+            bool(os.environ.get("RENDER")) and env not in ("development", "test", "testing")
+        )
+
+    @model_validator(mode="after")
+    def _resolve_edge_hmac_secret(self) -> "Settings":
+        if not self.is_production():
+            if not (self.EDGE_HMAC_SECRET or self.VERCEL_EDGE_SECRET):
+                self.EDGE_HMAC_SECRET = _PER_PROCESS_DEV_EDGE_SECRET
+        return self
+
+    def validate_edge_hmac_secret(self) -> None:
+        """Startup guard: fail closed if EDGE_HMAC_SECRET is unset in production."""
+        if self.is_production():
+            effective = (self.EDGE_HMAC_SECRET or self.VERCEL_EDGE_SECRET or "").strip()
+            if not effective or effective in ("dev-secret", "test-secret", "compass_vercel_edge_hmac_secret_2026"):
+                raise RuntimeError("STARTUP REFUSED: EDGE_HMAC_SECRET environment variable is missing in production")
 
     def get_missing_production_secrets(self) -> tuple[list[str], list[str]]:
         """Return (missing_secret_names, duplicate_secret_names) for production configuration without exposing secret values."""

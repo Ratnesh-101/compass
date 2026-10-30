@@ -1,13 +1,15 @@
 // Vercel Edge Middleware / Proxy Signer
 // Signs proxy requests to Compass backend with an HMAC SHA-256 edge signature
 // over the current timestamp, allowing backend to safely trust parts[-2] in XFF.
-// Signing is skipped (fail closed) when EDGE_HMAC_SECRET is unset; there is no built-in default secret.
+// Fails closed with 500 JSON error when EDGE_HMAC_SECRET is unset in production.
 
 import { next } from '@vercel/edge'
 
 export const config = {
   matcher: ['/api/:path*', '/chat', '/health'],
 }
+
+const devFallbackSecret = crypto.randomUUID()
 
 async function hmacSha256(secret, message) {
   const enc = new TextEncoder()
@@ -35,14 +37,33 @@ export default async function middleware(request) {
   const requestHeaders = new Headers(request.headers)
   requestHeaders.delete('x-compass-edge-sig')
 
-  const secret = (process.env.EDGE_HMAC_SECRET || process.env.VERCEL_EDGE_SECRET || '').trim()
-  if (secret) {
-    const xff = request.headers.get('x-forwarded-for') || ''
-    const clientIp = xff ? xff.split(',')[0].trim() : (request.ip || '127.0.0.1')
-    const nowSeconds = Math.floor(Date.now() / 1000)
-    const edgeSigHeader = await buildEdgeSignature(secret, clientIp, nowSeconds)
-    requestHeaders.set('x-compass-edge-sig', edgeSigHeader)
+  const isProduction =
+    process.env.VERCEL_ENV === 'production' ||
+    process.env.NODE_ENV === 'production' ||
+    process.env.ENVIRONMENT === 'production' ||
+    process.env.ENV === 'production'
+
+  let secret = (process.env.EDGE_HMAC_SECRET || process.env.VERCEL_EDGE_SECRET || '').trim()
+  if (!secret) {
+    if (isProduction) {
+      return new Response(
+        JSON.stringify({
+          error: 'EDGE_HMAC_SECRET environment variable is missing in production',
+        }),
+        {
+          status: 500,
+          headers: { 'content-type': 'application/json' },
+        }
+      )
+    }
+    secret = devFallbackSecret
   }
+
+  const xff = request.headers.get('x-forwarded-for') || ''
+  const clientIp = xff ? xff.split(',')[0].trim() : (request.ip || '127.0.0.1')
+  const nowSeconds = Math.floor(Date.now() / 1000)
+  const edgeSigHeader = await buildEdgeSignature(secret, clientIp, nowSeconds)
+  requestHeaders.set('x-compass-edge-sig', edgeSigHeader)
 
   return next({
     request: {

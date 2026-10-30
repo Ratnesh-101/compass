@@ -103,6 +103,7 @@ async def lifespan(app: FastAPI):
     """Manage application startup and shutdown."""
     # 0. Startup Database Safety Guard & Secrets Validation
     settings.validate_database_target()
+    settings.validate_edge_hmac_secret()
     logger.info(f"🧭 Compass database target: {settings.get_masked_database_url()}")
 
     try:

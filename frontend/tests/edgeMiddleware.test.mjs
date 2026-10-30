@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { buildEdgeSignature } from '../middleware.js'
+import middleware from '../middleware.js'
 
 test('buildEdgeSignature returns three pipe-separated parts with correct format, determinism and secret dependency', async () => {
   const secret = 'test-edge-secret-abc-123'
@@ -60,4 +61,48 @@ test('source check: middleware.js fails closed and strips client edge sig header
     source.includes("requestHeaders.delete('x-compass-edge-sig')"),
     "frontend/middleware.js must contain requestHeaders.delete('x-compass-edge-sig')"
   )
+})
+
+
+test('middleware returns 500 JSON error naming EDGE_HMAC_SECRET in production when secret unset', async () => {
+  const oldNodeEnv = process.env.NODE_ENV
+  const oldEdgeSecret = process.env.EDGE_HMAC_SECRET
+  const oldVercelSecret = process.env.VERCEL_EDGE_SECRET
+  try {
+    process.env.NODE_ENV = 'production'
+    delete process.env.EDGE_HMAC_SECRET
+    delete process.env.VERCEL_EDGE_SECRET
+
+    const req = { headers: new Headers() }
+    const res = await middleware(req)
+
+    assert.equal(res.status, 500)
+    assert.equal(res.headers.get('content-type'), 'application/json')
+    const body = await res.json()
+    assert.match(body.error, /EDGE_HMAC_SECRET/)
+  } finally {
+    process.env.NODE_ENV = oldNodeEnv
+    if (oldEdgeSecret !== undefined) process.env.EDGE_HMAC_SECRET = oldEdgeSecret
+    if (oldVercelSecret !== undefined) process.env.VERCEL_EDGE_SECRET = oldVercelSecret
+  }
+})
+
+test('middleware signs with random per-process secret in non-production when secret unset', async () => {
+  const oldNodeEnv = process.env.NODE_ENV
+  const oldEdgeSecret = process.env.EDGE_HMAC_SECRET
+  const oldVercelSecret = process.env.VERCEL_EDGE_SECRET
+  try {
+    process.env.NODE_ENV = 'development'
+    delete process.env.EDGE_HMAC_SECRET
+    delete process.env.VERCEL_EDGE_SECRET
+
+    const req = { headers: new Headers() }
+    const res = await middleware(req)
+
+    assert.notEqual(res.status, 500)
+  } finally {
+    process.env.NODE_ENV = oldNodeEnv
+    if (oldEdgeSecret !== undefined) process.env.EDGE_HMAC_SECRET = oldEdgeSecret
+    if (oldVercelSecret !== undefined) process.env.VERCEL_EDGE_SECRET = oldVercelSecret
+  }
 })
