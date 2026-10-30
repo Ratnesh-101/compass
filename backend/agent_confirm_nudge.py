@@ -55,6 +55,11 @@ def reply_asks_for_permission(reply: str) -> bool:
     return has_permission_phrase and has_change_verb
 
 
+def nudge_messages(reply: str) -> list[dict[str, str]]:
+    """The two messages that send the model back to make the tool call it only described."""
+    return [{"role": "assistant", "content": reply}, {"role": "user", "content": NUDGE_MESSAGE}]
+
+
 def should_nudge_for_tool_call(
     reply: str,
     tools_used: Sequence[str],

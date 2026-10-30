@@ -338,7 +338,8 @@ async def handle_verify_deadline(args: Dict[str, Any], pool: Any) -> Dict[str, A
             "error": "Web search is not configured",
         }
 
-    query = f"{task_title} deadline submission date"
+    from backend.services.deadline_query import build_deadline_query
+    query = build_deadline_query(task_title, task.get("project_name"), task.get("domain"))
     try:
         resp = await tavily_service.search(query, search_depth="basic")
     except Exception as e:

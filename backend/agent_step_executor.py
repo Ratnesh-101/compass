@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from backend.agent_persistence import record_audit_log
 from backend.agent_types import AgentStep, MUTATING_TOOLS
 from backend.services.ownership import scope_owner
+from backend.services.task_id_hint import task_id_hint
 
 logger = logging.getLogger("compass.agent_step_executor")
 
@@ -54,6 +55,7 @@ async def execute_agent_tool_step(
     from backend.skills import SKILL_REGISTRY
 
     tool_result = ""
+    id_hint = ""
     updated_search_web_unlocked = search_web_unlocked
 
     if func_name in SKILL_REGISTRY:
@@ -110,6 +112,7 @@ async def execute_agent_tool_step(
 
             result = await SKILL_REGISTRY[func_name](tool_args, pool)
             tool_result = result.get("response", str(result.get("data", "")))
+            id_hint = task_id_hint(result.get("data"))
             tools_used.append(func_name)
 
             if abstain_first and func_name in _MEMORY_QUERY_TOOLS:
@@ -214,7 +217,7 @@ async def execute_agent_tool_step(
     tool_payload = {
         "role": "tool",
         "tool_call_id": tc_id,
-        "content": tool_result,
+        "content": tool_result + id_hint,
     }
 
     return obs_step, tool_result, updated_search_web_unlocked, asst_payload, tool_payload
