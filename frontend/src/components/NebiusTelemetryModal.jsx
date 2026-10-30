@@ -13,51 +13,7 @@ export default function NebiusTelemetryModal({ isOpen, onClose, usageStats, onRe
   const inputTokens = stats.total_input_tokens ?? 0
   const outputTokens = stats.total_output_tokens ?? 0
   const totalCost = stats.total_estimated_cost_usd ?? 0.0
-  const savingsPct = stats.cost_savings_pct ?? 0.0
-  const gpt4Cost = stats.gpt4_baseline_cost_usd ?? 0.0
-
-  const breakdown = stats.breakdown || [
-    {
-      model: 'nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B',
-      tier: 'Tier 1: Intent Router',
-      params: '30B MoE (3B active)',
-      calls: 42,
-      input_tokens: 4168,
-      output_tokens: 1456,
-      tokens: 5624,
-      cost: '$0.000454',
-    },
-    {
-      model: 'nvidia/nemotron-3-super-120b-a12b',
-      tier: 'Tier 2: Deep ReAct Planner',
-      params: '120B MoE (12B active)',
-      calls: 20,
-      input_tokens: 5605,
-      output_tokens: 2816,
-      tokens: 8421,
-      cost: '$0.003368',
-    },
-    {
-      model: 'nvidia/Nemotron-3-Ultra-550b-a55b',
-      tier: 'Tier 3: Executive Synthesizer',
-      params: '550B MoE (55B active)',
-      calls: 18,
-      input_tokens: 11755,
-      output_tokens: 8286,
-      tokens: 20041,
-      cost: '$0.016034',
-    },
-    {
-      model: 'Qwen/Qwen3-Embedding-8B',
-      tier: 'Semantic Embedding',
-      params: '8B dense (768-dim)',
-      calls: 26,
-      input_tokens: 2602,
-      output_tokens: 0,
-      tokens: 2602,
-      cost: '$0.000051',
-    },
-  ]
+  const breakdown = stats.breakdown || []
 
   const handleCopyReport = () => {
     const report = [
@@ -66,7 +22,6 @@ export default function NebiusTelemetryModal({ isOpen, onClose, usageStats, onRe
       `Total Model Calls: ${totalCalls}`,
       `Total Tokens: ${totalTokens.toLocaleString()} (${inputTokens.toLocaleString()} in / ${outputTokens.toLocaleString()} out)`,
       `Total Estimated Cost: $${totalCost.toFixed(6)} USD`,
-      `Cost Savings vs Monolithic GPT-4: ${savingsPct}%`,
       '',
       '## Tiered Model Consumption Breakdown',
       '| Model | Tier / Role | Calls | Input Tokens | Output Tokens | Est. Cost (USD) |',
@@ -239,13 +194,13 @@ export default function NebiusTelemetryModal({ isOpen, onClose, usageStats, onRe
             }}
           >
             <div style={{ fontSize: '11px', color: '#34d399', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: '700' }}>
-              Cost Reduction
+              Routing Architecture
             </div>
-            <div style={{ fontSize: '24px', fontWeight: '800', color: '#34d399', marginTop: '4px' }}>
-              {savingsPct > 0 ? `${savingsPct}%` : 'Tiered MoE'}
+            <div style={{ fontSize: '20px', fontWeight: '800', color: '#34d399', marginTop: '4px' }}>
+              Hierarchical MoE
             </div>
             <div style={{ fontSize: '11px', color: 'rgba(52, 211, 153, 0.85)', marginTop: '2px' }}>
-              {gpt4Cost > 0 ? `vs Monolithic GPT-4 (~$${gpt4Cost.toFixed(2)})` : 'Relative to frontier monolithic pricing'}
+              Nano · Super · Ultra
             </div>
           </div>
         </div>
@@ -288,7 +243,14 @@ export default function NebiusTelemetryModal({ isOpen, onClose, usageStats, onRe
                 </tr>
               </thead>
               <tbody>
-                {breakdown.map((row, idx) => (
+                {breakdown.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} style={{ padding: '24px 14px', textAlign: 'center', color: '#94a3b8' }}>
+                      No measured model calls recorded yet. Live telemetry will populate as interactions occur.
+                    </td>
+                  </tr>
+                ) : (
+                  breakdown.map((row, idx) => (
                   <tr
                     key={row.model || idx}
                     style={{
@@ -317,7 +279,7 @@ export default function NebiusTelemetryModal({ isOpen, onClose, usageStats, onRe
                       {row.cost}
                     </td>
                   </tr>
-                ))}
+                )))}
               </tbody>
             </table>
           </div>

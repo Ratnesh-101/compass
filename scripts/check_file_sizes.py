@@ -57,6 +57,7 @@ BUILD_OUTPUT_DIRS = {
     '.cache',
     'coverage',
     'htmlcov',
+    'brag-output',
 }
 
 # Tooling and IDE metadata directories

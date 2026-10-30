@@ -101,6 +101,8 @@ async def search_chunks(
                    1 - (embedding <=> $1) AS similarity
             FROM memory_chunks
             WHERE domain = $2 AND user_id = $3
+              AND (needs_reindex IS FALSE OR needs_reindex IS NULL)
+              AND NOT ('needs_reindex' = ANY(COALESCE(tags, ARRAY[]::TEXT[])))
             ORDER BY embedding <=> $1 ASC
             LIMIT $4
             """,
@@ -113,6 +115,8 @@ async def search_chunks(
                    1 - (embedding <=> $1) AS similarity
             FROM memory_chunks
             WHERE user_id = $2
+              AND (needs_reindex IS FALSE OR needs_reindex IS NULL)
+              AND NOT ('needs_reindex' = ANY(COALESCE(tags, ARRAY[]::TEXT[])))
             ORDER BY embedding <=> $1 ASC
             LIMIT $3
             """,

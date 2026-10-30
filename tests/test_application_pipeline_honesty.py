@@ -478,16 +478,20 @@ async def test_concurrent_prepares_leave_a_single_tailored_resume(client: AsyncC
 
 @pytest.mark.asyncio
 async def test_link_resume_if_unlinked_only_links_once(client: AsyncClient):
-    from backend.memory.career import link_resume_if_unlinked
+    from backend.memory.career import link_resume_if_unlinked, upsert_master_resume
+    from backend.models_career import ResumeContent
 
     await client.post("/api/guest/session")
     user_id = f"link-{uuid.uuid4().hex[:8]}"
-    app = await get_or_create_career_application(user_id, await _new_opp())
-    first = await link_resume_if_unlinked(app.id, user_id, 1)
-    second = await link_resume_if_unlinked(app.id, user_id, 2)
-    assert first is not None and first.resume_id == 1
+    opp_id = await _new_opp()
+    r1 = await upsert_master_resume(user_id, ResumeContent(full_name="Tester 1"))
+    r2 = await upsert_master_resume(f"{user_id}_alt", ResumeContent(full_name="Tester 2"))
+    app = await get_or_create_career_application(user_id, opp_id)
+    first = await link_resume_if_unlinked(app.id, user_id, r1.id)
+    second = await link_resume_if_unlinked(app.id, user_id, r2.id)
+    assert first is not None and first.resume_id == r1.id
     assert second is None
-    assert (await get_career_application_by_id(app.id, user_id)).resume_id == 1
+    assert (await get_career_application_by_id(app.id, user_id)).resume_id == r1.id
 
 
 # 11. radar profile validation -----------------------------------------------------

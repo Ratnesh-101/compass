@@ -104,3 +104,42 @@ def test_is_point_grounded_validation():
     # Completely unrelated tokens
     unrelated_point = "Quantum cryptographic satellite teleportation array."
     assert is_point_grounded(unrelated_point, sources[0], sources) is False
+
+
+def test_balanced_brace_scanner_edge_cases():
+    """Verify balanced brace scanner with string braces, escaped quotes, nested objects, and unterminated text."""
+    # 1. Braces inside JSON strings
+    s1 = 'Here is the data: {"summary": "Company builds {custom} solutions {and} widgets", "val": 1} Hope this helps!'
+    p1 = _parse_json_safely(s1)
+    assert p1 is not None
+    assert p1["summary"] == "Company builds {custom} solutions {and} widgets"
+    assert p1["val"] == 1
+
+    # 2. Escaped quotes inside JSON strings
+    s2 = 'Output: {"summary": "Company is \\"deeply innovative\\" in payments", "status": "ok"}'
+    p2 = _parse_json_safely(s2)
+    assert p2 is not None
+    assert 'deeply innovative' in p2["summary"]
+
+    # 3. Nested objects
+    s3 = '{"summary": "Platform", "meta": {"deep": {"val": 42}, "tags": ["fintech"]}}'
+    p3 = _parse_json_safely(s3)
+    assert p3 is not None
+    assert p3["meta"]["deep"]["val"] == 42
+
+    # 4. Text after JSON
+    s4 = '{"summary": "Single object"} Extra trailing model commentary.'
+    p4 = _parse_json_safely(s4)
+    assert p4 is not None
+    assert p4["summary"] == "Single object"
+
+    # 5. Two JSON objects (extracts the first valid object)
+    s5 = '{"first": 1} {"second": 2}'
+    p5 = _parse_json_safely(s5)
+    assert p5 is not None
+    assert p5.get("first") == 1
+
+    # 6. Unterminated output (returns None gracefully without crashing)
+    s6 = '{"summary": "Incomplete output that cuts off before closing'
+    p6 = _parse_json_safely(s6)
+    assert p6 is None

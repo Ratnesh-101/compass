@@ -77,7 +77,9 @@ export default function App() {
 
   const [theme, setTheme] = useState(() => {
     try {
-      const qTheme = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('theme') : null
+      const qTheme = import.meta.env.DEV && typeof window !== 'undefined'
+        ? new URLSearchParams(window.location.search).get('theme')
+        : null
       if (qTheme === 'dark' || qTheme === 'light') return qTheme
       const saved = localStorage.getItem('compass.theme')
       if (saved === 'dark' || saved === 'light') return saved

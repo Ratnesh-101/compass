@@ -12,22 +12,27 @@ import asyncpg
 logger = logging.getLogger("compass.services.usage")
 
 # Pricing Constants per 1,000,000 tokens (USD)
-# Verified Nebius Token Factory catalog rates:
-# - Nemotron-3 Nano: $0.06 / 1M prompt, $0.24 / 1M completion
-# - Nemotron-3 Super: $0.30 / 1M prompt, $0.90 / 1M completion
-# Note: Nemotron-3 Ultra and Qwen3-Embedding rates are estimated, not independently verified from the dashboard directly.
+# Verified Nebius Token Factory catalog rates (Dated: March 2026):
+# - nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B: $0.06 / 1M prompt, $0.24 / 1M completion
+# - nvidia/nemotron-3-super-120b-a12b: $0.30 / 1M prompt, $0.90 / 1M completion
+#
+# Unverified / Pending User Verification on Nebius Pricing Page:
+# - nvidia/Nemotron-3-Ultra-550b-a55b: Unverified -> Cost unavailable for this model
+# - Qwen/Qwen3-Embedding-8B: Unverified -> Cost unavailable for this model
 PRICING_PER_1M = {
     # Normalized model keys
-    "nemotron-nano": {"prompt": 0.06, "completion": 0.24},
-    "nemotron-super": {"prompt": 0.30, "completion": 0.90},
-    "nemotron-ultra": {"prompt": 0.80, "completion": 2.40},
-    "qwen3-embedding": {"prompt": 0.02, "completion": 0.00},
+    # Verified on Nebius Token Factory rate card (March 2026):
+    "nemotron-nano": {"prompt": 0.06, "completion": 0.24, "verified": True, "source": "Nebius Token Factory (March 2026)"},
+    "nemotron-super": {"prompt": 0.30, "completion": 0.90, "verified": True, "source": "Nebius Token Factory (March 2026)"},
+    # Estimated in codebase based on MoE sizing; pending operator confirmation from Nebius pricing page:
+    "nemotron-ultra": {"prompt": 0.80, "completion": 2.40, "verified": False, "source": "Estimated based on 550B MoE capacity"},
+    "qwen3-embedding": {"prompt": 0.02, "completion": 0.00, "verified": False, "source": "Estimated based on 8B embedding dense capacity"},
     
     # Full Model ID mappings for OpenAI SDK compatibility
-    "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B": {"prompt": 0.06, "completion": 0.24},
-    "nvidia/nemotron-3-super-120b-a12b": {"prompt": 0.30, "completion": 0.90},
-    "nvidia/Nemotron-3-Ultra-550b-a55b": {"prompt": 0.80, "completion": 2.40},
-    "Qwen/Qwen3-Embedding-8B": {"prompt": 0.02, "completion": 0.00},
+    "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B": {"prompt": 0.06, "completion": 0.24, "verified": True, "source": "Nebius Token Factory (March 2026)"},
+    "nvidia/nemotron-3-super-120b-a12b": {"prompt": 0.30, "completion": 0.90, "verified": True, "source": "Nebius Token Factory (March 2026)"},
+    "nvidia/Nemotron-3-Ultra-550b-a55b": {"prompt": 0.80, "completion": 2.40, "verified": False, "source": "Estimated based on 550B MoE capacity"},
+    "Qwen/Qwen3-Embedding-8B": {"prompt": 0.02, "completion": 0.00, "verified": False, "source": "Estimated based on 8B embedding dense capacity"},
 }
 
 def _normalize_model_name(name: str) -> str:
@@ -47,8 +52,10 @@ def _normalize_model_name(name: str) -> str:
 def compute_step_cost(model_name: str, prompt_tokens: int, completion_tokens: int) -> float:
     """Compute estimated USD cost for a single model call based on token counts."""
     norm_key = _normalize_model_name(model_name)
-    pricing = PRICING_PER_1M.get(norm_key, {"prompt": 0.30, "completion": 0.90})
-    cost = (prompt_tokens * pricing["prompt"] / 1_000_000.0) + (completion_tokens * pricing["completion"] / 1_000_000.0)
+    pricing = PRICING_PER_1M.get(norm_key) or PRICING_PER_1M.get(model_name) or {"prompt": 0.30, "completion": 0.90}
+    p_rate = pricing.get("prompt") if pricing.get("prompt") is not None else 0.30
+    c_rate = pricing.get("completion") if pricing.get("completion") is not None else 0.90
+    cost = (prompt_tokens * p_rate / 1_000_000.0) + (completion_tokens * c_rate / 1_000_000.0)
     return round(cost, 6)
 
 
@@ -289,7 +296,6 @@ def record_usage(
     import asyncio
 
     norm_key = _normalize_model_name(model_name)
-    pricing = PRICING_PER_1M.get(norm_key, {"prompt": 0.06, "completion": 0.24})
 
     try:
         p_tok = int(prompt_tokens)
@@ -300,20 +306,21 @@ def record_usage(
     except Exception:
         c_tok = 0
 
-    cost = (p_tok * pricing["prompt"] / 1_000_000.0) + (
-        c_tok * pricing["completion"] / 1_000_000.0
-    )
-    cost = round(cost, 6)
+    step_cost = compute_step_cost(model_name, p_tok, c_tok)
+    cost = step_cost if step_cost is not None else 0.0
 
     # Update canonical model entry in memory
     canonical_key = norm_key
     if canonical_key not in _USAGE_STATE:
-        _USAGE_STATE[canonical_key] = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "cost": 0.0}
+        _USAGE_STATE[canonical_key] = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "cost": 0.0, "cost_unavailable": False}
     entry = _USAGE_STATE[canonical_key]
     entry["calls"] += 1
     entry["prompt_tokens"] += p_tok
     entry["completion_tokens"] += c_tok
-    entry["cost"] = round(entry["cost"] + cost, 6)
+    if step_cost is None:
+        entry["cost_unavailable"] = True
+    else:
+        entry["cost"] = round(entry.get("cost", 0.0) + cost, 6)
 
     # Record measured latency in memory accumulator (bounded to recent 1000 items)
     if duration_ms is not None and duration_ms > 0:
@@ -405,9 +412,9 @@ def get_usage_summary() -> Dict[str, Any]:
             "estimated_cost_usd": round(c_cost, 6),
         }
 
-    # Monolithic baseline cost comparison (e.g. GPT-4 at $10 in / $30 out per 1M)
+    # Benchmark Monolithic Baseline: OpenAI GPT-4o (Official OpenAI Pricing, May 2024: $2.50 / 1M prompt, $10.00 / 1M completion)
     try:
-        gpt4_baseline_usd = float(round((total_prompt_tokens * 10.0 / 1_000_000.0) + (total_completion_tokens * 30.0 / 1_000_000.0), 4))
+        gpt4_baseline_usd = float(round((total_prompt_tokens * 2.50 / 1_000_000.0) + (total_completion_tokens * 10.0 / 1_000_000.0), 4))
     except Exception:
         gpt4_baseline_usd = 0.0
     try:
@@ -445,7 +452,7 @@ def get_usage_summary() -> Dict[str, Any]:
             "tier": "Tier 1: Intent Router",
             "role": "Function calling & fast classification",
             "params": "30B MoE (3B active)",
-            "rate": "$0.06 / $0.24 per 1M",
+            "rate": "$0.06 / $0.24 per 1M (Nebius Token Factory, March 2026)",
             "latency": _compute_latency_stats(
                 _USAGE_STATE.get("nemotron-nano", {}).get("durations", [])
                 or _USAGE_STATE.get("nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B", {}).get("durations", [])
@@ -455,7 +462,7 @@ def get_usage_summary() -> Dict[str, Any]:
             "tier": "Tier 2: Deep ReAct Planner",
             "role": "Multi-step reasoning & grounded code context",
             "params": "120B MoE (12B active)",
-            "rate": "$0.30 / $0.90 per 1M",
+            "rate": "$0.30 / $0.90 per 1M (Nebius Token Factory, March 2026)",
             "latency": _compute_latency_stats(
                 _USAGE_STATE.get("nemotron-super", {}).get("durations", [])
                 or _USAGE_STATE.get("nvidia/nemotron-3-super-120b-a12b", {}).get("durations", [])
@@ -465,7 +472,7 @@ def get_usage_summary() -> Dict[str, Any]:
             "tier": "Tier 3: Executive Synthesizer",
             "role": "Cross-domain roadmap & deadline arbitration",
             "params": "550B MoE (55B active)",
-            "rate": "$0.80 / $2.40 per 1M",
+            "rate": "Cost unavailable for this model",
             "latency": _compute_latency_stats(
                 _USAGE_STATE.get("nemotron-ultra", {}).get("durations", [])
                 or _USAGE_STATE.get("nvidia/Nemotron-3-Ultra-550b-a55b", {}).get("durations", [])
@@ -475,7 +482,7 @@ def get_usage_summary() -> Dict[str, Any]:
             "tier": "Semantic Embedding",
             "role": "Matryoshka 768-dim vector embeddings for pgvector",
             "params": "8B dense",
-            "rate": "$0.02 per 1M",
+            "rate": "Cost unavailable for this model",
             "latency": _compute_latency_stats(
                 _USAGE_STATE.get("qwen3-embedding", {}).get("durations", [])
                 or _USAGE_STATE.get("Qwen/Qwen3-Embedding-8B", {}).get("durations", [])
@@ -511,8 +518,8 @@ def get_usage_summary() -> Dict[str, Any]:
                 "input_tokens": v["input_tokens"],
                 "output_tokens": v["output_tokens"],
                 "tokens": v["input_tokens"] + v["output_tokens"],
-                "cost": f"${v['estimated_cost_usd']:.6f}",
-                "cost_usd": v["estimated_cost_usd"],
+                "cost": "Cost unavailable for this model" if (v.get("cost_unavailable") or not PRICING_PER_1M.get(_normalize_model_name(k), {}).get("verified")) else f"${v['estimated_cost_usd']:.6f}",
+                "cost_usd": None if (v.get("cost_unavailable") or not PRICING_PER_1M.get(_normalize_model_name(k), {}).get("verified")) else v["estimated_cost_usd"],
                 "latency": model_metadata.get(k, {}).get("latency", _compute_latency_stats(v.get("durations", []))),
             }
             for k, v in by_model.items()
