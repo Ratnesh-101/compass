@@ -6,6 +6,7 @@
 > Live Web App: [https://compass-farmlytics.vercel.app](https://compass-farmlytics.vercel.app)  
 > Live Backend API: [https://compass-backend-qryu-vcfv.onrender.com/health](https://compass-backend-qryu-vcfv.onrender.com/health)  
 > GitHub Repository: [https://github.com/Ratnesh-101/compass](https://github.com/Ratnesh-101/compass)  
+> Demo Video: [https://youtu.be/TSO7xV_5ZHw](https://youtu.be/TSO7xV_5ZHw)  
 
 ---
 
@@ -19,6 +20,9 @@
 
 ### Track
 `Best Apps and Agents Track`
+
+### Video Demo Link
+`https://youtu.be/TSO7xV_5ZHw`
 
 ### ⚡ 60-Second Elevator Pitch (For Reviewers & Judges)
 
@@ -138,6 +142,7 @@ Tavily search and extract calls are partitioned into `tavily_usage_log`, trackin
 <a id="video-script"></a>
 ## 🎬 Part 2: 3-Minute Video Demo Script
 
+> **Published video**: [https://youtu.be/TSO7xV_5ZHw](https://youtu.be/TSO7xV_5ZHw)  
 > **Target Duration**: 2 minutes 44 seconds (Devpost Hard Ceiling: ≤ 3:00 | Safety Buffer: 16s)  
 > **Presenter**: Calm, confident, technical pace (85 – 110 wpm).  
 > **Setup**: Split screen or browser with [https://compass-farmlytics.vercel.app](https://compass-farmlytics.vercel.app) and terminal with `compass status`.
