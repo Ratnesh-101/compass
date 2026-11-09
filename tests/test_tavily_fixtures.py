@@ -24,6 +24,10 @@ from backend.services.tavily_pipeline import (
     run_tavily_research,
 )
 
+from tests.frozen_clock import frozen_clock  # noqa: F401
+
+pytestmark = pytest.mark.usefixtures("frozen_clock")
+
 
 # ---------------------------------------------------------------------------
 # 1. Wrong-Entity Page -> NOT_FOUND / UNRELATED
