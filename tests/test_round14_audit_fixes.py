@@ -25,6 +25,10 @@ from backend.services.tavily_authority import AuthorityTier
 from backend.services.rate_limiter import enforce_mint_rate_limit
 from backend.services.chat_stream import StreamingThinkFilter
 
+from tests.frozen_clock import frozen_clock  # noqa: F401
+
+pytestmark = pytest.mark.usefixtures("frozen_clock")
+
 
 def test_timezone_parsing_pt_edt_ist_and_midnight():
     """Verify zoneinfo time parsing, optional colon, midnight, and IST."""
