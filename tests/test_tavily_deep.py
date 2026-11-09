@@ -34,6 +34,10 @@ from backend.skills.handlers.web import (
     handle_search_web,
 )
 
+from tests.frozen_clock import frozen_clock  # noqa: F401
+
+pytestmark = pytest.mark.usefixtures("frozen_clock")
+
 
 # ---------------------------------------------------------------------------
 # 1. Domain Authority & Source Quality Classification
