@@ -154,6 +154,31 @@ async def verify_token(
     return credentials.credentials
 
 
+async def verify_nightly_or_admin_token(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+) -> str:
+    """Accept the scoped NIGHTLY_JOB_TOKEN, or fall back to the master AUTH_TOKEN (verify_token).
+
+    Fails closed when NIGHTLY_JOB_TOKEN is unset or a known dev default. The nightly token is
+    only honoured by routes using this dependency; _get_current_identity never recognises it.
+    """
+    if not credentials or not credentials.credentials:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    settings = get_settings()
+    nightly = (settings.NIGHTLY_JOB_TOKEN or "").strip()
+    if nightly and nightly not in (
+        settings.DEFAULT_DEV_TOKEN,
+        "compass-token",
+        "test-token",
+    ):
+        from backend.services.rate_limiter import safe_token_compare
+        if safe_token_compare(credentials.credentials, nightly):
+            return credentials.credentials
+
+    return await verify_token(credentials)
+
+
 # ---------------------------------------------------------------------------
 # Guest Security & Token Helpers
 # ---------------------------------------------------------------------------
