@@ -14,6 +14,10 @@ from backend.memory import structured
 from backend.services.tavily_authority import classify_domain_authority, AuthorityTier
 from backend.services.tavily_pipeline import evaluate_deterministic_verdict
 
+from tests.frozen_clock import frozen_clock  # noqa: F401
+
+pytestmark = pytest.mark.usefixtures("frozen_clock")
+
 
 @pytest.mark.asyncio
 async def test_per_task_trusted_event_url_persistence():
