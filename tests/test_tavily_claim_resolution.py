@@ -31,6 +31,10 @@ from backend.services.tavily_pipeline import (
 from backend.skills.handlers.web import handle_verify_with_tavily
 from backend.models import MessageOut, MessagesResponse
 
+from tests.frozen_clock import frozen_clock  # noqa: F401
+
+pytestmark = pytest.mark.usefixtures("frozen_clock")
+
 
 # ============================================================================
 # PHASE 7: CLAIM RESOLUTION TESTS
