@@ -46,7 +46,7 @@ Untrusted Internet (Browser / Client / Web Pages)
 | `/api/agent/run` | POST | Public | No (Gated) | Nebius / Tavily | Agent execution trace | Yes (10/min) | Medium |
 | `/api/agent/confirm` | POST | Bearer (`AUTH_TOKEN`) | Yes | PostgreSQL | Task/Memory state | Yes (30/min) | High |
 | `/api/agent/undo` | POST | Bearer (`AUTH_TOKEN`) | Yes | PostgreSQL | Restores state | Yes (30/min) | High |
-| `/api/agent/trigger-nightly` | POST | Bearer (`AUTH_TOKEN`) | Yes | Nebius / DB | Full task state | Yes | High |
+| `/api/agent/trigger-nightly` | POST | Bearer (`NIGHTLY_JOB_TOKEN` or `AUTH_TOKEN`) | Yes | Nebius / DB | Full task state | Yes | High |
 | `/api/tasks` | GET | Public (Scoped) | No | PostgreSQL | Tasks by account | Yes (30/min) | Low |
 | `/api/tasks` | POST | Public (Scoped) | Yes | PostgreSQL | Task creation | Yes (30/min) | Medium |
 | `/api/tasks/{task_id}` | PATCH / PUT | Owner / Admin | Yes | PostgreSQL | Task modifications | Yes (30/min) | High |
@@ -56,6 +56,8 @@ Untrusted Internet (Browser / Client / Web Pages)
 | `/api/calendar/callback` | GET | Public | Yes (encrypted) | Google API | Refresh token (AES/HMAC) | Yes | High |
 | `/api/usage/summary` | GET | Public | No | PostgreSQL | Token costs | Yes (30/min) | Informational |
 | `/health` | GET | Public | No | PostgreSQL ping | Uptime status | No | Informational |
+
+> **Scoped nightly token**: `NIGHTLY_JOB_TOKEN` is a separate secret, valid only for `POST /api/agent/trigger-nightly` (it is rejected by every other route, including `/admin/*`). Set it in the Render environment and as the GitHub Actions secret `NIGHTLY_JOB_TOKEN`. If unset, only `AUTH_TOKEN` is accepted (fail closed).
 
 ---
 
