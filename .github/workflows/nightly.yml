@@ -7,19 +7,65 @@ on:
 
 permissions: {}
 
+concurrency:
+  group: nightly-consolidation
+  cancel-in-progress: false
+
 jobs:
   trigger:
     name: Trigger nightly consolidation
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    env:
+      BASE_URL: https://compass-backend-qryu-vcfv.onrender.com
     steps:
-      - name: Call /api/agent/trigger-nightly
+      - name: Check secret
         env:
-          AUTH_TOKEN: ${{ secrets.AUTH_TOKEN }}
+          NIGHTLY_JOB_TOKEN: ${{ secrets.NIGHTLY_JOB_TOKEN }}
         run: |
-          # Render free tier may be asleep; retry while it wakes up.
-          curl --fail-with-body --silent --show-error \
-            --max-time 300 --retry 4 --retry-delay 30 --retry-all-errors \
+          trimmed="$(printf '%s' "${NIGHTLY_JOB_TOKEN}" | tr -d '[:space:]')"
+          if [ -z "${trimmed}" ]; then
+            echo "::error::NIGHTLY_JOB_TOKEN is empty or not set"
+            exit 1
+          fi
+
+      - name: Wake backend
+        run: |
+          # Render free tier may be asleep; /health needs no token.
+          curl --fail --silent --show-error --max-time 60 \
+            --retry 6 --retry-delay 20 --retry-all-errors \
+            -o /dev/null \
+            "${BASE_URL}/health"
+
+      - name: Trigger consolidation
+        env:
+          NIGHTLY_JOB_TOKEN: ${{ secrets.NIGHTLY_JOB_TOKEN }}
+        run: |
+          # Single attempt only: the job is non-idempotent (LLM), so no retries.
+          resp="${RUNNER_TEMP}/nightly-response.json"
+          curl --fail-with-body --silent --show-error --max-time 600 \
             -X POST \
-            -H "Authorization: Bearer ${AUTH_TOKEN}" \
-            "https://compass-backend-qryu-vcfv.onrender.com/api/agent/trigger-nightly"
+            -H "Authorization: Bearer ${NIGHTLY_JOB_TOKEN}" \
+            -o "${resp}" \
+            "${BASE_URL}/api/agent/trigger-nightly" || {
+              rc=$?
+              echo "Response body:"
+              cat "${resp}" 2>/dev/null || true
+              echo
+              echo "::error::trigger-nightly request failed (curl exit ${rc})"
+              exit "${rc}"
+            }
+          echo "Response body:"
+          cat "${resp}"
+          echo
+          # Endpoint returns 200 even when consolidation failed; check status.
+          status="$(jq -r '.consolidation.status // "missing"' "${resp}")"
+          case "${status}" in
+            completed|skipped)
+              echo "Consolidation status: ${status}"
+              ;;
+            *)
+              echo "::error::Consolidation status is '${status}' (expected completed or skipped)"
+              exit 1
+              ;;
+          esac

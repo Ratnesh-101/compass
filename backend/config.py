@@ -86,6 +86,7 @@ class Settings(BaseSettings):
 
     # --- Auth ---
     AUTH_TOKEN: str = ""  # Required — set in .env
+    NIGHTLY_JOB_TOKEN: str = ""  # Optional scoped credential for POST /api/agent/trigger-nightly only
 
     # --- Guest / Anonymous Mode ---
     GUEST_MAX_CONVERSATIONS: int = 50
@@ -171,6 +172,10 @@ class Settings(BaseSettings):
             "GUEST_SIGNING_SECRET": self.GUEST_SIGNING_SECRET.strip() if self.GUEST_SIGNING_SECRET else "",
             "EDGE_HMAC_SECRET": effective_edge_secret,
         }
+
+        # Scoped nightly token is optional (never "missing"), but must not reuse another secret
+        if self.NIGHTLY_JOB_TOKEN and self.NIGHTLY_JOB_TOKEN.strip():
+            secrets_dict["NIGHTLY_JOB_TOKEN"] = self.NIGHTLY_JOB_TOKEN.strip()
 
         # Check for duplicates among configured non-empty secrets
         duplicates = []

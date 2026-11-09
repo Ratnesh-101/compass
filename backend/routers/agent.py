@@ -16,6 +16,7 @@ from backend.dependencies import (
     _get_or_create_user_id,
     agent_rate_limit,
     verify_token,
+    verify_nightly_or_admin_token,
 )
 from backend.memory.db import get_pool
 from backend.models import (
@@ -499,11 +500,22 @@ async def get_latest_proactive_briefing(request: Request):
 
 
 @router.post("/trigger-nightly")
-async def trigger_nightly_consolidation_endpoint(_token: str = Depends(verify_token)):
+async def trigger_nightly_consolidation_endpoint(_token: str = Depends(verify_nightly_or_admin_token)):
     """Trigger the nightly consolidation job and autonomous proactive briefing run."""
     from backend.jobs.consolidate import run_consolidation
+    from backend.services import budget_context
     pool = await get_pool()
-    result = await run_consolidation(dry_run=False, pool=pool)
+    # Nightly-token callers have no admin identity, so the middleware gave them a per-run
+    # counter; this is system work and must not be run-capped (same as admin callers).
+    id_token = budget_context.bind_identity(
+        budget_context.BudgetIdentity(identity_id="system:nightly", is_admin=True)
+    )
+    counter_token = budget_context._run_counter_var.set(None)
+    try:
+        result = await run_consolidation(dry_run=False, pool=pool)
+    finally:
+        budget_context._run_counter_var.reset(counter_token)
+        budget_context.reset_identity(id_token)
     return {"status": "ok", "consolidation": result}
 
 

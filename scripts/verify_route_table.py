@@ -32,7 +32,7 @@ KNOWN_ROUTE_METADATA = {
     ("/api/agent/run", "POST"): ("_get_current_identity", "Run bound to caller; throttled by agent_rate_limit", "test_agent_execution.py::test_agent_run_endpoint"),
     ("/api/agent/runs", "GET"): ("_get_current_identity", "WHERE user_id = $1 or caller run isolation", "test_agent_execution.py::test_list_runs"),
     ("/api/agent/runs/{run_id}", "GET"): ("_get_current_identity", "Ownership check against run owner", "test_agent_execution.py::test_get_run_detail"),
-    ("/api/agent/trigger-nightly", "POST"): ("verify_token (AUTH_TOKEN)", "Admin AUTH_TOKEN via hmac.compare_digest strictly", "test_nightly_job.py::test_trigger_nightly_admin_auth"),
+    ("/api/agent/trigger-nightly", "POST"): ("verify_nightly_or_admin_token (NIGHTLY_JOB_TOKEN or AUTH_TOKEN)", "Scoped NIGHTLY_JOB_TOKEN (this route only) or admin AUTH_TOKEN via hmac.compare_digest strictly", "test_nightly_job.py::test_trigger_nightly_admin_auth"),
     ("/api/agent/undo", "POST"): ("_get_current_identity", "Identity ownership verified against agent_audit_log (IDOR safe)", "test_round4_hardening.py::test_cross_identity_agent_undo_isolation_negative"),
     ("/api/auth/logout", "POST"): ("None", "Clears session cookies compass_session, compass_guest_token", "test_api_endpoints.py::test_logout_endpoint"),
     ("/api/auth/me", "GET"): ("_get_current_identity", "Returns caller identity or 401", "test_api_endpoints.py::test_session_endpoint"),
