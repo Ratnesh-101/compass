@@ -174,12 +174,16 @@ async def test_session_persistence_survives_restart_simulation():
     token = create_session(user_email, oauth_verified=True)
     token_hash = _hash_token(token)
 
-    # Allow async background task to persist to DB
-    await asyncio.sleep(0.1)
-
-    # Verify session row exists in PostgreSQL
+    # create_session persists via a fire-and-forget task; poll (bounded) instead of a
+    # fixed sleep, which raced on slow CI runners.
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT * FROM sessions WHERE token_hash = $1", token_hash)
+        row = None
+        for _ in range(100):  # ~5 s max
+            row = await conn.fetchrow("SELECT * FROM sessions WHERE token_hash = $1", token_hash)
+            if row is not None:
+                break
+            await asyncio.sleep(0.05)
+        # Verify session row exists in PostgreSQL
         assert row is not None
         assert row["user_id"] == user_email
         assert row["oauth_verified"] is True
