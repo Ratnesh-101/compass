@@ -21,7 +21,7 @@ Tests run through the REAL orchestrator against the database:
 """
 
 import pytest
-from datetime import date, timedelta
+from datetime import datetime, timedelta, timezone
 from backend.orchestrator import handle_message
 from backend.memory.db import get_pool
 from backend.memory import structured
@@ -109,7 +109,8 @@ async def test_scenario_2_remind_me_tomorrow_at_4pm():
     data = res["data"]
     assert "email prof" in data["title"].lower()
 
-    tomorrow = date.today() + timedelta(days=1)
+    # Without a tz the backend resolves relative dates in UTC, so compute the expected date in UTC.
+    tomorrow = datetime.now(timezone.utc).date() + timedelta(days=1)
     assert str(data["due_date"]) == tomorrow.isoformat()
 
     reply = res["response"]
