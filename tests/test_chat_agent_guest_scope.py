@@ -64,3 +64,35 @@ async def test_no_identity_agent_fails_closed_not_unscoped(monkeypatch):
     kwargs = await _run_chat_agent(monkeypatch, user_id=None, guest_id=None)
     assert kwargs["user_id"] == NO_OWNER
     assert kwargs["user_id"] is not None
+
+
+@pytest.mark.asyncio
+async def test_injected_pool_reaches_agent_block_without_global_get_pool(monkeypatch):
+    """A pool passed into _handle_message_core must reach run_agent; get_pool must not be awaited."""
+    injected_pool = MagicMock(name="injected_pool")
+    recorded: list[dict] = []
+
+    async def fake_run_agent(**kwargs):
+        recorded.append(kwargs)
+        yield AgentStep(type="synthesize", content="ok")
+
+    monkeypatch.setattr("backend.agent.run_agent", fake_run_agent)
+    fake_get_pool = AsyncMock(return_value=MagicMock(name="global_pool"))
+    monkeypatch.setattr("backend.orchestrator.get_pool", fake_get_pool)
+
+    result = await _handle_message_core(
+        conversation_id=None,
+        message="plan my week",
+        user_id=None,
+        guest_id=str(uuid.uuid4()),
+        history=[],
+        memory_context="",
+        persist=False,
+        pool=injected_pool,
+        pre_routed_skill="agent",
+        pre_routed_args={"goal": "plan my week"},
+    )
+    assert result["skill_used"] == "agent"
+    assert len(recorded) == 1
+    assert recorded[0]["pool"] is injected_pool
+    fake_get_pool.assert_not_awaited()
