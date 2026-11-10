@@ -45,6 +45,7 @@ export default function ChatPanel({
   const [_loadingHistory, setLoadingHistory] = useState(false)
   const [guestMigrationCount, setGuestMigrationCount] = useState(0)
   const [toast, setToast] = useState(null)
+  const toastTimerRef = useRef(null)
   const [sharingConv, setSharingConv] = useState(null)
   const [tone, setTone] = useState(() => {
     try {
@@ -172,6 +173,9 @@ export default function ChatPanel({
       }
       if (streamTimerRef.current) {
         clearInterval(streamTimerRef.current)
+      }
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current)
       }
     }
   }, [])
@@ -452,7 +456,13 @@ export default function ChatPanel({
     }
   }
 
-  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2500) }
+  const showToast = (msg) => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current)
+    }
+    setToast(msg)
+    toastTimerRef.current = setTimeout(() => setToast(null), 2500)
+  }
   const handleDeleteFact = async (k) => {
     if (await deleteProfileFact(k)) {
       setProfileFacts(prev => { const n = { ...prev }; delete n[k]; return n })
