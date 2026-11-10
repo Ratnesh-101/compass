@@ -96,9 +96,10 @@ async def test_intel_budget_is_charged_per_search_subquery():
 @pytest.mark.asyncio
 async def test_intel_request_is_refused_when_the_remaining_budget_cannot_cover_the_searches():
     winning_features._daily_intel_tavily_usage.clear()
-    from datetime import date
+    from datetime import datetime, timezone
 
-    winning_features._daily_intel_tavily_usage[date.today().isoformat()] = winning_features.MAX_DAILY_INTEL_TAVILY_CREDITS - 1
+    # The budget is keyed by the UTC date, not the machine-local date.
+    winning_features._daily_intel_tavily_usage[datetime.now(timezone.utc).date().isoformat()] = winning_features.MAX_DAILY_INTEL_TAVILY_CREDITS - 1
     research = AsyncMock(return_value={"citations": []})
     topic_queries = len(
         winning_features.tavily_research.decompose_query(

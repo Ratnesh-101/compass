@@ -9,7 +9,7 @@ chat by default exactly like the dashboard, owner scoping is mandatory, and
 from __future__ import annotations
 
 import uuid
-from datetime import date, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -25,6 +25,11 @@ from backend.services.delete_target import DeleteTarget, normalize_delete_target
 from backend.services.task_scope import demo_sql_predicate, visible_tasks
 
 DEMO_SLUGS = ["nebius-p1", "cs61c-hw3", "sprint", "ssl-cors"]
+
+
+def _utc_today():
+    # The backend evaluates dates in UTC when no timezone is sent, so the tests must too.
+    return datetime.now(timezone.utc).date()
 
 
 def _tenant(label: str = "a") -> str:
@@ -180,7 +185,7 @@ async def test_single_visible_match_stages_a_delete_card(message):
     owner = _tenant()
     try:
         async with pool.acquire() as conn:
-            real = await _insert(conn, owner, "test", due=date.today() - timedelta(days=3))
+            real = await _insert(conn, owner, "test", due=_utc_today() - timedelta(days=3))
             for slug in DEMO_SLUGS:  # demo rows must not make this ambiguous
                 await _insert(conn, owner, f"test demo {slug}", url=f"compass://demo-persona/{slug}")
         res = await _say(owner, message)
@@ -199,9 +204,9 @@ async def test_overdue_single_match_among_future_and_completed_tasks():
     owner = _tenant()
     try:
         async with pool.acquire() as conn:
-            late = await _insert(conn, owner, "late report", due=date.today() - timedelta(days=2))
-            await _insert(conn, owner, "future report", due=date.today() + timedelta(days=9))
-            await _insert(conn, owner, "done report", due=date.today() - timedelta(days=5), status="done")
+            late = await _insert(conn, owner, "late report", due=_utc_today() - timedelta(days=2))
+            await _insert(conn, owner, "future report", due=_utc_today() + timedelta(days=9))
+            await _insert(conn, owner, "done report", due=_utc_today() - timedelta(days=5), status="done")
         res = await _say(owner, "delete my overdue deadline")
         pending = res["data"]["pending_action"]
         assert pending["action"] == "delete_task"
@@ -219,8 +224,8 @@ async def test_two_matches_stage_a_disambiguation_and_change_nothing(message):
     try:
         async with pool.acquire() as conn:
             real, _ = await _seed_mixed(conn, owner)
-            first = await _insert(conn, owner, "test", due=date.today() - timedelta(days=3))
-            second = await _insert(conn, owner, "test two", due=date.today() - timedelta(days=1))
+            first = await _insert(conn, owner, "test", due=_utc_today() - timedelta(days=3))
+            second = await _insert(conn, owner, "test two", due=_utc_today() - timedelta(days=1))
         res = await _say(owner, message)
         pending = res["data"]["pending_action"]
         assert pending["action"] == "delete_task_disambiguation"
