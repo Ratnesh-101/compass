@@ -46,8 +46,17 @@ logger = logging.getLogger("compass.career.submission")
 _batch_locks: Dict[str, asyncio.Lock] = {}
 
 
+_BATCH_LOCK_CAP = 1000
+_BATCH_LOCK_EVICT = 500
+
+
 def get_batch_lock(batch_id: str) -> asyncio.Lock:
     """Returns an asyncio.Lock specific to the given batch ID to prevent race conditions."""
+    if batch_id not in _batch_locks and len(_batch_locks) > _BATCH_LOCK_CAP:
+        # Evict idle locks only; a held lock is never removed.
+        idle = [key for key, lock in _batch_locks.items() if not lock.locked()][:_BATCH_LOCK_EVICT]
+        for key in idle:
+            del _batch_locks[key]
     if batch_id not in _batch_locks:
         _batch_locks[batch_id] = asyncio.Lock()
     return _batch_locks[batch_id]

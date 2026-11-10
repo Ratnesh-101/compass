@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence
+import urllib.parse
 import uuid
 import logging
 
@@ -425,7 +426,7 @@ async def create_google_calendar_event(
             "mode": "simulated",
         }
 
-    url = f"https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events"
+    url = f"https://www.googleapis.com/calendar/v3/calendars/{urllib.parse.quote(calendar_id, safe='')}/events"
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",

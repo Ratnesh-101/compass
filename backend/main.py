@@ -16,8 +16,9 @@ import logging
 import sys
 import urllib.parse
 from contextlib import asynccontextmanager
+from typing import Optional
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, JSONResponse
 
@@ -343,12 +344,16 @@ async def company_intel_job_alias(opportunity_id: int, job_id: str, request: Req
     "/opportunities/{opportunity_id}/job-analysis",
     include_in_schema=False,
 )
-async def job_analysis_alias(opportunity_id: int, request: Request):
+async def job_analysis_alias(
+    opportunity_id: int,
+    request: Request,
+    custom_desc: Optional[str] = Query(None, max_length=20000),
+):
     from backend.routers.career import analyze_opportunity_job_endpoint
-    return await analyze_opportunity_job_endpoint(opportunity_id, request, custom_desc=None)
+    return await analyze_opportunity_job_endpoint(opportunity_id, request, custom_desc=custom_desc)
 
 
-@app.get("/")
+# Intentionally not mounted: admin.root serves "/"; kept as a tested origin-validation helper.
 async def root_redirect(request: Request):
     """Root redirect handler. Resolves active frontend origin or redirects to frontend dev server."""
     query_str = request.url.query
