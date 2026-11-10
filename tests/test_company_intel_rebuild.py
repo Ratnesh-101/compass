@@ -303,6 +303,7 @@ async def test_8_caching_and_refresh_cooldown(mock_opp):
     tavily_calls = [0]
     async def fake_deep_research(*args, **kwargs):
         tavily_calls[0] += 1
+        await asyncio.sleep(0)  # genuinely suspend, as the real search does
         return {"citations": clean_citations}
 
     mock_resp = MagicMock(
@@ -338,7 +339,14 @@ async def test_8_caching_and_refresh_cooldown(mock_opp):
             generate_company_intel_brief(mock_opp, force_refresh=True),
         )
         assert tavily_calls[0] == 2
-        assert res_a == res_b
+        # Both calls must return a ready brief that agrees on everything except
+        # generated_at. Whether the second call sees the in-flight lock or runs
+        # after the first finishes depends on Python version (wait_for suspends
+        # on 3.11 but not 3.12), so only this contract is asserted, not identity.
+        assert res_a["status"] == "ready"
+        assert res_b["status"] == "ready"
+        assert {k: v for k, v in res_a.items() if k != "generated_at"} == \
+            {k: v for k, v in res_b.items() if k != "generated_at"}
 
         # Immediate follow-up within 30s cooldown: 0 new calls
         res3 = await generate_company_intel_brief(mock_opp, force_refresh=True)
