@@ -67,7 +67,7 @@ export async function fetchUsageSummary() {
  * Create a task or deadline directly without relying on AI chat.
  */
 export async function createTask(taskData) {
-  const res = await fetch(`${API_BASE}/api/tasks`, {
+  const res = await fetchWithGuestRetry(`${API_BASE}/api/tasks`, {
     method: 'POST',
     headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(taskData)
@@ -83,7 +83,7 @@ export async function createTask(taskData) {
  * Delete a task or deadline directly by ID without relying on AI chat.
  */
 export async function deleteTask(taskId) {
-  const res = await fetch(`${API_BASE}/api/tasks/${taskId}`, {
+  const res = await fetchWithGuestRetry(`${API_BASE}/api/tasks/${taskId}`, {
     method: 'DELETE',
     headers: getAuthHeaders(),
   })
@@ -98,7 +98,7 @@ export async function deleteTask(taskId) {
  * Update/edit any property of a task or deadline directly.
  */
 export async function updateTask(taskId, updateData) {
-  const res = await fetch(`${API_BASE}/api/tasks/${taskId}`, {
+  const res = await fetchWithGuestRetry(`${API_BASE}/api/tasks/${taskId}`, {
     method: 'PATCH',
     headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(updateData),
@@ -115,7 +115,7 @@ export async function updateTask(taskId, updateData) {
  */
 export async function verifyTaskDeadline(taskId) {
   try {
-    const res = await fetch(`${API_BASE}/api/tasks/${taskId}/verify`, {
+    const res = await fetchWithGuestRetry(`${API_BASE}/api/tasks/${taskId}/verify`, {
       method: 'POST',
       headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     })
@@ -135,7 +135,7 @@ export async function verifyTaskDeadline(taskId) {
  */
 export async function verifyAllDeadlines() {
   try {
-    const res = await fetch(`${API_BASE}/api/tasks/verify-deadlines`, {
+    const res = await fetchWithGuestRetry(`${API_BASE}/api/tasks/verify-deadlines`, {
       method: 'POST',
       headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     })

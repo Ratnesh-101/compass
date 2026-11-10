@@ -160,13 +160,13 @@ export function buildUrl(tab, domain, shareToken = null) {
   if (tab === 'dashboard') {
     return '/'
   }
-  if (tab === 'compass') {
+  if (tab === 'compass' || tab === 'assistant' || tab === 'planner' || tab === 'northstar') {
     return '/compass'
   }
-  if (tab === 'calendar') {
+  if (tab === 'calendar' || tab === 'schedule') {
     return '/schedule'
   }
-  if (tab === 'career' || tab === 'radar') {
+  if (tab === 'career' || tab === 'radar' || tab === 'copilot' || tab === 'internships') {
     return '/career'
   }
   // Timeline tab
