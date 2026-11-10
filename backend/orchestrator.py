@@ -872,6 +872,7 @@ async def _handle_message_core(
     # 2c. Skill Execution: agent (Multi-step autonomous reasoning & scheduling)
     if skill_name == "agent":
         from backend.agent import run_agent
+        from backend.services.ownership import NO_OWNER
         pool = await get_pool()
         goal = (args.get("goal") if isinstance(args, dict) else None) or message
         thoughts = []
@@ -882,9 +883,10 @@ async def _handle_message_core(
             async for step in run_agent(
                 goal=goal,
                 pool=pool,
-                user_id=user_id,
+                user_id=user_id or guest_id or NO_OWNER,
                 conversation_id=conv_id,
                 tone=tone,
+                is_guest=bool(guest_id and not user_id),
             ):
                 if step.type == "think":
                     if not any("Understanding" in m for m in thoughts):
