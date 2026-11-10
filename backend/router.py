@@ -39,7 +39,7 @@ from backend.router_helpers import (
 )
 from backend.services.task_intake_llm import extract_prose_tasks, llm_available, looks_like_prose_task_list
 from backend.services.task_intake_parse import parse_task_list
-from backend.services.task_intent import CAPABILITY_REPLY, is_capability_question
+from backend.services.task_intent import CAPABILITY_REPLY, blocks_task_creation, is_capability_question
 
 logger = logging.getLogger("compass.router")
 settings = get_settings()
@@ -339,6 +339,11 @@ async def route_message(
                     args = {**fallback_args, **{k: v for k, v in args.items() if k in ("domain", "due_date", "priority") and v}}
 
                 if func_name == "add_task":
+                    if blocks_task_creation(message):
+                        reply = await _external_answer_or_none(client, message, history)
+                        if reply:
+                            return None, None, reply
+                        return _fallback_route(message, history, tone=tone)
                     extracted = _extract_task_creation_args(message)
                     if not args.get("title") and extracted.get("title"):
                         args["title"] = extracted["title"]
