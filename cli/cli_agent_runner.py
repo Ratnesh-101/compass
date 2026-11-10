@@ -320,7 +320,12 @@ def run_feasibility_triage_session(
             for line in r.iter_lines():
                 if not line or not line.startswith("data: "):
                     continue
-                ev = json.loads(line[6:])
+                try:
+                    ev = json.loads(line[6:])
+                except ValueError:
+                    continue
+                if not isinstance(ev, dict):
+                    continue
                 agent = ev.get("metadata", {}).get("agent", "")
                 colour = {"planner": "cyan", "realist": "red"}.get(agent, "white")
                 console.print(f"[{colour}]{ev.get('type', '').upper()}[/] {ev.get('content', '')}")

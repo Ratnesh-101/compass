@@ -152,7 +152,7 @@ def classify_file(path: Path, root: Path) -> str:
         return 'GIT_METADATA'
 
     # 2. Dependency / Environment directories
-    if any(p in DEPENDENCY_DIRS for p in rel_parts):
+    if any(p in DEPENDENCY_DIRS for p in rel_parts) or any(p.startswith(('.venv', 'venv', '.python')) for p in rel_parts[:-1]):
         return 'DEPENDENCY'
 
     # 3. Tooling / IDE metadata
