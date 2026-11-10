@@ -69,3 +69,6 @@ intel_states*.html
 preview_states.html
 .playwright-mcp/
 .claude/
+
+# Local audit notes: may contain sensitive values, never commit
+SECURITY_AUDIT_REPORT.md

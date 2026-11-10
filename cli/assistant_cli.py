@@ -555,7 +555,7 @@ def add(
         "domain": domain,
     }
     if project:
-        payload["project_id"] = project
+        payload["project"] = project
     if due:
         payload["due_date"] = due
     if priority:

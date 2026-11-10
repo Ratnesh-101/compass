@@ -234,25 +234,28 @@ def run_interactive_agent_session(
             feedback = None
 
         if confirm == "yes":
-            console.print("[green]Executing approved actions…[/]")
-            try:
-                resp = httpx.post(
-                    f"{api_base}/api/agent/confirm",
-                    json={"actions": pending_actions, "run_id": run_id if 'run_id' in locals() else None},
-                    headers=req_headers,
-                    timeout=30.0,
-                )
-                resp.raise_for_status()
-                results = resp.json().get("results", [])
-                for r in results:
-                    status = r.get("status", "unknown")
-                    tool_name = r.get("tool", "")
-                    if status == "success":
-                        console.print(f"  ✅ {_tool_label(tool_name)}: done")
-                    else:
-                        console.print(f"  ❌ {_tool_label(tool_name)}: {r.get('message', 'failed')}")
-            except Exception as e:
-                console.print(f"[compass.error]❌ Failed to execute actions: {e}[/]")
+            if not run_id:
+                console.print("[compass.error]Cannot confirm: the agent run id was not received.[/]")
+            else:
+                console.print("[green]Executing approved actions…[/]")
+                try:
+                    resp = httpx.post(
+                        f"{api_base}/api/agent/confirm",
+                        json={"actions": pending_actions, "run_id": run_id},
+                        headers=req_headers,
+                        timeout=30.0,
+                    )
+                    resp.raise_for_status()
+                    results = resp.json().get("results", [])
+                    for r in results:
+                        status = r.get("status", "unknown")
+                        tool_name = r.get("tool", "")
+                        if status == "success":
+                            console.print(f"  ✅ {_tool_label(tool_name)}: done")
+                        else:
+                            console.print(f"  ❌ {_tool_label(tool_name)}: {r.get('message', 'failed')}")
+                except Exception as e:
+                    console.print(f"[compass.error]❌ Failed to execute actions: {e}[/]")
         else:
             if not feedback:
                 feedback = Prompt.ask("Reason or alternative instruction (optional)", default="User rejected this action")
@@ -264,6 +267,7 @@ def run_interactive_agent_session(
                         "POST",
                         f"{api_base}/api/agent/run",
                         json={
+                            "goal": goal,
                             "run_id": active_rid,
                             "action": "reject",
                             "feedback": feedback,
@@ -316,7 +320,12 @@ def run_feasibility_triage_session(
             for line in r.iter_lines():
                 if not line or not line.startswith("data: "):
                     continue
-                ev = json.loads(line[6:])
+                try:
+                    ev = json.loads(line[6:])
+                except ValueError:
+                    continue
+                if not isinstance(ev, dict):
+                    continue
                 agent = ev.get("metadata", {}).get("agent", "")
                 colour = {"planner": "cyan", "realist": "red"}.get(agent, "white")
                 console.print(f"[{colour}]{ev.get('type', '').upper()}[/] {ev.get('content', '')}")
