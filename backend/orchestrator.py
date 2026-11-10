@@ -103,7 +103,7 @@ async def _handle_message_core(
         history = []
         if conversation_id:
             try:
-                pool = await get_pool()
+                pool = active_pool or await get_pool()
                 async with pool.acquire() as conn:
                     rows = await conversations.get_recent_messages(conn, conversation_id, limit=6)
                     for r in rows:
@@ -119,7 +119,7 @@ async def _handle_message_core(
     if memory_context is None:
         memory_context = ""
         try:
-            pool = await get_pool()
+            pool = active_pool or await get_pool()
             async with pool.acquire() as conn:
                 prior_messages = await conversations.get_cross_conversation_memory(
                     conn, exclude_conversation_id=conversation_id, limit=6, user_id=user_id, guest_id=guest_id
@@ -541,7 +541,7 @@ async def _handle_message_core(
         found = False
         audit_id_to_undo = None
         try:
-            pool = await get_pool()
+            pool = active_pool or await get_pool()
             if pool:
                 async with pool.acquire() as conn:
                     # 1. Prefer whichever action is most recent: a soft-delete or a logged add_task
@@ -609,7 +609,7 @@ async def _handle_message_core(
 
         if persist:
             try:
-                pool = await get_pool()
+                pool = active_pool or await get_pool()
                 if pool:
                     async with pool.acquire() as conn:
                         real_cid = await conversations.get_or_create_conversation(conn, conv_id, user_id=user_id, guest_id=guest_id)
@@ -677,7 +677,7 @@ async def _handle_message_core(
         allow_different_thing = bool(args.get("allow_different_thing", False))
         allow_duplicate = bool(args.get("allow_duplicate", False))
         try:
-            pool = await get_pool()
+            pool = active_pool or await get_pool()
             async with pool.acquire() as conn:
                 task_owner = user_id or guest_id
                 existing_tasks = await structured.list_tasks(conn, user_id=task_owner, include_demo=bool(args.get("include_demo", False))) if task_owner else []
@@ -814,7 +814,7 @@ async def _handle_message_core(
 
         # Record into agent_audit_log for undo
         try:
-            pool = await get_pool()
+            pool = active_pool or await get_pool()
             if pool:
                 async with pool.acquire() as conn:
                     if task_record and "id" in task_record:
@@ -847,7 +847,7 @@ async def _handle_message_core(
         # Persist conversation & messages
         if persist:
             try:
-                pool = await get_pool()
+                pool = active_pool or await get_pool()
                 if pool:
                     async with pool.acquire() as conn:
                         real_cid = await conversations.get_or_create_conversation(conn, conv_id, user_id=user_id, guest_id=guest_id)
@@ -872,7 +872,8 @@ async def _handle_message_core(
     # 2c. Skill Execution: agent (Multi-step autonomous reasoning & scheduling)
     if skill_name == "agent":
         from backend.agent import run_agent
-        pool = await get_pool()
+        from backend.services.ownership import NO_OWNER
+        pool = active_pool or await get_pool()
         goal = (args.get("goal") if isinstance(args, dict) else None) or message
         thoughts = []
         synth_text = ""
@@ -882,9 +883,10 @@ async def _handle_message_core(
             async for step in run_agent(
                 goal=goal,
                 pool=pool,
-                user_id=user_id,
+                user_id=user_id or guest_id or NO_OWNER,
                 conversation_id=conv_id,
                 tone=tone,
+                is_guest=bool(guest_id and not user_id),
             ):
                 if step.type == "think":
                     if not any("Understanding" in m for m in thoughts):
@@ -966,7 +968,7 @@ async def _handle_message_core(
         )
         if persist:
             try:
-                pool = await get_pool()
+                pool = active_pool or await get_pool()
                 async with pool.acquire() as conn:
                     real_cid = await conversations.get_or_create_conversation(conn, conv_id, user_id=user_id, guest_id=guest_id)
                     await conversations.add_message(conn, real_cid, role="user", content=message)
