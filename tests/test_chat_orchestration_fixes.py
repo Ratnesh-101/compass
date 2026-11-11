@@ -82,14 +82,15 @@ async def test_stream_passes_its_conv_id_to_orchestrator_and_persists_under_it()
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tone", ["brief", "balanced"])
-async def test_capped_tones_skip_length_continuation(tone):
+async def test_capped_tones_get_one_finishing_call_not_full_continuation(tone):
     client = _mock_client(lambda: _Stream([_chunk("partial text", "length")]))
     request = MagicMock()
     request.is_disconnected = AsyncMock(return_value=False)
     with patch("backend.services.chat_stream.openai.AsyncOpenAI", lambda **kw: client), \
          patch("backend.services.chat_stream._schedule_stream_persistence", MagicMock()):
         await _collect(StreamChatRequest(message="tell me about dogs", tone=tone), request)
-    assert client.chat.completions.create.await_count == 1
+    # initial call + exactly one short finishing call (no multi-round continuation)
+    assert client.chat.completions.create.await_count == 2
 
 
 @pytest.mark.asyncio

@@ -40,6 +40,7 @@ from backend.agent_types import (
     _extract_content_from_response,
 )
 from backend.config import get_settings
+from backend.services.token_budget import reasoning_token_budget
 from backend.services.usage import compute_step_cost, record_usage
 
 logger = logging.getLogger("compass.agent")
@@ -268,15 +269,7 @@ async def run_agent(
         try:
             reasoning_model = str(getattr(settings, "REASONING_MODEL", getattr(settings, "SKILL_MODEL", "nvidia/nemotron-3-super-120b-a12b")))
             completions: Any = client.chat.completions
-            clean_tone = (tone or "").strip().lower()
-            if clean_tone == "brief":
-                r_max_tokens = 90
-            elif clean_tone == "balanced":
-                r_max_tokens = 250
-            elif clean_tone == "exploratory":
-                r_max_tokens = 1500
-            else:
-                r_max_tokens = int(getattr(settings, "MAX_REASONING_TOKENS", 4096))
+            r_max_tokens = reasoning_token_budget(settings)
 
             response = await completions.create(
                 model=reasoning_model,
@@ -603,6 +596,7 @@ async def run_agent(
                     step_cost_usd=0.0,
                     metadata={
                         "abstained": is_abstained,
+                        "is_truncated": getattr(choice, "finish_reason", None) == "length",
                         "replan_diff": active_replan_diff,
                         "source": provenance,
                         "sources": [provenance],
