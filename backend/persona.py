@@ -79,9 +79,9 @@ VALID_TONES = {"brief", "balanced", "exploratory", "detailed"}
 
 TONE_INSTRUCTIONS: Dict[str, str] = {
     "brief": (
-        "[TONE CONSTRAINT]: Keep response very brief (1 to 3 sentences max). "
-        "Keep response extremely brief, direct, and concise (1-2 sentences maximum, strictly under 40 words). "
-        "State the core answer or count + top item immediately with zero preamble or conversational filler. No follow-up questions."
+        "[TONE CONSTRAINT]: Keep the response brief. "
+        "Give a short but genuinely useful explanation, like a good assistant asked to be brief: one direct sentence that answers the question, then 1-3 short sentences on the key mechanism or reason and one concrete example or tradeoff (about 45-60 words total, strictly under 60 words). "
+        "State the core answer immediately with zero preamble or conversational filler. No follow-up questions."
     ),
     "balanced": (
         "Provide a balanced, well-rounded response (2-4 clear sentences, roughly 60-100 words). "

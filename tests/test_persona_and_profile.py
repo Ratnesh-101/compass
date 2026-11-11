@@ -360,7 +360,7 @@ def test_persona_tone_validation_and_prompt_injection():
 
     # 2. Prompt injection for 'brief'
     prompt_brief = build_persona_system_prompt(tone="brief")
-    assert "[TONE CONSTRAINT]: Keep response very brief (1 to 3 sentences max)." in prompt_brief
+    assert "[TONE CONSTRAINT]: Keep the response brief." in prompt_brief
 
     # 3. Prompt injection for 'exploratory'
     prompt_exploratory = build_persona_system_prompt(tone="exploratory")
