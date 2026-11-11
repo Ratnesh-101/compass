@@ -567,6 +567,7 @@ class SpecialistDispatcher:
                         due_date=p_due,
                         status=task_args.get("status", "open"),
                         priority=task_args.get("priority", "medium"),
+                        user_id=(request.user_id or "").strip() or None,
                     )
                     if created:
                         task_created_header = (
