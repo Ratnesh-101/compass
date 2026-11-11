@@ -156,7 +156,7 @@ def _build_agent_system_prompt(tool_names: List[str], abstain_first: bool = Fals
     if clean_tone == "brief":
         prompt += (
             "\n### Tone Constraint (Brief):\n"
-            "- Give a short but genuinely useful explanation, like a good assistant asked to be brief: one direct sentence that answers the question, then 1-3 short sentences on the key mechanism or reason and one concrete example or tradeoff (about 45-60 words total, strictly under 60 words).\n"
+            "- Give a short but genuinely useful explanation, like a good assistant asked to be brief: one direct sentence that answers the question, then 1-3 short sentences on the key mechanism or reason and one concrete example or tradeoff Keep it under 60 words, but never mention or state a word count in your reply.\n"
             "- State the core answer or count + top item immediately with zero preamble or conversational filler. No follow-up questions."
         )
     elif clean_tone == "balanced":
