@@ -11,7 +11,7 @@ import asyncio
 import json
 import logging
 import re
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import asyncpg
@@ -590,28 +590,62 @@ async def get_all_opportunities(
     verified_only: bool = False,
     saved_only: bool = False,
     applied_only: bool = False,
+    recent_24h: bool = False,
     page: int = 1,
     page_size: int = 25,
     statuses: Optional[Sequence[str]] = None,
 ) -> Tuple[List[OpportunityOut], int]:
     pool = await get_pool()
+    today = date.today()
     if not pool:
         items = list(_in_memory_opportunities.values())
         if status:
             items = [i for i in items if i.get("current_status") == status]
+            if status == "OPEN_CONFIRMED":
+                items = [i for i in items if not i.get("confirmed_close_date") or i.get("confirmed_close_date") >= today]
         if statuses:
-            items = [i for i in items if i.get("current_status") in statuses]
+            items = [
+                i for i in items
+                if i.get("current_status") in statuses
+                and (not i.get("confirmed_close_date") or i.get("confirmed_close_date") >= today)
+            ]
         if verified_only:
-            items = [i for i in items if i.get("current_status") == "OPEN_CONFIRMED"]
+            items = [
+                i for i in items
+                if i.get("current_status") == "OPEN_CONFIRMED"
+                and (not i.get("confirmed_close_date") or i.get("confirmed_close_date") >= today)
+            ]
         if category:
             items = [i for i in items if i.get("category") == category]
         if employer_type:
             items = [i for i in items if i.get("employer_type") == employer_type]
+        if work_arrangement:
+            items = [i for i in items if (i.get("work_arrangement") or "").lower() == work_arrangement.lower()]
+        if country:
+            items = [i for i in items if (i.get("country") or "").lower() == country.lower()]
         if india_only:
             items = [i for i in items if i.get("is_india_eligible") is True]
         if search:
             q = search.strip().lower()
             items = [i for i in items if q in i.get("company_name", "").lower() or q in i.get("role_title", "").lower()]
+        if recent_24h:
+            now_utc = datetime.now(timezone.utc)
+            filtered_24h = []
+            for i in items:
+                p_at = i.get("posted_at")
+                p_prec = (i.get("posted_at_precision") or "").strip().lower()
+                if p_at and p_prec in ("exact", "exact_timestamp"):
+                    if isinstance(p_at, str):
+                        try:
+                            p_at = datetime.fromisoformat(p_at)
+                        except Exception:
+                            continue
+                    if p_at.tzinfo is None:
+                        p_at = p_at.replace(tzinfo=timezone.utc)
+                    age = now_utc - p_at
+                    if 0 <= age.total_seconds() <= 86400:
+                        filtered_24h.append(i)
+            items = filtered_24h
 
         out_models = []
         for i in items:
@@ -628,7 +662,9 @@ async def get_all_opportunities(
             out_models.append(
                 _parse_row_to_opportunity(opp_copy, opp_copy.get("sources", []), opp_copy.get("cycles", []))
             )
-        return out_models, len(out_models)
+        total = len(out_models)
+        offset = (page - 1) * page_size
+        return out_models[offset : offset + page_size], total
 
     conditions = ["1=1"]
     args: List[Any] = [user_id or "default_user"]
@@ -636,11 +672,15 @@ async def get_all_opportunities(
     if status:
         args.append(status)
         conditions.append(f"o.current_status = ${len(args)}")
+        if status == "OPEN_CONFIRMED":
+            conditions.append("(o.confirmed_close_date IS NULL OR o.confirmed_close_date >= CURRENT_DATE)")
     if statuses:
         args.append(list(statuses))
         conditions.append(f"o.current_status = ANY(${len(args)}::text[])")
+        conditions.append("(o.confirmed_close_date IS NULL OR o.confirmed_close_date >= CURRENT_DATE)")
     if verified_only:
         conditions.append("o.current_status = 'OPEN_CONFIRMED'")
+        conditions.append("(o.confirmed_close_date IS NULL OR o.confirmed_close_date >= CURRENT_DATE)")
     if category:
         args.append(category)
         conditions.append(f"o.category = ${len(args)}")
@@ -650,6 +690,9 @@ async def get_all_opportunities(
     if work_arrangement:
         args.append(work_arrangement)
         conditions.append(f"o.work_arrangement = ${len(args)}")
+    if country:
+        args.append(country)
+        conditions.append(f"LOWER(o.country) = LOWER(${len(args)})")
     if india_only:
         conditions.append("o.is_india_eligible IS TRUE")
     if saved_only:
@@ -659,6 +702,8 @@ async def get_all_opportunities(
     if search:
         args.append(f"%{search.strip().lower()}%")
         conditions.append(f"(LOWER(o.company_name) LIKE ${len(args)} OR LOWER(o.role_title) LIKE ${len(args)})")
+    if recent_24h:
+        conditions.append("(o.posted_at IS NOT NULL AND LOWER(o.posted_at_precision) IN ('exact', 'exact_timestamp') AND o.posted_at <= now() AND o.posted_at >= now() - INTERVAL '24 hours')")
 
     where_sql = " AND ".join(conditions)
 
@@ -1079,12 +1124,14 @@ async def get_recommendation_candidates(
     india_only: bool = True,
 ) -> List[OpportunityOut]:
     """Every listing the Recommended list and the ELIGIBLE MATCHES stat may draw from (one shared filter set)."""
-    return await _get_all_user_opportunities(
+    candidates = await _get_all_user_opportunities(
         user_id,
         statuses=RECOMMENDABLE_STATUSES,
         employer_type=employer_type,
         india_only=india_only,
     )
+    today = date.today()
+    return [c for c in candidates if not (c.confirmed_close_date and c.confirmed_close_date < today)]
 
 
 async def get_user_saved_opportunities(user_id: str) -> List[OpportunityOut]:
@@ -1145,18 +1192,42 @@ async def get_radar_overview_stats(user_id: str) -> Dict[str, Any]:
         )
 
     pool = await get_pool()
+    today = date.today()
     if not pool:
         all_opps = list(_in_memory_opportunities.values())
-        verified_open_opps = [o for o in all_opps if o.get("current_status") == "OPEN_CONFIRMED"]
+        verified_open_opps = [
+            o for o in all_opps
+            if o.get("current_status") == "OPEN_CONFIRMED"
+            and (not o.get("confirmed_close_date") or o.get("confirmed_close_date") >= today)
+        ]
+        opening_soon = [
+            o for o in all_opps
+            if o.get("current_status") in ("UPCOMING_CONFIRMED", "ANNOUNCED")
+            and (not o.get("confirmed_close_date") or o.get("confirmed_close_date") >= today)
+        ]
+        upcoming_deadlines = [
+            o for o in all_opps
+            if o.get("current_status") == "OPEN_CONFIRMED"
+            and o.get("confirmed_close_date")
+            and today <= o.get("confirmed_close_date") <= today + timedelta(days=14)
+        ]
+        last_sync = None
+        for sr in reversed(_in_memory_sync_runs):
+            if sr.get("status") == "completed" and sr.get("run_completed_at"):
+                last_sync = sr.get("run_completed_at")
+                break
+        if not last_sync and _in_memory_sync_runs:
+            last_sync = _in_memory_sync_runs[-1].get("run_completed_at") or _in_memory_sync_runs[-1].get("run_started_at")
 
+        user_prefix = f"{user_id}:"
         return {
             "verified_open_count": len(verified_open_opps),
             "strong_matches_count": strong_matches_count,
-            "opening_soon_count": sum(1 for o in all_opps if o.get("current_status") in ("UPCOMING_CONFIRMED", "ANNOUNCED")),
-            "upcoming_deadlines_count": 0,
-            "saved_count": sum(1 for v in _in_memory_user_opps.values() if v.get("is_saved")),
-            "applications_in_progress_count": sum(1 for v in _in_memory_user_opps.values() if v.get("application_status")),
-            "last_sync_at": None,
+            "opening_soon_count": len(opening_soon),
+            "upcoming_deadlines_count": len(upcoming_deadlines),
+            "saved_count": sum(1 for k, v in _in_memory_user_opps.items() if k.startswith(user_prefix) and v.get("is_saved")),
+            "applications_in_progress_count": sum(1 for k, v in _in_memory_user_opps.items() if k.startswith(user_prefix) and v.get("application_status")),
+            "last_sync_at": last_sync,
             "total_tracked_opportunities": len(all_opps),
             "startups_count": sum(1 for o in all_opps if o.get("employer_type") == "startup"),
             "research_count": sum(1 for o in all_opps if o.get("employer_type") == "research"),
@@ -1167,9 +1238,15 @@ async def get_radar_overview_stats(user_id: str) -> Dict[str, Any]:
 
     async with pool.acquire() as conn:
         total = await conn.fetchval("SELECT COUNT(*) FROM opportunities") or 0
-        open_cnt = await conn.fetchval("SELECT COUNT(*) FROM opportunities WHERE current_status = 'OPEN_CONFIRMED'") or 0
+        open_cnt = await conn.fetchval(
+            "SELECT COUNT(*) FROM opportunities WHERE current_status = 'OPEN_CONFIRMED' AND (confirmed_close_date IS NULL OR confirmed_close_date >= CURRENT_DATE)"
+        ) or 0
         upcoming_cnt = await conn.fetchval(
-            "SELECT COUNT(*) FROM opportunities WHERE current_status = ANY($1::text[])", list(OPENING_SOON_STATUSES)
+            "SELECT COUNT(*) FROM opportunities WHERE current_status = ANY($1::text[]) AND (confirmed_close_date IS NULL OR confirmed_close_date >= CURRENT_DATE)",
+            list(OPENING_SOON_STATUSES),
+        ) or 0
+        upcoming_deadlines_cnt = await conn.fetchval(
+            "SELECT COUNT(*) FROM opportunities WHERE current_status = 'OPEN_CONFIRMED' AND confirmed_close_date >= CURRENT_DATE AND confirmed_close_date <= CURRENT_DATE + INTERVAL '14 days'"
         ) or 0
         saved_cnt = await conn.fetchval("SELECT COUNT(*) FROM user_opportunities WHERE user_id = $1 AND is_saved IS TRUE", user_id) or 0
         apps_cnt = await conn.fetchval(
@@ -1186,7 +1263,7 @@ async def get_radar_overview_stats(user_id: str) -> Dict[str, Any]:
             "verified_open_count": open_cnt,
             "strong_matches_count": strong_matches_count,
             "opening_soon_count": upcoming_cnt,
-            "upcoming_deadlines_count": 0,
+            "upcoming_deadlines_count": upcoming_deadlines_cnt,
             "saved_count": saved_cnt,
             "applications_in_progress_count": apps_cnt,
             "last_sync_at": last_sync,
@@ -1202,7 +1279,16 @@ async def get_radar_overview_stats(user_id: str) -> Dict[str, Any]:
 async def create_sync_run(source_id: str, source_type: str = "multi_source_radar") -> int:
     pool = await get_pool()
     if not pool:
-        return 1
+        run_id = len(_in_memory_sync_runs) + 1
+        _in_memory_sync_runs.append({
+            "id": run_id,
+            "source_id": source_id,
+            "source_type": source_type,
+            "status": "running",
+            "run_started_at": datetime.now(timezone.utc),
+            "run_completed_at": None,
+        })
+        return run_id
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "INSERT INTO opportunity_sync_runs (source_id, source_type, status, run_started_at) VALUES ($1, $2, 'running', now()) RETURNING id",
@@ -1223,6 +1309,18 @@ async def finish_sync_run(
 ) -> None:
     pool = await get_pool()
     if not pool:
+        for r in _in_memory_sync_runs:
+            if r.get("id") == run_id:
+                r.update({
+                    "status": status,
+                    "records_discovered": records_discovered,
+                    "records_updated": records_updated,
+                    "records_skipped": records_skipped,
+                    "verification_failures": failures,
+                    "error_summary": error_summary,
+                    "run_completed_at": datetime.now(timezone.utc),
+                })
+                break
         return
     async with pool.acquire() as conn:
         await conn.execute(
@@ -1244,7 +1342,7 @@ async def finish_sync_run(
 async def get_last_sync_run() -> Optional[Dict[str, Any]]:
     pool = await get_pool()
     if not pool:
-        return None
+        return _in_memory_sync_runs[-1] if _in_memory_sync_runs else None
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT * FROM opportunity_sync_runs ORDER BY id DESC LIMIT 1"
