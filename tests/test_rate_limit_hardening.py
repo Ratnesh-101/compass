@@ -164,7 +164,7 @@ async def test_concurrent_first_requests_respect_capacity():
     await asyncio.gather(*[_hold([]) for _ in range(6)])
     try:
         results = await asyncio.gather(
-            *[rate_limiter._consume_token(key, 2.0, 0.0001, fail_closed=True) for _ in range(6)]
+            *[rate_limiter._consume_token(key, 2.0, 0.0, fail_closed=True) for _ in range(6)]
         )
         assert sum(1 for ok, _ in results if ok) == 2
     finally:
