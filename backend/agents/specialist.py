@@ -31,6 +31,9 @@ SPECIALIST_CONTINUE_PROMPT = (
     "Do not repeat anything you already wrote."
 )
 SPECIALIST_CUT_SHORT_NOTE = "\n\n_(The answer was cut short — ask me to continue.)_"
+SPECIALIST_EMPTY_RETRY_MAX_TOKENS = 4000
+SPECIALIST_DIRECT_ANSWER_RULE = "\n\nAnswer directly. Keep any internal deliberation very short so the full answer fits."
+SPECIALIST_NO_ANSWER_NOTE = "\n\n_I could not generate a full answer this time (the model returned no text). Please try again._"
 # A non-streaming 2000-token completion must be able to finish inside one read timeout,
 # and a single retry keeps the worst case bounded (about 2 x 45 s) instead of 3 x 25 s of repeated timeouts.
 SPECIALIST_REQUEST_TIMEOUT_S = 45.0
@@ -103,6 +106,29 @@ async def _continue_truncated_answer(
     return joined
 
 
+async def _finalize_specialist_response(
+    resp: Any,
+    client: Any,
+    model: str,
+    messages: List[Dict[str, str]],
+    extract: Any,
+    clean: Any,
+) -> Optional[str]:
+    """Extract, clean, and continue truncated answer if needed; return None if empty."""
+    raw_content = await extract(resp)
+    content = clean(raw_content) if raw_content else ""
+    if content and content.strip():
+        content = content.strip()
+        choices = getattr(resp, "choices", None) or []
+        finish_reason = getattr(choices[0], "finish_reason", None) if choices else None
+        if finish_reason == "length":
+            content = await _continue_truncated_answer(
+                client, model, messages, content, extract, clean,
+            )
+        return content
+    return None
+
+
 async def _synthesize_specialist_response(
     capability: str,
     user_goal: str,
@@ -169,27 +195,59 @@ async def _synthesize_specialist_response(
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
-        resp = await client.chat.completions.create(
-            model=settings.ROUTER_MODEL,
-            messages=base_messages,
-            max_tokens=2000,
-            temperature=0.5,
-            stream=False,
+        try:
+            resp = await client.chat.completions.create(
+                model=settings.ROUTER_MODEL,
+                messages=base_messages,
+                max_tokens=2000,
+                temperature=0.5,
+                stream=False,
+            )
+        except Exception as e:
+            logger.warning(f"[_synthesize_specialist_response] LLM call failed for {capability}: {e}")
+            return fallback_summary
+
+        content = await _finalize_specialist_response(
+            resp,
+            client,
+            settings.ROUTER_MODEL,
+            base_messages,
+            _extract_content_from_response,
+            _clean_synthesis_text,
         )
-        raw_content = await _extract_content_from_response(resp)
-        content = _clean_synthesis_text(raw_content) if raw_content else ""
-        if content and content.strip():
-            content = content.strip()
-            choices = getattr(resp, "choices", None) or []
-            finish_reason = getattr(choices[0], "finish_reason", None) if choices else None
-            if finish_reason == "length":
-                content = await _continue_truncated_answer(
-                    client, settings.ROUTER_MODEL, base_messages, content,
-                    _extract_content_from_response, _clean_synthesis_text,
-                )
+        if content:
             return content
+
+        retry_messages = [
+            {**m, "content": m["content"] + SPECIALIST_DIRECT_ANSWER_RULE}
+            if m.get("role") == "system"
+            else dict(m)
+            for m in base_messages
+        ]
+        try:
+            retry_resp = await client.chat.completions.create(
+                model=settings.ROUTER_MODEL,
+                messages=retry_messages,
+                max_tokens=SPECIALIST_EMPTY_RETRY_MAX_TOKENS,
+                temperature=0.5,
+                stream=False,
+            )
+            retry_content = await _finalize_specialist_response(
+                retry_resp,
+                client,
+                settings.ROUTER_MODEL,
+                retry_messages,
+                _extract_content_from_response,
+                _clean_synthesis_text,
+            )
+            if retry_content:
+                return retry_content
+        except Exception as e:
+            logger.warning(f"[_synthesize_specialist_response] retry failed for {capability}: {e}")
+
+        return fallback_summary + SPECIALIST_NO_ANSWER_NOTE
     except Exception as e:
-        logger.warning(f"[_synthesize_specialist_response] LLM call failed for {capability}: {e}")
+        logger.warning(f"[_synthesize_specialist_response] synthesis setup failed for {capability}: {e}")
 
     return fallback_summary
 
