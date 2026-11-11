@@ -41,6 +41,7 @@ from backend.router_helpers import (
 from backend.services.chat_idempotency import committed_event, normalize_request_id, peek_replay, replay_events
 from backend.services.task_intent import is_intake_intent
 from backend.services.task_time import local_today, pick_timezone
+from backend.services.token_budget import HARD_CAP_FINISH_MAX_TOKENS, HARD_CAP_FINISH_PROMPT, stream_token_budget
 from backend.services.usage import record_usage
 
 logger = logging.getLogger("compass.services.chat_stream")
@@ -469,14 +470,7 @@ async def generate_chat_events(
 
         logger.info("Serving chat stream request with model=%s", _settings.ROUTER_MODEL)
         max_synth_budget = int(getattr(_settings, "MAX_SYNTHESIS_TOKENS", 8192))
-        clean_tone = effective_tone
-        hard_capped_tone = clean_tone in ("brief", "balanced")
-        if clean_tone == "brief":
-            stream_max_tokens = 90
-        elif clean_tone == "balanced":
-            stream_max_tokens = 250
-        else:
-            stream_max_tokens = max_synth_budget
+        stream_max_tokens, hard_capped_tone = stream_token_budget(effective_tone, max_synth_budget)
 
         call_kwargs: dict[str, Any] = {
             "model": _settings.ROUTER_MODEL,
@@ -597,28 +591,30 @@ async def generate_chat_events(
 
             # Bounded continuation if output token limit was reached
             continuation_attempts = 0
-            max_cont_attempts = int(getattr(_settings, "MAX_CONTINUATION_ATTEMPTS", 2))
-            while last_finish_reason == "length" and not tool_call_detected and not hard_capped_tone and continuation_attempts < max_cont_attempts:
+            max_cont_attempts = 1 if hard_capped_tone else int(getattr(_settings, "MAX_CONTINUATION_ATTEMPTS", 2))
+            while last_finish_reason == "length" and not tool_call_detected and continuation_attempts < max_cont_attempts:
                 if await request.is_disconnected():
                     break
                 continuation_attempts += 1
                 logger.info("Direct stream hit token limit (length). Continuing response (%d/%d)...", continuation_attempts, max_cont_attempts)
                 yield f"data: {json.dumps({'type': 'status', 'stage': 'generating', 'label': f'Continuing response ({continuation_attempts}/{max_cont_attempts})…'})}\n\n"
 
-                cont_messages = list(messages)
-                cont_messages.append({"role": "assistant", "content": full_text})
-                cont_messages.append({
-                    "role": "user",
-                    "content": (
+                cont_prompt = (
+                    HARD_CAP_FINISH_PROMPT
+                    if hard_capped_tone
+                    else (
                         "Your previous response was cut off by the token limit. "
                         "Continue generating EXACTLY where you left off. "
                         "Do not repeat prior paragraphs, table rows, citations, or greetings."
-                    ),
-                })
+                    )
+                )
+                cont_messages = list(messages)
+                cont_messages.append({"role": "assistant", "content": full_text})
+                cont_messages.append({"role": "user", "content": cont_prompt})
                 cont_kwargs = {
                     "model": _settings.ROUTER_MODEL,
                     "messages": cont_messages,
-                    "max_tokens": max_synth_budget,
+                    "max_tokens": HARD_CAP_FINISH_MAX_TOKENS if hard_capped_tone else max_synth_budget,
                     "temperature": 0.7,
                     "stream": True,
                 }
