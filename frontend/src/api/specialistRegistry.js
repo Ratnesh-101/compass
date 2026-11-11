@@ -74,6 +74,20 @@ export function getSpecialistById(id) {
   ) || null
 }
 
+/**
+ * Parse a typed "/command rest of the message" into { specialist, text }.
+ * Returns null when the text is not a known slash command followed by a non-empty
+ * message, so unknown "/paths" and a bare "/research" are sent unchanged.
+ */
+export function parseSlashCommand(raw) {
+  const match = String(raw ?? '').trim().match(/^\/([a-zA-Z0-9_-]+)\s+([\s\S]+)$/)
+  if (!match) return null
+  const specialist = getSpecialistById(match[1])
+  const text = match[2].trim()
+  if (!specialist || !text) return null
+  return { specialist, text }
+}
+
 export function filterSpecialists(query) {
   if (query === null || query === undefined) return SPECIALIST_AGENTS
   const clean = String(query).trim().toLowerCase().replace(/^\//, '')

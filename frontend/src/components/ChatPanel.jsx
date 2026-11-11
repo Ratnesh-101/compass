@@ -14,6 +14,7 @@ import {
   getCurrentUserId,
 } from '../api/client'
 import { makeRequestId, failureMessage } from '../utils/chatRequest'
+import { parseSlashCommand } from '../api/specialistRegistry'
 import ChatHistoryDrawer from './chat/ChatHistoryDrawer'
 import ShareModal from './ShareModal'
 import ChatChatMessageList from './chat/ChatMessageList'
@@ -244,7 +245,11 @@ export default function ChatPanel({
     }
 
     const activeMode = overrideMode !== null ? overrideMode : convMode
-    const specialistIdToUse = explicitSpecialistId || (activeSpecialist ? activeSpecialist.id : null)
+    // A fully typed "/research Compare X and Y" (sent without picking from the menu) must still reach the specialist.
+    const typedSlash = !explicitSpecialistId && !activeSpecialist ? parseSlashCommand(text) : null
+    if (typedSlash) text = typedSlash.text
+    const effectiveSpecialist = activeSpecialist || (typedSlash ? typedSlash.specialist : null)
+    const specialistIdToUse = explicitSpecialistId || (effectiveSpecialist ? effectiveSpecialist.id : null)
 
     // Abort previous in-flight stream if active
     if (activeAbortControllerRef.current) {
@@ -260,8 +265,8 @@ export default function ChatPanel({
     setInput('')
     setActiveSpecialist(null)
 
-    const specPrefix = activeSpecialist
-      ? `[${activeSpecialist.icon === 'compass' ? activeSpecialist.name : `${activeSpecialist.icon} ${activeSpecialist.name}`}] `
+    const specPrefix = effectiveSpecialist
+      ? `[${effectiveSpecialist.icon === 'compass' ? effectiveSpecialist.name : `${effectiveSpecialist.icon} ${effectiveSpecialist.name}`}] `
       : ''
     const userMsgText = `${specPrefix}${text}`
 

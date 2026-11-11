@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { filterSpecialists } from '../../api/specialistRegistry'
+import { filterSpecialists, getSpecialistById } from '../../api/specialistRegistry'
 import { Send, X } from 'lucide-react'
 import Logo from '../Logo'
 
@@ -28,8 +28,10 @@ export default function ChatInputBar({
     setInput(val)
 
     // Check if input begins with '/' or contains a slash command
+    // Only offer the picker while the command word itself is being typed; once a space follows
+    // ("/research Compare X"), Enter must send the message rather than re-open the menu.
     if (val.startsWith('/')) {
-      const match = val.match(/^\/([a-zA-Z0-9_-]*)/)
+      const match = val.match(/^\/([a-zA-Z0-9_-]*)$/)
       if (match) {
         setShowSlashPicker(true)
         setSlashQuery(match[1])
@@ -94,6 +96,14 @@ export default function ChatInputBar({
   const handleSubmit = (e) => {
     e.preventDefault()
     if (!input.trim() || isInputDisabled) return
+    // A bare "/research" (no question yet) selects the specialist instead of being sent as chat text.
+    const bare = input.trim().match(/^\/([a-zA-Z0-9_-]+)$/)
+    const bareSpec = bare ? getSpecialistById(bare[1]) : null
+    if (bareSpec) {
+      handleSelectSpecialist(bareSpec)
+      setInput('')
+      return
+    }
     onSend(input.trim(), null, activeSpecialist ? activeSpecialist.id : null)
   }
 
