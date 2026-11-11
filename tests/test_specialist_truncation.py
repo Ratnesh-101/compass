@@ -7,7 +7,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from backend.agents.specialist import _synthesize_specialist_response
+from backend.agents.specialist import (
+    SPECIALIST_DIRECT_ANSWER_RULE,
+    SPECIALIST_EMPTY_RETRY_MAX_TOKENS,
+    SPECIALIST_NO_ANSWER_NOTE,
+    _synthesize_specialist_response,
+)
 
 CUT_NOTE = "_(The answer was cut short — ask me to continue.)_"
 CONTINUE_PROMPT = (
@@ -114,3 +119,52 @@ async def test_client_allows_long_answers_and_bounds_retries():
     kwargs = ctor.call_args.kwargs
     assert kwargs["timeout"] == 45.0
     assert kwargs["max_retries"] == 1
+
+
+async def test_empty_length_response_is_retried_with_bigger_budget():
+    result, create = await _call(
+        [_resp("", "length"), _resp("Dynamic programming explained.", "stop")]
+    )
+
+    assert create.await_count == 2
+    assert result == "Dynamic programming explained."
+    first_call = create.await_args_list[0].kwargs
+    second_call = create.await_args_list[1].kwargs
+    assert second_call["max_tokens"] == SPECIALIST_EMPTY_RETRY_MAX_TOKENS
+    assert second_call["messages"][0]["content"].endswith(SPECIALIST_DIRECT_ANSWER_RULE)
+    assert SPECIALIST_DIRECT_ANSWER_RULE not in first_call["messages"][0]["content"]
+
+
+async def test_empty_twice_returns_stub_with_honest_note():
+    result, create = await _call([_resp("", "length"), _resp("", "length")])
+
+    assert create.await_count == 2
+    assert result == "FALLBACK" + SPECIALIST_NO_ANSWER_NOTE
+
+
+async def test_empty_then_cut_answer_is_continued():
+    result, create = await _call(
+        [
+            _resp("", "length"),
+            _resp("Part one", "length"),
+            _resp("and part two.", "stop"),
+        ]
+    )
+
+    assert create.await_count == 3
+    assert result.startswith("Part one")
+    assert result.endswith("and part two.")
+
+
+async def test_empty_stop_response_is_also_retried():
+    result, create = await _call([_resp("", "stop"), _resp("Answer.", "stop")])
+
+    assert create.await_count == 2
+    assert result == "Answer."
+
+
+async def test_retry_exception_returns_stub_with_note():
+    result, create = await _call([_resp("", "length"), RuntimeError("boom")])
+
+    assert create.await_count == 2
+    assert result == "FALLBACK" + SPECIALIST_NO_ANSWER_NOTE
