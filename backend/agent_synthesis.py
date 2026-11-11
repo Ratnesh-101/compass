@@ -47,14 +47,14 @@ async def force_final_synthesis(
 
     clean_tone = (tone or "").strip().lower()
     if clean_tone == "brief":
-        synth_tokens = 400
+        synth_tokens = 1200
         synth_prompt += (
             "\n\n[TONE CONSTRAINT: STRICTLY BRIEF]\n"
             "Give a short but genuinely useful explanation, like a good assistant asked to be brief: one direct sentence that answers the question, then 1-3 short sentences on the key mechanism or reason and one concrete example or tradeoff Keep it under 60 words, but never mention or state a word count in your reply. "
             "State the core answer or count + top item immediately with zero preamble or conversational filler. No follow-up questions."
         )
     elif clean_tone == "balanced":
-        synth_tokens = 250
+        synth_tokens = 1200
         synth_prompt += (
             "\n\n[TONE CONSTRAINT: BALANCED]\n"
             "Provide a balanced, well-rounded response (2-4 clear sentences, roughly 60-100 words). "
