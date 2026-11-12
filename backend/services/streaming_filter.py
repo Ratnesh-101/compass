@@ -51,3 +51,11 @@ class StreamingThinkFilter:
                         self.buffer = ""
                     break
         return out
+
+    def flush(self) -> str:
+        """Return text still held back at end of stream (e.g. a trailing '<th' that never became <think>).
+
+        Text inside an unfinished <think> block is private reasoning and stays dropped."""
+        tail = "" if self.in_think else self.buffer
+        self.buffer = ""
+        return tail

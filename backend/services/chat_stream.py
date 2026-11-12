@@ -589,6 +589,12 @@ async def generate_chat_events(
                             emitted_text += filtered_token
                             yield f"data: {json.dumps({'type': 'token', 'value': filtered_token})}\n\n"
 
+            tail = "" if tool_call_detected else think_filter.flush()
+            if tail:
+                full_text += tail
+                emitted_text += tail
+                yield f"data: {json.dumps({'type': 'token', 'value': tail})}\n\n"
+
             # Bounded continuation if output token limit was reached
             continuation_attempts = 0
             max_cont_attempts = 1 if hard_capped_tone else int(getattr(_settings, "MAX_CONTINUATION_ATTEMPTS", 2))
@@ -644,6 +650,11 @@ async def generate_chat_events(
                                     full_text += c_filtered
                                     emitted_text += c_filtered
                                     yield f"data: {json.dumps({'type': 'token', 'value': c_filtered})}\n\n"
+                    c_tail = cont_think_filter.flush()
+                    if c_tail:
+                        full_text += c_tail
+                        emitted_text += c_tail
+                        yield f"data: {json.dumps({'type': 'token', 'value': c_tail})}\n\n"
                 except Exception as cont_err:
                     logger.warning("Continuation attempt %d failed: %s", continuation_attempts, cont_err)
                     break
