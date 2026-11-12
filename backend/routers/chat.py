@@ -24,6 +24,7 @@ except (ImportError, ModuleNotFoundError):
 
 from backend.config import get_settings
 from backend.router import TOOLS
+from backend.services.sse_keepalive import with_keepalive
 from backend.services.usage import record_usage
 
 _settings = get_settings()
@@ -636,7 +637,7 @@ async def stream_chat(req: StreamChatRequest, request: Request, _rl: None = Depe
                     raise HTTPException(status_code=403, detail="Forbidden: conversation belongs to another user")
 
     return StreamingResponse(
-        generate_chat_events(req, request, user_id=user_id, guest_id=guest_id),
+        with_keepalive(generate_chat_events(req, request, user_id=user_id, guest_id=guest_id)),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
