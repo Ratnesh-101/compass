@@ -198,16 +198,21 @@ async def get_recommended_opportunities(
         enriched = [o for o in enriched if o.eligibility_classification == EligibilityClassification.ELIGIBLE]
 
     # Neutral Ranking Matrix:
-    # 1. Verified and active status: OPEN_CONFIRMED first (0), UPCOMING_CONFIRMED (1), others (2)
+    # 1. Verified and active status: fresh OPEN_CONFIRMED first (0), UPCOMING_CONFIRMED (1), stale open (2), others (3)
     # 2. Personal candidate eligibility: ELIGIBLE (0), POTENTIAL_MATCH (1), INSUFFICIENT_INFO (2), INELIGIBLE (3)
     # 3. User preferred role fit (bonus -1)
     # 4. User skill match overlap (bonus -N)
     # 5. India / Remote eligibility preference
     # 6. Approaching application deadline
     def rank_key(o: OpportunityOut) -> tuple:
-        status_weight = 0 if o.current_status == OpportunityStatus.OPEN_CONFIRMED else (
-            1 if o.current_status in (OpportunityStatus.UPCOMING_CONFIRMED, OpportunityStatus.ANNOUNCED) else 2
-        )
+        # Open listings verified recently rank first; an 'open' listing that needs a re-check ranks below
+        # upcoming ones (it is an unverified lead, not a verified opening).
+        if o.current_status == OpportunityStatus.OPEN_CONFIRMED:
+            status_weight = 2 if o.needs_recheck else 0
+        elif o.current_status in (OpportunityStatus.UPCOMING_CONFIRMED, OpportunityStatus.ANNOUNCED):
+            status_weight = 1
+        else:
+            status_weight = 3
         eligibility_weight = {
             EligibilityClassification.ELIGIBLE: 0,
             EligibilityClassification.POTENTIAL_MATCH: 1,
