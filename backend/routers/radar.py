@@ -6,7 +6,7 @@ watchlist monitoring, application pipeline tracking, and source synchronization.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -54,16 +54,22 @@ router = APIRouter(prefix="/api/opportunities", tags=["internship_radar"])
 
 
 def compute_is_verified_within_24h(
-    posted_at: Optional[datetime],
+    posted_at: Optional[Any],
     precision: Optional[str] = None,
     now_utc: Optional[datetime] = None,
 ) -> bool:
     """Compute is_verified_within_24h at read time:
-    precision == 'exact' AND 0 <= (now - posted_at) <= 24h.
+    precision in ('exact', 'exact_timestamp') AND 0 <= (now - posted_at) <= 24h.
     Future timestamps and date_only/unknown precision are NEVER verified.
+    Safely handles ISO strings.
     """
-    if not posted_at or precision != "exact":
+    if not posted_at or (precision or "").strip().lower() not in ("exact", "exact_timestamp"):
         return False
+    if isinstance(posted_at, str):
+        try:
+            posted_at = datetime.fromisoformat(posted_at)
+        except Exception:
+            return False
     now = now_utc or datetime.now(timezone.utc)
     if posted_at.tzinfo is None:
         posted_at = posted_at.replace(tzinfo=timezone.utc)
@@ -80,6 +86,20 @@ def _enrich_opportunity(opp: OpportunityOut, profile: Optional[UserOpportunityPr
         opp.location = None
     if opp.description and str(opp.description).lower() in ("nan", "null", "undefined", "none"):
         opp.description = None
+
+    # Truthful status transition: listings with passed deadlines are CLOSED_CONFIRMED, never open
+    today = date.today()
+    if opp.confirmed_close_date and opp.confirmed_close_date < today:
+        if opp.current_status in (
+            OpportunityStatus.OPEN_CONFIRMED,
+            OpportunityStatus.UPCOMING_CONFIRMED,
+            OpportunityStatus.ANNOUNCED,
+            OpportunityStatus.DISCOVERED,
+            OpportunityStatus.NEEDS_VERIFICATION,
+        ):
+            opp.current_status = OpportunityStatus.CLOSED_CONFIRMED
+            if not opp.verification_evidence or "closed" not in opp.verification_evidence.lower():
+                opp.verification_evidence = f"Application deadline closed on {opp.confirmed_close_date.isoformat()}."
 
     # Compute historical prediction
     opp.prediction = estimate_recruitment_cycle(opp.cycles)
@@ -111,6 +131,7 @@ async def list_opportunities_endpoint(
     search: Optional[str] = Query(None),
     india_only: bool = Query(False),
     verified_only: bool = Query(False),
+    recent_24h: bool = Query(False, description="Filter for opportunities verified posted in the last 24 hours"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
@@ -128,6 +149,7 @@ async def list_opportunities_endpoint(
         search=search,
         india_only=india_only,
         verified_only=verified_only,
+        recent_24h=recent_24h,
         page=page,
         page_size=page_size,
     )

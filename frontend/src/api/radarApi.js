@@ -20,6 +20,7 @@ export async function fetchOpportunities({
   search,
   india_only = false,
   verified_only = false,
+  recent_24h = false,
   page = 1,
   pageSize = 20,
 } = {}) {
@@ -33,6 +34,7 @@ export async function fetchOpportunities({
   if (search) params.set('search', search)
   if (india_only) params.set('india_only', 'true')
   if (verified_only) params.set('verified_only', 'true')
+  if (recent_24h) params.set('recent_24h', 'true')
   params.set('page', String(page))
   params.set('page_size', String(pageSize))
 
@@ -44,11 +46,12 @@ export async function fetchOpportunities({
   return res.json()
 }
 
-export async function fetchRecommendedOpportunities(limit = 20, employer_type = '') {
+export async function fetchRecommendedOpportunities(limit = 20, employer_type = '', india_only = true) {
   await ensureSession()
   const params = new URLSearchParams()
   params.set('limit', String(limit))
   if (employer_type) params.set('employer_type', employer_type)
+  if (india_only !== undefined) params.set('india_only', String(india_only))
 
   const res = await fetch(`${API_BASE}/api/opportunities/recommended?${params.toString()}`, {
     headers: getAuthHeaders(),
@@ -75,6 +78,7 @@ export async function fetchOpenOpportunities(filters = {}) {
 }
 
 export async function fetchSourceInventory() {
+  await ensureSession()
   const res = await fetch(`${API_BASE}/api/opportunities/sources`, {
     headers: getAuthHeaders(),
     credentials: 'include',
@@ -84,6 +88,7 @@ export async function fetchSourceInventory() {
 }
 
 export async function fetchUpcomingOpportunities() {
+  await ensureSession()
   const res = await fetch(`${API_BASE}/api/opportunities/upcoming`, {
     headers: getAuthHeaders(),
     credentials: 'include',
@@ -93,6 +98,7 @@ export async function fetchUpcomingOpportunities() {
 }
 
 export async function fetchRadarAnalytics() {
+  await ensureSession()
   const res = await fetch(`${API_BASE}/api/opportunities/analytics`, {
     headers: getAuthHeaders(),
     credentials: 'include',
@@ -102,6 +108,7 @@ export async function fetchRadarAnalytics() {
 }
 
 export async function fetchWatchlist() {
+  await ensureSession()
   const res = await fetch(`${API_BASE}/api/opportunities/watchlist`, {
     headers: getAuthHeaders(),
     credentials: 'include',
@@ -111,6 +118,7 @@ export async function fetchWatchlist() {
 }
 
 export async function saveOpportunity(id) {
+  await ensureSession()
   const res = await fetch(`${API_BASE}/api/opportunities/${id}/save`, {
     method: 'POST',
     headers: getAuthHeaders(),
@@ -121,6 +129,7 @@ export async function saveOpportunity(id) {
 }
 
 export async function unsaveOpportunity(id) {
+  await ensureSession()
   const res = await fetch(`${API_BASE}/api/opportunities/${id}/save`, {
     method: 'DELETE',
     headers: getAuthHeaders(),
@@ -131,6 +140,7 @@ export async function unsaveOpportunity(id) {
 }
 
 export async function fetchApplications() {
+  await ensureSession()
   const res = await fetch(`${API_BASE}/api/opportunities/applications`, {
     headers: getAuthHeaders(),
     credentials: 'include',
@@ -150,6 +160,7 @@ export async function fetchOpportunityDetail(id) {
 }
 
 export async function updateApplication(id, payload) {
+  await ensureSession()
   const res = await fetch(`${API_BASE}/api/opportunities/${id}/application`, {
     method: 'POST',
     headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
@@ -161,6 +172,7 @@ export async function updateApplication(id, payload) {
 }
 
 export async function fetchRadarProfile() {
+  await ensureSession()
   const res = await fetch(`${API_BASE}/api/opportunities/profile`, {
     headers: getAuthHeaders(),
     credentials: 'include',
@@ -170,6 +182,7 @@ export async function fetchRadarProfile() {
 }
 
 export async function updateRadarProfile(profile) {
+  await ensureSession()
   const res = await fetch(`${API_BASE}/api/opportunities/profile`, {
     method: 'PUT',
     headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
@@ -184,6 +197,7 @@ export async function updateRadarProfile(profile) {
 }
 
 export async function triggerRadarSync(source = 'all') {
+  await ensureSession()
   const res = await fetch(`${API_BASE}/api/opportunities/sync?source=${encodeURIComponent(source)}`, {
     method: 'POST',
     headers: getAuthHeaders(),
@@ -198,6 +212,7 @@ export async function triggerRadarSync(source = 'all') {
 }
 
 export async function verifyOpportunity(id) {
+  await ensureSession()
   const res = await fetch(`${API_BASE}/api/opportunities/${id}/verify`, {
     method: 'POST',
     headers: getAuthHeaders(),

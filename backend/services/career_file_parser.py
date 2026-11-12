@@ -246,8 +246,23 @@ def extract_resume_from_file_bytes(
     # 1. Plain Text and Markdown
     if ext in {".txt", ".md"}:
         try:
-            # Simple check to ensure it's not a binary file masquerading as text
-            if len(file_bytes) > 0 and file_bytes[0] == 0x00:
+            # Check for binary file signatures or null bytes masquerading as text
+            is_utf16 = file_bytes.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE))
+            known_binary_headers = (
+                b"\x7fELF",
+                b"MZ",
+                b"PK\x03\x04",
+                b"\x1f\x8b",
+                b"\xff\xd8\xff",
+                b"\x89PNG",
+                b"GIF8",
+                b"%PDF",
+                b"\x00\x00\x01\x00",
+            )
+            has_binary_header = any(file_bytes.startswith(hdr) for hdr in known_binary_headers)
+            has_null_bytes = not is_utf16 and b"\x00" in file_bytes[:8192]
+
+            if has_binary_header or has_null_bytes or (len(file_bytes) > 0 and file_bytes[0] == 0x00):
                 return ResumeParseResult(
                     success=False,
                     filename=filename,

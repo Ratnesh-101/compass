@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-const radar = readFileSync(new URL('../src/components/InternshipRadar.jsx', import.meta.url), 'utf8')
+const radar = readFileSync(new URL('../src/components/InternshipRadar.jsx', import.meta.url), 'utf8') + readFileSync(new URL('../src/utils/radarRefresh.js', import.meta.url), 'utf8')
 const filters = readFileSync(new URL('../src/components/radar/RadarFilters.jsx', import.meta.url), 'utf8')
 const api = readFileSync(new URL('../src/api/radarApi.js', import.meta.url), 'utf8')
 

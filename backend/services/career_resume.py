@@ -883,7 +883,7 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
             elif current_exp and current_exp.highlights and (line_clean[0].islower() or (not has_dates and not has_role_kw)):
                 current_exp.highlights[-1] = f"{current_exp.highlights[-1]} {_clean_bullet(line_clean)}".strip()
             else:
-                role = "Intern" if is_intern else "Software Engineer"
+                role = "Intern" if is_intern else ""
                 comp = line_clean
 
                 date_match = re.search(r"((?:20\d\d|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+20\d\d)\s*(?:[-–—~]|\bto\b)\s*(?:20\d\d|present|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+20\d\d))\b", line_clean, re.IGNORECASE)
@@ -905,7 +905,18 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
                     end_d = parts[1] if len(parts) > 1 else None
 
                 if "|" in comp:
-                    comp = comp.split("|")[0].strip()
+                    parts = [p.strip() for p in comp.split("|") if p.strip()]
+                    if len(parts) > 1:
+                        if any(re.search(r"\b" + re.escape(r_word) + r"\b", parts[0].lower()) for r_word in ROLE_KEYWORDS):
+                            role = parts[0]
+                            comp = parts[1]
+                        elif any(re.search(r"\b" + re.escape(r_word) + r"\b", parts[1].lower()) for r_word in ROLE_KEYWORDS):
+                            role = parts[1]
+                            comp = parts[0]
+                        else:
+                            comp = parts[0]
+                    elif parts:
+                        comp = parts[0]
 
                 if "," in comp:
                     parts = [p.strip() for p in comp.split(",", 1)]
@@ -1207,7 +1218,10 @@ def _project_sentence(p: ResumeProjectItem) -> str:
 
 
 def _experience_sentence(exp: ResumeExperienceItem) -> str:
-    sentence = f"Most recently, I worked as {exp.role_title} at {exp.company}"
+    if exp.role_title and exp.role_title.strip():
+        sentence = f"Most recently, I worked as {exp.role_title.strip()} at {exp.company}"
+    else:
+        sentence = f"Most recently, I worked at {exp.company}"
     if exp.start_date and exp.end_date:
         sentence += f" ({exp.start_date} to {exp.end_date})"
     elif exp.start_date and exp.is_current:

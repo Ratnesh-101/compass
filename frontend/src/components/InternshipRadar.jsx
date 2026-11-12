@@ -21,17 +21,7 @@ import {
   verifyOpportunity,
 } from '../api/radarApi'
 import { hasSavedProfile } from '../utils/careerUiHelpers'
-
-export function newestRefreshDate(opportunities) {
-  let newest = null
-  for (const opp of opportunities || []) {
-    for (const raw of [opp?.last_verified_at, opp?.last_checked_at]) {
-      const t = raw ? Date.parse(raw) : NaN
-      if (!Number.isNaN(t) && (newest === null || t > newest)) newest = t
-    }
-  }
-  return newest === null ? null : new Date(newest)
-}
+import { newestRefreshDate } from '../utils/radarRefresh'
 
 export default function InternshipRadar({
   refreshTrigger = 0,
@@ -100,7 +90,7 @@ export default function InternshipRadar({
       let serverHasMore = false
 
       if (activeTab === 'recommended') {
-        items = await fetchRecommendedOpportunities(30, selectedEmployerType)
+        items = await fetchRecommendedOpportunities(30, selectedEmployerType, indiaOnly)
       } else if (activeTab === 'recent_24h') {
         const res = await fetchOpportunities({
           category: selectedCategory,
@@ -108,12 +98,12 @@ export default function InternshipRadar({
           work_arrangement: workArrangement,
           search: searchQuery,
           india_only: indiaOnly,
-          page: 1,
-          pageSize: 50,
+          recent_24h: true,
+          page: targetPage,
+          pageSize: 24,
         })
-        const allOpps = res.opportunities || []
-        // Strict 24h verified filter: strictly rely ONLY on backend is_verified_within_24h boolean
-        items = allOpps.filter(o => o.is_verified_within_24h === true)
+        items = res.opportunities || []
+        serverHasMore = Boolean(res.has_more)
       } else if (activeTab === 'open') {
         items = await fetchOpenOpportunities({
           category: selectedCategory,
@@ -142,8 +132,8 @@ export default function InternshipRadar({
         serverHasMore = Boolean(res.has_more)
       }
 
-      // Client-side text search filter if tab is not 'all'
-      if (activeTab !== 'all' && searchQuery.trim()) {
+      // Client-side text search filter if tab is not 'all' and not 'recent_24h'
+      if (activeTab !== 'all' && activeTab !== 'recent_24h' && searchQuery.trim()) {
         const q = searchQuery.toLowerCase()
         items = items.filter(
           o =>
@@ -154,18 +144,23 @@ export default function InternshipRadar({
       }
 
       // Employer type filter for client-filtered tabs
-      if (selectedEmployerType && activeTab !== 'all' && activeTab !== 'open' && activeTab !== 'recommended') {
+      if (selectedEmployerType && activeTab !== 'all' && activeTab !== 'recent_24h' && activeTab !== 'open' && activeTab !== 'recommended') {
         items = items.filter(o => o.employer_type === selectedEmployerType)
       }
 
-      // Category filter for tabs other than 'all' and 'open'
-      if (activeTab !== 'all' && activeTab !== 'open' && selectedCategory) {
+      // Category filter for tabs other than 'all', 'recent_24h' and 'open'
+      if (activeTab !== 'all' && activeTab !== 'recent_24h' && activeTab !== 'open' && selectedCategory) {
         items = items.filter(o => o.category === selectedCategory)
       }
 
       // Work arrangement filter
-      if (activeTab !== 'all' && activeTab !== 'open' && workArrangement) {
+      if (activeTab !== 'all' && activeTab !== 'recent_24h' && activeTab !== 'open' && workArrangement) {
         items = items.filter(o => o.work_arrangement === workArrangement)
+      }
+
+      // India only filter for client-filtered tabs
+      if (indiaOnly && (activeTab === 'upcoming' || activeTab === 'watchlist' || activeTab === 'applications')) {
+        items = items.filter(o => o.is_india_eligible !== false)
       }
 
       if (isAppending) {
@@ -296,7 +291,7 @@ export default function InternshipRadar({
 
   // Sync is admin-only on the server (POST /api/opportunities/sync returns 403 otherwise),
   // so ordinary users get a read-only "last refreshed" line instead of a button that cannot work.
-  const lastRefreshed = newestRefreshDate(opportunities)
+  const lastRefreshed = newestRefreshDate(opportunities, stats)
 
   return (
     <div
