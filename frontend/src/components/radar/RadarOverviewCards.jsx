@@ -1,6 +1,7 @@
 import React from 'react'
 import { Target, Sparkles, Clock, Star, ClipboardList } from 'lucide-react'
 import { getProfileBannerInfo } from '../../utils/radarProfileBanner'
+import { shouldShowNoDeadlineNote } from '../../utils/radarFreshness'
 
 export default function RadarOverviewCards({
   stats,
@@ -10,6 +11,7 @@ export default function RadarOverviewCards({
   onSelectTab,
   error = null,
   onRetry = null,
+  opportunities = null,
 }) {
   const banner = getProfileBannerInfo(profile)
   const hasIncompleteProfile = banner.show
@@ -97,6 +99,15 @@ export default function RadarOverviewCards({
         </div>
       )}
 
+      {shouldShowNoDeadlineNote(opportunities) && (
+        <div
+          data-testid="radar-no-deadline-note"
+          style={{ fontSize: '12px', color: 'var(--text-secondary)' }}
+        >
+          No listing has a confirmed deadline. Apply early.
+        </div>
+      )}
+
       {/* 5-Column Responsive Metric Highlights */}
       <div
         style={{
@@ -119,7 +130,7 @@ export default function RadarOverviewCards({
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
             <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-              Active Now
+              Verified open
             </span>
             <span
               style={{
@@ -135,8 +146,29 @@ export default function RadarOverviewCards({
             {stats?.verified_open_count ?? (stats?.open_count ?? 0)}
           </div>
           <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            Open confirmed opportunities
+            Checked in the last 14 days
           </div>
+          {Number(stats?.stale_open_count) > 0 && (
+            <div data-testid="radar-stale-open" style={{ marginTop: '8px' }}>
+              <span
+                style={{
+                  display: 'inline-block',
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  background: 'rgba(245, 166, 35, 0.12)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid rgba(245, 166, 35, 0.35)',
+                }}
+              >
+                {stats.stale_open_count} listed as open, need re-check
+              </span>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                Last checked more than 14 days ago. Confirm on the company site before applying.
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 2. Eligible Strong Matches */}

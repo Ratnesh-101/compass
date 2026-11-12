@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { ExternalLink, CheckCircle2, XCircle, AlertCircle, Info, RefreshCw } from 'lucide-react'
 import { cleanOpportunity, cleanText, cleanSource } from '../../utils/jobCardCleaner'
 import Dialog from '../Dialog'
+import { formatOpportunityVerifiedAge, needsRecheck } from '../../utils/radarFreshness'
 
 const PIPELINE_STATUSES = [
   { id: 'interested', label: 'Interested' },
@@ -294,6 +295,25 @@ export default function RadarDetailModal({
                 </div>
                 <div>
                   <strong>Last Verified:</strong> {formattedVerified || 'Pending verification'}
+                </div>
+                <div data-testid="detail-verified-age">
+                  {formatOpportunityVerifiedAge(opportunity)}
+                  {needsRecheck(opportunity) && (
+                    <span
+                      data-testid="detail-needs-recheck-chip"
+                      style={{
+                        marginLeft: '8px',
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        background: 'rgba(245, 166, 35, 0.12)',
+                        border: '1px solid rgba(245, 166, 35, 0.35)',
+                      }}
+                    >
+                      Needs re-check
+                    </span>
+                  )}
                 </div>
                 {source_identifier && (
                   <div>

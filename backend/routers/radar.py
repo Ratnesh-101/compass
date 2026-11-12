@@ -43,6 +43,7 @@ from backend.models_radar import (
     UserOpportunityProfileUpdate,
 )
 from backend.services.radar_eligibility import evaluate_eligibility
+from backend.services.radar_freshness import needs_recheck, verification_age_days
 from backend.services.radar_inventory import get_source_inventory
 from backend.services.radar_prediction import estimate_recruitment_cycle
 from backend.services.radar_sync import run_radar_sync
@@ -112,6 +113,10 @@ def _enrich_opportunity(opp: OpportunityOut, profile: Optional[UserOpportunityPr
 
     # Strictly compute 24h recency at read time from posted_at & precision (no string derivation)
     opp.is_verified_within_24h = compute_is_verified_within_24h(opp.posted_at, opp.posted_at_precision)
+
+    # Truthful freshness and recheck metadata
+    opp.verification_age_days = verification_age_days(opp, today=today)
+    opp.needs_recheck = needs_recheck(opp, today=today)
     return opp
 
 

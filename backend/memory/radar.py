@@ -1181,6 +1181,7 @@ async def get_user_application_tracking(user_id: str) -> List[OpportunityOut]:
 async def get_radar_overview_stats(user_id: str) -> Dict[str, Any]:
     from backend.services.radar_eligibility import evaluate_eligibility
     from backend.models_radar import EligibilityClassification
+    from backend.services.radar_freshness import is_fresh_open, needs_recheck
 
     profile = await get_user_opportunity_profile(user_id)
     strong_matches_count = 0
@@ -1197,8 +1198,11 @@ async def get_radar_overview_stats(user_id: str) -> Dict[str, Any]:
         all_opps = list(_in_memory_opportunities.values())
         verified_open_opps = [
             o for o in all_opps
-            if o.get("current_status") == "OPEN_CONFIRMED"
-            and (not o.get("confirmed_close_date") or o.get("confirmed_close_date") >= today)
+            if is_fresh_open(o, today=today)
+        ]
+        stale_open_opps = [
+            o for o in all_opps
+            if needs_recheck(o, today=today)
         ]
         opening_soon = [
             o for o in all_opps
@@ -1222,6 +1226,7 @@ async def get_radar_overview_stats(user_id: str) -> Dict[str, Any]:
         user_prefix = f"{user_id}:"
         return {
             "verified_open_count": len(verified_open_opps),
+            "stale_open_count": len(stale_open_opps),
             "strong_matches_count": strong_matches_count,
             "opening_soon_count": len(opening_soon),
             "upcoming_deadlines_count": len(upcoming_deadlines),
@@ -1238,9 +1243,36 @@ async def get_radar_overview_stats(user_id: str) -> Dict[str, Any]:
 
     async with pool.acquire() as conn:
         total = await conn.fetchval("SELECT COUNT(*) FROM opportunities") or 0
-        open_cnt = await conn.fetchval(
-            "SELECT COUNT(*) FROM opportunities WHERE current_status = 'OPEN_CONFIRMED' AND (confirmed_close_date IS NULL OR confirmed_close_date >= CURRENT_DATE)"
-        ) or 0
+        counts_row = await conn.fetchrow(
+            """
+            SELECT
+                COUNT(CASE
+                    WHEN current_status = 'OPEN_CONFIRMED'
+                     AND (confirmed_close_date IS NULL OR confirmed_close_date >= CURRENT_DATE)
+                     AND COALESCE(
+                         last_verified_at,
+                         (SELECT MAX(s.last_checked_at) FROM opportunity_sources s WHERE s.opportunity_id = opportunities.id)
+                     ) >= CURRENT_DATE - INTERVAL '14 days'
+                    THEN 1 END) AS verified_open_cnt,
+                COUNT(CASE
+                    WHEN current_status = 'OPEN_CONFIRMED'
+                     AND (confirmed_close_date IS NULL OR confirmed_close_date >= CURRENT_DATE)
+                     AND (
+                         COALESCE(
+                             last_verified_at,
+                             (SELECT MAX(s.last_checked_at) FROM opportunity_sources s WHERE s.opportunity_id = opportunities.id)
+                         ) IS NULL
+                         OR COALESCE(
+                             last_verified_at,
+                             (SELECT MAX(s.last_checked_at) FROM opportunity_sources s WHERE s.opportunity_id = opportunities.id)
+                         ) < CURRENT_DATE - INTERVAL '14 days'
+                     )
+                    THEN 1 END) AS stale_open_cnt
+            FROM opportunities
+            """
+        )
+        open_cnt = (counts_row["verified_open_cnt"] if counts_row else 0) or 0
+        stale_cnt = (counts_row["stale_open_cnt"] if counts_row else 0) or 0
         upcoming_cnt = await conn.fetchval(
             "SELECT COUNT(*) FROM opportunities WHERE current_status = ANY($1::text[]) AND (confirmed_close_date IS NULL OR confirmed_close_date >= CURRENT_DATE)",
             list(OPENING_SOON_STATUSES),
@@ -1261,6 +1293,7 @@ async def get_radar_overview_stats(user_id: str) -> Dict[str, Any]:
 
         return {
             "verified_open_count": open_cnt,
+            "stale_open_count": stale_cnt,
             "strong_matches_count": strong_matches_count,
             "opening_soon_count": upcoming_cnt,
             "upcoming_deadlines_count": upcoming_deadlines_cnt,
