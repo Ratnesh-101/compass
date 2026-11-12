@@ -226,6 +226,8 @@ class OpportunityOut(BaseModel):
     posted_at: Optional[datetime] = None
     posted_at_precision: Optional[str] = None
     is_verified_within_24h: bool = False
+    verification_age_days: Optional[int] = None
+    needs_recheck: bool = False
 
     # Nested related domain data
     requirements: Optional[OpportunityRequirementsOut] = None
@@ -332,6 +334,7 @@ class UpdateApplicationStatusIn(BaseModel):
 
 class OpportunityOverviewStats(BaseModel):
     verified_open_count: int = 0
+    stale_open_count: int = 0
     strong_matches_count: int = 0
     opening_soon_count: int = 0
     upcoming_deadlines_count: int = 0
