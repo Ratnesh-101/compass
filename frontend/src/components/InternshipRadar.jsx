@@ -332,6 +332,7 @@ export default function InternshipRadar({
       {/* 1. Overview Metric Cards */}
       <RadarOverviewCards
         stats={stats}
+        opportunities={loading ? null : opportunities}
         profile={profile}
         onOpenProfile={handleOpenCandidateProfile}
         onNavigateToResumeStudio={handleGoToResumeStudio}

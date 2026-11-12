@@ -1,6 +1,7 @@
 import React from 'react'
 import { Star, DollarSign, Calendar, ExternalLink, Rocket } from 'lucide-react'
 import { cleanOpportunity } from '../../utils/jobCardCleaner'
+import { formatOpportunityVerifiedAge, needsRecheck } from '../../utils/radarFreshness'
 
 export default function RadarOpportunityCard({
   opportunity,
@@ -87,6 +88,24 @@ export default function RadarOpportunityCard({
           >
             {cleaned.eligibilityBadge.label}
           </span>
+
+          {needsRecheck(opportunity) && (
+            <span
+              data-testid="needs-recheck-chip"
+              title="Last checked more than 14 days ago. Confirm on the company site before applying."
+              style={{
+                padding: '2px 8px',
+                borderRadius: '4px',
+                fontSize: '11px',
+                fontWeight: 600,
+                background: 'rgba(245, 166, 35, 0.12)',
+                color: 'var(--text-primary, #1b1a17)',
+                border: '1px solid rgba(245, 166, 35, 0.35)',
+              }}
+            >
+              Needs re-check
+            </span>
+          )}
         </div>
 
         {/* Bookmark Button */}
@@ -275,6 +294,7 @@ export default function RadarOpportunityCard({
         {/* Single clean footer line: e.g. "Posted 23 Oct, checked 24 Oct via Glassdoor" */}
         <div style={{ fontSize: '11px', color: 'var(--text-muted, #5f5a52)' }}>
           {cleaned.footerLine}
+          <div data-testid="verified-age">{formatOpportunityVerifiedAge(opportunity)}</div>
         </div>
 
         {/* Action Controls */}
