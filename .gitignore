@@ -72,3 +72,8 @@ preview_states.html
 
 # Local audit notes: may contain sensitive values, never commit
 SECURITY_AUDIT_REPORT.md
+
+# Local AI-assistant tooling (kept on disk, not in the repo)
+CLAUDE.md
+skills-lock.json
+.agents/skills/
