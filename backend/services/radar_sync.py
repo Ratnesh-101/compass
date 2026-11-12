@@ -37,6 +37,7 @@ from backend.services.radar_sources import (
     normalize_company_name,
 )
 from backend.services.radar_jobspy import discover_jobspy_opportunities
+from backend.services.radar_reverify import reverify_stale_opportunities
 from backend.services.radar_verifier import verify_opportunity_status
 from backend.services.tavily import search as tavily_search, tavily_available
 
@@ -84,6 +85,13 @@ async def run_radar_sync(source_filter: Optional[str] = None, dry_run: bool = Fa
         records_skipped = 0
         failures = 0
         error_summary = ""
+        reverify_summary: Dict[str, Any] = {
+            "checked": 0,
+            "still_open": 0,
+            "downgraded": 0,
+            "errors": 0,
+            "dry_run": dry_run,
+        }
         if dry_run:
             logger.info(f"[DRY-RUN] Radar sync initiated (source_filter={source_filter}). No DB writes will occur.")
 
@@ -381,6 +389,19 @@ async def run_radar_sync(source_filter: Optional[str] = None, dry_run: bool = Fa
                     failures += 1
                     logger.warning(f"JobSpy synchronization encountered an issue: {jobspy_all_err}")
 
+            # 6. Re-verify stale open listings
+            try:
+                reverify_summary = await reverify_stale_opportunities(dry_run=dry_run)
+            except Exception as rev_err:
+                logger.warning(f"Radar reverification encountered an issue: {rev_err}")
+                reverify_summary = {
+                    "checked": 0,
+                    "still_open": 0,
+                    "downgraded": 0,
+                    "errors": 1,
+                    "dry_run": dry_run,
+                }
+
             status = "completed" if failures == 0 else "completed_with_errors"
             if failures > 0:
                 error_summary = f"{failures} records or network sources encountered warnings during sync."
@@ -409,5 +430,6 @@ async def run_radar_sync(source_filter: Optional[str] = None, dry_run: bool = Fa
             "records_skipped": records_skipped,
             "failures": failures,
             "error_summary": error_summary,
+            "reverify": reverify_summary,
             "duration_seconds": (datetime.now(timezone.utc) - start_time).total_seconds(),
         }

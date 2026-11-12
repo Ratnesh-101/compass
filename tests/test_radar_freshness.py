@@ -420,7 +420,7 @@ def test_enrich_opportunity_populates_freshness_metadata():
         role_title="Backend Intern",
         canonical_url="https://example.com/passed",
         current_status=OpportunityStatus.OPEN_CONFIRMED,
-        confirmed_close_date=date.today() - timedelta(days=2),
+        confirmed_close_date=datetime.now(timezone.utc).date() - timedelta(days=2),
         last_verified_at=now - timedelta(days=20),
     )
     enriched_passed = _enrich_opportunity(opp_passed_deadline, profile=None)
@@ -435,7 +435,7 @@ def test_enrich_opportunity_populates_freshness_metadata():
 @pytest.mark.asyncio
 async def test_in_memory_get_radar_overview_stats():
     """Verify get_radar_overview_stats in-memory branch divides open into fresh & stale."""
-    today = date.today()
+    today = datetime.now(timezone.utc).date()
     now_utc = datetime.now(timezone.utc)
 
     # Save original in-memory state

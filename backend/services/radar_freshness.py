@@ -121,7 +121,7 @@ def verification_age_days(opp_or_row: Any, today: Optional[date] = None) -> Opti
     if v_date is None:
         return None
 
-    ref_date = today.date() if isinstance(today, datetime) else (today or date.today())
+    ref_date = today.date() if isinstance(today, datetime) else (today or datetime.now(timezone.utc).date())
     diff = (ref_date - v_date).days
     return max(0, diff)
 
@@ -132,7 +132,7 @@ def is_fresh_open(opp_or_row: Any, today: Optional[date] = None) -> bool:
     Returns True ONLY if current_status is OPEN_CONFIRMED, confirmed_close_date has not passed,
     and verified within RECENCY_FRESH_DAYS (14 days).
     """
-    ref_date = today.date() if isinstance(today, datetime) else (today or date.today())
+    ref_date = today.date() if isinstance(today, datetime) else (today or datetime.now(timezone.utc).date())
     status = _get_field(opp_or_row, "current_status")
     if not status or str(status).upper() != OpportunityStatus.OPEN_CONFIRMED:
         return False
@@ -150,7 +150,7 @@ def needs_recheck(opp_or_row: Any, today: Optional[date] = None) -> bool:
     Returns True if an OPEN_CONFIRMED opportunity has expired recency (>14 days or no verification date).
     Returns False for non-OPEN_CONFIRMED opportunities or closed listings.
     """
-    ref_date = today.date() if isinstance(today, datetime) else (today or date.today())
+    ref_date = today.date() if isinstance(today, datetime) else (today or datetime.now(timezone.utc).date())
     status = _get_field(opp_or_row, "current_status")
     if not status or str(status).upper() != OpportunityStatus.OPEN_CONFIRMED:
         return False
