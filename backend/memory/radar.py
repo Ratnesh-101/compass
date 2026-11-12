@@ -815,6 +815,63 @@ async def update_opportunity_status(opportunity_id: int, new_status: str, verifi
         )
 
 
+async def update_opportunity_verification(
+    opportunity_id: int,
+    current_status: str,
+    verification_evidence: Optional[str],
+    last_verified_at: datetime,
+) -> None:
+    """Update status, verification evidence, and verification timestamp for an opportunity."""
+    pool = await get_pool()
+    if last_verified_at is None:
+        eff_dt = datetime.now(timezone.utc)
+    elif isinstance(last_verified_at, str):
+        eff_dt = datetime.fromisoformat(last_verified_at.replace("Z", "+00:00"))
+        if eff_dt.tzinfo is None:
+            eff_dt = eff_dt.replace(tzinfo=timezone.utc)
+    elif isinstance(last_verified_at, date) and not isinstance(last_verified_at, datetime):
+        eff_dt = datetime.combine(last_verified_at, datetime.min.time(), tzinfo=timezone.utc)
+    elif isinstance(last_verified_at, datetime) and last_verified_at.tzinfo is None:
+        eff_dt = last_verified_at.replace(tzinfo=timezone.utc)
+    else:
+        eff_dt = last_verified_at
+
+    if not pool:
+        target = _in_memory_opportunities.get(opportunity_id)
+        if target is None and isinstance(opportunity_id, str) and opportunity_id.isdigit():
+            target = _in_memory_opportunities.get(int(opportunity_id))
+        elif target is None:
+            for k, v in _in_memory_opportunities.items():
+                if str(k) == str(opportunity_id):
+                    target = v
+                    break
+        if target is not None:
+            target["current_status"] = current_status
+            target["verification_evidence"] = verification_evidence
+            target["last_verified_at"] = eff_dt
+            target["application_url_checked"] = True
+            target["updated_at"] = datetime.now(timezone.utc)
+        return
+
+    async with pool.acquire() as conn:
+        opp_id = int(opportunity_id) if isinstance(opportunity_id, str) and opportunity_id.isdigit() else opportunity_id
+        await conn.execute(
+            """
+            UPDATE opportunities
+            SET current_status = $1,
+                verification_evidence = $2,
+                last_verified_at = $3,
+                application_url_checked = TRUE,
+                updated_at = now()
+            WHERE id = $4
+            """,
+            current_status,
+            verification_evidence,
+            eff_dt,
+            opp_id,
+        )
+
+
 async def add_status_history(
     opportunity_id: int,
     prev_status: str,
@@ -1193,7 +1250,7 @@ async def get_radar_overview_stats(user_id: str) -> Dict[str, Any]:
         )
 
     pool = await get_pool()
-    today = date.today()
+    today = datetime.now(timezone.utc).date()  # UTC, like every stored timestamp
     if not pool:
         all_opps = list(_in_memory_opportunities.values())
         verified_open_opps = [

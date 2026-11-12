@@ -89,7 +89,7 @@ def _enrich_opportunity(opp: OpportunityOut, profile: Optional[UserOpportunityPr
         opp.description = None
 
     # Truthful status transition: listings with passed deadlines are CLOSED_CONFIRMED, never open
-    today = date.today()
+    today = datetime.now(timezone.utc).date()  # UTC, like every stored timestamp
     if opp.confirmed_close_date and opp.confirmed_close_date < today:
         if opp.current_status in (
             OpportunityStatus.OPEN_CONFIRMED,

@@ -43,7 +43,7 @@ from backend.services.career_resume import (
 # ===========================================================================
 
 def test_closed_opportunity_dynamically_enriched_when_deadline_passed():
-    yesterday = date.today() - timedelta(days=1)
+    yesterday = datetime.now(timezone.utc).date() - timedelta(days=1)
     opp = OpportunityOut(
         id=9001,
         company_name="Acme Corp",
@@ -150,7 +150,7 @@ def test_open_listing_with_future_deadline_stays_open():
         category="swe",
         canonical_url="https://acme.test/jobs/9002",
         current_status=OpportunityStatus.OPEN_CONFIRMED,
-        confirmed_close_date=date.today() + timedelta(days=5),
+        confirmed_close_date=datetime.now(timezone.utc).date() + timedelta(days=5),
     )
     assert _enrich_opportunity(opp, None).current_status == OpportunityStatus.OPEN_CONFIRMED
 
