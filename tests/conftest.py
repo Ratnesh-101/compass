@@ -174,24 +174,17 @@ async def test_db_lifecycle():
     try:
         from backend.memory import db
         if db._pool is not None:
-            # One statement at a time: a single failure must not silently skip the rest
-            # (a leaked rate_limit_buckets row can turn a later request into a 429).
-            cleanup_statements = (
-                "DELETE FROM user_profile_facts WHERE user_id LIKE 'alice_%' OR user_id LIKE 'bob_%' OR user_id LIKE 'carol_%' OR user_id LIKE 'david_%' OR user_id LIKE 'test_%' OR user_id LIKE '%@example.com'",
-                "DELETE FROM parked_thoughts WHERE user_id LIKE 'alice_%' OR user_id LIKE 'bob_%' OR user_id LIKE 'carol_%' OR user_id LIKE 'david_%' OR user_id LIKE 'test_%' OR user_id LIKE '%@example.com'",
-                "DELETE FROM rate_limit_buckets",
-                "DELETE FROM guest_mint_log",
-                "DELETE FROM agent_runs WHERE id LIKE 'test_%' OR id LIKE 'run_%'",
-                "DELETE FROM pending_actions WHERE run_id LIKE 'test_%' OR run_id LIKE 'run_%'",
-            )
-            async with db._pool.acquire(timeout=15.0) as conn:
-                for statement in cleanup_statements:
-                    try:
-                        await conn.execute(statement)
-                    except Exception as exc:
-                        print(f"[conftest] cleanup failed: {statement[:40]}... {type(exc).__name__}")
-    except Exception as exc:
-        print(f"[conftest] cleanup could not acquire the pool: {type(exc).__name__}")
+            async with db._pool.acquire(timeout=5.0) as conn:
+                await conn.execute("""
+                    DELETE FROM user_profile_facts WHERE user_id LIKE 'alice_%' OR user_id LIKE 'bob_%' OR user_id LIKE 'carol_%' OR user_id LIKE 'david_%' OR user_id LIKE 'test_%' OR user_id LIKE '%@example.com';
+                    DELETE FROM parked_thoughts WHERE user_id LIKE 'alice_%' OR user_id LIKE 'bob_%' OR user_id LIKE 'carol_%' OR user_id LIKE 'david_%' OR user_id LIKE 'test_%' OR user_id LIKE '%@example.com';
+                    DELETE FROM rate_limit_buckets;
+                    DELETE FROM guest_mint_log;
+                    DELETE FROM agent_runs WHERE id LIKE 'test_%' OR id LIKE 'run_%';
+                    DELETE FROM pending_actions WHERE run_id LIKE 'test_%' OR run_id LIKE 'run_%';
+                """)
+    except Exception:
+        pass
 
 
 def pytest_sessionfinish(session, exitstatus):
