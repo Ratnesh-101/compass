@@ -290,6 +290,6 @@ Verify that all 4 probes pass and that the reported `commit` reflects the restor
 
 ## 8. Known Operational Limitations
 
-1. **Render Free-Tier Sleep Cycle**: On free or hobby plans, Render spins down web services after 15 minutes of inactivity. The first request after a period of dormancy will experience a cold-start delay of 30–50 seconds while the container initializes.
+1. **Render Free-Tier Sleep Cycle**: On free or hobby plans, Render spins down web services after 15 minutes of inactivity. The first request after a period of dormancy will experience a cold-start delay of 20–45 seconds while the container initializes; the app shows a "Waking Compass up" message meanwhile.
 2. **In-Memory Rate Limiting**: Endpoint rate limiting is enforced per-worker in memory. If Render scales horizontally across multiple container instances, rate limits apply per container rather than globally across workers (documented trade-off).
 3. **Branch Preview Databases**: Pull requests deploy frontend preview builds on Vercel, but preview backend environments require separate Render services or manual database branch creation via Neon CLI.
