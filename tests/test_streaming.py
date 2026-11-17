@@ -73,7 +73,7 @@ async def test_streaming_tool_call(client: AsyncClient, monkeypatch, signed_gues
     assert len(events) >= 1
     done_events = [ev for ev in events if ev.get("type") == "done"]
     assert len(done_events) == 1
-    assert done_events[0].get("skill_used") in ("add_task", "chat")
+    assert done_events[0].get("skill_used") in ("add_task", "add_tasks_preview", "chat")
     assert "conversation_id" in done_events[0]
 
 

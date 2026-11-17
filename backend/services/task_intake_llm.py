@@ -15,6 +15,7 @@ from typing import Any, List, Literal, Optional
 
 from pydantic import BaseModel, Field, ValidationError
 
+from backend.services.task_context import enrich_title, infer_domain
 from backend.services.task_intake_parse import MAX_ITEMS, IntakeItem
 from backend.services.task_intent import is_question_framed, mentions_task_creation, title_problem
 
@@ -43,7 +44,11 @@ class TaskDraftList(BaseModel):
 SYSTEM_PROMPT = (
     "Extract the tasks the user explicitly asks to add. Never invent tasks, dates or details. "
     "Copy due_text verbatim from the message (empty string if the user gave no date or time). "
-    "Use priority 'medium' and domain 'general' unless the message says otherwise."
+    "Use priority 'medium' unless the message says otherwise. "
+    "Keep the user's context in each title: when the message says what the tasks are for "
+    "(for example 'for my data structures exam'), name them like 'Study arrays - Data Structures exam', "
+    "not just 'arrays'. Use domain 'coursework' for studying, exams, classes and assignments, "
+    "'hackathon' for hackathon work, 'code' for programming and repositories, otherwise 'general'."
 )
 
 
@@ -74,7 +79,8 @@ def _to_items(drafts: List[TaskDraft], message: str) -> List[IntakeItem]:
         due_text = d.due_text.strip()
         if due_text and due_text.lower() not in lowered:
             due_text = ""  # not a quote of the user's words: drop it rather than trust it
-        items.append(IntakeItem(title, d.domain, d.priority, d.duration_minutes, due_text))
+        title = enrich_title(title, message)
+        items.append(IntakeItem(title, infer_domain(d.domain, message), d.priority, d.duration_minutes, due_text))
     return items
 
 

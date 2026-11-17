@@ -141,8 +141,10 @@ async def test_audit_missing_required_schema_fields_falls_back():
 
 
 @pytest.mark.asyncio
-async def test_audit_identity_cannot_be_spoofed_by_model_args():
+async def test_audit_identity_cannot_be_spoofed_by_model_args(monkeypatch):
     """Verify that model-supplied user_id in arguments cannot override trusted user_id in database operations."""
+    # The create_task call is asserted below, so use the direct-save path (the preview writes nothing).
+    monkeypatch.setattr("backend.orchestrator.SINGLE_TASK_PREVIEW", False)
     spoofed_args = {"title": "Test task", "user_id": "attacker_user_id"}
     trusted_user_id = "legitimate_authenticated_user"
 

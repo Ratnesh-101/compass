@@ -72,8 +72,10 @@ def test_past_date_roll_forward_with_frozen_clock():
 
 
 @pytest.mark.asyncio
-async def test_undo_cross_user_isolation():
+async def test_undo_cross_user_isolation(monkeypatch):
     """Verify that User B cannot undo or delete a task created by User A."""
+    # The saved task is only a fixture here (undo isolation is under test), so use the direct-save path.
+    monkeypatch.setattr("backend.orchestrator.SINGLE_TASK_PREVIEW", False)
     from backend.orchestrator import handle_message
     from backend.memory.db import get_pool
     from backend.memory import structured

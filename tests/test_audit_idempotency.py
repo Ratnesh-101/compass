@@ -13,7 +13,9 @@ CONV = "audit-idem-conv-1"
 
 
 @pytest_asyncio.fixture
-async def pool():
+async def pool(monkeypatch):
+    # These tests are about request-id idempotency of a committed save, so use the direct-save path.
+    monkeypatch.setattr("backend.orchestrator.SINGLE_TASK_PREVIEW", False)
     p = await get_pool()
     if p is None:
         pytest.skip("local Postgres is not available")

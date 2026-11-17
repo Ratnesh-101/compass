@@ -12,6 +12,7 @@ from typing import Any, Optional, Tuple
 
 from backend.services.task_intent import blocks_task_creation, normalize_task_intent_text, title_problem
 from backend.services.task_time import local_today, request_timezone
+from backend.services.task_title_clean import extract_priority, strip_priority_domain_fragments, tidy_title
 
 logger = logging.getLogger("compass.router.helpers")
 
@@ -365,13 +366,12 @@ def _parse_natural_date(text: str, today: Optional[date] = None) -> Tuple[Option
         return today + timedelta(days=7 * int(m_in_weeks.group(1))), time_24, time_12
 
     # Day of week (e.g. "next monday", "this friday", "friday")
-    for day_name, target_weekday in DAYS_OF_WEEK.items():
-        pattern = rf"\b(?:next\s+|this\s+)?{day_name}\b"
-        if re.search(pattern, msg):
-            days_ahead = (target_weekday - today.weekday()) % 7
-            if days_ahead == 0:
-                days_ahead = 7
-            return today + timedelta(days=days_ahead), time_24, time_12
+    # Rules (see services/task_dates.py): next/bare = first occurrence after today, this = incl. today.
+    from backend.services.task_dates import first_weekday_date
+
+    weekday_day = first_weekday_date(msg, today)
+    if weekday_day is not None:
+        return weekday_day, time_24, time_12
 
     # ISO date (YYYY-MM-DD)
     m_iso = re.search(r"\b(20\d{2})-(\d{1,2})-(\d{1,2})\b", msg)
@@ -449,7 +449,7 @@ def _extract_task_creation_args(message: str) -> dict:
         domain = "hackathon"
     elif any(k in msg_lower for k in ("coursework", "assignment", "homework", "exam", "quiz", "lecture", "cs101")):
         domain = "coursework"
-    elif any(k in msg_lower for k in ("code", "repo", "repository", "bug", "pr", "branch", "refactor")):
+    elif any(k in msg_lower for k in ("code", "repo", "repository", "bug", "branch", "refactor")) or re.search(r"\bprs?\b", msg_lower):
         domain = "code"
 
     m_dom = re.search(r"\bdomain[:= ]\s*([a-z0-9_-]+)", msg_lower)
@@ -495,12 +495,13 @@ def _extract_task_creation_args(message: str) -> dict:
         if not text_cand:
             return ""
         t = text_cand.strip(" .!?:;'\"")
+        t = strip_priority_domain_fragments(t)
         month_rx = "|".join(MONTH_MAP.keys())
         patterns = [
             rf"\b(?:on|at|due|by|for|in)?\s*\d{{1,2}}(?:st|nd|rd|th)?\s+(?:of\s+)?({month_rx})\b(?:\s+\d{{4}})?",
             rf"\b(?:on|at|due|by|for|in)?\s*({month_rx})\s+\d{{1,2}}(?:st|nd|rd|th)?\b(?:\s+\d{{4}})?",
             r"\b(?:on|at|due|by|for|in)?\s*(?:today|tomorrow|yesterday)\b",
-            r"\b(?:next|this)?\s*(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+            r"\b(?:(?:on|at|due|by|before|until)\s+)?(?:(?:next|this)\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
             r"\b\d{4}-\d{2}-\d{2}\b",
             r"\b(?:at\s+)?(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?\s*(?:am|pm)?\b",
             r"\b(?:at\s+)?(?:1[0-2]|0?[1-9])\s*(?:am|pm)\b",
@@ -510,7 +511,7 @@ def _extract_task_creation_args(message: str) -> dict:
         ]
         for p in patterns:
             t = re.sub(p, "", t, flags=re.IGNORECASE)
-        return t.strip(" .!?:;'\"")
+        return tidy_title(t)
 
     # Strategy C: "remind me to X [by/on/at ...]"
     if not title and "remind me to " in msg_lower:
@@ -560,6 +561,9 @@ def _extract_task_creation_args(message: str) -> dict:
         res["due_date"] = due_str
     if time_12:
         res["time_str"] = time_12
+    stated_priority = extract_priority(msg)
+    if stated_priority:
+        res["priority"] = stated_priority
     has_explicit_year = bool(re.search(r"\b20\d{2}\b", msg))
     if parsed_date and not has_explicit_year and parsed_date.year > _current_today().year:
         res["roll_forward_note"] = f"(Note: {parsed_date.strftime('%B %d')} has passed this year; scheduled for {parsed_date.year})"

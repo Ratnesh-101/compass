@@ -70,7 +70,8 @@ def _preview_text(items: list[dict], parsed: ParsedIntake, tz_name: str) -> str:
         )
     if parsed.skipped:
         notes.append("Skipped (no usable task name): " + "; ".join(f'"{s}"' for s in parsed.skipped))
-    notes.append(f"Times are in {tz_name}. Reply \"Confirm\" to add all {n}, or \"Cancel\".")
+    confirm_hint = 'Reply "Confirm" to add it' if n == 1 else f'Reply "Confirm" to add all {n}'
+    notes.append(f'Times are in {tz_name}. {confirm_hint}, or "Cancel".')
     return "\n".join(lines + [""] + notes)
 
 
