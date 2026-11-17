@@ -1,13 +1,10 @@
-import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react'
-import { X } from 'lucide-react'
+import React, { useState, useMemo, useEffect } from 'react'
 import {
   deleteTask,
   updateTask,
-  seedJudgeDemoPersona,
   verifyAllDeadlines,
 } from '../api/client'
-import { mapPersonaError } from '../utils/personaNotice'
-import OnboardingTour from './OnboardingTour'
+import AboutJudgesModal from './AboutJudgesModal'
 import { getDomainMeta } from './timeline/domainMeta'
 import TaskCard from './timeline/TaskCard'
 import TaskDetailModal from './timeline/TaskDetailModal'
@@ -41,8 +38,8 @@ export default function Timeline({
   const toggleDark = onToggleDarkMode || onToggleTheme
   const [selectedTask, setSelectedTask] = useState(null)
   const [showAddModal, setShowAddModal] = useState(false)
-  const [seedingPersona, setSeedingPersona] = useState(false)
-  const [seedSuccess, setSeedSuccess] = useState(false)
+  const [showAboutModal, setShowAboutModal] = useState(false)
+  const [savedToast, setSavedToast] = useState(false)
   const [highlightedTaskId, setHighlightedTaskId] = useState(() => {
     try {
       return window.sessionStorage.getItem('compass_highlight_task_id') || null
@@ -105,61 +102,6 @@ export default function Timeline({
       setVerifyingDeadlines(false)
     }
   }
-
-  const [seedNotice, setSeedNotice] = useState(null)
-  const retryTimeoutRef = useRef(null)
-
-  useEffect(() => {
-    return () => {
-      if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current)
-    }
-  }, [])
-
-  const handleSeedJudgePersona = useCallback(async (isRetry = false) => {
-    if (seedingPersona && !isRetry) return
-    if (!isRetry && retryTimeoutRef.current) {
-      clearTimeout(retryTimeoutRef.current)
-      retryTimeoutRef.current = null
-    }
-    setSeedingPersona(true)
-    if (!isRetry) {
-      setSeedNotice(null)
-    }
-    try {
-      await seedJudgeDemoPersona()
-      setSeedSuccess(true)
-      setSeedNotice({
-        type: 'success',
-        text: 'Judge Persona loaded successfully! 21 multi-domain tasks & timeline populated.',
-        canRetry: false,
-      })
-      setTimeout(() => setSeedSuccess(false), 3000)
-      if (onTasksUpdated) await onTasksUpdated()
-    } catch (err) {
-      const mapped = mapPersonaError(err)
-      if (mapped.is503 && !isRetry) {
-        setSeedNotice({
-          type: 'info',
-          text: mapped.text,
-          canRetry: true,
-        })
-        const delay = (mapped.retryDelay || 5) * 1000
-        retryTimeoutRef.current = setTimeout(() => {
-          handleSeedJudgePersona(true)
-        }, delay)
-      } else {
-        setSeedNotice({
-          type: mapped.type === 'info' ? 'error' : mapped.type,
-          text: mapped.is503
-            ? 'The server is waking up or temporarily unavailable.'
-            : mapped.text,
-          canRetry: mapped.canRetry,
-        })
-      }
-    } finally {
-      setSeedingPersona(false)
-    }
-  }, [seedingPersona, onTasksUpdated])
 
   const handleDelete = async (taskId) => {
     try {
@@ -233,97 +175,6 @@ export default function Timeline({
         </div>
       )}
 
-      {/* Inline Judge Persona Feedback Banner */}
-      {seedNotice && (
-        <div
-          role="status"
-          aria-live="polite"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '12px',
-            padding: '10px 14px',
-            marginBottom: '16px',
-            borderRadius: '6px',
-            background:
-              seedNotice.type === 'success'
-                ? 'rgba(16, 185, 129, 0.12)'
-                : seedNotice.type === 'disabled'
-                ? 'rgba(217, 119, 6, 0.12)'
-                : seedNotice.type === 'info'
-                ? 'rgba(59, 130, 246, 0.12)'
-                : 'rgba(239, 68, 68, 0.12)',
-            border:
-              seedNotice.type === 'success'
-                ? '1px solid rgba(16, 185, 129, 0.35)'
-                : seedNotice.type === 'disabled'
-                ? '1px solid rgba(217, 119, 6, 0.35)'
-                : seedNotice.type === 'info'
-                ? '1px solid rgba(59, 130, 246, 0.35)'
-                : '1px solid rgba(239, 68, 68, 0.35)',
-            color:
-              seedNotice.type === 'success'
-                ? '#059669'
-                : seedNotice.type === 'disabled'
-                ? '#d97706'
-                : seedNotice.type === 'info'
-                ? '#2563eb'
-                : '#dc2626',
-            fontSize: '13px',
-            fontWeight: '500',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontWeight: '600' }}>
-              {seedNotice.type === 'success' ? '✓' : seedNotice.type === 'disabled' ? '⚠️' : seedNotice.type === 'info' ? 'ℹ️' : '✕'}
-            </span>
-            <span>{seedNotice.text}</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {seedNotice.canRetry && (
-              <button
-                type="button"
-                onClick={() => handleSeedJudgePersona(true)}
-                disabled={seedingPersona}
-                style={{
-                  background: 'transparent',
-                  border: '1px solid currentColor',
-                  borderRadius: '4px',
-                  padding: '2px 8px',
-                  fontSize: '12px',
-                  fontWeight: '600',
-                  color: 'inherit',
-                  cursor: seedingPersona ? 'wait' : 'pointer',
-                }}
-              >
-                Retry
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => {
-                if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current)
-                setSeedNotice(null)
-              }}
-              className="btn-touch-target"
-              style={{
-                background: 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-                color: 'inherit',
-                padding: '4px',
-                display: 'flex',
-                alignItems: 'center',
-              }}
-              aria-label="Dismiss message"
-            >
-              <X size={14} />
-            </button>
-          </div>
-        </div>
-      )}
-
       <TimelineHeader
         today={today}
         domainMeta={domainMeta}
@@ -333,20 +184,10 @@ export default function Timeline({
         onOpenTelemetry={onOpenTelemetry}
         onVerifyAll={handleVerifyAll}
         verifyingDeadlines={verifyingDeadlines}
-        onSeedJudgePersona={() => handleSeedJudgePersona(false)}
-        seedingPersona={seedingPersona}
-        seedSuccess={seedSuccess}
         onOpenNewTask={() => setShowAddModal(true)}
+        onOpenAbout={() => setShowAboutModal(true)}
         verificationSummary={verificationSummary}
         onClearVerificationSummary={() => setVerificationSummary(null)}
-      />
-
-      {/* Judge Onboarding & Architectural Tour */}
-      <OnboardingTour
-        onVerifyDeadlines={handleVerifyAll}
-        onOpenTelemetry={onOpenTelemetry}
-        onOpenCompass={onOpenCompass}
-        onOpenSeed={() => handleSeedJudgePersona(false)}
       />
 
       {/* Filter pills: horizontal scroll on mobile, 6px radius, min 44px tap target, domain swatch */}
@@ -442,7 +283,7 @@ export default function Timeline({
             </div>
             <div style={{ fontSize: '13px', color: 'var(--text-secondary)', maxWidth: '480px', margin: '0 auto', lineHeight: 1.5 }}>
               {activeDomain === 'all'
-                ? 'Use the Add deadline button in the header above to create your first milestone, or click Load Judge Persona to populate demo multi-domain tasks.'
+                ? 'Use the Add deadline button in the header above to create your first milestone, or take the 60-second tour on the Dashboard.'
                 : `No deadlines in ${getDomainMeta(activeDomain).label} yet. Use Add deadline to create your first milestone.`}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', marginTop: '16px', flexWrap: 'wrap' }}>
@@ -540,12 +381,53 @@ export default function Timeline({
       <AddDeadlineModal
         isOpen={showAddModal}
         onClose={() => setShowAddModal(false)}
-        onCreated={onTasksUpdated}
+        onCreated={() => {
+          setShowAddModal(false)
+          setSavedToast(true)
+          setTimeout(() => setSavedToast(false), 3000)
+          if (onTasksUpdated) onTasksUpdated()
+        }}
         defaultDomain={activeDomain}
         tasks={tasks}
         customDomains={customDomains}
         onOpenCompass={onOpenCompass}
       />
+
+      {/* About & Judges Guide Modal (N-005, N-026, N-027) */}
+      <AboutJudgesModal
+        isOpen={showAboutModal}
+        onClose={() => setShowAboutModal(false)}
+        onOpenTelemetry={onOpenTelemetry}
+        onVerifyDeadlines={handleVerifyAll}
+      />
+
+      {/* Saved Toast Notification (N-033) */}
+      {savedToast && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            position: 'fixed',
+            bottom: '24px',
+            right: '24px',
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border)',
+            boxShadow: 'var(--shadow-lg)',
+            padding: '10px 16px',
+            borderRadius: '8px',
+            color: 'var(--text-primary)',
+            fontSize: '13px',
+            fontWeight: '600',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            zIndex: 1200,
+          }}
+        >
+          <span style={{ color: '#10b981', fontWeight: 'bold' }}>✓</span>
+          <span>Deadline saved</span>
+        </div>
+      )}
     </div>
   )
 }

@@ -83,11 +83,13 @@ export function QuickConnectModal({ show, onClose, quickEmailInput, setQuickEmai
           <span>Connect Your Gmail</span>
         </h3>
         <p style={{ color: 'var(--text-secondary)', fontSize: '13px', margin: '0 0 20px', lineHeight: '1.5' }}>
-          Enter your Gmail address to activate your schedule profile. Tasks will be slotted deterministically and can be imported or subscribed directly in Google Calendar.
+          Enter your Gmail address to activate your schedule profile. Tasks will be scheduled into open focus slots and can be imported or subscribed directly in Google Calendar.
         </p>
+        <label htmlFor="input-quick-email" className="sr-only">Gmail address</label>
         <input
           id="input-quick-email"
           type="email"
+          aria-label="Gmail address"
           placeholder="e.g. yourname@gmail.com"
           value={quickEmailInput}
           onChange={(e) => setQuickEmailInput(e.target.value)}

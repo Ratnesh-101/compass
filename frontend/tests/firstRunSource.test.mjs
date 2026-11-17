@@ -20,12 +20,15 @@ function between(source, startMarker, endMarker) {
   return source.slice(start, end)
 }
 
-test('seed buttons never pass the click event as isRetry', () => {
-  assert.ok(dashboard.includes('onClick={() => handleSeedJudgePersona(false)}'))
-  assert.ok(!dashboard.includes('onClick={handleSeedJudgePersona}'))
-  assert.ok(timeline.includes('onSeedJudgePersona={() => handleSeedJudgePersona(false)}'))
-  assert.ok(!timeline.includes('onSeedJudgePersona={handleSeedJudgePersona}'))
-  assert.ok(!timeline.includes('onOpenSeed={handleSeedJudgePersona}'))
+test('seeding UI is gone from Dashboard, Timeline and the About modal (demo seeding is off in production)', () => {
+  for (const [name, src] of [['Dashboard', dashboard], ['Timeline', timeline], ['AboutJudgesModal', read('components/AboutJudgesModal.jsx')]]) {
+    assert.ok(!src.includes('handleSeedJudgePersona'), `${name} must not seed`)
+    assert.ok(!src.includes('seedJudgeDemoPersona'), `${name} must not call the seed API`)
+    assert.ok(!src.includes('ExamplePersonaModal'), `${name} must not open the example dialog`)
+    assert.ok(!src.includes('See an example'), `${name} must not offer "See an example"`)
+  }
+  assert.ok(!read('api/chatApi.js').includes('/api/demo/seed-persona'))
+  assert.ok(!app.includes('compass:demo-persona-loaded'))
 })
 
 test('health offline->online transition re-runs the one-shot user and demo checks', () => {
@@ -86,7 +89,6 @@ test('migration success view is reachable: import handlers no longer close it, D
 test('network calls that used to spin forever now use a timeout', () => {
   assert.ok(migrationApi.includes('fetchWithTimeout('))
   assert.ok(read('api/calendarApi.js').includes('fetchWithTimeout('))
-  assert.ok(read('api/chatApi.js').includes('timeoutMs: SEED_TIMEOUT_MS'))
   assert.ok(read('api/baseClient.js').includes('export async function fetchWithTimeout'))
 })
 

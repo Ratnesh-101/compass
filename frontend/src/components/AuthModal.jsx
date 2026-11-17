@@ -302,8 +302,8 @@ export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged 
               gap: '16px'
             }}>
               {/* Google OAuth Button */}
-              <div style={{ textAlign: 'center' }}>
-                {oauthStatus?.configured ? (
+              {oauthStatus?.configured && (
+                <div style={{ textAlign: 'center' }}>
                   <a
                     href={safeHref(getGoogleOAuthConnectUrl(true))}
                     style={{
@@ -323,29 +323,8 @@ export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged 
                     <Key size={15} strokeWidth={1.8} />
                     <span>Sign in with Google OAuth</span>
                   </a>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setError('Google OAuth is not configured in .env (GOOGLE_CLIENT_ID missing). See the setup instructions below.')}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      padding: '10px 20px',
-                      borderRadius: 'var(--radius-btn, 6px)',
-                      background: 'var(--bg-card)',
-                      border: '1px solid var(--border)',
-                      color: 'var(--text-muted)',
-                      fontSize: '13px',
-                      fontWeight: '600',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <Key size={15} strokeWidth={1.8} />
-                    <span>Sign in with Google (Setup Required)</span>
-                  </button>
-                )}
-              </div>
+                </div>
+              )}
 
               {emailSignInEnabled && (
                 <>
@@ -371,8 +350,11 @@ export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged 
                   }}
                   style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}
                 >
+                  <label htmlFor="auth-email-input" className="sr-only">Student email address</label>
                   <input
+                    id="auth-email-input"
                     type="email"
+                    aria-label="Student email address"
                     placeholder="student@vit.ac.in"
                     value={emailInput}
                     onChange={e => setEmailInput(e.target.value)}
@@ -588,14 +570,12 @@ export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged 
                     </a>
                   ) : (
                     <span style={{
-                      fontSize: '11px', color: 'var(--amber-text)', fontWeight: '600',
-                      background: 'rgba(245, 158, 11, 0.12)',
-                      border: '1px solid rgba(245, 158, 11, 0.3)',
+                      fontSize: '11px', color: 'var(--text-muted)', fontWeight: '500',
+                      background: 'var(--bg-card)',
+                      border: '1px solid var(--border)',
                       borderRadius: 'var(--radius-btn, 6px)', padding: '5px 9px', flexShrink: 0,
-                      display: 'inline-flex', alignItems: 'center', gap: '4px'
                     }}>
-                      <Settings size={13} strokeWidth={1.8} />
-                      <span>Setup Required</span>
+                      Not configured
                     </span>
                   )}
                 </div>
@@ -620,7 +600,16 @@ export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged 
                 )}
 
                 {/* Setup Guide shown when OAuth is not configured */}
-                {oauthStatus && !oauthStatus.configured && <GoogleCloudSetupGuide />}
+                {oauthStatus && !oauthStatus.configured && (
+                  <details style={{ marginTop: '12px' }}>
+                    <summary style={{ cursor: 'pointer', fontSize: '12px', color: 'var(--text-muted)', fontWeight: '500' }}>
+                      Developer setup guide (Google Cloud Console)
+                    </summary>
+                    <div style={{ marginTop: '8px' }}>
+                      <GoogleCloudSetupGuide />
+                    </div>
+                  </details>
+                )}
               </div>
 
               {/* ── Option B: iCal Subscription ───────────────────────── */}
@@ -631,7 +620,7 @@ export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
                   <div>
                     <div style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-primary)' }}>
-                      Option B: Instant 1-Click Google Calendar Subscription (RFC 5545)
+                      Option B: Instant 1-Click Google Calendar Subscription (iCal feed)
                     </div>
                     <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px', lineHeight: '1.4' }}>
                       Zero OAuth setup required! In Google Calendar, click{' '}

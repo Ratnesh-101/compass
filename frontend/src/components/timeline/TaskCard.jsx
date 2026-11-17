@@ -1,6 +1,35 @@
 import React from 'react'
 import { getDomainMeta } from './domainMeta'
 
+export function formatHumanDate(ts) {
+  if (!ts) return ''
+  try {
+    const d = new Date(ts)
+    if (isNaN(d.getTime())) return String(ts)
+    const now = new Date()
+    const isToday = d.toDateString() === now.toDateString()
+    const yesterday = new Date(now)
+    yesterday.setDate(now.getDate() - 1)
+    const isYesterday = d.toDateString() === yesterday.toDateString()
+
+    const timeStr = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase()
+
+    if (isToday) {
+      return `Added today, ${timeStr}`
+    }
+    if (isYesterday) {
+      return `Added yesterday, ${timeStr}`
+    }
+    const monthDay = d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+    if (d.getFullYear() === now.getFullYear()) {
+      return `Added ${monthDay}, ${timeStr}`
+    }
+    return `Added ${d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}, ${timeStr}`
+  } catch {
+    return String(ts)
+  }
+}
+
 export default function TaskCard({
   task,
   onSelectTask,
@@ -56,7 +85,7 @@ export default function TaskCard({
           </div>
           <div>
             <div style={{ fontSize: '14px', fontWeight: '600', color: 'var(--text-primary)' }}>{task.project}</div>
-            <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{task.timestamp}</div>
+            <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{formatHumanDate(task.timestamp || task.created_at)}</div>
           </div>
         </div>
 
@@ -85,6 +114,7 @@ export default function TaskCard({
             className="btn-delete-deadline btn-touch-target"
             id={`btn-delete-task-${task.id}`}
             title="Delete deadline"
+            aria-label={`Delete deadline "${task.title}"`}
             onClick={async (e) => {
               e.stopPropagation()
               if (window.confirm(`Delete deadline "${task.title}"?`)) {
@@ -130,6 +160,7 @@ export default function TaskCard({
           className="btn-toggle-task-status"
           id={`btn-toggle-status-${task.id}`}
           title={isCompleted ? 'Mark as open' : 'Mark as completed'}
+          aria-label={isCompleted ? `Mark "${task.title}" as open` : `Mark "${task.title}" as completed`}
           onClick={async (e) => {
             e.stopPropagation()
             onToggleStatus(task.id, isCompleted)
