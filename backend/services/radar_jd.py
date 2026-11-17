@@ -106,13 +106,23 @@ def _needs_fetch(description: Optional[str]) -> bool:
 
 
 async def _persist(opp: Any, description: str, apply_url: Optional[str], deadline: Optional[date]) -> None:
-    """Write through the existing idempotent upsert so no new SQL or schema is needed."""
+    """Write through the existing idempotent upsert so no new SQL or schema is needed.
+
+    The status written is the one stored NOW, not the one on the (possibly stale) object we were given:
+    a re-check may have just demoted the listing, and the upsert must not undo that."""
+    status = opp.current_status
+    try:
+        stored = await radar_memory.get_opportunity_by_id(opp.id)
+        if stored is not None and getattr(stored, "current_status", None):
+            status = stored.current_status
+    except Exception:  # keep the caller's status if the lookup fails
+        logger.info("Could not re-read the status of listing %s before saving details", getattr(opp, "id", "?"))
     await radar_memory.upsert_opportunity(
         company_name=opp.company_name,
         role_title=opp.role_title,
         canonical_url=opp.canonical_url,
         official_application_url=apply_url or opp.official_application_url,
-        current_status=opp.current_status,
+        current_status=status,
         opportunity_type=opp.opportunity_type,
         employer_type=opp.employer_type or "enterprise",
         category=opp.category or "general",

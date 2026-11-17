@@ -53,7 +53,7 @@ async def prepare_from_job_link_endpoint(body: JobLinkRequest, request: Request)
     return await prepare_from_link(user_id, body.url, _master_factory(request))
 
 
-@router.post("/ats-check")
+@router.post("/ats-check", dependencies=[Depends(rate_limit)])
 async def ats_check_endpoint(body: AtsCheckRequest, request: Request) -> Dict[str, Any]:
     """Estimate how a basic applicant tracking system reads a resume (the master when no id is given)."""
     user_id = _get_or_create_user_id(request)

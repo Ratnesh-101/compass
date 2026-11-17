@@ -482,7 +482,8 @@ async def recheck_opportunity_status_endpoint(opportunity_id: int, ident: Identi
     if new_status != OpportunityStatus.CLOSED_CONFIRMED:
         # Best effort: a stub description gets replaced by the real posting text, apply link and deadline.
         try:
-            details = await asyncio.wait_for(fetch_and_store_listing_details(opportunity_id, opportunity=opp), timeout=15.0)
+            fresh_opp = opp.model_copy(update={"current_status": new_status})  # never write the pre-check status back
+            details = await asyncio.wait_for(fetch_and_store_listing_details(opportunity_id, opportunity=fresh_opp), timeout=15.0)
             if details.get("fetched"):
                 result["details_fetched"] = True
         except Exception:

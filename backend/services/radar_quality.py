@@ -154,7 +154,8 @@ def _is_aggregator_url(url: Optional[str]) -> bool:
 
 def merge_duplicates(group: List[OpportunityOut]) -> OpportunityOut:
     """Collapse rows for one listing into the best-sourced one, keeping stricter requirements."""
-    ordered = sorted(group, key=_best_first_key)
+    # A row the user saved or tracks is shown first, so Save/Unsave and notes act on the row they see.
+    ordered = sorted(group, key=lambda o: (not o.is_saved, not bool(o.application_status), _best_first_key(o)))
     best = ordered[0]
     if len(ordered) == 1:
         return best
@@ -184,8 +185,8 @@ def merge_duplicates(group: List[OpportunityOut]) -> OpportunityOut:
         "is_saved": any(o.is_saved for o in ordered),
         "application_status": tracked.application_status if tracked else best.application_status,
         "application_date": tracked.application_date if tracked else best.application_date,
-        "personal_deadline": tracked.personal_deadline if tracked else best.personal_deadline,
-        "private_notes": tracked.private_notes if tracked else best.private_notes,
+        "personal_deadline": next((o.personal_deadline for o in ordered if o.personal_deadline), best.personal_deadline),
+        "private_notes": next((o.private_notes for o in ordered if o.private_notes), best.private_notes),
     })
 
 
@@ -214,7 +215,7 @@ _ENTRY_WORD_RE = re.compile(
 YEARLY_SALARY_LIMIT = 70_000        # USD/EUR/GBP: above this a "yearly" figure is a full-time salary
 YEARLY_SALARY_LIMIT_INR = 1_500_000
 
-_YEARLY_RE = re.compile(r"(/\s*(year|yr)\b|\bper\s+(year|annum)\b|\byearly\b|\bannual(ly)?\b)", re.IGNORECASE)
+_YEARLY_RE = re.compile(r"(/\s*(year|yr)\b|\bper\s+(year|annum)\b|\byearly\b|\bannual(ly)?\b|\blpa\b)", re.IGNORECASE)
 _AMOUNT_RE = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s*(k)?", re.IGNORECASE)
 
 
@@ -227,7 +228,9 @@ def yearly_salary_exceeds_internship_range(compensation: Optional[str]) -> bool:
     if not m:
         return False
     amount = float(m.group(1).replace(",", ""))
-    if m.group(2):
+    if re.search(r"\b(lakh|lakhs|lpa)\b", text, re.IGNORECASE):
+        amount *= 100_000  # "28 LPA" is 2,800,000 rupees a year
+    elif m.group(2):
         amount *= 1000
     inr = bool(re.search(r"\binr\b|₹|\brs\.?\b|lakh|lpa", text, re.IGNORECASE))
     return amount > (YEARLY_SALARY_LIMIT_INR if inr else YEARLY_SALARY_LIMIT)

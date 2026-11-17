@@ -66,6 +66,11 @@ def _body_before_signoff(text: str) -> str:
     return text[: m.start()] if m else text
 
 
+def _is_plausible_year(token: str) -> bool:
+    """A calendar year near today ("Summer 2027") is not an invented achievement figure."""
+    return len(token) == 4 and token.isdigit() and 2024 <= int(token) <= 2032
+
+
 def validate_cover_letter(
     text: str,
     *,
@@ -113,7 +118,10 @@ def validate_cover_letter(
         problems.append("The last paragraph stops without ending the sentence.")
     if source_text:
         source = source_text.replace(",", "")
-        unsupported = [n for n in dict.fromkeys(_NUMBER_RE.findall(body)) if n.replace(",", "") not in source]
+        unsupported = [
+            n for n in dict.fromkeys(_NUMBER_RE.findall(body))
+            if n.replace(",", "") not in source and not _is_plausible_year(n)
+        ]
         if unsupported:
             problems.append(f"It uses figures that are not in the profile or the job text: {', '.join(unsupported[:4])}.")
     return problems
