@@ -30,16 +30,22 @@ export function savedChangeNotice(committed) {
   return `${what} saved before the connection dropped, so there is nothing to retry. Refresh the task list to see it.`
 }
 
+export const PLAIN_NETWORK_ERROR_MESSAGE = "That took too long and the connection dropped. Your question is saved. Try again?"
+
 // The assistant message shown when a stream ends early. A committed change is reported as saved
 // (no error, no Retry); anything else keeps the retry affordance and reuses the same request id.
 export function failureMessage({ err, partialText, prompt, specialistId, requestId, thought, fallbackError }) {
   if (err?.committed) {
     return { role: 'assistant', text: partialText, savedNotice: savedChangeNotice(err.committed), thought: thought || null }
   }
+  let errMsg = err?.message || fallbackError
+  if (!errMsg || /network\s*error|failed to fetch|load failed|networkrequestfailed|connection closed|connection interrupted|stream ended abruptly|econnreset/i.test(errMsg)) {
+    errMsg = PLAIN_NETWORK_ERROR_MESSAGE
+  }
   return {
     role: 'assistant',
     text: partialText,
-    error: err?.message || fallbackError,
+    error: errMsg,
     canRetry: true,
     retryPrompt: prompt,
     retrySpecialistId: specialistId,

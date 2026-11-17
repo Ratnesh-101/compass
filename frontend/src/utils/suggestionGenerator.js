@@ -128,6 +128,7 @@ export function generateFollowUpSuggestions({
     }
   }
 
+  const replyText = (latestMessage.text || '').toLowerCase()
   const combinedContext = `${lastUserText} ${latestMessage.text || ''}`.toLowerCase()
 
   // Real tasks partitioned by domain
@@ -146,6 +147,16 @@ export function generateFollowUpSuggestions({
     combinedContext.includes('prize') ||
     combinedContext.includes('token factory')
 
+  const isCareer =
+    combinedContext.includes('internship') ||
+    combinedContext.includes('career') ||
+    combinedContext.includes('job') ||
+    combinedContext.includes('application') ||
+    combinedContext.includes('resume') ||
+    combinedContext.includes('eligible') ||
+    combinedContext.includes('radar') ||
+    combinedContext.includes('hiring')
+
   const isCoursework =
     combinedContext.includes('coursework') ||
     combinedContext.includes('cs 61') ||
@@ -159,38 +170,34 @@ export function generateFollowUpSuggestions({
     combinedContext.includes('lecture') ||
     combinedContext.includes('syllabus')
 
+  // Code domain requires genuine architectural, algorithmic or code context (not a casual 'database' or 'api' word in prose)
   const isCode =
     combinedContext.includes('matryoshka') ||
     combinedContext.includes('embedding') ||
     combinedContext.includes('pgvector') ||
-    combinedContext.includes('architecture') ||
+    combinedContext.includes('hnsw') ||
+    combinedContext.includes('refactor') ||
     combinedContext.includes('benchmark') ||
     combinedContext.includes('tradeoff') ||
-    combinedContext.includes('refactor') ||
-    (!isCoursework && combinedContext.includes('pipeline')) ||
-    combinedContext.includes('dimension') ||
-    combinedContext.includes('hnsw') ||
-    combinedContext.includes('vector') ||
-    combinedContext.includes('qwen') ||
-    combinedContext.includes('rust') ||
-    combinedContext.includes('postgres') ||
-    combinedContext.includes('database') ||
-    combinedContext.includes('api')
+    combinedContext.includes('algorithm') ||
+    combinedContext.includes('vector search') ||
+    (codeTasks.length > 0 && (combinedContext.includes('code') || combinedContext.includes('function') || combinedContext.includes('sql') || combinedContext.includes('python')))
 
   const isScheduleOrPlanning =
     combinedContext.includes('schedule') ||
     combinedContext.includes('calendar') ||
     combinedContext.includes('conflict') ||
     combinedContext.includes('weekend') ||
-    combinedContext.includes('today') ||
+    /(plan|agenda|todo|tasks?|schedule)[\s\S]*today|today[\s\S]*(plan|agenda|todo|tasks?|schedule)/.test(combinedContext) ||
     combinedContext.includes('roadmap') ||
     combinedContext.includes('overdue') ||
     combinedContext.includes('deadline') ||
-    combinedContext.includes('due') ||
+    /due/.test(combinedContext) ||
     combinedContext.includes('prioritize')
 
   // Score domains so the most pertinent domain gets primary placement
   const domainsByPriority = []
+  if (isCareer) domainsByPriority.push('career')
   if (isCoursework) domainsByPriority.push('coursework')
   if (isHackathon) domainsByPriority.push('hackathon')
   if (isCode) domainsByPriority.push('code')
@@ -199,12 +206,18 @@ export function generateFollowUpSuggestions({
   const candidatePool = []
 
   for (const domain of domainsByPriority) {
-    if (domain === 'coursework') {
+    if (domain === 'career') {
+      if (combinedContext.includes('eligib') || combinedContext.includes('requirement')) {
+        candidatePool.push('What are the eligibility requirements?')
+      }
+      candidatePool.push('Find matching internships')
+      candidatePool.push('Review my upcoming deadlines')
+    } else if (domain === 'coursework') {
       candidatePool.push('Review upcoming coursework deadlines')
       candidatePool.push('Check for schedule conflicts this week')
       if (courseworkTasks.length > 0) {
         candidatePool.push('Prioritize my coursework tasks')
-      } else {
+      } else if (replyText.includes('lab')) {
         candidatePool.push('Summarize key lab takeaways')
       }
     } else if (domain === 'hackathon') {
@@ -218,11 +231,17 @@ export function generateFollowUpSuggestions({
         candidatePool.push('What are the hackathon deliverables?')
       }
     } else if (domain === 'code') {
-      candidatePool.push('Why did we choose this approach?')
-      candidatePool.push('What are the tradeoffs?')
+      // Only suggest technical tradeoffs/approaches if the reply actually discusses them
+      if (replyText.includes('approach') || replyText.includes('we chose') || replyText.includes('configured') || replyText.includes('matryoshka') || replyText.includes('pgvector') || replyText.includes('algorithm')) {
+        candidatePool.push('Why did we choose this approach?')
+      }
+      if (replyText.includes('tradeoff') || replyText.includes('vs ') || replyText.includes('versus') || replyText.includes('pgvector') || replyText.includes('embedding') || replyText.includes('matryoshka') || replyText.includes('architecture')) {
+        candidatePool.push('What are the tradeoffs?')
+      }
       if (codeTasks.length > 0) {
         candidatePool.push('Check for code debt in tasks')
-      } else {
+      }
+      if (replyText.includes('perform') || replyText.includes('optim') || replyText.includes('benchmark') || replyText.includes('latency') || replyText.includes('fast similarity')) {
         candidatePool.push('How can we optimize performance?')
       }
     } else if (domain === 'schedule') {
@@ -236,16 +255,9 @@ export function generateFollowUpSuggestions({
     }
   }
 
-  // Fallback if conversation is about general tasks or advice
+  // When unsure show none: do not show ungrounded generic chips
   if (candidatePool.length === 0) {
-    if (safeTasks.length > 0) {
-      candidatePool.push('What should I tackle next?')
-      candidatePool.push('Check my upcoming deadlines')
-      candidatePool.push('Summarize open tasks across domains')
-    } else {
-      candidatePool.push('What should I tackle next?')
-      candidatePool.push('Plan an optimal roadmap for today')
-    }
+    return []
   }
 
   // Filter out any candidates that the user has already asked in this conversation

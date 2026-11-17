@@ -8,79 +8,14 @@ import { fetchPersonaPhrases } from '../../api/chatApi'
 import Logo from '../Logo'
 import { generateFollowUpSuggestions, formatSuggestionText } from '../../utils/suggestionGenerator'
 import { isMessageEligibleForVerification } from '../../utils/verificationEligibility'
-
-const DEFAULT_STARTING_PHRASES = [
-  "Where should we begin?",
-  "Ready when you are.",
-  "Pick a direction, or just start talking and we'll find one.",
-  "No wrong place to start. What's pulling at you?",
-  "Half-formed thoughts welcome.",
-  "Take your time. I'm not going anywhere.",
-]
-
-const DEFAULT_RETURNING_PHRASES = [
-  "You returned! Want to pick up where we left off, or start somewhere new?",
-  "Welcome back. What changed since last time?",
-  "Good to see you again. Where shall we dive in?",
-  "Ready to pick up the thread, or start somewhere fresh?",
-]
-
-function getTimeGreeting() {
-  const hour = new Date().getHours()
-  if (hour < 12) return 'Good morning'
-  if (hour < 18) return 'Good afternoon'
-  return 'Good evening'
-}
-
-function getEmptyStateGreeting(isReturning, userName, startingPool = DEFAULT_STARTING_PHRASES, returningPool = DEFAULT_RETURNING_PHRASES) {
-  const pool = (isReturning ? returningPool : startingPool) || DEFAULT_STARTING_PHRASES
-  const storageKey = isReturning ? 'compass_last_returning_phrase_idx' : 'compass_last_starting_phrase_idx'
-  let lastIdx = -1
-  try {
-    const val = localStorage.getItem(storageKey)
-    if (val !== null) lastIdx = parseInt(val, 10)
-  } catch {
-    /* ignore storage access error */
-  }
-
-  let candidates = pool.map((_, i) => i).filter(i => isNaN(lastIdx) || i !== lastIdx)
-  if (candidates.length === 0) candidates = pool.map((_, i) => i)
-
-  const chosenIdx = candidates[Math.floor(Math.random() * candidates.length)]
-  try {
-    localStorage.setItem(storageKey, String(chosenIdx))
-  } catch {
-    /* ignore storage access error */
-  }
-
-  let phrase = pool[chosenIdx] || pool[0] || "Where should we begin?"
-
-  if (userName && isReturning) {
-    if (phrase.includes("Welcome back.")) {
-      phrase = `Welcome back, ${userName}. What changed since last time?`
-    } else if (phrase.includes("You returned!")) {
-      phrase = `Welcome back, ${userName}! Want to pick up where we left off, or start somewhere new?`
-    } else if (phrase.includes("Good to see you again.")) {
-      phrase = `Good to see you again, ${userName}. Where shall we dive in?`
-    }
-  }
-
-  // 15% chance of subtle time-aware touch
-  if (Math.random() < 0.15) {
-    const hour = new Date().getHours()
-    let touch = null
-    if (hour >= 23 || hour < 5) touch = "Burning the midnight oil."
-    else if (hour >= 5 && hour < 8) touch = "Early start today."
-    else if (hour >= 8 && hour < 12) touch = "Morning focus."
-    else if (hour >= 18 && hour < 23) touch = "Evening unwind."
-    if (touch) {
-      phrase = `${touch} ${phrase}`
-    }
-  }
-
-  return phrase
-}
-
+import {
+  DEFAULT_STARTING_PHRASES,
+  DEFAULT_RETURNING_PHRASES,
+  STARTER_QUESTIONS,
+  filterDuplicateTaskList,
+  getTimeGreeting,
+  getEmptyStateGreeting,
+} from './chatGreetings'
 
 export default function ChatMessageList({
   messages,
@@ -97,6 +32,8 @@ export default function ChatMessageList({
   onRetry,
   tasks = [],
   userInput = '',
+  continuingMessageId = null,
+  onContinueResponse = null,
 }) {
   const [startingPhrases, setStartingPhrases] = useState(DEFAULT_STARTING_PHRASES)
   const [returningPhrases, setReturningPhrases] = useState(DEFAULT_RETURNING_PHRASES)
@@ -179,6 +116,33 @@ export default function ChatMessageList({
               : `Your warm thinking partner for coursework, deadlines, and hackathons. No wrong place to start.`
             }
           </p>
+
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center', marginTop: '20px', maxWidth: '520px' }}>
+            {STARTER_QUESTIONS.map((q, qIdx) => (
+              <button
+                key={qIdx}
+                type="button"
+                onClick={() => onSendMessage && onSendMessage(q)}
+                className="assistant-follow-up-chip"
+                style={{
+                  padding: '7px 14px',
+                  borderRadius: '18px',
+                  fontSize: '12.5px',
+                  fontWeight: '500',
+                  background: 'var(--bg-card-soft)',
+                  border: '1px solid var(--border)',
+                  color: 'var(--text-primary)',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+              >
+                <span>✦</span>
+                <span>{q}</span>
+              </button>
+            ))}
+          </div>
         </div>
       ) : (
         <>
@@ -220,69 +184,109 @@ export default function ChatMessageList({
                       )}
                       {msg.role === 'user' ? (
                         msg.text
-                      ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          {msg.text ? <MarkdownRenderer content={msg.text} /> : null}
-                          {msg.savedNotice && (
-                            <div role="status" style={{ marginTop: msg.text ? '10px' : '0', fontSize: '13px', color: 'var(--text-secondary)' }}>
-                              {msg.savedNotice}
-                            </div>
-                          )}
-                          {msg.error && (
-                            <div style={{
-                              display: 'flex',
-                              flexDirection: 'column',
-                              gap: '8px',
-                              marginTop: msg.text ? '10px' : '0',
-                              padding: msg.text ? '8px 12px' : '0',
-                              background: msg.text ? 'rgba(239, 68, 68, 0.08)' : 'transparent',
-                              borderRadius: msg.text ? '6px' : '0',
-                              border: msg.text ? '1px solid rgba(239, 68, 68, 0.2)' : 'none',
-                            }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--danger, #ef4444)', fontSize: '13px' }}>
-                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                                  <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
-                                  <line x1="12" y1="9" x2="12" y2="13" />
-                                  <line x1="12" y1="17" x2="12.01" y2="17" />
-                                </svg>
-                                <span>{msg.text ? `Stream interrupted: ${msg.error} (partial output preserved)` : msg.error}</span>
+                      ) : (() => {
+                        const isContinuationTarget = isStreaming && Boolean(continuingMessageId) && (msg.id === continuingMessageId)
+                        let rawText = msg.text || ''
+                        if (msg.role === 'assistant' && rawText.includes('synthesize cross-domain roadmaps')) {
+                          rawText = "Hey! I'm Compass. I can help you find internships, plan your week, organize deadlines, and answer your questions. What's on your mind?"
+                        }
+                        const displayText = (pendingKind === 'add_tasks' && pendingAction?.items?.length > 0)
+                          ? filterDuplicateTaskList(rawText, pendingAction.items)
+                          : rawText
+
+                        return (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            {displayText ? <MarkdownRenderer content={displayText + (isContinuationTarget && streamingText ? ('\n' + streamingText) : '')} /> : null}
+                            {isContinuationTarget && <span className="streaming-caret" style={{ background: 'var(--coursework)' }} />}
+                            {isLatest && !isStreaming && messages.length === 1 && msg.role === 'assistant' && (
+                              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>
+                                {STARTER_QUESTIONS.map((q, qIdx) => (
+                                  <button
+                                    key={qIdx}
+                                    type="button"
+                                    onClick={() => onSendMessage && onSendMessage(q)}
+                                    className="assistant-follow-up-chip"
+                                    style={{
+                                      padding: '6px 12px',
+                                      borderRadius: '16px',
+                                      fontSize: '12px',
+                                      fontWeight: '500',
+                                      background: 'var(--bg-card-soft)',
+                                      border: '1px solid var(--border)',
+                                      color: 'var(--text-primary)',
+                                      cursor: 'pointer',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '6px',
+                                    }}
+                                  >
+                                    <span>✦</span>
+                                    <span>{q}</span>
+                                  </button>
+                                ))}
                               </div>
-                              {msg.canRetry && msg.retryPrompt && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (onRetry) {
-                                      onRetry(idx, msg.retryPrompt, msg.retrySpecialistId, msg.retryRequestId)
-                                    } else if (onSendMessage) {
-                                      onSendMessage(msg.retryPrompt)
-                                    }
-                                  }}
-                                  className="btn-secondary"
-                                  style={{
-                                    alignSelf: 'flex-start',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '6px',
-                                    padding: '0 12px',
-                                    minHeight: '32px',
-                                    borderRadius: 'var(--radius-btn, 6px)',
-                                    fontSize: '12px',
-                                    cursor: 'pointer',
-                                    fontWeight: '500',
-                                  }}
-                                >
-                                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                                    <polyline points="1 4 1 10 7 10" />
-                                    <polyline points="23 20 23 14 17 14" />
-                                    <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" />
+                            )}
+                            {msg.savedNotice && (
+                              <div role="status" style={{ marginTop: msg.text ? '10px' : '0', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                                {msg.savedNotice}
+                              </div>
+                            )}
+                            {msg.error && (
+                              <div style={{
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '8px',
+                                marginTop: msg.text ? '10px' : '0',
+                                padding: msg.text ? '8px 12px' : '0',
+                                background: msg.text ? 'rgba(239, 68, 68, 0.08)' : 'transparent',
+                                borderRadius: msg.text ? '6px' : '0',
+                                border: msg.text ? '1px solid rgba(239, 68, 68, 0.2)' : 'none',
+                              }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--danger, #ef4444)', fontSize: '13px' }}>
+                                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                                    <line x1="12" y1="9" x2="12" y2="13" />
+                                    <line x1="12" y1="17" x2="12.01" y2="17" />
                                   </svg>
-                                  <span>Retry</span>
-                                </button>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      )}
+                                  <span>{msg.text ? `Stream interrupted: ${msg.error} (partial output preserved)` : msg.error}</span>
+                                </div>
+                                {msg.canRetry && msg.retryPrompt && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (onRetry) {
+                                        onRetry(idx, msg.retryPrompt, msg.retrySpecialistId, msg.retryRequestId)
+                                      } else if (onSendMessage) {
+                                        onSendMessage(msg.retryPrompt)
+                                      }
+                                    }}
+                                    className="btn-secondary"
+                                    style={{
+                                      alignSelf: 'flex-start',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '6px',
+                                      padding: '0 12px',
+                                      minHeight: '32px',
+                                      borderRadius: 'var(--radius-btn, 6px)',
+                                      fontSize: '12px',
+                                      cursor: 'pointer',
+                                      fontWeight: '500',
+                                    }}
+                                  >
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                                      <polyline points="1 4 1 10 7 10" />
+                                      <polyline points="23 20 23 14 17 14" />
+                                      <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" />
+                                    </svg>
+                                    <span>Retry</span>
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })()}
                       {msg.role === 'assistant' && msg.tasks && Array.isArray(msg.tasks) && msg.tasks.length > 0 && (
                         <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                           <span style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
@@ -296,7 +300,7 @@ export default function ChatMessageList({
                       {msg.role === 'assistant' && msg.evidence && (
                         <EvidenceCard evidence={msg.evidence} />
                       )}
-                      {msg.role === 'assistant' && msg.isTruncated && (
+                      {msg.role === 'assistant' && (msg.isTruncated || msg.is_truncated) && (
                         <div style={{
                           marginTop: '10px',
                           padding: '8px 12px',
@@ -315,20 +319,32 @@ export default function ChatMessageList({
                           </div>
                           <button
                             type="button"
-                            onClick={() => onSendMessage && onSendMessage("Continue response")}
+                            disabled={isStreaming}
+                            onClick={() => {
+                              if (onContinueResponse) {
+                                onContinueResponse(msg, idx)
+                              } else if (onSendMessage) {
+                                onSendMessage({
+                                  text: "Continue response",
+                                  continue_message_id: msg.id,
+                                  continueMessageId: msg.id,
+                                  targetMessageIndex: idx,
+                                })
+                              }
+                            }}
                             className="btn-secondary"
                             style={{
                               padding: '2px 10px',
                               minHeight: '28px',
                               fontSize: '11.5px',
                               borderRadius: '4px',
-                              cursor: 'pointer',
+                              cursor: isStreaming ? 'not-allowed' : 'pointer',
                               fontWeight: '600',
                               color: '#e65100',
                               border: '1px solid rgba(230, 81, 0, 0.4)',
                             }}
                           >
-                            Continue response ➔
+                            {isStreaming && continuingMessageId === msg.id ? 'Continuing…' : 'Continue response ➔'}
                           </button>
                         </div>
                       )}
@@ -589,7 +605,7 @@ export default function ChatMessageList({
             })}
 
             {/* Active Progressive Token Streaming Bubble */}
-            {isStreaming && (
+            {isStreaming && !continuingMessageId && (
               <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-start' }}>
                 <div className="chat-msg-avatar" style={{
                   width: '32px', height: '32px', borderRadius: 'var(--radius-btn, 6px)', background: 'var(--bg-sidebar)',

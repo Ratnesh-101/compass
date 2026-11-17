@@ -133,7 +133,7 @@ test('a stream error before any commit keeps Retry and reuses the same request i
   assert.equal(msg.retryRequestId, 'req-retry-9999')
   assert.equal(msg.retryPrompt, 'add task x')
   assert.equal(msg.retrySpecialistId, null)
-  assert.equal(msg.error, 'network error')
+  assert.equal(msg.error, 'That took too long and the connection dropped. Your question is saved. Try again?')  // N-011 plain wording
 })
 
 test('ChatPanel keeps one request id per send, reuses it on Retry and refreshes tasks after a saved change', () => {
