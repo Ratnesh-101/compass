@@ -2,7 +2,9 @@ import React, { useState } from 'react'
 import { ExternalLink, CheckCircle2, XCircle, AlertCircle, Info, RefreshCw } from 'lucide-react'
 import { cleanOpportunity, cleanText, cleanSource } from '../../utils/jobCardCleaner'
 import Dialog from '../Dialog'
-import { formatOpportunityVerifiedAge, needsRecheck } from '../../utils/radarFreshness'
+import { needsRecheck } from '../../utils/radarFreshness'
+import RadarDescription from './RadarDescription'
+import { descriptionBlocks, friendlySourceAuthority, friendlySourceType, isStubDescription, lastCheckedLabel, safeVerificationBasis } from './radarDisplay'
 
 const PIPELINE_STATUSES = [
   { id: 'interested', label: 'Interested' },
@@ -93,9 +95,9 @@ export default function RadarDetailModal({
     ? new Date(rawPostingDate).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
     : null
 
-  const formattedVerified = last_verified_at
-    ? `${new Date(last_verified_at).toLocaleDateString()} ${new Date(last_verified_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-    : null
+  const lastChecked = lastCheckedLabel(last_verified_at, { checkFailed: opportunity.check_failed === true })
+  const verificationBasis = safeVerificationBasis(verification_evidence)
+  const descriptionBlocksNonEmpty = !isStubDescription(cleanDescription) && descriptionBlocks(cleanDescription).length > 0
 
   // Validate external application URL
   const originalUrl = official_application_url || canonical_url
@@ -293,11 +295,8 @@ export default function RadarDetailModal({
                 <div>
                   <strong>Posted:</strong> {formattedPosted || 'Date unrecorded by source'}
                 </div>
-                <div>
-                  <strong>Last Verified:</strong> {formattedVerified || 'Pending verification'}
-                </div>
                 <div data-testid="detail-verified-age">
-                  {formatOpportunityVerifiedAge(opportunity)}
+                  {lastChecked}
                   {needsRecheck(opportunity) && (
                     <span
                       data-testid="detail-needs-recheck-chip"
@@ -368,10 +367,8 @@ export default function RadarDetailModal({
                 <h4 style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary, #1b1a17)', marginBottom: '8px' }}>
                   Role Overview
                 </h4>
-                {cleanDescription ? (
-                  <div style={{ fontSize: '13px', color: 'var(--text-secondary, #3d3a35)', lineHeight: 1.6, whiteSpace: 'pre-line' }}>
-                    {cleanDescription}
-                  </div>
+                {cleanDescription && descriptionBlocksNonEmpty ? (
+                  <RadarDescription text={cleanDescription} />
                 ) : (
                   <div style={{ fontSize: '13px', color: 'var(--text-muted, #5f5a52)', fontStyle: 'italic' }}>
                     No extended description was published for this listing. Please review the official employer posting.
@@ -401,16 +398,19 @@ export default function RadarDetailModal({
                         }}
                       >
                         <div>
-                          <strong>{cleanSource(src.source_name) || src.source_name}</strong> ({src.source_type})
+                          <strong>{cleanSource(src.source_name) || src.source_name}</strong>
+                          {friendlySourceType(src.source_type) ? ` (${friendlySourceType(src.source_type)})` : ''}
                           {src.source_url && (
                             <div style={{ color: 'var(--text-muted, #5f5a52)', fontSize: '11px' }}>
                               {src.source_url}
                             </div>
                           )}
                         </div>
-                        <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'var(--bg-card, #ffffff)', border: '1px solid var(--border-soft, #eee9de)', fontSize: '11px' }}>
-                          {src.source_authority}
-                        </span>
+                        {friendlySourceAuthority(src.source_authority) && (
+                          <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'var(--bg-card, #ffffff)', border: '1px solid var(--border-soft, #eee9de)', fontSize: '11px' }}>
+                            {friendlySourceAuthority(src.source_authority)}
+                          </span>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -418,10 +418,10 @@ export default function RadarDetailModal({
               )}
 
               {/* Verification Evidence */}
-              {verification_evidence && (
+              {verificationBasis && (
                 <div style={{ padding: '10px 12px', borderRadius: '6px', background: 'var(--bg-app, #f7f5ef)', border: '1px solid var(--border, #e6e1d6)', fontSize: '12px', color: 'var(--text-secondary, #3d3a35)' }}>
-                  <strong>Verification Basis: </strong>
-                  <span>{verification_evidence}</span>
+                  <strong>How we checked: </strong>
+                  <span>{verificationBasis}</span>
                 </div>
               )}
             </>

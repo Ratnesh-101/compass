@@ -61,7 +61,7 @@ test('stale after more than 3 days', () => {
 
 test('stale open listing gets amber re-verify badge, fresh gets green', () => {
   const stale = getVerificationBadge('OPEN_CONFIRMED', '2026-10-20', NOW)
-  assert.equal(stale.label, 'Stale - re-verify before applying')
+  assert.equal(stale.label, 'May be closed. Check the company site.')
   assert.match(stale.text, /brand-dark/)
   const fresh = getVerificationBadge('OPEN_CONFIRMED', '2026-10-28', NOW)
   assert.equal(fresh.label, 'Verified open')
@@ -75,5 +75,5 @@ test('footer shows last checked N days ago and stale chip', () => {
     confirmed_open_date: '2026-10-01',
   }, NOW)
   assert.match(c.footerLine, /Last checked 9 days ago/)
-  assert.equal(c.verificationBadge.label, 'Stale - re-verify before applying')
+  assert.equal(c.verificationBadge.label, 'May be closed. Check the company site.')
 })

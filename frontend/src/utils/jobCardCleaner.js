@@ -150,7 +150,7 @@ const AMBER_BADGE = {
 export function getVerificationBadge(status, lastVerifiedAt, now = new Date()) {
   if (status === 'OPEN_CONFIRMED') {
     if (isStaleVerification(lastVerifiedAt, now)) {
-      return { label: 'Stale - re-verify before applying', ...AMBER_BADGE }
+      return { label: 'May be closed. Check the company site.', ...AMBER_BADGE }
     }
     return {
       label: 'Verified open',

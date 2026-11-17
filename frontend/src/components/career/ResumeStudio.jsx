@@ -364,7 +364,7 @@ export default function ResumeStudio() {
     return (
       <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
         <div className="spinner" style={{ margin: '0 auto 12px' }} />
-        <p>Loading Evidence-Based Resume Studio...</p>
+        <p>Loading My resume...</p>
       </div>
     )
   }
@@ -379,10 +379,10 @@ export default function ResumeStudio() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginBottom: '22px' }}>
         <div>
           <h2 style={{ margin: '0 0 6px', fontSize: '22px', fontWeight: '800', color: 'var(--text-primary)', letterSpacing: '-0.02em' }}>
-            📄 Evidence-Based Resume Studio
+            📄 My resume
           </h2>
           <p style={{ margin: 0, fontSize: '13.5px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-            Anchor your master career profile to verified evidence and generate tailored ATS resumes without qualification hallucination.
+            Keep your resume here once. Compass copies it for each job and only reorders what is already on it.
           </p>
         </div>
 
@@ -458,8 +458,8 @@ export default function ResumeStudio() {
       )}
 
       {saveSuccess && (
-        <div style={{ background: '#dcfce7', color: '#166534', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', fontSize: '13px' }}>
-          ✅ Resume changes successfully saved and factually anchored!
+        <div role="status" aria-live="polite" style={{ background: '#dcfce7', color: '#166534', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', fontSize: '13px', fontWeight: 600 }}>
+          ✅ Saved. Your resume and your internship profile are up to date.
         </div>
       )}
 
@@ -537,7 +537,7 @@ export default function ResumeStudio() {
                         {res.title}
                       </div>
                       <div style={{ fontSize: '11.5px', color: isSelected ? 'var(--primary, #2563eb)' : 'var(--text-secondary)', fontWeight: isSelected ? '600' : '400', marginTop: '2px' }}>
-                        {res.is_master ? '★ Master Source of Truth' : `${getResumeKindLabel(res)} · v${res.version}`}
+                        {res.is_master ? '★ Your main resume' : `${getResumeKindLabel(res)} · v${res.version}`}
                       </div>
                     </div>
                     <span
@@ -857,7 +857,7 @@ export default function ResumeStudio() {
                     transition: 'all 0.15s ease',
                   }}
                 >
-                  {saving ? 'Saving...' : (selectedResume?.is_master ? 'Save Master Anchor' : 'Save Tailored Resume')}
+                  {saving ? 'Saving...' : (selectedResume?.is_master ? 'Save' : 'Save Tailored Resume')}
                 </button>
               </div>
             </form>

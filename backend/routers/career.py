@@ -44,7 +44,6 @@ from backend.memory.career import (
     approve_application_batch,
     create_application_batch,
     create_tailored_resume,
-    delete_tailored_resume,
     finish_application_batch,
     get_application_batch,
     get_career_application_by_id,
@@ -57,7 +56,6 @@ from backend.memory.career import (
     list_original_resume_documents,
     list_resumes,
     log_application_event,
-    link_resume_if_unlinked,
     save_original_resume_document,
     update_career_application,
     update_resume,
@@ -101,7 +99,6 @@ from backend.services.career_job_match import analyze_job_and_match
 from backend.services.career_profile_sources import ingest_external_profile
 from backend.services.career_resume import (
     build_default_master_for_user,
-    draft_truthful_cover_letter,
     generate_resume_docx,
     generate_resume_html,
     analyze_extraction_diagnostics,
@@ -109,6 +106,11 @@ from backend.services.career_resume import (
     tailor_resume_for_opportunity,
     validate_resume_against_master,
 )
+from backend.routers.career_flow import router as career_flow_router
+from backend.services.career_cover_letter import compose_cover_letter
+from backend.services.career_flow import prepare_application_for_user, prepare_top_matches
+from backend.services.career_profile_derive import enrich_radar_profile_from_resume
+from backend.services.career_tailor_changes import attach_changes
 from backend.services.career_submission import (
     SUPPORTED_ADAPTERS,
     compute_batch_content_hash,
@@ -124,6 +126,8 @@ from backend.services.career_submission import (
 logger = logging.getLogger("compass.routers.career")
 
 router = APIRouter(prefix="/api/career", tags=["career_copilot"])
+# Paste-a-link and ATS-check routes live in their own module (this file is already over the size limit).
+router.include_router(career_flow_router)
 
 
 # ===========================================================================
@@ -155,7 +159,9 @@ async def get_master_resume_endpoint(request: Request):
 async def update_master_resume_endpoint(body: ResumeContent, request: Request):
     """Update master resume content with verified candidate information."""
     user_id = _get_or_create_user_id(request)
-    return await upsert_master_resume(user_id, body, "Master Resume")
+    saved = await upsert_master_resume(user_id, body, "Master Resume")
+    await enrich_radar_profile_from_resume(user_id, saved.content)
+    return saved
 
 
 @router.get("/resumes", response_model=List[ResumeOut])
@@ -205,6 +211,7 @@ async def tailor_resume_endpoint(body: TailorResumeRequest, request: Request):
         custom_title=body.custom_title,
         skills_emphasis=body.target_skills_emphasis,
     )
+    attach_changes(report, master.content, tailored_content, opp)
 
     title = body.custom_title or f"{opp.company_name} — {opp.role_title} Tailored"
     tailored = await create_tailored_resume(
@@ -648,7 +655,10 @@ async def commit_extracted_resume_endpoint(
         existing = await get_master_resume(user_id)
         if existing is not None:
             reviewed_content = merge_resume_content(existing.content, reviewed_content)
-        return await upsert_master_resume(user_id, reviewed_content, "Master Resume")
+        saved_master = await upsert_master_resume(user_id, reviewed_content, "Master Resume")
+        # Fill year of study, country and tracks from what the resume states, so nothing is asked twice.
+        await enrich_radar_profile_from_resume(user_id, saved_master.content)
+        return saved_master
     else:
         report = validate_resume_against_master(reviewed_content, reviewed_content)
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
@@ -684,11 +694,8 @@ async def draft_cover_letter_endpoint(body: DraftCoverLetterRequest, request: Re
         default_content = _build_initial_master_content(profile, request)
         master = await upsert_master_resume(user_id, default_content, "Master Resume")
 
-    letter_text, verified_projs, verified_skls = draft_truthful_cover_letter(
-        master=master.content,
-        opportunity=opp,
-        emphasis_projects=body.emphasis_projects,
-    )
+    letter = await compose_cover_letter(master.content, opp, emphasis_projects=body.emphasis_projects)
+    letter_text, verified_projs, verified_skls = letter["content"], letter["projects"], letter["skills"]
 
     from datetime import datetime, timezone
     return CoverLetterOut(
@@ -810,70 +817,11 @@ async def prepare_application_endpoint(request: Request, opportunity_id: Optiona
     if not opp_id:
         raise HTTPException(status_code=400, detail="opportunity_id is required")
 
-    opp = await get_opportunity_by_id(opp_id, user_id)
-    if not opp:
-        raise HTTPException(status_code=404, detail="Opportunity not found")
-
-    from backend.memory.career import get_or_create_career_application
-    app = await get_or_create_career_application(user_id, opp_id)
-
-    master = await get_master_resume(user_id)
-    if not master:
-        profile = await get_user_opportunity_profile(user_id)
-        if not profile:
-            from backend.models_radar import UserOpportunityProfileIn
-            profile = UserOpportunityProfileIn()
-        master = await upsert_master_resume(user_id, _build_initial_master_content(profile, request), "Master Resume")
-
-    # Check or auto-tailor resume if not yet attached
-    if not app.resume_id:
-        tailored_content, report, val_status = tailor_resume_for_opportunity(master.content, opp)
-        tailored = await create_tailored_resume(
-            user_id=user_id,
-            opportunity_id=opp.id,
-            title=f"{opp.company_name} Tailored Resume",
-            content=tailored_content,
-            validation_report=report,
-            validation_status=val_status,
-        )
-        # Conditional link (resume_id IS NULL): a concurrent prepare that lost the race
-        # discards its own resume instead of leaving an orphan next to the winner's.
-        linked = await link_resume_if_unlinked(app.id, user_id, tailored.id, _status_for_resume(app, val_status))
-        if linked is None:
-            await delete_tailored_resume(tailored.id, user_id)
-            app = await get_career_application_by_id(app.id, user_id)
-            if not app:
-                raise HTTPException(status_code=404, detail="Application not found")
-        else:
-            app = linked
-            app.resume = tailored
-
-    # Draft truthful cover letter if not present
-    if not app.cover_letter and master:
-        letter_text, _, _ = draft_truthful_cover_letter(master.content, opp)
-        app = await update_career_application(app.id, user_id, {
-            "cover_letter": letter_text,
-        })
-
-    app.opportunity = opp
-    if app.resume_id and not app.resume:
-        app.resume = await get_resume_by_id(app.resume_id, user_id)
-
-    # Compute missing fields
-    missing = []
-    res_content = app.resume.content if app.resume else master.content
-    if not (res_content.full_name or "").strip():
-        missing.append("Full name")
-    if not res_content.email:
-        missing.append("Email address")
-    if not res_content.phone:
-        missing.append("Phone number")
-    if not res_content.education:
-        missing.append("Education history")
-    app.missing_fields = missing
-
-    await log_application_event(app.id, "prepared", {"opportunity_id": opp.id})
-    return app
+    # Fetches the full job page, tailors the resume, writes a checked cover letter, runs the job
+    # analysis and adds the apply-by date to the Timeline (see backend.services.career_flow).
+    return await prepare_application_for_user(
+        user_id, opp_id, lambda profile: _build_initial_master_content(profile, request)
+    )
 
 
 @router.post("/applications/{opportunity_id:int}", response_model=CareerApplicationOut)
@@ -1197,10 +1145,10 @@ async def get_application_handoff_kit_endpoint(app_id: int, request: Request):
         email = (app_resume.content.email or "").strip()
         if not name or name.lower() in PLACEHOLDER_NAMES:
             is_blocked = True
-            block_msg = "Resume export blocked: Candidate full name is empty or a placeholder. If your profile already has your name, this resume predates it: open the Tailored Resume tab and use Re-Tailor with AI."
+            block_msg = "Resume export blocked: Candidate full name is empty or a placeholder. If your profile already has your name, this resume predates it: open the Tailored Resume tab and use Re-tailor to this job."
         elif not email or email.lower() in PLACEHOLDER_EMAILS or "@" not in email:
             is_blocked = True
-            block_msg = "Resume export blocked: Candidate email is empty or a placeholder. If your profile already has your email, this resume predates it: open the Tailored Resume tab and use Re-Tailor with AI."
+            block_msg = "Resume export blocked: Candidate email is empty or a placeholder. If your profile already has your email, this resume predates it: open the Tailored Resume tab and use Re-tailor to this job."
 
     # Common answers generated strictly from profile (never guessed)
     common_answers: Dict[str, Optional[str]] = {}
@@ -1396,14 +1344,19 @@ async def add_skill_deliberate_endpoint(body: AddSkillRequest, request: Request)
 
 
 @router.post("/auto-prepare")
-async def trigger_auto_prepare_endpoint(request: Request):
+async def trigger_auto_prepare_endpoint(request: Request, scope: str = Query("watchlist", pattern="^(watchlist|top_matches)$")):
     """
-    Opt-in, cost-guarded auto-prepare endpoint.
-    Processes at most 3 watchlisted opportunities with ELIGIBLE status for candidates with complete profiles.
+    Cost-guarded auto-prepare endpoint.
+    scope=watchlist (default): opt-in, at most 3 watchlisted ELIGIBLE opportunities for complete profiles.
+    scope=top_matches: the user pressed "Prepare my top 3 matches", which is the explicit opt-in. Prepares the
+    best open listings for the profile (resume, checked cover letter, apply-by reminder) under the same daily quota.
     Returns 429 if daily limit exceeded.
     """
     user_id = _get_or_create_user_id(request)
-    result = await execute_auto_prepare_for_user(user_id)
+    if scope == "top_matches":
+        result = await prepare_top_matches(user_id, lambda profile: _build_initial_master_content(profile, request))
+    else:
+        result = await execute_auto_prepare_for_user(user_id)
     if result.get("status") == "rate_limited":
         retry_after = result.get("retry_after", 86400)
         raise HTTPException(

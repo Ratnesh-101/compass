@@ -366,6 +366,55 @@ def verify_opportunity_evidence_metadata(
     return {
         "employer_identity_verified": is_official or status in (OpportunityStatus.OPEN_CONFIRMED, OpportunityStatus.UPCOMING_CONFIRMED),
         "official_source_confirmed": is_official,
-        "application_url_checked": bool(application_url and application_url.startswith("http")),
+        # Only true when the page was actually fetched; a failed fetch proves nothing.
+        "application_url_checked": bool(application_url and application_url.startswith("http"))
+        and not is_fetch_failure(evidence_text),
         "verification_evidence": evidence_text,
     }
+
+
+_FETCH_FAILURE_PREFIXES = (
+    "verification failed with error",
+    "verification stopped",
+    "verification connection timed out or failed",
+    "no valid http application url",
+)
+_HTTP_ERROR_RE = re.compile(r"^official page returned http (\d{3})\. status retained", re.IGNORECASE)
+
+# A listing that could not be fetched for this long (several nightly runs) stops being "verified open".
+DEMOTE_AFTER_FAILED_DAYS = 21
+
+
+def is_fetch_failure(evidence: Optional[str]) -> bool:
+    """True when the evidence text means the page could not be fetched, so nothing was verified.
+
+    A 404/410 is not a failure: it is an authoritative "removed" answer.
+    """
+    text = (evidence or "").strip().lower()
+    if not text:
+        return False
+    if text.startswith(_FETCH_FAILURE_PREFIXES):
+        return True
+    return bool(_HTTP_ERROR_RE.match(text))
+
+
+def should_demote_after_failure(
+    current_status: str,
+    last_verified_at: Optional[datetime],
+    now: Optional[datetime] = None,
+    max_age_days: int = DEMOTE_AFTER_FAILED_DAYS,
+) -> bool:
+    """Demote an OPEN_CONFIRMED listing to NEEDS_VERIFICATION once its last good check is too old.
+
+    No failure counter is stored, so "repeated failures" is judged by age: if the last successful
+    check is older than max_age_days and the fetch fails again, the open claim is no longer supported.
+    A listing that has never been verified is demoted straight away.
+    """
+    if current_status != OpportunityStatus.OPEN_CONFIRMED:
+        return False
+    if last_verified_at is None:
+        return True
+    if last_verified_at.tzinfo is None:
+        last_verified_at = last_verified_at.replace(tzinfo=timezone.utc)
+    age = (now or datetime.now(timezone.utc)) - last_verified_at
+    return age.days >= max_age_days

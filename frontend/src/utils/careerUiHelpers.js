@@ -53,7 +53,7 @@ export const APPLICATION_STATUS_LABELS = {
   SUBMISSION_FAILED: 'Submission Failed',
   SUBMISSION_OUTCOME_UNKNOWN: 'Submission Outcome Unknown',
   MANUAL_SUBMISSION_REQUIRED: 'Manual Handoff',
-  HANDOFF_KIT_READY: 'Handoff Kit Ready',
+  HANDOFF_KIT_READY: 'Application Pack Ready',
   ASSESSMENT_RECEIVED: 'Assessment Received',
   INTERVIEW: 'Interviewing',
   REJECTED: 'Rejected',

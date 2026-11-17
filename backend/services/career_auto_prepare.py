@@ -29,7 +29,9 @@ from fastapi import HTTPException
 from backend.models_career import CareerApplicationStatus, ResumeValidationStatus
 from backend.models_radar import EligibilityClassification
 from backend.services.radar_eligibility import evaluate_eligibility
-from backend.services.career_resume import tailor_resume_for_opportunity, draft_truthful_cover_letter
+from backend.services.career_cover_letter import compose_cover_letter
+from backend.services.career_resume import tailor_resume_for_opportunity
+from backend.services.career_tailor_changes import attach_changes
 
 logger = logging.getLogger("compass.services.career_auto_prepare")
 
@@ -246,6 +248,7 @@ async def execute_auto_prepare_for_user(user_id: str) -> Dict[str, Any]:
 
         # Deterministically tailor resume
         tailored_content, report, val_status = tailor_resume_for_opportunity(c, opp)
+        attach_changes(report, c, tailored_content, opp)
         tailored = await create_tailored_resume(
             user_id=user_id,
             opportunity_id=opp.id,
@@ -255,8 +258,8 @@ async def execute_auto_prepare_for_user(user_id: str) -> Dict[str, Any]:
             validation_status=val_status,
         )
 
-        # Truthful cover letter
-        letter_text, _, _ = draft_truthful_cover_letter(c, opp)
+        # Cover letter: written from the profile, checked, clean template as the fallback
+        letter_text = (await compose_cover_letter(c, opp))["content"]
 
         # Attach only while the application still has no resume (conditional, race-safe)
         review_status = (

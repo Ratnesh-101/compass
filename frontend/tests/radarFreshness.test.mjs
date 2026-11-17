@@ -80,11 +80,13 @@ test('overview cards carry the student wording', () => {
 test('opportunity card and detail modal show age and re-check chip', () => {
   const card = read('../src/components/radar/RadarOpportunityCard.jsx')
   const modal = read('../src/components/radar/RadarDetailModal.jsx')
-  for (const src of [card, modal]) {
-    assert.ok(src.includes('formatOpportunityVerifiedAge'))
-    assert.ok(src.includes('needsRecheck'))
-    assert.ok(src.includes('Needs re-check'))
-  }
+  // The card keeps the freshness helper; the detail modal now words the age through lastCheckedLabel
+  // (plain wording, no internal labels) and still shows the re-check chip.
+  assert.ok(card.includes('formatOpportunityVerifiedAge'))
+  assert.ok(card.includes('needsRecheck'))
+  assert.ok(card.includes('Needs re-check'))
+  assert.ok(modal.includes('lastCheckedLabel'))
+  assert.ok(modal.includes('Needs re-check'))
 })
 
 test('radar page passes loaded opportunities to the overview cards', () => {

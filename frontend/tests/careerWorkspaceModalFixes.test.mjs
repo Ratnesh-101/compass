@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { STAGES } from '../src/utils/applicationStages.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const srcDir = path.resolve(__dirname, '../src')
@@ -33,8 +34,9 @@ test('Item 2: status case normalization, valid enum select options, and uppercas
   // 2. Status select options must not include invalid enums (interested, interviewing)
   assert.ok(!code.includes('value="interested"'), 'Select options must not include invalid enum "interested"')
   assert.ok(!code.includes('value="interviewing"'), 'Select options must not include invalid enum "interviewing"')
-  // 3. Status select options must include valid enum "interview"
-  assert.match(code, /buildStatusOptions\(appStatus,\s*\{\s*useLowerCase:\s*true\s*\}\)/, 'Select options must come from the shared backend-status list (includes "interview")')
+  // 3. The tracker offers the stage "interview" (six stages mapped from the shared backend-status list)
+  assert.match(code, /STAGES\.map\(stage =>/, 'Select options must come from the six-stage tracker')
+  assert.ok(STAGES.some(s => s.key === 'interview'), 'The tracker must include the interview stage')
   // 4. Outgoing update must send uppercase enum matching CareerApplicationStatus
   assert.match(code, /const\s+\w+\s*=\s*\w+\s*\?\s*String\(\s*\w+\s*\)\.toUpperCase\(\)\s*:\s*undefined|\.toUpperCase\(\)/, 'Outgoing status update must send uppercase enum to match CareerApplicationStatus')
 })

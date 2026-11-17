@@ -27,7 +27,11 @@ from backend.memory.radar import (
     upsert_opportunity_requirements,
 )
 from backend.models_radar import EmployerType, OpportunityStatus
-from backend.services.radar_ats_adapters import fetch_all_public_ats_opportunities
+from backend.services.radar_ats_adapters import (
+    fetch_all_public_ats_opportunities,
+    is_india_or_remote,
+    states_india_applicants_accepted,
+)
 from backend.services.radar_sources import (
     CURATED_INDIAN_OPPORTUNITIES,
     canonicalize_url,
@@ -110,7 +114,7 @@ async def run_radar_sync(source_filter: Optional[str] = None, dry_run: bool = Fa
                                 official_application_url=item["official_application_url"],
                                 current_status=item["current_status"],
                                 opportunity_type=item["opportunity_type"],
-                                employer_type=item.get("employer_type", EmployerType.ENTERPRISE),
+                                employer_type=item.get("employer_type") or EmployerType.ENTERPRISE,
                                 category=item["category"],
                                 location=item.get("location"),
                                 work_arrangement=item.get("work_arrangement", "unknown"),
@@ -179,7 +183,7 @@ async def run_radar_sync(source_filter: Optional[str] = None, dry_run: bool = Fa
                                 official_application_url=ats["official_application_url"],
                                 current_status=ats["current_status"],
                                 opportunity_type=ats["opportunity_type"],
-                                employer_type=ats.get("employer_type", EmployerType.STARTUP),
+                                employer_type=ats.get("employer_type") or EmployerType.STARTUP,
                                 category=ats["category"],
                                 location=ats.get("location"),
                                 work_arrangement=ats.get("work_arrangement", "unknown"),
@@ -230,7 +234,7 @@ async def run_radar_sync(source_filter: Optional[str] = None, dry_run: bool = Fa
                                 official_application_url=gh["official_application_url"],
                                 current_status=gh["current_status"],
                                 opportunity_type=gh["opportunity_type"],
-                                employer_type=gh.get("employer_type", EmployerType.STARTUP),
+                                employer_type=gh.get("employer_type") or EmployerType.STARTUP,
                                 category=gh["category"],
                                 location=gh.get("location"),
                                 work_arrangement=gh.get("work_arrangement", "unknown"),
@@ -252,7 +256,6 @@ async def run_radar_sync(source_filter: Optional[str] = None, dry_run: bool = Fa
                             if gh.get("eligible_academic_years"):
                                 await upsert_opportunity_requirements(opp_id, {
                                     "eligible_academic_years": gh["eligible_academic_years"],
-                                    "eligible_countries": ["India"] if gh.get("is_india_eligible") else [],
                                 })
                             records_updated += 1
                     except Exception as ex:
@@ -282,6 +285,7 @@ async def run_radar_sync(source_filter: Optional[str] = None, dry_run: bool = Fa
                             cat = infer_category(role)
                             emp_type = infer_employer_type(comp, cat)
 
+                            tav_india = is_india_or_remote(f"{title} {snippet[:300]}") or states_india_applicants_accepted(snippet)
                             opp_id = await upsert_opportunity(
                                 company_name=comp[:80],
                                 role_title=role[:120],
@@ -289,12 +293,12 @@ async def run_radar_sync(source_filter: Optional[str] = None, dry_run: bool = Fa
                                 official_application_url=url,
                                 current_status=OpportunityStatus.DISCOVERED,
                                 opportunity_type="internship" if "fellow" not in role.lower() else "fellowship",
-                                employer_type=emp_type,
+                                employer_type=emp_type or EmployerType.ENTERPRISE,
                                 category=cat,
-                                location="India / Remote",
+                                location="India / Remote" if tav_india else "Not stated",
                                 work_arrangement="remote" if "remote" in snippet.lower() else "hybrid",
-                                country="India",
-                                is_india_eligible=True,
+                                country="India" if tav_india else "Global",
+                                is_india_eligible=tav_india,
                                 description=snippet[:400],
                                 verification_evidence="Discovered via targeted search query; pending reachability verification.",
                                 employer_identity_verified=False,
@@ -358,7 +362,8 @@ async def run_radar_sync(source_filter: Optional[str] = None, dry_run: bool = Fa
                                     compensation=j_opp.get("compensation"),
                                     confirmed_open_date=j_opp.get("confirmed_open_date"),
                                     description=j_opp.get("description"),
-                                    last_verified_at=datetime.now(timezone.utc),
+                                    # Discovery on an aggregator is not a verification of the posting.
+                                    last_verified_at=datetime.now(timezone.utc) if j_opp.get("application_url_checked") else None,
                                     verification_evidence=j_opp.get("verification_evidence"),
                                     employer_identity_verified=j_opp.get("employer_identity_verified", False),
                                     official_source_confirmed=j_opp.get("official_source_confirmed", False),

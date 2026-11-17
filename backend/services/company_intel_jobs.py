@@ -24,6 +24,12 @@ import uuid
 
 from fastapi import HTTPException
 
+from backend.services.company_intel_summary import (
+    FALLBACK_LABEL,
+    UNAVAILABLE_MESSAGE,
+    extractive_summary,
+    is_scrape_dump,
+)
 from backend.services.intel_grounding import (  # noqa: F401  (single implementation lives there)
     ROLE_NONE,
     ROLE_SIMILAR,
@@ -185,6 +191,8 @@ def build_sources_only_fallback(
 
     for s in cleaned_sources[:4]:
         snippet = s.get("snippet", "")
+        if is_scrape_dump(snippet):
+            continue  # a scraped field dump is never shown as a bullet
         shaped = shape_point_text(snippet, FALLBACK_POINT_MAX_WORDS)
         if shaped is None:
             continue  # cut-off fragment: never show it as a bullet
@@ -212,12 +220,17 @@ def build_sources_only_fallback(
         for s in cleaned_sources[:4]
     ]
 
+    # A short quoted summary, or one plain message. Never "report ready" next to "summary unavailable".
+    quoted_summary = extractive_summary(cleaned_sources)
+    if not quoted_summary and not (priorities or role_context or challenges):
+        return _build_error_intel(company, role, UNAVAILABLE_MESSAGE, reason=reason)
+
     return {
         "status": "ready",
         "schema_version": SCHEMA_VERSION,
         "is_sources_only": True,
-        "fallback_label": "Sources found, summary unavailable",
-        "summary": "Sources found, summary unavailable.",
+        "fallback_label": FALLBACK_LABEL,
+        "summary": quoted_summary,
         "priorities": priorities,
         "role_context": role_context,
         "challenges": challenges,

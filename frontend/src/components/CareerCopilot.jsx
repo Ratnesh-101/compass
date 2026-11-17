@@ -1,30 +1,69 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import InternshipRadar from './InternshipRadar'
 import ApplicationCenter from './career/ApplicationCenter'
 import DarkModeToggle from './DarkModeToggle'
 import RadarProfileModal from './radar/RadarProfileModal'
+import CareerStartPanel from './career/CareerStartPanel'
+import JobLinkInput from './career/JobLinkInput'
+import CandidateDetailsGate from './career/CandidateDetailsGate'
+import { fetchRadarProfile } from '../api/radarApi'
+import { hasSavedProfile } from '../utils/careerUiHelpers'
+import { SAVED_RESUME_MESSAGE } from '../utils/careerFlowText'
 
 const ResumeStudio = React.lazy(() => import('./career/ResumeStudio'))
+const ApplicationWorkspaceModal = React.lazy(() => import('./career/ApplicationWorkspaceModal'))
 
 export default function CareerCopilot({ isDarkMode, onToggleDarkMode }) {
   const [activeSubTab, setActiveSubTab] = useState('radar') // 'radar' | 'resumes' | 'applications'
   const [profileRefreshTrigger, setProfileRefreshTrigger] = useState(0)
   const [notification, setNotification] = useState(null)
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false)
+  // null while unknown, so the "Upload your resume to begin" panel never flashes for a returning user
+  const [hasProfile, setHasProfile] = useState(null)
+  const [linkedApp, setLinkedApp] = useState(null)
 
-  const handleNavigateToResumeStudio = () => {
+  // Every callback below is memoized: they are passed to InternshipRadar, and a new function on every
+  // render used to restart its refresh effect (the reload storm after a profile save).
+  const handleNavigateToResumeStudio = useCallback(() => {
     setActiveSubTab('resumes')
-  }
+  }, [])
 
-  const handleOpenProfileModal = () => setIsProfileModalOpen(true)
-  const handleCloseProfileModal = () => setIsProfileModalOpen(false)
+  const handleOpenProfileModal = useCallback(() => setIsProfileModalOpen(true), [])
+  const handleCloseProfileModal = useCallback(() => setIsProfileModalOpen(false), [])
 
   // The modal saves via the radar profile API and closes itself; reload the radar profile and stat cards.
-  const handleProfileUpdated = () => {
+  const handleProfileUpdated = useCallback(() => {
     setProfileRefreshTrigger(prev => prev + 1)
-  }
+  }, [])
 
-  const handleRefreshComplete = () => {
+  // One profile read per change (first load and each save), not one per render.
+  useEffect(() => {
+    let alive = true
+    fetchRadarProfile()
+      .then(profile => {
+        if (alive) setHasProfile(hasSavedProfile(profile))
+      })
+      .catch(() => {
+        if (alive) setHasProfile(true) // unknown: do not push a returning user back to the start screen
+      })
+    return () => {
+      alive = false
+    }
+  }, [profileRefreshTrigger])
+
+  const showSaved = useCallback(message => {
+    setNotification({ type: 'success', message })
+    setTimeout(() => {
+      setNotification(prev => (prev?.type === 'success' && prev.message === message ? null : prev))
+    }, 4000)
+  }, [])
+
+  const handleResumeSaved = useCallback(() => {
+    showSaved(SAVED_RESUME_MESSAGE)
+    setProfileRefreshTrigger(prev => prev + 1)
+  }, [showSaved])
+
+  const handleRefreshComplete = useCallback(() => {
     setNotification({
       type: 'success',
       message: '✓ Profile saved! Internship matches have been updated.',
@@ -33,9 +72,9 @@ export default function CareerCopilot({ isDarkMode, onToggleDarkMode }) {
     setTimeout(() => {
       setNotification(prev => (prev?.type === 'success' ? null : prev))
     }, 4000)
-  }
+  }, [])
 
-  const handleRefreshError = () => {
+  const handleRefreshError = useCallback(() => {
     setNotification({
       type: 'warning',
       message: 'Profile saved, but could not refresh internship recommendations.',
@@ -48,7 +87,7 @@ export default function CareerCopilot({ isDarkMode, onToggleDarkMode }) {
         setProfileRefreshTrigger(prev => prev + 1)
       },
     })
-  }
+  }, [])
 
   const SUB_TABS = [
     { key: 'radar', label: 'Internship Radar', desc: 'Verified discovery & eligibility' },
@@ -269,16 +308,23 @@ export default function CareerCopilot({ isDarkMode, onToggleDarkMode }) {
       {/* Main Tab Area */}
       <div style={{ flex: 1, minHeight: 0, padding: activeSubTab === 'radar' ? '0' : '20px 24px' }}>
         {activeSubTab === 'radar' && (
-          <InternshipRadar
-            refreshTrigger={profileRefreshTrigger}
-            onRefreshComplete={handleRefreshComplete}
-            onRefreshError={handleRefreshError}
-            onNavigateToResumeStudio={handleNavigateToResumeStudio}
-            onOpenProfile={handleOpenProfileModal}
-          />
+          <>
+            {/* First step: with no profile yet, "Upload your resume to begin" comes before anything else. */}
+            <div style={{ width: '100%', maxWidth: '1280px', margin: '0 auto', padding: '16px 20px 0 20px', boxSizing: 'border-box' }}>
+              {hasProfile === false && <CareerStartPanel onResumeSaved={handleResumeSaved} />}
+              <JobLinkInput onPrepared={app => setLinkedApp(app)} />
+            </div>
+            <InternshipRadar
+              refreshTrigger={profileRefreshTrigger}
+              onRefreshComplete={handleRefreshComplete}
+              onRefreshError={handleRefreshError}
+              onNavigateToResumeStudio={handleNavigateToResumeStudio}
+              onOpenProfile={handleOpenProfileModal}
+            />
+          </>
         )}
         {activeSubTab === 'resumes' && (
-          <React.Suspense fallback={<div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading Resume Studio…</div>}>
+          <React.Suspense fallback={<div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading My resume…</div>}>
             <ResumeStudio />
           </React.Suspense>
         )}
@@ -288,11 +334,25 @@ export default function CareerCopilot({ isDarkMode, onToggleDarkMode }) {
       </div>
 
       {isProfileModalOpen && (
-        <RadarProfileModal
-          isOpen
-          onClose={handleCloseProfileModal}
-          onProfileUpdated={handleProfileUpdated}
-        />
+        <CandidateDetailsGate onClose={handleCloseProfileModal} onSaved={showSaved}>
+          <RadarProfileModal
+            isOpen
+            onClose={handleCloseProfileModal}
+            onProfileUpdated={handleProfileUpdated}
+          />
+        </CandidateDetailsGate>
+      )}
+
+      {/* The application prepared from a pasted job link opens ready to review. */}
+      {linkedApp?.opportunity && (
+        <React.Suspense fallback={null}>
+          <ApplicationWorkspaceModal
+            key={linkedApp.opportunity.id}
+            opportunity={linkedApp.opportunity}
+            onClose={() => setLinkedApp(null)}
+            onNavigateToResumeStudio={handleNavigateToResumeStudio}
+          />
+        </React.Suspense>
       )}
     </div>
   )

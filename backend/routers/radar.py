@@ -7,6 +7,7 @@ watchlist monitoring, application pipeline tracking, and source synchronization.
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -45,9 +46,16 @@ from backend.models_radar import (
 from backend.services.radar_eligibility import evaluate_eligibility
 from backend.services.radar_freshness import needs_recheck, verification_age_days
 from backend.services.radar_inventory import get_source_inventory
+from backend.services.radar_jd import fetch_and_store_listing_details
 from backend.services.radar_prediction import estimate_recruitment_cycle
+from backend.services.radar_quality import (
+    dedupe_opportunities,
+    profile_country_of,
+    recommendation_rank_key,
+    refine_listings,
+)
 from backend.services.radar_sync import run_radar_sync
-from backend.services.radar_verifier import verify_opportunity_status
+from backend.services.radar_verifier import is_fetch_failure, should_demote_after_failure, verify_opportunity_status
 
 logger = logging.getLogger("compass.routers.radar")
 
@@ -159,7 +167,7 @@ async def list_opportunities_endpoint(
         page_size=page_size,
     )
 
-    enriched = [_enrich_opportunity(item, profile) for item in raw_items]
+    enriched = [_enrich_opportunity(item, profile) for item in dedupe_opportunities(raw_items)]
     return OpportunitiesListResponse(
         opportunities=enriched,
         total=total,
@@ -184,62 +192,38 @@ async def get_recommended_opportunities(
     """
     user_id = _get_or_create_user_id(request)
     profile = await get_user_opportunity_profile(user_id)
+    items = await recommended_for_user(
+        user_id, profile, employer_type=employer_type, eligible_only=eligible_only, india_only=india_only
+    )
+    return items[:limit]
 
-    # Same candidate set as the ELIGIBLE MATCHES stat: open / upcoming / announced only.
+
+async def recommended_for_user(
+    user_id: str,
+    profile: Optional[UserOpportunityProfileIn],
+    employer_type: Optional[str] = None,
+    eligible_only: bool = False,
+    india_only: bool = True,
+) -> List[OpportunityOut]:
+    """The one recommendation query: Career page, chat, and the heading counters all use it.
+
+    Same candidate set as the ELIGIBLE MATCHES stat (open / upcoming / announced), then deduped,
+    stripped of senior, clearance and out-of-country listings, enriched, and ranked with the
+    candidate's own country first.
+    """
     raw_items = await get_recommendation_candidates(user_id, employer_type=employer_type, india_only=india_only)
-
-    enriched = [_enrich_opportunity(item, profile) for item in raw_items]
+    profile_country = profile_country_of(profile)
+    refined = refine_listings(raw_items, profile_country, country_filter=india_only)
+    enriched = [_enrich_opportunity(item, profile) for item in refined]
 
     # Recommendations never include listings the candidate is definitively ineligible for.
     enriched = [o for o in enriched if o.eligibility_classification != EligibilityClassification.INELIGIBLE]
 
-    # If eligible_only is requested, strictly filter for ELIGIBLE
     if eligible_only:
         enriched = [o for o in enriched if o.eligibility_classification == EligibilityClassification.ELIGIBLE]
 
-    # Neutral Ranking Matrix:
-    # 1. Verified and active status: fresh OPEN_CONFIRMED first (0), UPCOMING_CONFIRMED (1), stale open (2), others (3)
-    # 2. Personal candidate eligibility: ELIGIBLE (0), POTENTIAL_MATCH (1), INSUFFICIENT_INFO (2), INELIGIBLE (3)
-    # 3. User preferred role fit (bonus -1)
-    # 4. User skill match overlap (bonus -N)
-    # 5. India / Remote eligibility preference
-    # 6. Approaching application deadline
-    def rank_key(o: OpportunityOut) -> tuple:
-        # Open listings verified recently rank first; an 'open' listing that needs a re-check ranks below
-        # upcoming ones (it is an unverified lead, not a verified opening).
-        if o.current_status == OpportunityStatus.OPEN_CONFIRMED:
-            status_weight = 2 if o.needs_recheck else 0
-        elif o.current_status in (OpportunityStatus.UPCOMING_CONFIRMED, OpportunityStatus.ANNOUNCED):
-            status_weight = 1
-        else:
-            status_weight = 3
-        eligibility_weight = {
-            EligibilityClassification.ELIGIBLE: 0,
-            EligibilityClassification.POTENTIAL_MATCH: 1,
-            EligibilityClassification.INSUFFICIENT_INFORMATION: 2,
-            EligibilityClassification.INELIGIBLE: 3,
-        }.get(o.eligibility_classification, 2)
-
-        role_bonus = 0
-        if profile and profile.preferred_roles:
-            pref = [r.lower() for r in profile.preferred_roles]
-            if any(p in o.role_title.lower() or p in o.category.lower() for p in pref):
-                role_bonus = -1
-
-        skill_bonus = 0
-        if profile and profile.skills and o.requirements and o.requirements.required_skills:
-            user_s = {s.strip().lower() for s in profile.skills if s.strip()}
-            req_s = {s.strip().lower() for s in o.requirements.required_skills if s.strip()}
-            overlap = len(user_s.intersection(req_s))
-            skill_bonus = -overlap
-
-        india_bonus = 0 if o.is_india_eligible else 1
-        deadline_weight = o.confirmed_close_date.toordinal() if o.confirmed_close_date else 9999999
-
-        return (status_weight, eligibility_weight, role_bonus, skill_bonus, india_bonus, deadline_weight)
-
-    enriched.sort(key=rank_key)
-    return enriched[:limit]
+    enriched.sort(key=lambda o: recommendation_rank_key(o, profile, profile_country))
+    return enriched
 
 
 @router.get("/open", response_model=List[OpportunityOut])
@@ -264,7 +248,13 @@ async def get_open_confirmed_opportunities(
         page=1,
         page_size=100,
     )
-    return [_enrich_opportunity(item, profile) for item in raw_items]
+    profile_country = profile_country_of(profile)
+    refined = refine_listings(raw_items, profile_country, country_filter=india_only)
+    enriched = [_enrich_opportunity(item, profile) for item in refined]
+    # Same exclusions and order as the recommendation list, so the "Verified open" counter matches.
+    enriched = [o for o in enriched if o.eligibility_classification != EligibilityClassification.INELIGIBLE]
+    enriched.sort(key=lambda o: recommendation_rank_key(o, profile, profile_country))
+    return enriched
 
 
 @router.get("/upcoming", response_model=List[OpportunityOut])
@@ -284,6 +274,18 @@ async def get_radar_analytics_endpoint(request: Request):
     """Return live dashboard statistics computed from real database records and user profile."""
     user_id = _get_or_create_user_id(request)
     stats_dict = await get_radar_overview_stats(user_id)
+    try:
+        # The heading counters describe the list the user actually sees, not raw database rows.
+        profile = await get_user_opportunity_profile(user_id)
+        shown = await recommended_for_user(user_id, profile)
+        open_now = [o for o in shown if o.current_status == OpportunityStatus.OPEN_CONFIRMED]
+        stats_dict["verified_open_count"] = sum(1 for o in open_now if not o.needs_recheck)
+        stats_dict["stale_open_count"] = sum(1 for o in open_now if o.needs_recheck)
+        stats_dict["strong_matches_count"] = sum(
+            1 for o in shown if o.eligibility_classification == EligibilityClassification.ELIGIBLE
+        )
+    except Exception:
+        logger.warning("Could not align radar counters with the recommendation list", exc_info=True)
     return OpportunityOverviewStats(**stats_dict)
 
 
@@ -437,6 +439,28 @@ async def recheck_opportunity_status_endpoint(opportunity_id: int, ident: Identi
     target_url = opp.official_application_url or opp.canonical_url
     new_status, evidence, verified_at = await verify_opportunity_status(target_url, opp.current_status)
 
+    if is_fetch_failure(evidence):
+        # Nothing was verified: keep the old last_verified_at and never raise the status. After a long
+        # run of failed checks an "open" listing is demoted, again without touching the timestamp.
+        demoted = should_demote_after_failure(opp.current_status, opp.last_verified_at)
+        if demoted:
+            await update_opportunity_status(opportunity_id, OpportunityStatus.NEEDS_VERIFICATION, opp.last_verified_at)
+            await add_status_history(
+                opportunity_id=opportunity_id,
+                prev_status=opp.current_status,
+                new_status=OpportunityStatus.NEEDS_VERIFICATION,
+                evidence_source=target_url,
+                reason="Could not re-check the listing for several weeks.",
+            )
+        return {
+            "opportunity_id": opportunity_id,
+            "previous_status": opp.current_status,
+            "current_status": OpportunityStatus.NEEDS_VERIFICATION if demoted else opp.current_status,
+            "evidence": "Could not re-check today.",
+            "last_verified_at": opp.last_verified_at.isoformat() if opp.last_verified_at else None,
+            "check_failed": True,
+        }
+
     # Always persist last_verified_at so the cooldown holds even when status is unchanged.
     await update_opportunity_status(opportunity_id, new_status, verified_at)
     if new_status != opp.current_status:
@@ -448,13 +472,22 @@ async def recheck_opportunity_status_endpoint(opportunity_id: int, ident: Identi
             reason=evidence,
         )
 
-    return {
+    result = {
         "opportunity_id": opportunity_id,
         "previous_status": opp.current_status,
         "current_status": new_status,
         "evidence": evidence,
         "last_verified_at": verified_at.isoformat(),
     }
+    if new_status != OpportunityStatus.CLOSED_CONFIRMED:
+        # Best effort: a stub description gets replaced by the real posting text, apply link and deadline.
+        try:
+            details = await asyncio.wait_for(fetch_and_store_listing_details(opportunity_id, opportunity=opp), timeout=15.0)
+            if details.get("fetched"):
+                result["details_fetched"] = True
+        except Exception:
+            logger.info("Listing detail fetch skipped for %s", opportunity_id)
+    return result
 
 
 @router.get("/{opportunity_id}", response_model=OpportunityOut)

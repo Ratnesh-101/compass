@@ -33,14 +33,40 @@ INTERN_KEYWORDS_REGEX = re.compile(
 )
 
 INDIA_LOCATION_KEYWORDS = [
-    "india", "bengaluru", "bangalore", "hyderabad", "pune", "mumbai", "delhi", "gurgaon", "gurugram", "noida", "chennai", "kolkata", "ahmedabad", "maharashtra", "karnataka", "telangana", "tamil nadu", "apac"
+    "india", "bengaluru", "bangalore", "hyderabad", "pune", "mumbai", "delhi", "gurgaon", "gurugram", "noida", "chennai", "kolkata", "ahmedabad", "maharashtra", "karnataka", "telangana", "tamil nadu"
 ]
+_INDIA_LOCATION_RE = re.compile(
+    r"\b(" + "|".join(re.escape(k) for k in INDIA_LOCATION_KEYWORDS) + r")\b", re.IGNORECASE
+)
+# Only phrases that explicitly say anyone anywhere can apply. A bare "global" is not enough: it is
+# often used for roles that still require a US/EU work permit.
 GLOBAL_SCOPE_KEYWORDS = [
     "worldwide", "anywhere", "global remote", "remote - global", "remote, global", "remote (worldwide)", "remote worldwide", "work from anywhere"
 ]
 NON_INDIA_RESTRICTIONS = [
     "us only", "usa only", "united states only", "americas only", "emea only", "uk only", "canada only", "must reside in", "u.s. only"
 ]
+# "open to applicants in India", "India-based candidates welcome", "we accept applicants from India"
+_INDIA_APPLICANTS_RE = re.compile(
+    r"(?:(?:open to|accept(?:s|ing)?|welcome|hiring|eligible)[^.]{0,60}\b(?:india|indian)\b"
+    r"|\b(?:india|indian)\b[- ](?:based )?(?:applicants|candidates|students)\b[^.]{0,30}(?:welcome|accepted|eligible|can apply))",
+    re.IGNORECASE,
+)
+# Other-country names inside a location, e.g. "Remote (United States | Canada)".
+_OTHER_COUNTRY_RE = re.compile(
+    r"\b(united states|usa|u\.s\.a?\.?|canada|united kingdom|uk|germany|france|ireland|netherlands|singapore|australia)\b",
+    re.IGNORECASE,
+)
+
+
+def is_india_location(text: str) -> bool:
+    """Whole-word India / Indian-city match ('Indiana' is not India)."""
+    return bool(text and _INDIA_LOCATION_RE.search(text.lower()))
+
+
+def states_india_applicants_accepted(text: str) -> bool:
+    """True only when the text explicitly says applicants in/from India are accepted."""
+    return bool(text and _INDIA_APPLICANTS_RE.search(text))
 
 
 def is_internship_role(title: str, description: str = "", commitment: str = "") -> bool:
@@ -50,16 +76,22 @@ def is_internship_role(title: str, description: str = "", commitment: str = "") 
 
 
 def is_india_or_remote(location_text: str, is_remote: bool = False) -> bool:
-    """Check if location string indicates confirmed eligibility for Indian students.
-    Never infer global/India eligibility from generic remote work without affirmative geographic evidence.
+    """True only for an India location or an explicit statement that India-based applicants are accepted.
+
+    Generic remote work and a bare "global" never count. A location that names other countries
+    ("Remote (United States | Canada)") does not count unless India is named too.
     """
     if not location_text:
         return False
     loc_lower = location_text.lower().strip()
     if any(k in loc_lower for k in NON_INDIA_RESTRICTIONS):
         return False
-    if any(k in loc_lower for k in INDIA_LOCATION_KEYWORDS):
+    if _INDIA_LOCATION_RE.search(loc_lower):
         return True
+    if states_india_applicants_accepted(location_text):
+        return True
+    if _OTHER_COUNTRY_RE.search(loc_lower):
+        return False
     if any(k in loc_lower for k in GLOBAL_SCOPE_KEYWORDS):
         return True
     return False
@@ -118,7 +150,7 @@ async def fetch_greenhouse_opportunities(
                     "category": category,
                     "location": location_name,
                     "work_arrangement": work_arr,
-                    "country": "India" if "india" in location_name.lower() else "Global",
+                    "country": "India" if is_india_location(location_name) else "Global",
                     "is_india_eligible": india_eligible,
                     "official_application_url": job_url,
                     "canonical_url": canon_url,
@@ -193,7 +225,7 @@ async def fetch_lever_opportunities(
                     "category": category,
                     "location": location,
                     "work_arrangement": work_arr,
-                    "country": "India" if "india" in location.lower() else "Global",
+                    "country": "India" if is_india_location(location) else "Global",
                     "is_india_eligible": india_eligible,
                     "official_application_url": hosted_url,
                     "canonical_url": canon_url,
@@ -266,7 +298,7 @@ async def fetch_ashby_opportunities(
                     "category": category,
                     "location": location,
                     "work_arrangement": work_arr,
-                    "country": "India" if "india" in location.lower() else "Global",
+                    "country": "India" if is_india_location(location) else "Global",
                     "is_india_eligible": india_eligible,
                     "official_application_url": job_url,
                     "canonical_url": canon_url,
