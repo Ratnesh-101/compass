@@ -783,7 +783,7 @@ async def _handle_message_core(
 
                 project_id = None
                 if project_name:
-                    proj = await structured.get_or_create_project(conn, name=project_name, domain=domain)
+                    proj = await structured.get_or_create_project(conn, name=project_name, domain=domain, owner_id=task_owner)
                     project_id = proj.get("id")
 
                 task_record = await structured.create_task(

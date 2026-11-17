@@ -573,7 +573,7 @@ async def log_memory_entry(req: LogMemoryRequest, request: Request, _rl: None = 
         async with pool.acquire() as conn:
             project_id = None
             if req.project:
-                proj = await structured.get_or_create_project(conn, name=req.project, domain=domain_str)
+                proj = await structured.get_or_create_project(conn, name=req.project, domain=domain_str, owner_id=user_id)
                 project_id = proj.get("id")
 
             has_user_col = await conn.fetchval(

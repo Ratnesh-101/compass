@@ -256,7 +256,9 @@ async def handle_ingest_url(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
     async with pool.acquire() as conn:
         project_id = None
         if args.get("project"):
-            proj = await structured.get_or_create_project(conn, args["project"], domain)
+            proj = await structured.get_or_create_project(
+                conn, args["project"], domain, owner_id=args.get("user_id") or None
+            )
             project_id = proj["id"]
 
         tags = ["web", "tavily-extract"]
@@ -630,7 +632,9 @@ async def handle_save_verified_finding(args: Dict[str, Any], pool: Any) -> Dict[
     async with pool.acquire() as conn:
         project_id = None
         if args.get("project"):
-            proj = await structured.get_or_create_project(conn, args["project"], domain)
+            proj = await structured.get_or_create_project(
+                conn, args["project"], domain, owner_id=args.get("user_id") or None
+            )
             project_id = proj["id"]
 
         await vector.store_chunk(

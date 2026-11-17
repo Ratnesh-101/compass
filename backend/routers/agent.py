@@ -209,7 +209,8 @@ async def agent_confirm(req: AgentConfirmRequest, request: Request):
         logger.warning(f"Could not clear pending actions on run {run_id}: {e}")
 
     results = await execute_confirmed_actions(
-        actions, pool, run_id=run_id, approved_by="admin_override" if is_admin else "user", user_id=caller
+        actions, pool, run_id=run_id, approved_by="admin_override" if is_admin else "user", user_id=caller,
+        is_guest=ident.is_guest,
     )
 
     for aid, res in zip(claimed_action_ids, results):

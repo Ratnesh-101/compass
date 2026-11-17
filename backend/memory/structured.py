@@ -6,9 +6,12 @@ Used by the router skills and API endpoints.
 """
 
 from datetime import date, datetime
+import logging
 from typing import Optional, Union, Any
 import asyncpg
 from asyncpg.pool import PoolConnectionProxy
+
+logger = logging.getLogger("compass.memory.structured")
 
 DbConn = Union[asyncpg.Connection, PoolConnectionProxy]
 
@@ -48,10 +51,13 @@ async def get_or_create_project(
     name: str,
     domain: str,
     description: Optional[str] = None,
+    *,
+    owner_id: Optional[str] = None,
 ) -> dict:
     """Find an existing project by exact or fuzzy name, or create a new one.
 
-    Fuzzy resolution:
+    Fuzzy resolution (only among projects `owner_id` already has non-deleted tasks in;
+    skipped when no owner is given, so one tenant never gets bound to another's project):
       1. Exact case-insensitive match (e.g. 'compass' == 'Compass')
       2. Prefix/substring match with length >= 3 safeguard
       3. Word overlap match
@@ -69,20 +75,25 @@ async def get_or_create_project(
     # 2. Fuzzy match: project name starts with or contains candidate, or candidate contains project name
     # Guard: Require both names to be at least 3 characters long to prevent short names
     # (like 'AI' or 'Go') from spuriously matching arbitrary task descriptions.
-    if len(clean_name) >= 3:
+    if len(clean_name) >= 3 and owner_id:
         row = await conn.fetchrow(
             """
-            SELECT id, name, domain, description, created_at
-            FROM projects
-            WHERE LENGTH(name) >= 3
+            SELECT p.id, p.name, p.domain, p.description, p.created_at
+            FROM projects p
+            WHERE LENGTH(p.name) >= 3
               AND (
-                  LOWER(name) LIKE '%' || LOWER($1) || '%'
-                  OR LOWER($1) LIKE '%' || LOWER(name) || '%'
+                  LOWER(p.name) LIKE '%' || LOWER($1) || '%'
+                  OR LOWER($1) LIKE '%' || LOWER(p.name) || '%'
               )
-            ORDER BY LENGTH(name) ASC
+              AND EXISTS (
+                  SELECT 1 FROM tasks t
+                  WHERE t.project_id = p.id AND t.deleted_at IS NULL
+                    AND LOWER(t.user_id) = LOWER($2)
+              )
+            ORDER BY LENGTH(p.name) ASC
             LIMIT 1
             """,
-            clean_name
+            clean_name, owner_id,
         )
         if row:
             return dict(row)
@@ -105,8 +116,26 @@ async def get_or_create_project(
 async def list_projects(
     conn: DbConn,
     domain: Optional[str] = None,
+    *,
+    owner_id: Optional[str] = None,
+    all_tenants: bool = False,
 ) -> list[dict]:
-    """Retrieve all projects, optionally filtered by domain."""
+    """Retrieve projects, optionally filtered by domain.
+
+    With `owner_id`: only projects holding at least one of that owner's non-deleted tasks.
+    Without an owner the result is [] unless `all_tenants=True` (internal cross-tenant jobs).
+    """
+    if owner_id:
+        rows = await conn.fetch(
+            "SELECT DISTINCT p.id, p.name, p.domain, p.description, p.created_at "
+            "FROM projects p JOIN tasks t ON t.project_id = p.id "
+            "WHERE LOWER(t.user_id) = LOWER($1) AND t.deleted_at IS NULL "
+            "AND ($2::text IS NULL OR p.domain = $2) ORDER BY p.name ASC",
+            owner_id, domain or None,
+        )
+        return [dict(r) for r in rows]
+    if not all_tenants:
+        return []
     if domain:
         rows = await conn.fetch(
             "SELECT id, name, domain, description, created_at FROM projects WHERE domain = $1 ORDER BY name ASC",
@@ -195,11 +224,19 @@ async def list_tasks(
     unscheduled_only: bool = False,
     user_id: Optional[str] = None,
     include_demo: bool = False,
+    all_tenants: bool = False,
 ) -> list[dict]:
     """Query tasks with optional filters and per-account isolation.
 
     Judge Persona demo rows are hidden unless ``include_demo`` is True.
+    A missing owner (``user_id`` None) never means "everyone": it returns [] unless the caller
+    explicitly passes ``all_tenants=True`` (admin / internal maintenance jobs only).
     """
+    if user_id is None and not all_tenants:
+        logger.error("list_tasks called without user_id and without all_tenants=True; returning no rows")
+        return []
+    if all_tenants:
+        user_id = None
     query = """
         SELECT t.id, t.domain, t.title, t.due_date, t.status, t.priority, t.notes, t.trusted_event_url,
                t.duration_minutes, t.scheduled_start, t.scheduled_end, t.is_fixed, t.recurrence_rule,
@@ -331,9 +368,9 @@ async def update_task(
     return await get_task(conn, task_id)
 
 
-async def update_task_status(conn: DbConn, task_id: int, status: str) -> Optional[dict]:
-    """Convenience helper to update task status."""
-    return await update_task(conn, task_id, status=status)
+async def update_task_status(conn: DbConn, task_id: int, status: str, owner_id: Optional[str] = None) -> Optional[dict]:
+    """Convenience helper to update task status, optionally restricted to the owner."""
+    return await update_task(conn, task_id, owner_id=owner_id, status=status)
 
 
 async def delete_task(conn: DbConn, task_id: int, owner_id: Optional[str] = None) -> bool:
