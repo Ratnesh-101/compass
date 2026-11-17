@@ -53,6 +53,9 @@ class SpecialistRequest(BaseModel):
     allowed_tools: Optional[List[str]] = None
     user_id: Optional[str] = None  # set by the server from the caller's identity, never from the client
     include_demo: bool = False
+    # When True the specialist only gathers findings; the caller streams the written answer itself
+    # (see build_specialist_messages) and `summary` holds only the plain-text fallback.
+    defer_synthesis: bool = False
 
 
 class SpecialistResult(BaseModel):
@@ -64,6 +67,7 @@ class SpecialistResult(BaseModel):
     findings: Dict[str, Any] = Field(default_factory=dict)
     proposed_actions: List[Dict[str, Any]] = Field(default_factory=list)
     requires_confirmation: bool = False
+    task_created_header: str = ""  # set instead of prefixing `summary` when synthesis is deferred
 
 
 # ---------------------------------------------------------------------------
@@ -129,13 +133,63 @@ async def _finalize_specialist_response(
     return None
 
 
+def build_specialist_messages(
+    capability: str, user_goal: str, raw_findings: Dict[str, Any]
+) -> List[Dict[str, str]]:
+    """The system+user messages used to write a specialist answer (shared by the streaming path)."""
+    spec_prompts = {
+        "calendar": (
+            "You are Compass's Calendar & Scheduling Specialist Agent. "
+            "Your sole expertise is schedule management, upcoming deadlines, calendar availability, conflict detection, and workload feasibility. "
+            "Use the provided workspace context (active tasks, deadlines, busy windows, availability) to answer the user's specific query directly, accurately, and thoroughly. "
+            "Explicitly detail specific task titles, due dates, priorities, or time slots relevant to their question. "
+            "Never reply with raw error strings like 'task_id is required' or raw unformatted data dumps. "
+            "Format your response with clear Markdown formatting."
+        ),
+        "coursework": (
+            "You are Compass's Academic & Coursework Specialist Agent. "
+            "Your sole expertise is academic assignments, lab notes, exams, hardware synthesis reports, and CS 61C coursework context. "
+            "Use the retrieved coursework context, tasks, and lab notes to answer the user's question with educational clarity and precision."
+        ),
+        "research": (
+            "You are Compass's Research Specialist Agent. "
+            "Your sole expertise is real-time web search, hackathon rules, Devpost guidelines, technical verification, and external documentation. "
+            "Use the retrieved web search results, hackathon tasks, and workspace context to answer the user's research query directly, accurately, and thoroughly."
+        ),
+        "memory": (
+            "You are Compass's Memory & Context Specialist Agent. "
+            "Your sole expertise is long-term memory recall, 768-dim Matryoshka vector embeddings, past session decisions, and code architecture context. "
+            "Use the retrieved vector memory chunks and task backlog history to answer the user's question, citing specific facts and context."
+        ),
+    }
+    system_prompt = spec_prompts.get(
+        capability,
+        f"You are Compass's {capability.title()} Specialist Agent. Answer the user's query specifically using the retrieved domain context."
+    )
+    system_prompt += SPECIALIST_COMPLETENESS_RULE
+
+    findings_str = json.dumps(raw_findings, default=str)[:3500]
+    user_prompt = (
+        f"USER QUERY: {user_goal}\n\n"
+        f"RETRIEVED DOMAIN FINDINGS & CONTEXT:\n{findings_str}\n\n"
+        f"Please provide a comprehensive, domain-expert response addressing the user's question directly."
+    )
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+
+
 async def _synthesize_specialist_response(
     capability: str,
     user_goal: str,
     raw_findings: Dict[str, Any],
     fallback_summary: str,
+    defer: bool = False,
 ) -> str:
     """Synthesize a domain-expert response for the given capability and findings using LLM."""
+    if defer:
+        return fallback_summary
     try:
         from openai import AsyncOpenAI
         from backend.config import get_settings
@@ -145,56 +199,13 @@ async def _synthesize_specialist_response(
         if not settings.NEBIUS_API_KEY:
             return fallback_summary
 
-        spec_prompts = {
-            "calendar": (
-                "You are Compass's Calendar & Scheduling Specialist Agent. "
-                "Your sole expertise is schedule management, upcoming deadlines, calendar availability, conflict detection, and workload feasibility. "
-                "Use the provided workspace context (active tasks, deadlines, busy windows, availability) to answer the user's specific query directly, accurately, and thoroughly. "
-                "Explicitly detail specific task titles, due dates, priorities, or time slots relevant to their question. "
-                "Never reply with raw error strings like 'task_id is required' or raw unformatted data dumps. "
-                "Format your response with clear Markdown formatting."
-            ),
-            "coursework": (
-                "You are Compass's Academic & Coursework Specialist Agent. "
-                "Your sole expertise is academic assignments, lab notes, exams, hardware synthesis reports, and CS 61C coursework context. "
-                "Use the retrieved coursework context, tasks, and lab notes to answer the user's question with educational clarity and precision."
-            ),
-            "research": (
-                "You are Compass's Research Specialist Agent. "
-                "Your sole expertise is real-time web search, hackathon rules, Devpost guidelines, technical verification, and external documentation. "
-                "Use the retrieved web search results, hackathon tasks, and workspace context to answer the user's research query directly, accurately, and thoroughly."
-            ),
-            "memory": (
-                "You are Compass's Memory & Context Specialist Agent. "
-                "Your sole expertise is long-term memory recall, 768-dim Matryoshka vector embeddings, past session decisions, and code architecture context. "
-                "Use the retrieved vector memory chunks and task backlog history to answer the user's question, citing specific facts and context."
-            ),
-        }
-
-        system_prompt = spec_prompts.get(
-            capability,
-            f"You are Compass's {capability.title()} Specialist Agent. Answer the user's query specifically using the retrieved domain context."
-        )
-
-        system_prompt += SPECIALIST_COMPLETENESS_RULE
-
-        findings_str = json.dumps(raw_findings, default=str)[:3500]
-        user_prompt = (
-            f"USER QUERY: {user_goal}\n\n"
-            f"RETRIEVED DOMAIN FINDINGS & CONTEXT:\n{findings_str}\n\n"
-            f"Please provide a comprehensive, domain-expert response addressing the user's question directly."
-        )
-
         client = AsyncOpenAI(
             api_key=settings.NEBIUS_API_KEY,
             base_url=settings.NEBIUS_BASE_URL,
             timeout=SPECIALIST_REQUEST_TIMEOUT_S,
             max_retries=SPECIALIST_MAX_RETRIES,
         )
-        base_messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
+        base_messages = build_specialist_messages(capability, user_goal, raw_findings)
         try:
             resp = await client.chat.completions.create(
                 model=settings.ROUTER_MODEL,
@@ -288,7 +299,7 @@ async def run_coursework_specialist(
         logger.warning(f"[CourseworkSpecialist] Notes query failed: {e}")
 
     fallback_summary = "\n".join(summary_parts) if summary_parts else f"Coursework analysis completed for '{goal}'."
-    synthesized_summary = await _synthesize_specialist_response("coursework", goal, findings, fallback_summary)
+    synthesized_summary = await _synthesize_specialist_response("coursework", goal, findings, fallback_summary, defer=request.defer_synthesis)
 
     return SpecialistResult(
         capability="coursework",
@@ -357,7 +368,7 @@ async def run_research_specialist(
         logger.warning(f"[ResearchSpecialist] Web search failed: {e}")
 
     fallback_summary = "\n".join(summary_parts) if summary_parts else f"Research web query completed for '{goal}'."
-    synthesized_summary = await _synthesize_specialist_response("research", goal, findings, fallback_summary)
+    synthesized_summary = await _synthesize_specialist_response("research", goal, findings, fallback_summary, defer=request.defer_synthesis)
 
     return SpecialistResult(
         capability="research",
@@ -454,7 +465,7 @@ async def run_calendar_specialist(
         logger.warning(f"[CalendarSpecialist] Conflict check failed: {e}")
 
     fallback_summary = "\n".join(summary_parts) if summary_parts else f"Calendar & schedule analysis completed for '{goal}'."
-    synthesized_summary = await _synthesize_specialist_response("calendar", goal, findings, fallback_summary)
+    synthesized_summary = await _synthesize_specialist_response("calendar", goal, findings, fallback_summary, defer=request.defer_synthesis)
 
     return SpecialistResult(
         capability="calendar",
@@ -502,7 +513,7 @@ async def run_memory_specialist(
         logger.warning(f"[MemorySpecialist] Task backlog query failed: {e}")
 
     fallback_summary = "\n".join(summary_parts) if summary_parts else f"Memory context search completed for '{goal}'."
-    synthesized_summary = await _synthesize_specialist_response("memory", goal, findings, fallback_summary)
+    synthesized_summary = await _synthesize_specialist_response("memory", goal, findings, fallback_summary, defer=request.defer_synthesis)
 
     return SpecialistResult(
         capability="memory",
@@ -548,6 +559,7 @@ class SpecialistDispatcher:
                 allowed_tools=request.allowed_tools,
                 user_id=request.user_id,
                 include_demo=request.include_demo,
+                defer_synthesis=request.defer_synthesis,
             )
 
         task_created_header = ""
@@ -598,7 +610,10 @@ class SpecialistDispatcher:
                 )
 
             if task_created_header:
-                res.summary = task_created_header + res.summary
+                if request.defer_synthesis:
+                    res.task_created_header = task_created_header
+                else:
+                    res.summary = task_created_header + res.summary
             return res
         except Exception as e:
             logger.error(f"[SpecialistDispatcher] Specialist execution error for {cap}: {e}", exc_info=True)
@@ -621,8 +636,11 @@ async def run_specialist_task(
     pool: Any = None,
     user_id: Optional[str] = None,
     include_demo: bool = False,
+    defer_synthesis: bool = False,
 ) -> Dict[str, Any]:
-    """Canonical helper function for delegating a specialized task, scoped to `user_id` when given."""
+    """Canonical helper function for delegating a specialized task, scoped to `user_id` when given.
+
+    With `defer_synthesis=True` only the findings are gathered; the caller streams the written answer."""
     req_cap = (capability or "auto-dispatcher").lower().strip()
     if req_cap not in ("coursework", "research", "calendar", "memory", "auto-dispatcher", "auto"):
         req_cap = "auto-dispatcher"
@@ -634,6 +652,7 @@ async def run_specialist_task(
         allowed_tools=allowed_tools,
         user_id=user_id,
         include_demo=include_demo,
+        defer_synthesis=defer_synthesis,
     )
     result = await SpecialistDispatcher.dispatch(request, pool=pool)
     return result.model_dump()

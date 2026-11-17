@@ -57,6 +57,8 @@ async def handle_search_web(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
 
     results = resp.get("results", [])
     from backend.services.tavily_authority import sort_and_enrich_sources
+    from backend.services.web_answer import drop_social_results, synthesize_web_answer
+    results = drop_social_results(results)  # N-009: social posts are noise, not sources
     ranked_results = sort_and_enrich_sources(results) if results else results
 
     citations = [
@@ -143,23 +145,10 @@ async def handle_search_web(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
 
             formatted_response = "\n".join(out_lines).strip()
         else:
-            # Deadline query but no explicit dates extracted
-            parts = [
-                f"### Web Research: *{query}*",
-                "",
-                "No explicit deadline date could be conclusively verified from the official sources. Here are the most authoritative references found:",
-                "",
-            ]
-            for r in ranked_results[:3]:
-                badge = r.get("authority_badge", "Web")
-                parts.append(f"• [{r.get('title', 'Untitled')}]({r.get('url', '')}) `{badge}`\n  {r.get('content', '')[:350].strip()}...")
-            formatted_response = "\n".join(parts)
+            # Deadline query but no explicit dates extracted: short answer + source links, no pasted snippets
+            formatted_response = await synthesize_web_answer(query, ranked_results)
     elif ranked_results:
-        parts = [f"**Web Search Results for:** *{query}*"]
-        for r in ranked_results[:3]:
-            badge = r.get("authority_badge", "Web")
-            parts.append(f"• [{r.get('title', 'Untitled')}]({r.get('url', '')}) `{badge}`\n  {r.get('content', '')[:400].strip()}...")
-        formatted_response = "\n".join(parts)
+        formatted_response = await synthesize_web_answer(query, ranked_results)
 
     return {
         "success": True,

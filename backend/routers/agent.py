@@ -19,6 +19,7 @@ from backend.dependencies import (
     verify_nightly_or_admin_token,
 )
 from backend.memory.db import get_pool
+from backend.services.sse_keepalive import with_keepalive
 from backend.models import (
     AgentRequest,
     AgentConfirmRequest,
@@ -102,7 +103,7 @@ async def agent_run(req: AgentRequest, request: Request):
             yield f"data: {json.dumps({'type': 'error', 'content': 'An internal error occurred.'})}\n\n"
 
     return StreamingResponse(
-        agent_event_generator(),
+        with_keepalive(agent_event_generator()),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -546,7 +547,7 @@ async def agent_feasibility(request: Request, req: FeasibilityRequest):
             yield f"data: {json.dumps({'type': 'error', 'content': 'An internal error occurred during feasibility streaming.'})}\n\n"
 
     return StreamingResponse(
-        event_generator(),
+        with_keepalive(event_generator()),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

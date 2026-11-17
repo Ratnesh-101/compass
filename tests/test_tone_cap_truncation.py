@@ -9,13 +9,7 @@ from backend.agent import run_agent
 from backend.config import get_settings
 from backend.models import StreamChatRequest
 from backend.services.chat_stream import generate_chat_events
-from backend.services.token_budget import (
-    BALANCED_STREAM_MAX_TOKENS,
-    BRIEF_STREAM_MAX_TOKENS,
-    HARD_CAP_FINISH_MAX_TOKENS,
-    HARD_CAP_FINISH_PROMPT,
-    stream_token_budget,
-)
+from backend.services.token_budget import CONTINUE_PROMPT, stream_token_budget
 
 
 class _Delta:
@@ -106,10 +100,10 @@ async def test_balanced_cut_answer_is_finished():
     events, call_kwargs = await _drive_streams(msg, "balanced", [stream1, stream2])
 
     assert len(call_kwargs) == 2
-    assert call_kwargs[1]["max_tokens"] == HARD_CAP_FINISH_MAX_TOKENS
+    assert call_kwargs[1]["max_tokens"] == int(get_settings().MAX_SYNTHESIS_TOKENS)
     second_call_messages = call_kwargs[1]["messages"]
     assert second_call_messages[-1]["role"] == "user"
-    assert second_call_messages[-1]["content"] == HARD_CAP_FINISH_PROMPT
+    assert second_call_messages[-1]["content"] == CONTINUE_PROMPT
     assert second_call_messages[-2]["role"] == "assistant"
     assert second_call_messages[-2]["content"] == "Start by mastering the basics while you think aloud about"
 
@@ -135,10 +129,10 @@ async def test_brief_cut_answer_is_finished():
     events, call_kwargs = await _drive_streams(msg, "brief", [stream1, stream2])
 
     assert len(call_kwargs) == 2
-    assert call_kwargs[1]["max_tokens"] == HARD_CAP_FINISH_MAX_TOKENS
+    assert call_kwargs[1]["max_tokens"] == int(get_settings().MAX_SYNTHESIS_TOKENS)
     second_call_messages = call_kwargs[1]["messages"]
     assert second_call_messages[-1]["role"] == "user"
-    assert second_call_messages[-1]["content"] == HARD_CAP_FINISH_PROMPT
+    assert second_call_messages[-1]["content"] == CONTINUE_PROMPT
     assert second_call_messages[-2]["role"] == "assistant"
     assert second_call_messages[-2]["content"] == "Start by mastering the basics while you think aloud about"
 
@@ -152,30 +146,29 @@ async def test_brief_cut_answer_is_finished():
 
 @pytest.mark.asyncio
 async def test_hard_capped_continuation_is_bounded():
-    stream1 = _Stream([
-        _Chunk([_Choice(_Delta("Start by mastering the basics while you think aloud about"), None)]),
-        _Chunk([_Choice(_Delta(""), "length")]),
-    ])
-    stream2 = _Stream([
-        _Chunk([_Choice(_Delta(" trade-offs and more"), None)]),
-        _Chunk([_Choice(_Delta(""), "length")]),
-    ])
-    msg = "How do I prepare for a system design interview?"
-    events, call_kwargs = await _drive_streams(msg, "balanced", [stream1, stream2])
+    def _cut(text):
+        return _Stream([
+            _Chunk([_Choice(_Delta(text), None)]),
+            _Chunk([_Choice(_Delta(""), "length")]),
+        ])
 
-    assert len(call_kwargs) == 2
+    streams = [_cut("Start by mastering the basics"), _cut(" and more"), _cut(" and more still")]
+    msg = "How do I prepare for a system design interview?"
+    events, call_kwargs = await _drive_streams(msg, "balanced", streams)
+
+    # 1 first pass + MAX_CONTINUATION_ATTEMPTS (2) continuations, then stop.
+    assert len(call_kwargs) == 3
     done_events = [e for e in events if e.get("type") == "done"]
     assert len(done_events) == 1
     assert done_events[0].get("is_truncated") is True
 
 
 def test_stream_token_budget_values():
-    assert stream_token_budget("brief", 8192) == (BRIEF_STREAM_MAX_TOKENS, True)
-    assert stream_token_budget("balanced", 8192) == (BALANCED_STREAM_MAX_TOKENS, True)
+    # Tone is a style instruction only: every tone gets the full budget and is never hard-capped.
+    assert stream_token_budget("brief", 8192) == (8192, False)
+    assert stream_token_budget("balanced", 8192) == (8192, False)
     assert stream_token_budget("detailed", 8192) == (8192, False)
     assert stream_token_budget(None, 8192) == (8192, False)
-    assert BRIEF_STREAM_MAX_TOKENS >= 400
-    assert BALANCED_STREAM_MAX_TOKENS >= 600
 
 
 @pytest.mark.asyncio

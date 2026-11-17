@@ -20,6 +20,16 @@ logger = logging.getLogger("compass.agent_synthesis")
 
 from datetime import datetime
 
+SYNTHESIS_MIN_TIMEOUT_S = 60.0
+SYNTHESIS_MAX_TIMEOUT_S = 240.0
+SYNTHESIS_TOKENS_PER_SECOND = 40.0  # conservative generation speed for the large synthesis model
+
+
+def synthesis_timeout_seconds(max_tokens: int) -> float:
+    """Read timeout for one non-streaming synthesis call, scaled to its token budget (60-240 s)."""
+    est = float(max_tokens) / SYNTHESIS_TOKENS_PER_SECOND + 20.0
+    return max(SYNTHESIS_MIN_TIMEOUT_S, min(SYNTHESIS_MAX_TIMEOUT_S, est))
+
 
 async def force_final_synthesis(
     client: AsyncOpenAI,
@@ -45,30 +55,29 @@ async def force_final_synthesis(
         "- Never emit literal bracketed placeholders such as '[time]' or '[date]'; explicitly state 'time not shown in source' instead."
     )
 
+    # Tone is a style instruction only: every tone gets the full synthesis token budget so hidden
+    # reasoning can never eat the visible answer.
+    synth_tokens = int(getattr(settings, "MAX_SYNTHESIS_TOKENS", 8192))
+    synth_timeout = synthesis_timeout_seconds(synth_tokens)
     clean_tone = (tone or "").strip().lower()
     if clean_tone == "brief":
-        synth_tokens = 1200
         synth_prompt += (
             "\n\n[TONE CONSTRAINT: STRICTLY BRIEF]\n"
             "Give a short but genuinely useful explanation, like a good assistant asked to be brief: one direct sentence that answers the question, then 1-3 short sentences on the key mechanism or reason and one concrete example or tradeoff Keep it under 60 words, but never mention or state a word count in your reply. "
             "State the core answer or count + top item immediately with zero preamble or conversational filler. No follow-up questions."
         )
     elif clean_tone == "balanced":
-        synth_tokens = 1200
         synth_prompt += (
             "\n\n[TONE CONSTRAINT: BALANCED]\n"
             "Provide a balanced, well-rounded response (2-4 clear sentences, roughly 60-100 words). "
             "Balance brevity with helpful context and next steps."
         )
     elif clean_tone == "exploratory":
-        synth_tokens = 1500
         synth_prompt += (
             "\n\n[TONE CONSTRAINT: COMPREHENSIVE EXPLORATION]\n"
             "Provide a comprehensive, in-depth exploration (at least 150 words). "
             "Think out loud, examine nuances, provide context and rationale, and outline forward-looking recommendations."
         )
-    else:
-        synth_tokens = int(getattr(settings, "MAX_SYNTHESIS_TOKENS", 8192))
 
     messages.append({
         "role": "user",
@@ -84,6 +93,7 @@ async def force_final_synthesis(
         max_tokens=synth_tokens,
         temperature=0.5,
         stream=False,
+        timeout=synth_timeout,
     )
     dur_ms = int((time.perf_counter() - t0) * 1000)
     usage = getattr(response, "usage", None)
@@ -121,6 +131,7 @@ async def force_final_synthesis(
                 max_tokens=synth_tokens,
                 temperature=0.5,
                 stream=False,
+                timeout=synth_timeout,
             )
             c_dur_ms = int((time.perf_counter() - t0_cont) * 1000)
             c_usage = getattr(cont_resp, "usage", None)

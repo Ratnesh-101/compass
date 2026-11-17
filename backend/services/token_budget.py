@@ -9,22 +9,20 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-BRIEF_STREAM_MAX_TOKENS = 1500  # visible answer stays short via the tone prompt; the rest is headroom for hidden reasoning
-BALANCED_STREAM_MAX_TOKENS = 2000
-HARD_CAP_FINISH_MAX_TOKENS = 800
-HARD_CAP_FINISH_PROMPT = (
-    "Your previous response was cut off by the length limit. Finish it now: complete the sentence that was cut off "
-    "and conclude in at most two more short sentences. Do not repeat anything you already wrote and do not start a new topic."
+CONTINUE_PROMPT = (
+    "Your previous response was cut off by the token limit. "
+    "Continue generating EXACTLY where you left off. "
+    "Do not repeat prior paragraphs, table rows, citations, or greetings."
 )
 
 
 def stream_token_budget(tone: Optional[str], max_synth_budget: Any) -> tuple[int, bool]:
-    """Return (max_tokens, hard_capped) for the direct chat stream. tone may be None."""
-    clean_tone = (tone or "").strip().lower()
-    if clean_tone == "brief":
-        return (BRIEF_STREAM_MAX_TOKENS, True)
-    if clean_tone == "balanced":
-        return (BALANCED_STREAM_MAX_TOKENS, True)
+    """Return (max_tokens, hard_capped) for the direct chat stream.
+
+    Tone is a style instruction only (enforced by the system prompt). Every tone gets the full
+    synthesis budget, because hidden reasoning tokens count against max_tokens and a hard cap
+    cuts the visible answer mid-sentence. `hard_capped` is always False and kept for callers.
+    """
     return (int(max_synth_budget), False)
 
 
