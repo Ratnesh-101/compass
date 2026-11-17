@@ -198,45 +198,75 @@ export default function AgentPanel({ onTaskMutated, conversationId }) {
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
+      let sawTerminal = false
+      let activeRunId = payload?.run_id || currentRunId || null
+
+      const processLine = (line) => {
+        if (!line.startsWith('data: ')) return
+        try {
+          const event = JSON.parse(line.slice(6))
+          setSteps(prev => [...prev, event])
+
+          if (event.run_id) {
+            activeRunId = event.run_id
+            setCurrentRunId(event.run_id)
+          }
+
+          if (event.type === 'confirm_request') {
+            sawTerminal = true
+            setPendingActions(prev => [...prev, { tool: event.tool, args: event.args }])
+          } else if (event.type === 'done') {
+            sawTerminal = true
+            if (event.metadata?.triage_plan) {
+              const tp = event.metadata.triage_plan
+              if ((tp.drop && tp.drop.length > 0) || (tp.defer && tp.defer.length > 0)) {
+                setPendingActions([{
+                  tool: 'apply_triage_plan',
+                  args: {
+                    drop_ids: (tp.drop || []).map(t => t.task_id),
+                    defer_ids: (tp.defer || []).map(t => t.task_id),
+                  },
+                  summary: `Adjust workload: drop ${tp.drop?.length || 0} task(s) and reschedule ${tp.defer?.length || 0} task(s)`,
+                }])
+              }
+            }
+          }
+        } catch {
+          // Skip malformed events
+        }
+      }
 
       while (true) {
         const { done, value } = await reader.read()
-        if (done) break
+        if (done) {
+          if (buffer && buffer.trim()) {
+            const remainingLines = buffer.split('\n')
+            for (const line of remainingLines) {
+              processLine(line)
+            }
+            buffer = ''
+          }
+          break
+        }
 
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
         buffer = lines.pop() || ''
 
         for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const event = JSON.parse(line.slice(6))
-              setSteps(prev => [...prev, event])
-
-              if (event.run_id) {
-                setCurrentRunId(event.run_id)
-              }
-
-              if (event.type === 'confirm_request') {
-                setPendingActions(prev => [...prev, { tool: event.tool, args: event.args }])
-              } else if (event.type === 'done' && event.metadata?.triage_plan) {
-                const tp = event.metadata.triage_plan
-                if ((tp.drop && tp.drop.length > 0) || (tp.defer && tp.defer.length > 0)) {
-                  setPendingActions([{
-                    tool: 'apply_triage_plan',
-                    args: {
-                      drop_ids: (tp.drop || []).map(t => t.task_id),
-                      defer_ids: (tp.defer || []).map(t => t.task_id),
-                    },
-                    summary: `Adjust workload: drop ${tp.drop?.length || 0} task(s) and reschedule ${tp.defer?.length || 0} task(s)`,
-                  }])
-                }
-              }
-            } catch {
-              // Skip malformed events
-            }
-          }
+          processLine(line)
         }
+      }
+
+      if (!sawTerminal) {
+        setSteps(prev => [...prev, {
+          type: 'error',
+          content: 'The planning stream disconnected before receiving a completion event.',
+          step: prev.length + 1,
+          elapsed_ms: 0,
+          run_id: activeRunId,
+          canResume: Boolean(activeRunId),
+        }])
       }
     } catch (err) {
       if (err.name !== 'AbortError') {
@@ -402,6 +432,42 @@ export default function AgentPanel({ onTaskMutated, conversationId }) {
     }
   }
 
+  const resumeRun = async (runId) => {
+    if (!runId) return
+    setIsRunning(true)
+    try {
+      const res = await fetch(`${getApiBase()}/api/agent/runs/${runId}`, { headers: getAuthHeaders() })
+      if (!res.ok) throw new Error(`Failed to fetch run: ${res.status}`)
+      const data = await res.json()
+      if (data) {
+        setCurrentRunId(data.id || runId)
+        if (data.goal) setGoal(data.goal)
+        let loadedSteps = data.steps || data.accumulated_steps || []
+        if (typeof loadedSteps === 'string') {
+          try { loadedSteps = JSON.parse(loadedSteps) } catch { loadedSteps = [] }
+        }
+        if (Array.isArray(loadedSteps) && loadedSteps.length > 0) setSteps(loadedSteps)
+        let pending = data.pending_actions || []
+        if (typeof pending === 'string') {
+          try { pending = JSON.parse(pending) } catch { pending = [] }
+        }
+        if (Array.isArray(pending) && pending.length > 0) setPendingActions(pending)
+        if (data.status === 'running') {
+          await streamFromEndpoint({ run_id: runId, goal: data.goal || goal })
+        }
+      }
+    } catch (err) {
+      setSteps(prev => [...prev, {
+        type: 'error',
+        content: `Could not resume run: ${err.message}`,
+        step: prev.length + 1,
+        elapsed_ms: 0,
+      }])
+    } finally {
+      setIsRunning(false)
+    }
+  }
+
   return (
     <div style={{
       flex: 1,
@@ -531,7 +597,33 @@ export default function AgentPanel({ onTaskMutated, conversationId }) {
         )}
 
         {steps.map((step, i) => (
-          <StepCard key={i} step={step} index={i} />
+          <div key={i}>
+            <StepCard step={step} index={i} />
+            {step.canResume && step.run_id && !isRunning && (
+              <div style={{ margin: '-4px 0 10px 12px' }}>
+                <button
+                  type="button"
+                  onClick={() => resumeRun(step.run_id)}
+                  className="btn-secondary"
+                  style={{
+                    padding: '4px 12px',
+                    fontSize: '12px',
+                    fontWeight: '600',
+                    color: 'var(--primary, #2563eb)',
+                    border: '1px solid var(--border)',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    background: 'var(--bg-card)',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                >
+                  Resume run ➔
+                </button>
+              </div>
+            )}
+          </div>
         ))}
 
         <ConfirmationGate

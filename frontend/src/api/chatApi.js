@@ -98,7 +98,7 @@ export function sanitizeModesMarker(text) {
  * Dispatches incremental tokens via onToken, completion metadata via onComplete,
  * and errors via onError.
  */
-export async function streamQueryFromAssistant(prompt, conversationId, { onToken, onThought, onStatus, onComplete, onError, tone = null, mode = null, specialistId = null, targetMessageId = null, targetMessageContent = null, signal = null, requestId = null } = {}) {
+export async function streamQueryFromAssistant(prompt, conversationId, { onToken, onThought, onStatus, onComplete, onError, tone = null, mode = null, specialistId = null, targetMessageId = null, targetMessageContent = null, signal = null, requestId = null, continueMessageId = null, continue_message_id = null } = {}) {
   let fullResponse = ''
   let reader = null
   let streamResult = null
@@ -125,6 +125,10 @@ export async function streamQueryFromAssistant(prompt, conversationId, { onToken
     }
     if (targetMessageContent) {
       body.target_message_content = targetMessageContent
+    }
+    const contId = continueMessageId || continue_message_id
+    if (contId) {
+      body.continue_message_id = contId
     }
 
     const res = await fetch(`${API_BASE}/api/chat/stream`, {
@@ -174,6 +178,9 @@ export async function streamQueryFromAssistant(prompt, conversationId, { onToken
       }
 
       if (evt.type === 'status' || evt.type === 'activity') {
+        if (evt.label && /continuing response/i.test(evt.label)) {
+          evt.label = 'Finishing the answer…'
+        }
         if (onStatus) onStatus(evt)
       } else if (evt.type === 'committed') {
         committed = { skill_used: evt.skill_used, count: evt.count }
@@ -236,10 +243,14 @@ export async function streamQueryFromAssistant(prompt, conversationId, { onToken
     }
 
     const cleanResponse = sanitizeModesMarker(fullResponse).trim()
-    if (!cleanResponse && !sawDoneEvent) {
-      const emptyErr = new Error('Connection closed before assistant response was received.')
-      emptyErr.partialResponse = ''
-      throw emptyErr
+    if (!sawDoneEvent) {
+      const streamErr = new Error(
+        cleanResponse
+          ? 'Stream ended abruptly before completion.'
+          : 'Connection closed before assistant response was received.'
+      )
+      streamErr.partialResponse = fullResponse
+      throw streamErr
     }
 
     streamResult = {
@@ -322,6 +333,8 @@ export async function fetchConversationMessages(conversationId) {
       skill_called: m.skill_called,
       evidence: m.evidence,
       created_at: m.created_at,
+      isTruncated: Boolean(m.is_truncated || m.isTruncated),
+      is_truncated: Boolean(m.is_truncated || m.isTruncated),
     }))
   } catch {
     return []

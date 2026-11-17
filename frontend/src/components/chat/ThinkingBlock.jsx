@@ -103,7 +103,12 @@ export default function ThinkingBlock({ thought, status, isLive = false }) {
 
   // Resolve user-facing activity label
   const activeLabel = useMemo(() => {
-    if (status?.label) return status.label
+    if (status?.label) {
+      if (/continuing response/i.test(status.label)) {
+        return 'Finishing the answer…'
+      }
+      return status.label
+    }
     if (status?.stage === 'searching') return 'Searching the web…'
     if (status?.stage === 'reading_sources') return 'Verifying official sources…'
     if (status?.stage === 'reasoning') return 'Analyzing…'
