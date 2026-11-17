@@ -3,13 +3,8 @@
 import {
   API_BASE,
   getAuthHeaders,
-  fetchWithGuestRetry,
-  getGuestToken,
-  setGuestSession,
-  initGuestSession,
   fetchWithTimeout,
 } from './baseClient.js'
-import { SEED_TIMEOUT_MS } from '../utils/firstRun.js'
 import { chatRequestFields, makeRequestId } from '../utils/chatRequest.js'
 
 // When the Judge Persona workspace is visible, chat must see the same demo data the dashboard shows.
@@ -423,74 +418,6 @@ export async function fetchMemoryOverview() {
   }
 }
 
-
-/**
- * Seed or refresh the Dual-Degree Hackathon Competitor demo persona for judges.
- */
-export async function seedJudgeDemoPersona() {
-  try {
-    let tz = 'UTC'
-    try {
-      tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
-    } catch {
-      /* fallback to UTC */
-    }
-
-    let guestToken = getGuestToken()
-    if (!guestToken) {
-      const initData = await initGuestSession()
-      if (initData) {
-        guestToken = initData.guest_token || initData.token
-      }
-    }
-
-    const res = await fetchWithGuestRetry(`${API_BASE}/api/demo/seed-persona`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(guestToken ? { 'x-guest-token': guestToken } : {})
-      },
-      body: JSON.stringify({ tz }),
-      timeoutMs: SEED_TIMEOUT_MS,
-    })
-    if (!res.ok) {
-      let errPayload = {}
-      try {
-        errPayload = await res.json()
-      } catch {
-        /* non-JSON response e.g. 503 HTML from proxy */
-      }
-      const retryHeader = res.headers.get('retry-after')
-      const retryAfterSec = retryHeader ? parseInt(retryHeader, 10) : null
-      const detailObj = typeof errPayload.detail === 'object' && errPayload.detail ? errPayload.detail : {}
-      const detailText = detailObj.detail || (typeof errPayload.detail === 'string' ? errPayload.detail : '') || errPayload.message || `HTTP ${res.status}`
-      const isExplicitlyDisabled = errPayload.code === 'seeding_disabled' || detailObj.code === 'seeding_disabled' || detailText.toLowerCase().includes('disabled')
-      const code = errPayload.code || detailObj.code || (
-        isExplicitlyDisabled ? 'seeding_disabled' :
-        res.status === 429 ? 'seeding_rate_limited' :
-        res.status === 403 ? 'auth_forbidden' :
-        res.status === 503 ? 'db_unavailable' :
-        res.status === 401 ? 'auth_required' : 'unknown_error'
-      )
-      const error = new Error(detailText)
-      error.status = res.status
-      error.code = code
-      error.retryAfter = retryAfterSec
-      throw error
-    }
-    const data = await res.json()
-    if (data.guest_id && data.guest_token) {
-      setGuestSession(data.guest_id, data.guest_token)
-    }
-    if (typeof window !== 'undefined' && typeof window.CustomEvent === 'function') {
-      window.dispatchEvent(new window.CustomEvent('compass:demo-persona-loaded'))
-    }
-    return data
-  } catch (err) {
-    console.warn('Demo persona seed error:', err)
-    throw err
-  }
-}
 
 /**
  * Check if the current account/session has Judge Persona demo data active.

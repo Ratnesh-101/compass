@@ -318,14 +318,14 @@ export default function AddDeadlineModal({ isOpen, onClose, onCreated, defaultDo
 
           {/* Title */}
           <div>
-            <label style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px' }}>
+            <label htmlFor="input-deadline-title" style={{ display: 'block', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px' }}>
               Title <span style={{ color: '#ef4444' }}>*</span>
             </label>
             <input
               id="input-deadline-title"
               type="text"
               required
-              placeholder="e.g. Submit CS106B Project or Finish Auth Flow"
+              placeholder="e.g. Submit Operating Systems assignment or Study for midterm"
               value={title}
               onChange={e => setTitle(e.target.value)}
               style={{
@@ -345,13 +345,13 @@ export default function AddDeadlineModal({ isOpen, onClose, onCreated, defaultDo
           {/* Project & Due Date Row */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
             <div>
-              <label style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px' }}>
+              <label htmlFor="input-deadline-project" style={{ display: 'block', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px' }}>
                 Project
               </label>
               <input
                 id="input-deadline-project"
                 type="text"
-                placeholder="e.g. HackMIT, Compass"
+                placeholder="e.g. Computer Networks, Capstone Project"
                 value={project}
                 onChange={e => setProject(e.target.value)}
                 style={{
@@ -368,7 +368,7 @@ export default function AddDeadlineModal({ isOpen, onClose, onCreated, defaultDo
               />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px' }}>
+              <label htmlFor="input-deadline-date" style={{ display: 'block', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px' }}>
                 Deadline Date
               </label>
               <input
@@ -394,7 +394,7 @@ export default function AddDeadlineModal({ isOpen, onClose, onCreated, defaultDo
           {/* Priority & Duration Row */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
             <div>
-              <label style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px' }}>
+              <label htmlFor="select-deadline-priority" style={{ display: 'block', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px' }}>
                 Priority
               </label>
               <select
@@ -420,7 +420,7 @@ export default function AddDeadlineModal({ isOpen, onClose, onCreated, defaultDo
               </select>
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px' }}>
+              <label htmlFor="input-deadline-duration" style={{ display: 'block', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px' }}>
                 Duration (minutes)
               </label>
               <input
@@ -448,7 +448,7 @@ export default function AddDeadlineModal({ isOpen, onClose, onCreated, defaultDo
 
           {/* Notes / Description */}
           <div>
-            <label style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px' }}>
+            <label htmlFor="input-deadline-notes" style={{ display: 'block', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px' }}>
               Notes & Details
             </label>
             <textarea

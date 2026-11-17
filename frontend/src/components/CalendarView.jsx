@@ -133,7 +133,7 @@ export default function CalendarView({
   isDarkMode,
   onToggleDarkMode,
 }) {
-  const [calendarStatus, setCalendarStatus] = useState({ connected: false, mode: 'demo', account_email: 'demo-scholar@compass.ai' })
+  const [calendarStatus, setCalendarStatus] = useState({ connected: false, mode: 'demo', account_email: '' })
   const [selectedDate, setSelectedDate] = useState(() => toIso(new Date()))
   const [monthCursor, setMonthCursor] = useState(() => new Date())
   const [busyIntervals, setBusyIntervals] = useState([])
@@ -152,6 +152,40 @@ export default function CalendarView({
   const [showMoreMenu, setShowMoreMenu] = useState(false)
   const [viewMode, setViewMode] = useState('week') // 'week' | 'agenda'
   const moreMenuRef = useRef(null)
+
+  // Editable working hours with localStorage persistence (N-028)
+  const [workingHours, setWorkingHours] = useState(() => {
+    try {
+      const saved = localStorage.getItem('compass_working_hours')
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (parsed.start && parsed.end) return parsed
+      }
+    } catch {
+      /* ignore */
+    }
+    return { start: '09:00', end: '18:00' }
+  })
+  const [isEditingHours, setIsEditingHours] = useState(false)
+  const [tempStart, setTempStart] = useState('09:00')
+  const [tempEnd, setTempEnd] = useState('18:00')
+
+  const handleStartEditHours = () => {
+    setTempStart(workingHours.start)
+    setTempEnd(workingHours.end)
+    setIsEditingHours(true)
+  }
+
+  const handleSaveWorkingHours = () => {
+    const updated = { start: tempStart || '09:00', end: tempEnd || '18:00' }
+    setWorkingHours(updated)
+    try {
+      localStorage.setItem('compass_working_hours', JSON.stringify(updated))
+    } catch {
+      /* ignore */
+    }
+    setIsEditingHours(false)
+  }
 
   const selectedDateObj = useMemo(() => parseIsoLocal(selectedDate), [selectedDate])
   const weekStart = useMemo(() => startOfWeek(selectedDateObj), [selectedDateObj])
@@ -365,7 +399,7 @@ export default function CalendarView({
 
   const handleDisconnect = async () => {
     await disconnectCalendar()
-    setCalendarStatus({ connected: false, mode: 'demo', account_email: 'demo-scholar@compass.ai' })
+    setCalendarStatus({ connected: false, mode: 'demo', account_email: '' })
     loadAvailability(weekStart)
     setShowMoreMenu(false)
   }
@@ -422,7 +456,7 @@ export default function CalendarView({
             </h2>
             <div
               onClick={() => { if (onOpenAuthModal) onOpenAuthModal(); else setShowQuickModal(true) }}
-              title="Click to switch account or manage Google Calendar"
+              title={isLive ? `Connected: ${calendarStatus.account_email}` : "Private Guest Workspace (Local Schedule)"}
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '6px 10px', borderRadius: 'var(--radius-btn, 6px)',
                 background: 'var(--bg-card-soft)', border: '1px solid var(--border)',
@@ -432,7 +466,7 @@ export default function CalendarView({
               }}>
               <span className="domain-swatch" style={{ width: '8px', height: '8px', borderRadius: '2px', background: isLive ? 'var(--code)' : 'var(--hackathon)', flexShrink: 0 }} />
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {isLive ? `${calendarStatus.account_email}` : (calendarStatus.account_email || 'demo')}
+                {isLive && calendarStatus.account_email ? calendarStatus.account_email : 'Guest Schedule'}
               </span>
             </div>
           </div>
@@ -446,7 +480,7 @@ export default function CalendarView({
 
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', marginTop: '8px' }}>
           <p className="calendar-policy-subtext" style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>
-            {workingWindowLabel(userTimeZone)} · 15m buffer · deterministic allocation
+            Working hours: {workingHours.start} – {workingHours.end} · 15m focus breaks
           </p>
 
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -462,7 +496,7 @@ export default function CalendarView({
                 minHeight: '44px',
               }}>
               {checkingReactive ? <RefreshCw size={14} strokeWidth={1.8} className="animate-spin" /> : <Zap size={14} strokeWidth={1.8} />}
-              <span>{checkingReactive ? 'Scanning...' : 'Scan Slip'}</span>
+              <span>{checkingReactive ? 'Checking...' : 'Check schedule'}</span>
             </button>
 
             <div ref={moreMenuRef} style={{ position: 'relative' }}>
@@ -765,16 +799,76 @@ export default function CalendarView({
             </div>
 
             <div style={{ marginTop: 'auto', padding: '14px', borderRadius: 'var(--radius-card, 8px)', background: 'var(--bg-card-soft)', border: '1px solid var(--border)' }}>
-              <h4 style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <Settings size={14} strokeWidth={1.8} />
-                <span>Deterministic Policy</span>
-              </h4>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <h4 style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Settings size={14} strokeWidth={1.8} />
+                  <span>Study Schedule Preferences</span>
+                </h4>
+                {!isEditingHours && (
+                  <button
+                    type="button"
+                    onClick={handleStartEditHours}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: 'var(--accent, #f5a623)',
+                      fontSize: '11.5px',
+                      fontWeight: '600',
+                      cursor: 'pointer',
+                      padding: '2px 4px',
+                    }}
+                  >
+                    Edit hours
+                  </button>
+                )}
+              </div>
+
+              {isEditingHours ? (
+                <div style={{ marginBottom: '10px', padding: '10px', background: 'var(--bg-card)', borderRadius: '6px', border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: '12px', fontWeight: '600', marginBottom: '8px', color: 'var(--text-primary)' }}>Set Working Hours</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                    <label htmlFor="calendar-hours-start" style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>From:</label>
+                    <input
+                      id="calendar-hours-start"
+                      type="time"
+                      value={tempStart}
+                      onChange={(e) => setTempStart(e.target.value)}
+                      style={{ padding: '4px 6px', fontSize: '12px', borderRadius: '4px', border: '1px solid var(--border)', background: 'var(--bg-app)', color: 'var(--text-primary)' }}
+                    />
+                    <label htmlFor="calendar-hours-end" style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>To:</label>
+                    <input
+                      id="calendar-hours-end"
+                      type="time"
+                      value={tempEnd}
+                      onChange={(e) => setTempEnd(e.target.value)}
+                      style={{ padding: '4px 6px', fontSize: '12px', borderRadius: '4px', border: '1px solid var(--border)', background: 'var(--bg-app)', color: 'var(--text-primary)' }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingHours(false)}
+                      style={{ padding: '4px 10px', fontSize: '11.5px', borderRadius: '4px', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer' }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveWorkingHours}
+                      style={{ padding: '4px 12px', fontSize: '11.5px', borderRadius: '4px', border: 'none', background: 'var(--primary, #f5a623)', color: 'var(--accent-text, #1b1a17)', fontWeight: '600', cursor: 'pointer' }}
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
               <ul style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.6', paddingLeft: '16px', margin: 0 }}>
-                <li>Working Window: {workingWindowLabel(userTimeZone)}</li>
-                <li>Days: Monday - Friday (workdays)</li>
-                <li>Inter-task buffer: 15 minutes</li>
-                <li>Deterministic slot allocator</li>
-                <li>Export as .ics (RFC 5545)</li>
+                <li>Working Window: {workingHours.start} – {workingHours.end}</li>
+                <li>Days: Monday – Friday (study days)</li>
+                <li>Break between tasks: 15 minutes</li>
+                <li>Automatic focus time allocator</li>
+                <li>Export to calendar (.ics format)</li>
               </ul>
             </div>
           </section>

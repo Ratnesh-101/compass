@@ -728,7 +728,7 @@ export default function Sidebar({
                 flexShrink: 0
               }} />
               <span style={{ fontSize: '12.5px', fontWeight: '600', color: '#ffffff' }}>
-                {isOnline ? `${totalActive} tasks synced` : 'Reconnecting'}
+                {isOnline ? `${totalActive} ${totalActive === 1 ? 'task' : 'tasks'} synced` : 'Reconnecting'}
               </span>
             </div>
             {!isOnline && onRetryConnection && (
@@ -866,7 +866,8 @@ export default function Sidebar({
 
       {/* Account / Workspace Switcher: min 44px tap target */}
       {effectivelyCollapsed ? (
-        <div
+        <button
+          type="button"
           id="sidebar-account-btn"
           onClick={() => onOpenAuth && onOpenAuth()}
           title={currentUser?.authenticated ? `Signed in as ${currentUser.email}, Click to switch` : 'Sign in / Account'}
@@ -887,6 +888,7 @@ export default function Sidebar({
             transition: 'all 0.15s ease',
             flexShrink: 0,
             color: 'var(--sidebar-text)',
+            padding: 0,
           }}
           onMouseEnter={e => {
             e.currentTarget.style.background = 'var(--sidebar-hover)'
@@ -901,12 +903,16 @@ export default function Sidebar({
             <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
             <circle cx="12" cy="7" r="4" />
           </svg>
-        </div>
+        </button>
       ) : (
-        <div
+        <button
+          type="button"
           id="sidebar-account-btn"
           onClick={() => onOpenAuth && onOpenAuth()}
+          aria-label={currentUser?.authenticated ? `Account: ${currentUser.email}. Click to manage account.` : 'Sign in to Compass. Click to login.'}
           style={{
+            width: '100%',
+            textAlign: 'left',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -935,14 +941,14 @@ export default function Sidebar({
                 {currentUser?.authenticated ? currentUser.email : 'Sign in / Account'}
               </div>
               <div style={{ fontSize: '10.5px', color: 'var(--sidebar-text)', opacity: 0.75 }}>
-                {currentUser?.calendar?.connected ? 'Google Calendar Connected' : 'Isolated Workspace'}
+                {currentUser?.calendar?.connected ? 'Google Calendar Connected' : 'Private Workspace'}
               </div>
             </div>
           </div>
           <span style={{ fontSize: '11px', color: 'var(--brand)', fontWeight: '600', flexShrink: 0, paddingLeft: '6px' }}>
             {currentUser?.authenticated ? 'Switch ▾' : 'Login ▾'}
           </span>
-        </div>
+        </button>
       )}
 
       <CreateDomainModal

@@ -8,7 +8,8 @@ import {
   X,
   ArrowLeft,
   Loader2,
-  Check
+  Check,
+  BookOpen
 } from 'lucide-react'
 import DarkModeToggle from '../DarkModeToggle'
 
@@ -21,10 +22,8 @@ export default function TimelineHeader({
   onOpenTelemetry,
   onVerifyAll,
   verifyingDeadlines,
-  onSeedJudgePersona,
-  seedingPersona,
-  seedSuccess,
   onOpenNewTask,
+  onOpenAbout,
   verificationSummary,
   onClearVerificationSummary,
 }) {
@@ -105,7 +104,7 @@ export default function TimelineHeader({
         )}
       </div>
 
-      {/* Toolbar Button Group: compact, responsive */}
+      {/* Toolbar Button Group: clean, student-friendly */}
       <div
         className="timeline-actions-group"
         style={{
@@ -115,87 +114,6 @@ export default function TimelineHeader({
           flexWrap: 'wrap'
         }}
       >
-        {onOpenTelemetry && (
-          <button
-            id="btn-open-telemetry"
-            type="button"
-            onClick={onOpenTelemetry}
-            className="btn-secondary"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              minHeight: '36px',
-              padding: '0 12px',
-              fontSize: '12.5px',
-              fontWeight: '500',
-              borderRadius: 'var(--radius-btn, 6px)',
-              cursor: 'pointer'
-            }}
-            title="Inspect live Nebius Token Factory token consumption and NVIDIA MoE hierarchy"
-          >
-            <Cpu size={14} strokeWidth={1.8} style={{ color: 'var(--accent, #f5a623)' }} />
-            <span>Nebius & NVIDIA Telemetry</span>
-          </button>
-        )}
-
-        <button
-          id="btn-verify-all-deadlines"
-          type="button"
-          onClick={onVerifyAll}
-          disabled={verifyingDeadlines}
-          className="btn-secondary"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px',
-            minHeight: '36px',
-            padding: '0 12px',
-            fontSize: '12.5px',
-            fontWeight: '500',
-            borderRadius: 'var(--radius-btn, 6px)',
-            cursor: verifyingDeadlines ? 'wait' : 'pointer'
-          }}
-          title="Verify deadlines against authoritative sources with Tavily"
-        >
-          {verifyingDeadlines ? (
-            <Loader2 size={14} strokeWidth={1.8} className="spin" />
-          ) : (
-            <ShieldCheck size={14} strokeWidth={1.8} style={{ color: 'var(--brand)' }} />
-          )}
-          <span>{verifyingDeadlines ? 'Verifying with Tavily...' : 'Verify with Tavily'}</span>
-        </button>
-
-        <button
-          id="btn-seed-judge-persona"
-          type="button"
-          onClick={onSeedJudgePersona}
-          disabled={seedingPersona}
-          className="btn-secondary"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px',
-            minHeight: '36px',
-            padding: '0 12px',
-            fontSize: '12.5px',
-            fontWeight: '500',
-            borderRadius: 'var(--radius-btn, 6px)',
-            cursor: seedingPersona ? 'wait' : 'pointer',
-            color: seedSuccess ? 'var(--code-text, #10b981)' : undefined
-          }}
-          title="Load demonstration persona with multi-domain tasks & semantic memory"
-        >
-          {seedingPersona ? (
-            <Loader2 size={14} strokeWidth={1.8} className="spin" />
-          ) : seedSuccess ? (
-            <Check size={14} strokeWidth={1.8} style={{ color: 'var(--code-text, #10b981)' }} />
-          ) : (
-            <Sparkles size={14} strokeWidth={1.8} style={{ color: 'var(--brand)' }} />
-          )}
-          <span>{seedingPersona ? 'Loading...' : seedSuccess ? 'Demo Persona Loaded!' : 'Load Judge Persona'}</span>
-        </button>
-
         <button
           id="btn-add-deadline"
           onClick={onOpenNewTask}
@@ -216,6 +134,31 @@ export default function TimelineHeader({
           <Plus size={15} strokeWidth={2} />
           <span>Add deadline</span>
         </button>
+
+        {onOpenAbout && (
+          <button
+            id="timeline-btn-about-judges"
+            type="button"
+            onClick={onOpenAbout}
+            className="btn-secondary"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              minHeight: '36px',
+              padding: '0 12px',
+              fontSize: '12.5px',
+              fontWeight: '500',
+              borderRadius: 'var(--radius-btn, 6px)',
+              cursor: 'pointer',
+              flexShrink: 0
+            }}
+            title="Architecture, AI telemetry, and evaluation resources for judges"
+          >
+            <BookOpen size={14} strokeWidth={1.8} style={{ color: 'var(--accent)' }} />
+            <span>About / for judges</span>
+          </button>
+        )}
       </div>
 
       {/* Verification Feedback Banner */}
