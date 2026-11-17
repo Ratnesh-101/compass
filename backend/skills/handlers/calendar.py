@@ -264,9 +264,11 @@ async def handle_commit_schedule(args: Dict[str, Any], pool: Any) -> Dict[str, A
     """
     from backend.memory.structured import get_task, update_task
     from backend.services.calendar import link_calendar_event, summarize_calendar_outcome, tally_link_results
-    from backend.services.ownership import scope_owner
+    from backend.services.ownership import has_caller, scope_owner
 
     user_id = args.get("user_id")
+    if not has_caller(user_id):
+        return {"response": "user_id required", "data": {"status": "error", "error": "user_id required"}}
     scoped_owner = scope_owner(user_id)
     assignments = args.get("assignments") or []
     rationale = args.get("rationale") or "Schedule committed by Compass Agent."

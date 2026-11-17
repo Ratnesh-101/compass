@@ -195,6 +195,7 @@ async def run_agent(
                 run_id=run_id,
                 approved_by="user",
                 user_id=user_id,
+                is_guest=True if is_guest else None,
             )
 
             tc_id = "call_approved"

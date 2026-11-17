@@ -168,7 +168,7 @@ async def handle_create_task(conn, req: CreateTaskRequest, user_id: Optional[str
 
     project_id = None
     if proj_name and proj_name != "General":
-        proj = await structured.get_or_create_project(conn, name=proj_name, domain=dom_clean)
+        proj = await structured.get_or_create_project(conn, name=proj_name, domain=dom_clean, owner_id=user_id)
         project_id = proj.get("id")
 
     task_row = await structured.create_task(

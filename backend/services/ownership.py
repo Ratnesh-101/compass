@@ -35,6 +35,16 @@ def scope_owner(user_id: Optional[str]) -> Optional[str]:
     return stripped or NO_OWNER
 
 
+def has_caller(user_id: Optional[str]) -> bool:
+    """True when a caller identity (a real user id or the explicit "admin" id) was supplied.
+
+    Handlers that mutate by task id must check this first: scope_owner() maps a missing id to
+    None, which means "unscoped", so a missing id must be rejected rather than passed through.
+    A whitespace-only id passes here on purpose; scope_owner() turns it into NO_OWNER, which matches nothing.
+    """
+    return bool(user_id)
+
+
 def owns_task(task_owner: Optional[str], ident: "Identity") -> bool:
     """True when the identity may act on a task owned by `task_owner`."""
     if ident.is_admin:

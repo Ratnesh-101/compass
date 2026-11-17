@@ -153,7 +153,9 @@ async def handle_log_code_snippet(args: Dict[str, Any], pool: Any) -> Dict[str, 
     async with pool.acquire() as conn:
         project_id = None
         if project_name:
-            proj = await structured.get_or_create_project(conn, project_name, "code")
+            proj = await structured.get_or_create_project(
+                conn, project_name, "code", owner_id=scope_owner(args.get("user_id"))
+            )
             project_id = proj.get("id")
         chunk = await vector.store_chunk(
             conn, content=content, domain="code", project_id=project_id, tags=tag_list,
@@ -252,24 +254,29 @@ async def handle_summarize_across_domains(args: Dict[str, Any], pool: Any) -> Di
 
     settings = get_settings()
     user_id = args.get("user_id")
-    chunk_owner = scope_owner(user_id)
+    chunk_owner = str(user_id) if user_id else None
     async with pool.acquire() as conn:
         tasks = await list_chat_tasks(conn, args, status="open")
-        projects = await structured.list_projects(conn)
+        projects = await structured.list_projects(
+            conn,
+            owner_id=scope_owner(user_id),
+            all_tenants=bool(user_id) and scope_owner(user_id) is None,
+        )
+        # No caller means no memory: a NULL owner here used to match every tenant's chunks.
         try:
             code_chunks = await conn.fetch(
                 "SELECT id, content, tags FROM memory_chunks WHERE domain = 'code' "
-                "AND ($1::text IS NULL OR lower(user_id) = lower($1::text)) ORDER BY id DESC LIMIT 5",
+                "AND lower(user_id) = lower($1::text) ORDER BY id DESC LIMIT 5",
                 chunk_owner,
-            )
+            ) if chunk_owner else []
         except Exception:
             code_chunks = []
         try:
             cw_chunks = await conn.fetch(
                 "SELECT id, content, tags FROM memory_chunks WHERE domain = 'coursework' "
-                "AND ($1::text IS NULL OR lower(user_id) = lower($1::text)) ORDER BY id DESC LIMIT 5",
+                "AND lower(user_id) = lower($1::text) ORDER BY id DESC LIMIT 5",
                 chunk_owner,
-            )
+            ) if chunk_owner else []
         except Exception:
             cw_chunks = []
 

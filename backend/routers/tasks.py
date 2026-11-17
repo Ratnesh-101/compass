@@ -66,7 +66,11 @@ async def get_projects(
     try:
         pool = await get_pool()
         async with pool.acquire() as conn:
-            rows = await structured.list_projects(conn, domain=domain)
+            rows = await structured.list_projects(
+                conn, domain=domain,
+                owner_id=None if _ident.is_admin else _ident.id,
+                all_tenants=bool(_ident.is_admin),
+            )
             projects = [
                 ProjectOut(
                     id=r["id"],
@@ -446,7 +450,7 @@ async def update_frontend_task(task_id: str, req: UpdateTaskRequest, request: Re
             if req.project is not None:
                 proj_name = req.project.strip() or "General"
                 dom_for_proj = update_kwargs.get("domain") or existing.get("domain", "general")
-                proj_row = await structured.get_or_create_project(conn, proj_name, dom_for_proj)
+                proj_row = await structured.get_or_create_project(conn, proj_name, dom_for_proj, owner_id=user_id)
                 update_kwargs["project_id"] = proj_row.get("id")
 
             updated = await structured.update_task(conn, numeric_id, **update_kwargs)

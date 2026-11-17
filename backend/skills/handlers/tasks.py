@@ -712,7 +712,7 @@ async def handle_get_hackathon_deadlines(args: Dict[str, Any], pool: Any) -> Dic
 async def handle_add_task(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
     """Add a new task via structured.create_task."""
     from backend.memory import structured
-    from backend.services.ownership import scope_owner
+    from backend.services.ownership import has_caller, scope_owner
 
     title = args.get("title", "Untitled Task")
     domain = args.get("domain", "general")
@@ -781,6 +781,8 @@ async def handle_add_task(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
                 old_d = ex.get("due_date") or "unscheduled"
                 new_d = due_date or "unscheduled"
                 if shift_existing:
+                    if not has_caller(args.get("user_id")):
+                        return {"response": "user_id required", "data": {"error": "user_id required"}}
                     updated = await structured.update_task(
                         conn,
                         ex["id"],
@@ -811,7 +813,9 @@ async def handle_add_task(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
 
             project_id = None
             if project_name:
-                proj = await structured.get_or_create_project(conn, name=project_name, domain=domain)
+                proj = await structured.get_or_create_project(
+                    conn, name=project_name, domain=domain, owner_id=scope_owner(user_id)
+                )
                 project_id = proj.get("id")
 
             task_record = await structured.create_task(
@@ -876,10 +880,12 @@ async def handle_add_task(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
 async def handle_update_task_status(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
     """Update the status of an existing task."""
     from backend.memory import structured
-    from backend.services.ownership import scope_owner
+    from backend.services.ownership import has_caller, scope_owner
     task_id = args.get("task_id")
     status = args.get("status") or "open"
 
+    if not has_caller(args.get("user_id")):
+        return {"response": "user_id required", "data": {"error": "user_id required"}}
     if not task_id:
         return {"response": "Missing task_id.", "data": {}}
 
@@ -902,9 +908,11 @@ async def handle_update_task_status(args: Dict[str, Any], pool: Any) -> Dict[str
 async def handle_edit_task(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
     """Edit an existing task's title, due date, priority, or notes."""
     from backend.memory import structured
-    from backend.services.ownership import scope_owner
+    from backend.services.ownership import has_caller, scope_owner
     task_id = args.get("task_id")
 
+    if not has_caller(args.get("user_id")):
+        return {"response": "user_id required", "data": {"error": "user_id required"}}
     if not task_id:
         return {"response": "Missing task_id.", "data": {}}
 
@@ -946,9 +954,11 @@ async def handle_edit_task(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
 async def handle_delete_task(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
     """Delete a task by ID."""
     from backend.memory import structured
-    from backend.services.ownership import scope_owner
+    from backend.services.ownership import has_caller, scope_owner
     task_id = args.get("task_id")
 
+    if not has_caller(args.get("user_id")):
+        return {"response": "user_id required", "data": {"error": "user_id required"}}
     if not task_id:
         return {"response": "Missing task_id.", "data": {}}
 
@@ -968,9 +978,16 @@ async def handle_delete_task(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
 async def handle_list_projects(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
     """List all tracked projects via structured.list_projects."""
     from backend.memory import structured
+    from backend.services.ownership import scope_owner
     domain = args.get("domain")
+    user_id = args.get("user_id")
     async with pool.acquire() as conn:
-        projects = await structured.list_projects(conn)
+        # Owner-scoped; "admin" (scope_owner -> None) keeps the cross-tenant view, a missing id lists nothing.
+        projects = await structured.list_projects(
+            conn,
+            owner_id=scope_owner(user_id),
+            all_tenants=bool(user_id) and scope_owner(user_id) is None,
+        )
     if domain:
         projects = [p for p in projects if p.get("domain") == domain]
     p_names = [f"'{p['name']}' ({p.get('domain', 'general')})" for p in projects]
