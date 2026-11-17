@@ -40,7 +40,9 @@ async def cleanup_test_data():
 
 
 @pytest.mark.asyncio
-async def test_scenario_1_exact_echo_no_invented_priority_and_undo():
+async def test_scenario_1_exact_echo_no_invented_priority_and_undo(monkeypatch):
+    # The direct-save reply text and undo are under test here, so turn the single-add preview off.
+    monkeypatch.setattr("backend.orchestrator.SINGLE_TASK_PREVIEW", False)
     test_user = "test_user_round12_s1"
     msg = "add a deadline on 10th of October 23:59 with the name complete python programming"
 
@@ -104,21 +106,32 @@ async def test_scenario_2_remind_me_tomorrow_at_4pm():
         persist=False,
     )
 
-    assert res["skill_used"] == "add_task"
+    # A single add shows a preview first; nothing is saved until the user confirms.
+    assert res["skill_used"] == "add_tasks_preview"
     assert res["success"] is True
-    data = res["data"]
-    assert "email prof" in data["title"].lower()
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        assert [t for t in await structured.list_tasks(conn, user_id=test_user) if t.get("user_id") == test_user] == []
+    (item,) = res["data"]["pending_action"]["items"]
+    assert "email prof" in item["title"].lower()
+    assert "email prof" in res["response"].lower()
 
     # Without a tz the backend resolves relative dates in UTC, so compute the expected date in UTC.
     tomorrow = datetime.now(timezone.utc).date() + timedelta(days=1)
+    assert item["due_date"] == tomorrow.isoformat()
+
+    done = await handle_message(
+        conversation_id=res["conversation_id"],
+        message="Confirm",
+        user_id=test_user,
+        persist=False,
+    )
+    assert done["success"] is True
+    (data,) = done["data"]["created_tasks"]
+    assert "email prof" in data["title"].lower()
     assert str(data["due_date"]) == tomorrow.isoformat()
 
-    reply = res["response"]
-    assert "email prof" in reply.lower()
-    assert tomorrow.isoformat() in reply
-
     # Clean up
-    pool = await get_pool()
     async with pool.acquire() as conn:
         await structured.delete_task(conn, data["id"])
 
@@ -134,9 +147,16 @@ async def test_scenario_3_add_task_x():
         persist=False,
     )
 
-    assert res["skill_used"] == "add_task"
+    assert res["skill_used"] == "add_tasks_preview"
     assert res["success"] is True
-    data = res["data"]
+    done = await handle_message(
+        conversation_id=res["conversation_id"],
+        message="Confirm",
+        user_id=test_user,
+        persist=False,
+    )
+    assert done["success"] is True
+    (data,) = done["data"]["created_tasks"]
     assert data["title"].lower() == "x"
 
     # Clean up
@@ -209,7 +229,9 @@ async def test_scenario_5_non_task_sentences_with_deadline_do_not_create_task(mo
 
 
 @pytest.mark.asyncio
-async def test_scenario_6_duplicate_title_and_due_date_prevention():
+async def test_scenario_6_duplicate_title_and_due_date_prevention(monkeypatch):
+    # The duplicate check runs before the preview, but it needs a saved first task; save directly.
+    monkeypatch.setattr("backend.orchestrator.SINGLE_TASK_PREVIEW", False)
     test_user = "test_user_round12_s6"
     msg = "add a deadline on 10th of October 23:59 with the name complete python programming"
 

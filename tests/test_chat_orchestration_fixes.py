@@ -162,7 +162,9 @@ async def test_undo_restores_only_most_recent_delete_batch():
 
 
 @pytest.mark.asyncio
-async def test_undo_after_add_task_does_not_restore_older_deletion():
+async def test_undo_after_add_task_does_not_restore_older_deletion(monkeypatch):
+    # Undo of a real saved add is under test, so use the direct-save path.
+    monkeypatch.setattr("backend.orchestrator.SINGLE_TASK_PREVIEW", False)
     user = "test_user_orchfix_order"
     pool = await get_pool()
     async with pool.acquire() as conn:

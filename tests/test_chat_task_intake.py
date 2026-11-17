@@ -101,20 +101,29 @@ async def test_model_dispatched_add_task_with_a_bad_title_is_refused(clean_state
 
 
 @pytest.mark.asyncio
-async def test_a_normal_command_still_creates_the_task_in_one_step(clean_state):
+async def test_a_normal_command_previews_then_creates_the_task_on_confirm(clean_state):
     res = await _send("add task buy milk tomorrow 5pm", tz=IST)
-    assert res["success"] is True and res["skill_used"] == "add_task"
-    assert res["response"].startswith("Done! Added task 'Buy milk'") and "17:00" in res["response"] and IST in res["response"]
+    assert res["skill_used"] == "add_tasks_preview" and res["success"] is True
+    assert "I found 1 task" in res["response"] and "Nothing has been added yet" in res["response"]
+    assert "Buy milk" in res["response"] and "5:00 PM" in res["response"] and IST in res["response"]
+    assert await _tasks(clean_state) == [] and await _pending(clean_state) == 1
+
+    done = await _send("Confirm", tz=IST)
+    assert done["success"] is True and done["data"]["created_count"] == 1
+    assert done["response"].startswith("Added 1 task:")
     (task,) = await _tasks(clean_state)
     tomorrow = local_today(IST) + timedelta(days=1)
     assert task["title"] == "Buy milk" and task["due_date"] == tomorrow
     assert task["due_at"] == _utc(tomorrow, 17, 0, IST)
+    assert await _pending(clean_state) == 0
 
 
 @pytest.mark.asyncio
 async def test_polite_command_with_a_concrete_task_creates_it(clean_state):
     res = await _send("could you add a task to submit the report tomorrow?")
-    assert res["success"] is True
+    assert res["skill_used"] == "add_tasks_preview" and res["success"] is True
+    assert await _tasks(clean_state) == []
+    await _send("Confirm")
     assert [t["title"] for t in await _tasks(clean_state)] == ["Submit the report"]
 
 
@@ -265,8 +274,14 @@ async def test_if_any_item_fails_none_are_created_and_the_reason_is_given(clean_
 
 
 # ---- E: retries are idempotent --------------------------------------------------------------------
+# These tests are about request-id replay of a committed save, so they use the direct-save path.
+@pytest.fixture
+def direct_save(monkeypatch):
+    monkeypatch.setattr("backend.orchestrator.SINGLE_TASK_PREVIEW", False)
+
+
 @pytest.mark.asyncio
-async def test_same_request_id_sent_twice_creates_one_task(clean_state):
+async def test_same_request_id_sent_twice_creates_one_task(clean_state, direct_save):
     first = await _send("add task buy milk tomorrow 5pm", request_id="req-retry-0001")
     second = await _send("add task buy milk tomorrow 5pm", request_id="req-retry-0001")
     assert first["success"] is True and second.get("replayed") is True
@@ -275,7 +290,7 @@ async def test_same_request_id_sent_twice_creates_one_task(clean_state):
 
 
 @pytest.mark.asyncio
-async def test_distinct_request_ids_are_independent_and_missing_ids_still_work(clean_state):
+async def test_distinct_request_ids_are_independent_and_missing_ids_still_work(clean_state, direct_save):
     await _send("add task alpha one tomorrow", request_id="req-distinct-1")
     await _send("add task beta two tomorrow", request_id="req-distinct-2")
     await _send("add task gamma three tomorrow")
@@ -283,7 +298,7 @@ async def test_distinct_request_ids_are_independent_and_missing_ids_still_work(c
 
 
 @pytest.mark.asyncio
-async def test_request_ids_are_scoped_to_the_owner(clean_state):
+async def test_request_ids_are_scoped_to_the_owner(clean_state, direct_save):
     await _send("add task alpha one tomorrow", request_id="req-shared-001")
     res = await _send("add task alpha one tomorrow", user=OTHER, request_id="req-shared-001")
     assert res["success"] is True and res.get("replayed") is None
@@ -291,7 +306,7 @@ async def test_request_ids_are_scoped_to_the_owner(clean_state):
 
 
 @pytest.mark.asyncio
-async def test_failed_or_non_mutating_requests_release_their_request_id(clean_state):
+async def test_failed_or_non_mutating_requests_release_their_request_id(clean_state, direct_save):
     first = await _send("can you add deadlines for me?", request_id="req-release-01")
     assert first.get("replayed") is None
     retry = await _send("add task buy milk tomorrow", request_id="req-release-01")
@@ -345,7 +360,7 @@ async def _stream(message, request_id=None, tz=None):
 
 
 @pytest.mark.asyncio
-async def test_stream_announces_the_commit_before_the_reply_text(clean_state):
+async def test_stream_announces_the_commit_before_the_reply_text(clean_state, direct_save):
     events = await _stream("add task buy milk tomorrow 5pm", request_id="req-stream-001", tz=IST)
     kinds = [e["type"] for e in events]
     assert "committed" in kinds and kinds.index("committed") < kinds.index("token") < kinds.index("done")
@@ -354,7 +369,7 @@ async def test_stream_announces_the_commit_before_the_reply_text(clean_state):
 
 
 @pytest.mark.asyncio
-async def test_stream_retry_replays_the_result_without_creating_again(clean_state):
+async def test_stream_retry_replays_the_result_without_creating_again(clean_state, direct_save):
     await _stream("add task buy milk tomorrow 5pm", request_id="req-stream-002", tz=IST)
     events = await _stream("add task buy milk tomorrow 5pm", request_id="req-stream-002", tz=IST)
     assert [e["type"] for e in events][-1] == "done" and events[-1].get("replayed") is True

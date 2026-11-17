@@ -243,7 +243,10 @@ async def test_model_inferred_task_from_chatter_asks_instead_of_saving(pool):
 async def test_model_inferred_task_saves_when_gate_agrees_or_is_unsure(pool, verdict):
     with patch("backend.services.intent_gate.classify_task_intent", AsyncMock(return_value=verdict)):
         res = await _model_adds("start the project soon")
-    assert res["success"] is True and await _count(pool) == 1
+    assert res["success"] is True and res["skill_used"] == "add_tasks_preview" and "Do you want me to add" not in res["response"]
+    assert await _count(pool) == 0
+    done = await handle_message(conversation_id=CONV, message="Confirm", user_id=OWNER, persist=False)
+    assert done["success"] is True and await _count(pool) == 1
 
 
 @pytest.mark.asyncio
@@ -268,7 +271,9 @@ async def test_prose_preview_then_confirm_creates_the_tasks(pool):
 
 
 @pytest.mark.asyncio
-async def test_plain_chat_never_touches_the_request_log(pool):
+async def test_plain_chat_never_touches_the_request_log(pool, monkeypatch):
+    # The second half needs a committed save to be logged, so use the direct-save path.
+    monkeypatch.setattr("backend.orchestrator.SINGLE_TASK_PREVIEW", False)
     await handle_message(conversation_id=CONV, message="thanks, that was really helpful", user_id=OWNER,
                          persist=False, request_id="req-plain-chat-1")
     async with pool.acquire() as conn:
