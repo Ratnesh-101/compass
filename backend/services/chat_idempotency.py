@@ -47,6 +47,24 @@ def normalize_request_id(raw: Any) -> Optional[str]:
     return None
 
 
+def validate_request_id(raw: Any) -> Optional[str]:
+    """Like normalize_request_id, but a supplied id that is malformed is an error (HTTP 422).
+
+    A short or odd id used to be dropped silently, so a retry ran again and duplicated the task.
+    Absent or blank ids are fine: the request just runs without idempotency."""
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return None
+    normalized = normalize_request_id(raw)
+    if normalized is None:
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=422,
+            detail="request_id must be 8-64 characters: letters, digits, '_' or '-'.",
+        )
+    return normalized
+
+
 def may_mutate(message: Any) -> bool:
     """False for messages that cannot change data (plain chat sends no tools), so they skip the claim."""
     from backend.router_helpers import is_pending_action_cancel, is_pending_action_confirm, is_undo_request, message_needs_tools
@@ -78,6 +96,19 @@ def committed_summary(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 _committed_outcome: contextvars.ContextVar[Optional[Dict[str, Any]]] = contextvars.ContextVar(
     "_committed_outcome", default=None
 )
+# Optional callback invoked the moment a mutation row is written (see record_committed_outcome), so the
+# stream can send its "committed" event before the orchestrator returns.
+_commit_listener: contextvars.ContextVar[Optional[Callable[[Dict[str, Any]], None]]] = contextvars.ContextVar(
+    "_commit_listener", default=None
+)
+
+
+def set_commit_listener(callback: Optional[Callable[[Dict[str, Any]], None]]) -> contextvars.Token:
+    return _commit_listener.set(callback)
+
+
+def reset_commit_listener(token: contextvars.Token) -> None:
+    _commit_listener.reset(token)
 
 
 def record_committed_outcome(
@@ -109,6 +140,12 @@ def record_committed_outcome(
         "routing_latency_ms": 0,
     }
     _committed_outcome.set(payload)
+    listener = _commit_listener.get()
+    if listener is not None:
+        try:
+            listener(payload)
+        except Exception as e:  # a broken listener must never undo or block a committed change
+            logger.debug("commit listener failed: %s", e)
 
 
 async def _claim(conn: Any, owner: str, request_id: str) -> Tuple[str, Optional[Dict[str, Any]]]:

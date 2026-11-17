@@ -19,21 +19,27 @@ def test_a_lone_angle_bracket_at_the_end_is_returned():
     assert out + tail == "x < y and y <"
 
 
-def test_unfinished_think_block_stays_private():
-    out, tail = _run(["answer<think>secret reasoning"])
-    assert out + tail == "answer"
+def test_unfinished_think_block_that_opens_the_message_stays_private():
+    out, tail = _run(["<think>secret reasoning"])
+    assert out + tail == ""
+
+
+def test_mid_answer_think_tag_is_ordinary_text():
+    # T-009: only a <think> that opens the message is reasoning.
+    out, tail = _run(["answer<think>not reasoning"])
+    assert out + tail == "answer<think>not reasoning"
 
 
 def test_complete_think_block_is_removed_and_nothing_is_left_over():
-    out, tail = _run(["a<thi", "nk>hidden</think>b"])
-    assert out + tail == "ab"
+    out, tail = _run(["<thi", "nk>hidden</think>b"])
+    assert out + tail == "b"
     assert tail == ""
 
 
 def test_flush_is_idempotent():
     f = StreamingThinkFilter()
-    f.process("hi <t")
-    assert f.flush() == "<t"
+    assert f.process("<th") == ""  # partial opening tag at the start is held back
+    assert f.flush() == "<th"
     assert f.flush() == ""
 
 

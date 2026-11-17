@@ -10,7 +10,6 @@ from backend.models import StreamChatRequest
 from backend.persona import build_persona_system_prompt, validate_tone
 from backend.router_helpers import is_long_form_request
 from backend.services.chat_stream import generate_chat_events
-from backend.services.token_budget import BALANCED_STREAM_MAX_TOKENS, BRIEF_STREAM_MAX_TOKENS
 
 HACKATHON = (
     "We have a 48-hour hackathon starting Friday 6pm. Team of 3 building an AI app. "
@@ -103,14 +102,14 @@ async def test_balanced_long_form_gets_full_budget():
 
 
 @pytest.mark.asyncio
-async def test_balanced_short_question_stays_capped():
+async def test_balanced_short_question_gets_full_budget_too():
     kwargs = await _drive("What is a process and a thread?", "balanced")
-    assert kwargs["max_tokens"] == BALANCED_STREAM_MAX_TOKENS
+    assert kwargs["max_tokens"] == int(get_settings().MAX_SYNTHESIS_TOKENS)
     assert DETAILED_MARKER not in kwargs["messages"][0]["content"]
 
 
 @pytest.mark.asyncio
 async def test_brief_stays_brief_for_long_form_prompt():
     kwargs = await _drive(HACKATHON, "brief")
-    assert kwargs["max_tokens"] == BRIEF_STREAM_MAX_TOKENS
+    assert kwargs["max_tokens"] == int(get_settings().MAX_SYNTHESIS_TOKENS)
     assert DETAILED_MARKER not in kwargs["messages"][0]["content"]
