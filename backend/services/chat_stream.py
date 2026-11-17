@@ -40,6 +40,7 @@ from backend.router_helpers import (
     is_undo_request,
 )
 from backend.services.chat_idempotency import committed_event, normalize_request_id, peek_replay, replay_events
+from backend.services.chat_fastpath import GREETING_REPLY, apply_router_extra_body, is_greeting_fastpath
 from backend.services.task_intent import is_intake_intent
 from backend.services.task_time import local_today, pick_timezone
 from backend.services.token_budget import stream_token_budget
@@ -370,6 +371,15 @@ async def _generate_chat_events(
             yield replay_evt
         return
 
+    if is_greeting_fastpath(req, message):
+        # Pure greeting in a plain chat turn: answer at once, no model call.
+        yield f"data: {json.dumps({'type': 'ping'})}\n\n"
+        yield f"data: {json.dumps({'type': 'status', 'stage': 'thinking', 'label': 'Understanding your request…'})}\n\n"
+        yield f"data: {json.dumps({'type': 'token', 'value': GREETING_REPLY})}\n\n"
+        yield f"data: {json.dumps({'type': 'done', 'conversation_id': conv_id, 'skill_used': 'chat'}, default=str)}\n\n"
+        _persist_bg(conv_id, message, GREETING_REPLY, user_id, guest_id, "chat")
+        return
+
     stream_start = time.perf_counter()
     yield f"data: {json.dumps({'type': 'ping'})}\n\n"
     yield f"data: {json.dumps({'type': 'status', 'stage': 'thinking', 'label': 'Understanding your request…'})}\n\n"
@@ -628,6 +638,7 @@ async def _generate_chat_events(
         if tools:
             call_kwargs["tools"] = tools
             call_kwargs["tool_choice"] = "auto"
+        apply_router_extra_body(call_kwargs, _settings)
 
         try:
             stream = cast(

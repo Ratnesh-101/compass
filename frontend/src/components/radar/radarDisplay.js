@@ -110,3 +110,36 @@ export function descriptionBlocks(text) {
     return Boolean(next) && next.type !== 'heading'
   })
 }
+
+// ---- Remote roles open worldwide (second tier, never labelled as India) ----
+
+export const WORLDWIDE_CHIP_LABEL = 'Remote · open worldwide'
+export const WORLDWIDE_DETAIL_LINE = 'The listing says anyone can apply. Check the company site for location rules.'
+
+const INDIA_TEXT_RE =
+  /\b(india|bengaluru|bangalore|mumbai|delhi|new delhi|hyderabad|chennai|pune|kolkata|gurgaon|gurugram|noida|ahmedabad|jaipur|kochi|chandigarh|indore|thiruvananthapuram|coimbatore)\b/i
+const WORLDWIDE_TEXT_RE =
+  /\b(worldwide|world-wide|anywhere|global remote|remote\s*[(\-–,]?\s*global\b|work from anywhere)\b/i
+
+/**
+ * True for a listing that is not located in India but that the server marked India-eligible
+ * because the listing itself says anyone can apply. Missing fields never throw.
+ */
+export function isOpenWorldwide(opportunity) {
+  const o = opportunity || {}
+  if (o.is_india_eligible !== true) return false
+  const country = String(o.country || '').trim()
+  const location = String(o.location || o.location_text || '')
+  if (/^india$/i.test(country) || INDIA_TEXT_RE.test(location)) return false
+  return /^(global|worldwide|anywhere)$/i.test(country) || WORLDWIDE_TEXT_RE.test(location)
+}
+
+/** Subheading under "Internship Radar", from the India filter and the loaded list. */
+export function radarHeadingText(indiaOnly, opportunities) {
+  if (!indiaOnly) {
+    return 'Internships worldwide, checked against your degree and year. Some may need a work permit.'
+  }
+  const list = Array.isArray(opportunities) ? opportunities : []
+  if (list.some(isOpenWorldwide)) return 'Internships in India, then remote roles open worldwide'
+  return 'Internships in India, or open to applicants in India, checked against your degree and year.'
+}

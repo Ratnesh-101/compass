@@ -4,6 +4,7 @@ import RadarOverviewCards from './radar/RadarOverviewCards'
 import RadarFilters from './radar/RadarFilters'
 import RadarOpportunityCard from './radar/RadarOpportunityCard'
 import RadarDetailModal from './radar/RadarDetailModal'
+import { radarHeadingText } from './radar/radarDisplay'
 
 const ApplicationWorkspaceModal = React.lazy(() => import('./career/ApplicationWorkspaceModal'))
 import {
@@ -348,9 +349,7 @@ export default function InternshipRadar({
           </span>
         </div>
         <p style={{ margin: '6px 0 0 0', fontSize: '14px', color: 'var(--text-secondary)' }}>
-          {indiaOnly
-            ? 'Internships in India, or open to applicants in India, checked against your degree and year.'
-            : 'Internships worldwide, checked against your degree and year. Some may need a work permit.'}
+          {radarHeadingText(indiaOnly, opportunities)}
         </p>
       </div>
 

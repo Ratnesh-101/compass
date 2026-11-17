@@ -4,7 +4,7 @@ import { cleanOpportunity, cleanText, cleanSource } from '../../utils/jobCardCle
 import Dialog from '../Dialog'
 import { needsRecheck } from '../../utils/radarFreshness'
 import RadarDescription from './RadarDescription'
-import { descriptionBlocks, friendlySourceAuthority, friendlySourceType, isStubDescription, lastCheckedLabel, safeVerificationBasis } from './radarDisplay'
+import { descriptionBlocks, friendlySourceAuthority, friendlySourceType, isOpenWorldwide, isStubDescription, lastCheckedLabel, safeVerificationBasis, WORLDWIDE_CHIP_LABEL, WORLDWIDE_DETAIL_LINE } from './radarDisplay'
 
 const PIPELINE_STATUSES = [
   { id: 'interested', label: 'Interested' },
@@ -249,6 +249,11 @@ export default function RadarDetailModal({
                   <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary, #1b1a17)', marginTop: '2px' }}>
                     {cleanLocation || 'Flexible'}
                   </div>
+                  {isOpenWorldwide(opportunity) && (
+                    <div data-testid="worldwide-detail" style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-secondary, #3d3a35)', marginTop: '4px', lineHeight: 1.4 }}>
+                      <strong>{WORLDWIDE_CHIP_LABEL}.</strong> {WORLDWIDE_DETAIL_LINE}
+                    </div>
+                  )}
                 </div>
 
                 <div style={{ padding: '10px 12px', borderRadius: '6px', background: 'var(--bg-app, #f7f5ef)', border: '1px solid var(--border, #e6e1d6)' }}>

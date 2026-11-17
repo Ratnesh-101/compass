@@ -279,8 +279,10 @@ export default function ChatInputBar({
                 ? 'Streaming response...'
                 : activeSpecialist
                 ? activeSpecialist.placeholder
-                : 'Ask Compass anything, or type "/" to choose a mode...'
+                : 'Ask anything, for example: Plan my week'
             }
+            title='Type / to choose a mode'
+            aria-description='Type / to choose a mode'
             disabled={isInputDisabled}
             style={{
               flex: 1,

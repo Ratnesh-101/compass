@@ -2,6 +2,7 @@ import React from 'react'
 import { Star, DollarSign, Calendar, ExternalLink, Rocket } from 'lucide-react'
 import { cleanOpportunity } from '../../utils/jobCardCleaner'
 import { formatOpportunityVerifiedAge, needsRecheck } from '../../utils/radarFreshness'
+import { isOpenWorldwide, WORLDWIDE_CHIP_LABEL, WORLDWIDE_DETAIL_LINE } from './radarDisplay'
 
 export default function RadarOpportunityCard({
   opportunity,
@@ -88,6 +89,24 @@ export default function RadarOpportunityCard({
           >
             {cleaned.eligibilityBadge.label}
           </span>
+
+          {isOpenWorldwide(opportunity) && (
+            <span
+              data-testid="open-worldwide-chip"
+              title={WORLDWIDE_DETAIL_LINE}
+              style={{
+                padding: '2px 8px',
+                borderRadius: '4px',
+                fontSize: '11px',
+                fontWeight: 600,
+                background: 'var(--bg-card-soft, #f2eee6)',
+                color: 'var(--text-primary, #1b1a17)',
+                border: '1px solid var(--border, #e6e1d6)',
+              }}
+            >
+              {WORLDWIDE_CHIP_LABEL}
+            </span>
+          )}
 
           {needsRecheck(opportunity) && (
             <span
