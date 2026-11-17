@@ -210,6 +210,7 @@ async def reactive_schedule_check_endpoint(
     busy = await get_calendar_freebusy(
         now, now + timedelta(days=7), pool=pool, user_id=ident.id, task_user_id=owner,
         include_demo=bool(body and body.include_demo),
+        all_tenants=owner is None,  # admin identity is intentionally unscoped
     )
     windows = get_available_windows(
         busy,

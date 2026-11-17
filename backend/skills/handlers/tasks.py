@@ -714,6 +714,9 @@ async def handle_add_task(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
     from backend.memory import structured
     from backend.services.ownership import has_caller, scope_owner
 
+    if not has_caller(args.get("user_id")):
+        return {"response": "user_id required", "data": {"error": "user_id required"}}
+
     title = args.get("title", "Untitled Task")
     domain = args.get("domain", "general")
     if domain not in {"hackathon", "coursework", "code", "general"}:
@@ -781,8 +784,6 @@ async def handle_add_task(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
                 old_d = ex.get("due_date") or "unscheduled"
                 new_d = due_date or "unscheduled"
                 if shift_existing:
-                    if not has_caller(args.get("user_id")):
-                        return {"response": "user_id required", "data": {"error": "user_id required"}}
                     updated = await structured.update_task(
                         conn,
                         ex["id"],

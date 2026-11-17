@@ -308,7 +308,7 @@ def test_allocator_never_places_before_not_before():
 async def test_propose_schedule_for_a_past_date_starts_no_earlier_than_now():
     handler = SKILL_REGISTRY["propose_schedule"]
     before = datetime.now(timezone.utc)
-    result = await handler({"target_date": "2020-01-06"}, pool=None)
+    result = await handler({"target_date": "2020-01-06", "user_id": "sched-user"}, pool=None)
     horizon_start = datetime.fromisoformat(result["data"]["horizon"]["start"])
     assert horizon_start >= before.replace(microsecond=0)
     assert horizon_start.minute % 15 == 0

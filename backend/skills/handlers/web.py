@@ -10,9 +10,26 @@ import logging
 import re
 from urllib.parse import urlparse
 
+from backend.services.ownership import has_caller, scope_owner
 from backend.skills.registry import register_skill
 
 logger = logging.getLogger("compass.skills.web")
+
+
+def _owner_required_result() -> Dict[str, Any]:
+    """Error result for memory writes with no caller (an ownerless chunk is never retrievable)."""
+    return {
+        "success": False,
+        "data": {},
+        "summary": "user_id required to store memory",
+        "response": "Cannot store memory without a user identity.",
+        "error": "user_id required",
+    }
+
+
+def _chunk_owner(user_id: Any) -> str:
+    """Owner for stored chunks. Admin ("admin") is kept literal so its chunks stay searchable by admin."""
+    return scope_owner(user_id) or str(user_id)
 
 
 @register_skill("search_web")
@@ -203,6 +220,9 @@ async def handle_ingest_url(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
             "error": f"SSRF blocked: {reason}",
         }
 
+    if not has_caller(args.get("user_id")):
+        return _owner_required_result()
+
     if not tavily_service.tavily_available():
         return {
             "success": False,
@@ -264,6 +284,7 @@ async def handle_ingest_url(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
                 project_id=project_id,
                 source=url,
                 tags=tags,
+                user_id=_chunk_owner(args.get("user_id")),
             )
             stored += 1
 
@@ -614,6 +635,9 @@ async def handle_save_verified_finding(args: Dict[str, Any], pool: Any) -> Dict[
     source_url = (args.get("source_url") or "tavily-research").strip()
     citation = args.get("citation") or ""
 
+    if not has_caller(args.get("user_id")):
+        return _owner_required_result()
+
     stored_text = f"{fact}\n\nEvidence Source: {source_url}"
     if citation:
         stored_text += f" ({citation})"
@@ -633,6 +657,7 @@ async def handle_save_verified_finding(args: Dict[str, Any], pool: Any) -> Dict[
             project_id=project_id,
             source=source_url,
             tags=["web", "tavily-verified", "research-finding"],
+            user_id=_chunk_owner(args.get("user_id")),
         )
 
     summary = f"Saved verified finding to {domain.upper()} memory with citation provenance."

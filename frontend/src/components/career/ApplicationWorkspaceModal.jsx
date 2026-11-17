@@ -27,6 +27,7 @@ import {
   draftCoverLetter,
   setApplicationCoverLetter,
   updateApplication,
+  markApplied,
   getResumeExportUrl,
   getResumeExportDocxUrl,
   fetchJobAnalysis,
@@ -750,6 +751,27 @@ export default function ApplicationWorkspaceModal({
   }
 
   // Handle Status & Notes Updates
+  // Moving to "Applied" uses the explicit confirmation endpoint (timeline event + follow-up reminder).
+  const handleMarkAppliedRecord = async () => {
+    if (!application) return false
+    setSavingStatus(true)
+    setError(null)
+    try {
+      const updated = await markApplied(application.id)
+      setApplication(updated)
+      setAppStatus(String(updated.status || 'submitted').toLowerCase())
+      clearWorkspaceDraft(opportunity.id)
+      if (onApplicationUpdated) onApplicationUpdated(updated)
+      showNotification(`Saved. This application is now in the "${stageLabel(stageOfStatus(updated.status))}" stage.`)
+      return true
+    } catch (err) {
+      setError(err.message || 'Failed to mark the application as applied')
+      return false
+    } finally {
+      setSavingStatus(false)
+    }
+  }
+
   const handleUpdateApplicationRecord = async (newStatus = appStatus) => {
     if (!application) return false
     setSavingStatus(true)
@@ -789,8 +811,9 @@ export default function ApplicationWorkspaceModal({
       return
     }
     for (const step of plan.steps) {
-      const nextStatus = step.type === 'mark_applied' ? 'submitted' : step.status.toLowerCase()
-      const ok = await handleUpdateApplicationRecord(nextStatus)
+      const ok = step.type === 'mark_applied'
+        ? await handleMarkAppliedRecord()
+        : await handleUpdateApplicationRecord(step.status.toLowerCase())
       if (!ok) return
     }
     setStageChoice('')

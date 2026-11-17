@@ -77,7 +77,20 @@ class StreamState:
     @property
     def truncated(self) -> bool:
         """True when the last pass that ran ended on the token limit (or its continuation failed)."""
-        return self.finish == "length"
+        return self.finish == "length" or self.continuation_failed
+
+
+def no_retry_client(client: Any) -> Any:
+    """A real OpenAI client with SDK retries off, so STREAM_REQUEST_TIMEOUT_S bounds the wait (not 3x).
+    Anything else (test fakes, mocks) is returned unchanged."""
+    try:
+        import openai
+
+        if isinstance(openai.AsyncOpenAI, type) and isinstance(client, openai.AsyncOpenAI):
+            return client.with_options(max_retries=0)
+    except Exception:  # never let this helper break a request
+        pass
+    return client
 
 
 async def _aclose(stream: Any) -> None:
@@ -106,7 +119,7 @@ async def text_pass_events(
     dispatches them) instead of being ignored.
     Raises if the completion cannot be created or the stream breaks; the caller decides what to tell the user."""
     call_kwargs = {**kwargs, "stream": True, "timeout": STREAM_REQUEST_TIMEOUT_S}
-    stream = await client.chat.completions.create(**call_kwargs)
+    stream = await no_retry_client(client).chat.completions.create(**call_kwargs)
     state.finish = None
     think_filter = StreamingThinkFilter()
 
@@ -256,12 +269,14 @@ async def orchestrate_with_early_commit(
     finally:
         if getter is not None and not getter.done():
             getter.cancel()
+        if not task.done():
+            # Generator closed while the orchestrator is still running: retrieve and log its outcome.
+            task.add_done_callback(stream_watch.late_outcome_logger(str(trace_id)))
     if timed_out:
         logger.error(
             "post_commit_timeout request_id=%s waited_s=%.1f limit_s=%.1f",
             trace_id, time.monotonic() - committed_at, stream_watch.POST_COMMIT_TIMEOUT_S,
         )
-        task.add_done_callback(stream_watch.late_outcome_logger(str(trace_id)))
         yield ("result", stream_watch.degraded_result(committed_payload, "post_commit_timeout"))
         return
     try:
@@ -378,19 +393,40 @@ async def fetch_message_states(conn: Any, message_ids: List[Any]) -> Dict[Any, T
 # Continue mode (T-004)
 # ---------------------------------------------------------------------------
 
-async def load_continue_target(pool: Any, message_id_raw: Any, owner_id: Optional[str]) -> Optional[Dict[str, Any]]:
-    """The caller's own assistant message to continue plus the few messages before it, or None."""
-    if not (pool and owner_id and str(message_id_raw or "").isdigit()):
+LAST_MESSAGE = "last"
+
+
+async def load_continue_target(
+    pool: Any, message_id_raw: Any, owner_id: Optional[str], conversation_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """The caller's own assistant message to continue plus the few messages before it, or None.
+
+    `message_id_raw` is a message id, or "last": a message that has just finished streaming has no id on
+    the client yet (it is saved in the background), so "last" means the newest assistant message of
+    `conversation_id`. Ownership is checked the same way in both cases.
+    """
+    raw = str(message_id_raw or "").strip().lower()
+    is_last = raw == LAST_MESSAGE
+    if not (pool and owner_id and (raw.isdigit() or (is_last and conversation_id))):
         return None
-    mid = int(str(message_id_raw))
     try:
         async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT m.id, m.role, m.content, m.conversation_id FROM messages m "
-                "JOIN conversations c ON m.conversation_id = c.id "
-                "WHERE m.id = $1 AND (c.user_id = $2 OR c.guest_id = $2)",
-                mid, owner_id,
-            )
+            if is_last:
+                row = await conn.fetchrow(
+                    "SELECT m.id, m.role, m.content, m.conversation_id FROM messages m "
+                    "JOIN conversations c ON m.conversation_id = c.id "
+                    "WHERE c.id = $1::uuid AND (c.user_id = $2 OR (c.guest_id = $2 AND c.user_id IS NULL)) "
+                    "AND m.role = 'assistant' AND COALESCE(m.content, '') <> '' "
+                    "ORDER BY m.id DESC LIMIT 1",
+                    str(conversation_id), owner_id,
+                )
+            else:
+                row = await conn.fetchrow(
+                    "SELECT m.id, m.role, m.content, m.conversation_id FROM messages m "
+                    "JOIN conversations c ON m.conversation_id = c.id "
+                    "WHERE m.id = $1 AND (c.user_id = $2 OR (c.guest_id = $2 AND c.user_id IS NULL))",
+                    int(raw), owner_id,
+                )
             if not row or row["role"] != "assistant" or not row["content"]:
                 return None
             prior = await conn.fetch(
@@ -410,12 +446,26 @@ async def load_continue_target(pool: Any, message_id_raw: Any, owner_id: Optiona
     }
 
 
-async def _append_to_message(pool: Any, message_id: Any, new_text: str, truncated: bool, status: Optional[str]) -> None:
+async def _append_to_message(
+    pool: Any, message_id: Any, new_text: str, truncated: bool, status: Optional[str],
+    expected_content: Optional[str] = None,
+) -> bool:
+    """Append `new_text`. With `expected_content` the append is a compare-and-set: it only applies when the
+    message still has that text, so two concurrent continues cannot both append. False when not applied."""
     if not (pool and new_text):
-        return
+        return False
     try:
         async with pool.acquire() as conn:
-            await conn.execute("UPDATE messages SET content = content || $2 WHERE id = $1", message_id, new_text)
+            if expected_content is None:
+                await conn.execute("UPDATE messages SET content = content || $2 WHERE id = $1", message_id, new_text)
+            else:
+                res = await conn.execute(
+                    "UPDATE messages SET content = content || $2 WHERE id = $1 AND content = $3",
+                    message_id, new_text, expected_content,
+                )
+                if isinstance(res, str) and res.strip().endswith(" 0"):
+                    logger.warning("Message %s changed while continuing; the continuation was not appended", message_id)
+                    return False
             await mark_message_state(conn, message_id, truncated, status)
             if not truncated and not status:
                 try:
@@ -424,8 +474,10 @@ async def _append_to_message(pool: Any, message_id: Any, new_text: str, truncate
                     )
                 except Exception:
                     pass
+        return True
     except Exception as e:
         logger.error("Could not append continued text to message %s: %s", message_id, e)
+        return False
 
 
 async def continue_message_events(
@@ -438,9 +490,10 @@ async def continue_message_events(
     message_id_raw: Any,
     system_prompt: str,
     max_tokens: int,
+    conversation_id: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     """Resume a saved assistant message: stream only the NEW text and append it to that message."""
-    target = await load_continue_target(pool, message_id_raw, owner_id)
+    target = await load_continue_target(pool, message_id_raw, owner_id, conversation_id)
     if not target:
         yield sse({
             "type": "error", "detail": "I couldn't find that answer to continue. Please ask again.",
@@ -468,19 +521,22 @@ async def continue_message_events(
                 yield evt
     except Exception as err:
         logger.error("Continue mode failed for message %s: %s", target["id"], err, exc_info=True)
-        await _append_to_message(pool, target["id"], state.full_text, True, STATUS_INTERRUPTED)
+        await _append_to_message(pool, target["id"], state.full_text, True, STATUS_INTERRUPTED, target["content"])
         yield friendly_error_event(partial=state.full_text)
         return
 
     if state.disconnected:
-        await _append_to_message(pool, target["id"], state.full_text, True, STATUS_INTERRUPTED)
+        await _append_to_message(pool, target["id"], state.full_text, True, STATUS_INTERRUPTED, target["content"])
         return
+    # No visible new text means the answer is still unfinished; keep it flagged so Continue stays available.
+    still_truncated = state.truncated or not state.full_text.strip()
     await _append_to_message(
-        pool, target["id"], state.full_text, state.truncated, STATUS_TRUNCATED if state.truncated else None
+        pool, target["id"], state.full_text, still_truncated, STATUS_TRUNCATED if still_truncated else None,
+        target["content"],
     )
     yield sse({
         "type": "done", "conversation_id": target["conversation_id"], "skill_used": "chat",
-        "is_truncated": state.truncated, "continued_message_id": target["id"],
+        "is_truncated": still_truncated, "continued_message_id": target["id"],
     })
 
 

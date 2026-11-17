@@ -307,7 +307,7 @@ async def test_continue_mode_streams_only_new_text_and_appends_to_message():
     done = [e for e in events if e["type"] == "done"][0]
     assert done["continued_message_id"] == 7 and done["is_truncated"] is False
     updates = [x for x in conn.executed if "content = content ||" in x[0]]
-    assert updates and updates[0][1] == (7, " and part two.")
+    assert updates and updates[0][1] == (7, " and part two.", "Part one of the answer")
 
 
 @pytest.mark.asyncio

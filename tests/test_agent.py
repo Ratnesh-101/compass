@@ -489,6 +489,7 @@ async def test_audit_log_entry_created_for_mutation():
         pool=pool,
         run_id=run_id,
         approved_by="test_user",
+        user_id="audit-test-user",  # add_task now rejects a missing caller
     )
     assert len(results) == 1
     assert results[0]["status"] == "success"
@@ -524,6 +525,7 @@ async def test_undo_correctly_reverts_last_mutation(client: AsyncClient, auth_he
         confirmed_actions=[{"tool": "add_task", "args": {"title": title, "domain": "code"}}],
         pool=pool,
         run_id=run_id,
+        user_id="undo-test-user",  # add_task now rejects a missing caller
     )
     created_id = results[0]["result"]["data"]["id"]
 

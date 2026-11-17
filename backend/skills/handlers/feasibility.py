@@ -8,6 +8,7 @@ Both are tenant-scoped: the caller's ``user_id`` is required.
 from typing import Any, Dict, Optional
 import logging
 
+from backend.services.ownership import scope_owner
 from backend.skills.registry import register_skill
 
 logger = logging.getLogger("compass.skills.feasibility")
@@ -112,7 +113,8 @@ async def handle_apply_triage_plan(args: Dict[str, Any], pool: Any) -> Dict[str,
                 [(t, "done", "dropped") for t in drop_ids]
                 + [(t, "open", "deferred") for t in defer_ids]
             ):
-                row = await structured.update_task(conn, tid, owner_id=str(user_id), status=status)
+                # Admin sees all (scope_owner -> None = unscoped), same as routers/tasks.py; users stay scoped.
+                row = await structured.update_task(conn, tid, owner_id=scope_owner(user_id), status=status)
                 if row:
                     changed.append({"id": tid, "action": label})
                 else:

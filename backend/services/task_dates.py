@@ -49,6 +49,18 @@ _EXPLICIT_DATE = re.compile(
 )
 
 
+# Phrases this module cannot resolve ("friday next week", "monday of next week", "weekend"): the model's date stands.
+_COMPOUND_PHRASE = re.compile(
+    r"\bnext\s+week\b|\bweek\s+after\b|\bafter\s+next\b|\bof\s+next\b|\bweekends?\b", re.IGNORECASE
+)
+# A weekday word counts as a due date only with a cue ("by friday", "on friday", "due friday", "this friday");
+# otherwise it may be part of the title ("prepare Friday newsletter").
+_DUE_CUE = re.compile(
+    r"\b(?:by|on|due|before|until|this|next|tomorrow|today|tonight)\b|\bin\s+\d{1,3}\s+(?:days?|weeks?)\b",
+    re.IGNORECASE,
+)
+
+
 def weekday_date(today: date, weekday: int, qualifier: Optional[str] = None) -> date:
     """Date of ``weekday`` (0=Monday) relative to ``today`` using the rules in the module docstring."""
     ahead = (weekday - today.weekday()) % 7
@@ -99,10 +111,10 @@ def reconcile_due_date(message: str, model_date: Optional[date], today: date) ->
     Returns ``model_date`` unchanged when the message has no relative phrase, has several different
     ones, or also contains an explicit calendar date (nothing is guessed in those cases).
     """
-    if not message or _EXPLICIT_DATE.search(message):
+    if not message or _EXPLICIT_DATE.search(message) or _COMPOUND_PHRASE.search(message):
         return model_date
     dates = relative_dates(message, today)
-    if len(dates) == 1:
+    if len(dates) == 1 and _DUE_CUE.search(message):
         return next(iter(dates))
     return model_date
 

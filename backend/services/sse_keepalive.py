@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 from typing import AsyncIterator
 
 KEEPALIVE_INTERVAL_SECONDS = 8.0
@@ -21,10 +22,19 @@ async def with_keepalive(
 ) -> AsyncIterator[str]:
     iterator = source.__aiter__()
     pending: asyncio.Future | None = None
+    # Every step of the source runs in ONE shared context. A plain ensure_future per step would give
+    # each step its own copy of the context, so a ContextVar set inside the source (for example the
+    # agent's include_demo flag) would be lost before the next step runs.
+    ctx = contextvars.copy_context()
+    loop = asyncio.get_running_loop()
+
+    async def _next() -> str:
+        return await iterator.__anext__()
+
     try:
         while True:
             if pending is None:
-                pending = asyncio.ensure_future(iterator.__anext__())
+                pending = loop.create_task(_next(), context=ctx)
             done, _ = await asyncio.wait({pending}, timeout=interval)
             if not done:
                 yield KEEPALIVE_FRAME

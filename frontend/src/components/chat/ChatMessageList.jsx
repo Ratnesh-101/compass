@@ -326,8 +326,8 @@ export default function ChatMessageList({
                               } else if (onSendMessage) {
                                 onSendMessage({
                                   text: "Continue response",
-                                  continue_message_id: msg.id,
-                                  continueMessageId: msg.id,
+                                  continue_message_id: msg.id || 'last',
+                                  continueMessageId: msg.id || 'last',
                                   targetMessageIndex: idx,
                                 })
                               }

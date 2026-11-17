@@ -127,6 +127,7 @@ async def test_ingest_url_stores_768_dim_chunks(monkeypatch):
         "url": "https://example.com/test-article",
         "domain": "code",
         "project": "Tavily Integration",
+        "user_id": "ingest-test-user",
     }, pool=pool)
 
     try:
@@ -180,7 +181,7 @@ async def test_ingest_url_undo_removes_chunks(monkeypatch):
         monkeypatch.setattr(tavily_service, "tavily_available", lambda: True)
         monkeypatch.setattr("backend.memory.vector.get_embedding", AsyncMock(return_value=[0.05] * 768))
 
-        res = await handle_ingest_url({"url": test_url, "domain": "general"}, pool=pool)
+        res = await handle_ingest_url({"url": test_url, "domain": "general", "user_id": "ingest-test-user"}, pool=pool)
         assert res["success"] is True
 
         # 2. Record simulated audit log entry for this action

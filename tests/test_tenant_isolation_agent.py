@@ -229,14 +229,30 @@ async def test_add_task_shift_existing_requires_user_id(client: AsyncClient):
     created = await SKILL_REGISTRY["add_task"]({"title": title, "due_date": "2030-01-01", "user_id": a}, pool)
     task_id = created["data"]["id"]
 
-    # No user_id: the duplicate lookup is empty so nothing can be shifted, and the shift branch is guarded too.
+    # No user_id: add_task is rejected up front (it must not create an ownerless task or shift anything).
     res = await SKILL_REGISTRY["add_task"](
         {"title": title, "due_date": "2030-02-02", "shift_existing": True}, pool
     )
+    assert "user_id required" in res["response"]
+    assert res["data"] == {"error": "user_id required"}
     async with pool.acquire() as conn:
         due = await conn.fetchval("SELECT due_date FROM tasks WHERE id = $1", task_id)
+        orphans = await conn.fetchval(
+            "SELECT count(*) FROM tasks WHERE title = $1 AND user_id IS NULL", title
+        )
     assert str(due) == "2030-01-01"
-    assert res["data"].get("id") != task_id
+    assert orphans == 0
+
+
+@pytest.mark.asyncio
+async def test_add_task_without_user_id_creates_no_orphan_row(client: AsyncClient):
+    title = f"Orphan check {uuid.uuid4().hex[:6]}"
+    pool = await get_pool()
+    for args in ({"title": title}, {"title": title, "user_id": ""}, {"title": title, "user_id": None}):
+        res = await SKILL_REGISTRY["add_task"](args, pool)
+        assert res["data"] == {"error": "user_id required"}
+    async with pool.acquire() as conn:
+        assert await conn.fetchval("SELECT count(*) FROM tasks WHERE title = $1", title) == 0
 
 
 @pytest.mark.asyncio
@@ -269,15 +285,34 @@ async def test_confirmed_delete_task_without_caller_cannot_delete(client: AsyncC
         assert await conn.fetchval("SELECT deleted_at FROM tasks WHERE id = $1", a_task) is None
 
 
-def test_confirm_route_passes_is_guest_to_execute_confirmed_actions():
-    import inspect
+@pytest.mark.asyncio
+async def test_confirm_route_refuses_banned_tool_for_a_real_guest(client: AsyncClient):
+    """A real guest (bare-UUID id, signed token) confirming a guest-banned tool is refused and the task survives."""
+    from backend.agent_pending import register_pending_action
+    from backend.agent import save_agent_run
 
-    from backend.routers import agent as agent_router
+    mint = await client.post("/api/guest/session")
+    assert mint.status_code == 200
+    guest_id, guest_token = mint.json()["guest_id"], mint.json()["guest_token"]
+    created = await client.post(
+        "/api/tasks", json={"title": "Guest task", "domain": "hackathon"}, headers={"x-guest-token": guest_token}
+    )
+    assert created.status_code == 200, created.text
+    task_id = int(created.json()["id"])
+    pool = await get_pool()
+    run_id = f"run_{uuid.uuid4().hex}"
+    args = {"task_id": task_id}
+    await save_agent_run(pool, run_id, "goal", "paused", [], [], [{"tool": "delete_task", "args": args}])
+    await register_pending_action(pool, run_id, guest_id, "delete_task", args, 300.0)
 
-    src = inspect.getsource(agent_router)
-    call = src[src.index("results = await execute_confirmed_actions("):]
-    call = call[: call.index(")\n") + 1]
-    assert "is_guest=ident.is_guest" in call
+    res = await client.post("/api/agent/confirm", json={"run_id": run_id}, headers={"x-guest-token": guest_token})
+
+    assert res.status_code == 200, res.text
+    result = res.json()["results"][0]
+    assert result["status"] == "error"
+    assert "Guest sessions are forbidden" in result["message"]
+    async with pool.acquire() as conn:
+        assert await conn.fetchval("SELECT deleted_at FROM tasks WHERE id = $1", task_id) is None
 
 
 @pytest.mark.asyncio

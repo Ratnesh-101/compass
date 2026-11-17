@@ -436,10 +436,13 @@ export default function ChatPanel({
   }
 
   const handleContinueResponse = (msg) => {
+    // A message that has just finished streaming has no database id yet (it is saved in the background).
+    // 'last' tells the server to continue the newest assistant message of this conversation.
+    const targetId = msg?.id || 'last'
     handleSend({
       text: "Continue response",
-      continue_message_id: msg?.id,
-      continueMessageId: msg?.id,
+      continue_message_id: targetId,
+      continueMessageId: targetId,
     })
   }
 

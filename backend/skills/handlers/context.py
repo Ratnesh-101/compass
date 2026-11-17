@@ -254,7 +254,9 @@ async def handle_summarize_across_domains(args: Dict[str, Any], pool: Any) -> Di
 
     settings = get_settings()
     user_id = args.get("user_id")
-    chunk_owner = str(user_id) if user_id else None
+    # Rule: admin ("admin") sees all tenants, a real user sees only their own, no caller sees nothing.
+    chunk_owner = scope_owner(user_id)
+    chunks_visible = bool(user_id)
     async with pool.acquire() as conn:
         tasks = await list_chat_tasks(conn, args, status="open")
         projects = await structured.list_projects(
@@ -266,17 +268,17 @@ async def handle_summarize_across_domains(args: Dict[str, Any], pool: Any) -> Di
         try:
             code_chunks = await conn.fetch(
                 "SELECT id, content, tags FROM memory_chunks WHERE domain = 'code' "
-                "AND lower(user_id) = lower($1::text) ORDER BY id DESC LIMIT 5",
+                "AND ($1::text IS NULL OR lower(user_id) = lower($1::text)) ORDER BY id DESC LIMIT 5",
                 chunk_owner,
-            ) if chunk_owner else []
+            ) if chunks_visible else []
         except Exception:
             code_chunks = []
         try:
             cw_chunks = await conn.fetch(
                 "SELECT id, content, tags FROM memory_chunks WHERE domain = 'coursework' "
-                "AND lower(user_id) = lower($1::text) ORDER BY id DESC LIMIT 5",
+                "AND ($1::text IS NULL OR lower(user_id) = lower($1::text)) ORDER BY id DESC LIMIT 5",
                 chunk_owner,
-            ) if chunk_owner else []
+            ) if chunks_visible else []
         except Exception:
             cw_chunks = []
 

@@ -57,6 +57,7 @@ from backend.services.chat_stream_extras import (
     friendly_error_event,
     load_candidate_profile_context,
     mark_message_state,
+    no_retry_client,
     orchestrate_with_early_commit,
     run_web_fallback,
     should_search_web,
@@ -278,18 +279,36 @@ async def _generate_chat_events(
             yield sse({'type': 'error', 'detail': SPECIALIST_FAILED_MESSAGE, 'can_retry': True, 'terminal': True})
             return
         spec_state = StreamState()
-        spec_settings = _settings
-        spec_key = spec_settings.NEBIUS_API_KEY or ""
-        spec_use_model = bool(spec_key) and not spec_key.startswith("your_nebius") and spec_key not in ("mock", "mock-key-not-used-in-tests")
-        spec_client = _get_stream_client(spec_settings) if spec_use_model else None
-        async for spec_evt in specialist_answer_events(
-            client=spec_client, settings=spec_settings, request=request, spec_result=spec_result,
-            user_goal=message, state=spec_state, max_tokens=int(getattr(spec_settings, "MAX_SYNTHESIS_TOKENS", 8192)),
-            use_model=spec_use_model,
-        ):
-            yield spec_evt
         spec_header = spec_result.get("task_created_header") or ""
-        response_text = (spec_header + spec_state.full_text).strip() if spec_state.full_text.strip() else ""
+        try:
+            spec_settings = _settings
+            spec_key = spec_settings.NEBIUS_API_KEY or ""
+            spec_use_model = bool(spec_key) and not spec_key.startswith("your_nebius") and spec_key not in ("mock", "mock-key-not-used-in-tests")
+            spec_client = _get_stream_client(spec_settings) if spec_use_model else None
+            async for spec_evt in specialist_answer_events(
+                client=spec_client, settings=spec_settings, request=request, spec_result=spec_result,
+                user_goal=message, state=spec_state, max_tokens=int(getattr(spec_settings, "MAX_SYNTHESIS_TOKENS", 8192)),
+                use_model=spec_use_model,
+            ):
+                yield spec_evt
+        except Exception as spec_stream_err:
+            logger.error("Specialist %s stream failed: %s", valid_id, spec_stream_err, exc_info=True)
+            if not spec_header:
+                yield friendly_error_event(partial=spec_state.full_text, detail=SPECIALIST_FAILED_MESSAGE)
+                return
+            spec_state.failed = True
+        if spec_state.failed and spec_header:
+            # A task was already created and announced. Never answer with a retryable error (Retry would
+            # create it again): finish normally, with the plain summary when the model wrote nothing.
+            if spec_state.full_text.strip():
+                spec_state.continuation_failed = True  # partial text kept: flag it as cut short
+            else:
+                spec_fallback = str(spec_result.get("summary") or "")
+                if spec_fallback.strip():
+                    yield sse({"type": "token", "value": spec_fallback})
+                    spec_state.full_text = spec_fallback
+            spec_state.failed = False
+        response_text = (spec_header + spec_state.full_text).strip() if (spec_header or spec_state.full_text.strip()) else ""
         spec_truncated = spec_state.truncated and not spec_state.failed
         spec_status = STATUS_TRUNCATED if spec_truncated else (STATUS_INTERRUPTED if (spec_state.failed or spec_state.disconnected) else None)
 
@@ -320,22 +339,27 @@ async def _generate_chat_events(
         # Continue mode: resume a saved assistant message and stream only the new text.
         from backend.persona import build_persona_system_prompt as _persona_prompt
 
-        cont_pool = await _resolve_pool()
-        cont_today = local_today(pick_timezone(getattr(req, "tz", None), None)).isoformat()
-        cont_sys_prompt = _persona_prompt(
-            profile_facts=None,
-            extra_context=f"Today's date is {cont_today}.",
-            tone=effective_tone,
-            parked_thoughts=None,
-            conv_mode=getattr(req, "mode", None),
-        )
-        yield status_event("thinking", "Picking up where the answer stopped…")
-        async for cont_evt in continue_message_events(
-            client=_get_stream_client(_settings), settings=_settings, request=request, pool=cont_pool,
-            owner_id=user_id or guest_id, message_id_raw=continue_msg_id, system_prompt=cont_sys_prompt,
-            max_tokens=stream_token_budget(effective_tone, int(getattr(_settings, "MAX_SYNTHESIS_TOKENS", 8192)))[0],
-        ):
-            yield cont_evt
+        try:
+            cont_pool = await _resolve_pool()
+            cont_today = local_today(pick_timezone(getattr(req, "tz", None), None)).isoformat()
+            cont_sys_prompt = _persona_prompt(
+                profile_facts=None,
+                extra_context=f"Today's date is {cont_today}.",
+                tone=effective_tone,
+                parked_thoughts=None,
+                conv_mode=getattr(req, "mode", None),
+            )
+            yield status_event("thinking", "Picking up where the answer stopped…")
+            async for cont_evt in continue_message_events(
+                client=_get_stream_client(_settings), settings=_settings, request=request, pool=cont_pool,
+                owner_id=user_id or guest_id, message_id_raw=continue_msg_id, system_prompt=cont_sys_prompt,
+                max_tokens=stream_token_budget(effective_tone, int(getattr(_settings, "MAX_SYNTHESIS_TOKENS", 8192)))[0],
+                conversation_id=getattr(req, "conversation_id", None),
+            ):
+                yield cont_evt
+        except Exception as cont_err:
+            logger.error("Continue mode failed: %s", cont_err, exc_info=True)
+            yield friendly_error_event(detail=GENERIC_ERROR_MESSAGE)
         return
 
     replayed = await peek_replay(
@@ -608,7 +632,7 @@ async def _generate_chat_events(
         try:
             stream = cast(
                 openai.AsyncStream[ChatCompletionChunk],
-                await client.chat.completions.create(**call_kwargs),
+                await no_retry_client(client).chat.completions.create(**call_kwargs),
             )
         except Exception as create_err:
             logger.warning("Upstream stream creation failed: %s, falling back to orchestrator", create_err)
@@ -652,6 +676,7 @@ async def _generate_chat_events(
         tool_call_detected = False
         usage_data = None
         last_finish_reason: Optional[str] = None
+        cont_failed = False
         think_filter = StreamingThinkFilter()
         accumulated_tool_calls: Dict[int, Dict[str, str]] = {}
 
@@ -740,6 +765,7 @@ async def _generate_chat_events(
                     yield cont_evt
                 full_text, emitted_text = cont_state.full_text, cont_state.emitted_text
                 last_finish_reason = cont_state.finish
+                cont_failed = cont_state.continuation_failed
                 if cont_state.disconnected:
                     _persist_bg(
                         conv_id, message, full_text.strip(), user_id, guest_id, "chat",
@@ -798,6 +824,8 @@ async def _generate_chat_events(
                         yield retry_cont_evt
             except Exception as retry_err:
                 logger.warning("Retry after an empty first pass failed: %s", retry_err)
+                if retry_state.full_text.strip():
+                    retry_state.continuation_failed = True  # partial text kept: flag it as cut short
             if retry_state.disconnected:
                 if retry_state.full_text.strip():
                     _persist_bg(
@@ -807,6 +835,7 @@ async def _generate_chat_events(
                 return
             full_text, emitted_text = retry_state.full_text, retry_state.emitted_text
             last_finish_reason = retry_state.finish
+            cont_failed = retry_state.continuation_failed
             if retry_state.tool_call_detected:
                 tool_call_detected = True
                 accumulated_tool_calls = retry_state.tool_calls
@@ -947,7 +976,7 @@ async def _generate_chat_events(
             _persist_bg(conv_id, message, greeting_text, user_id, guest_id, "chat")
             return
 
-        final_truncated = last_finish_reason == "length"
+        final_truncated = last_finish_reason == "length" or cont_failed
         final_skill = "chat"
 
         # T-013: a plain-chat reply that says "I don't have that" for an outside-event question gets a web

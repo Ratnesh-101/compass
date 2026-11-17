@@ -216,4 +216,14 @@ async def confirm_add_tasks(conn: Any, action: Dict[str, Any], owner_identity: s
         )
     lines = [f"Added {len(created)} {'task' if len(created) == 1 else 'tasks'}:", ""]
     lines += [f"{i}. {t['title']} — {t['due_label']}" for i, t in enumerate(created, 1)]
-    return "\n".join(lines), {"created_tasks": created, "created_count": len(created)}, True
+    reply = "\n".join(lines)
+    data = {"created_tasks": created, "created_count": len(created)}
+    # The transaction has committed: signal it now so the stream can send "committed" and start the
+    # post-commit time bound before any later (reply/persist) step can stall.
+    from backend.services.chat_idempotency import record_committed_outcome
+
+    record_committed_outcome(
+        task_ids=[t.get("id") for t in created if t.get("id") is not None],
+        reply_text=reply, conv_id=conv_id, skill_used="pending_action_confirm", data=data,
+    )
+    return reply, data, True

@@ -277,6 +277,7 @@ async def test_save_verified_finding_persistence(monkeypatch):
             "finding": "Nebius Token Factory supports NVIDIA Nemotron-3 Super 120B with fp8 precision.",
             "source_url": "https://docs.nebius.com/token-factory",
             "domain": "hackathon",
+            "user_id": "finding-user",
             "citation": "Official Docs",
         },
         pool=mock_pool,
@@ -285,6 +286,7 @@ async def test_save_verified_finding_persistence(monkeypatch):
     assert res["success"] is True
     assert mock_store_chunk.called
     kwargs = mock_store_chunk.call_args.kwargs
+    assert kwargs["user_id"] == "finding-user"
     assert kwargs["domain"] == "hackathon"
     assert "tavily-verified" in kwargs["tags"]
     assert "https://docs.nebius.com/token-factory" in kwargs["content"]

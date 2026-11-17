@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   fetchApplications,
   updateApplication,
+  markApplied,
   prepareBatch,
   approveBatch,
   submitBatch,
@@ -144,8 +145,11 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
     try {
       let latest = null
       for (const step of plan.steps) {
-        const next = step.type === 'mark_applied' ? 'SUBMITTED' : step.status
-        latest = await updateApplication(app.id, { status: next })
+        // "Applied" must go through the explicit confirmation endpoint: it logs the timeline event and
+        // schedules the follow-up reminder. A plain status update would skip both.
+        latest = step.type === 'mark_applied'
+          ? await markApplied(app.id)
+          : await updateApplication(app.id, { status: step.status })
       }
       if (latest) {
         setApplications(prev => prev.map(a => (a.id === app.id ? { ...a, status: latest.status, target_deadline: latest.target_deadline } : a)))
