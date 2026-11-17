@@ -206,6 +206,19 @@ test('the preview card lists every task with its due time and offers Add all / C
   assert.match(html, /id="btn-intake-cancel"/)
 })
 
+test('the preview card focuses the primary Add button on mount; Escape and Cancel do not confirm', () => {
+  const card = read('../src/components/chat/IntakePreviewCard.jsx')
+  assert.ok(card.includes('useRef(null)'))
+  assert.ok(card.includes('confirmRef.current?.focus('), 'focus is moved to the confirm button in an effect')
+  assert.match(card, /id="btn-intake-confirm"\s+ref=\{confirmRef\}/)
+  assert.match(card, /id="btn-intake-confirm"[\s\S]*?onClick=\{handleConfirm\}/)
+  assert.match(card, /id="btn-intake-cancel"[\s\S]*?onClick=\{handleCancel\}/)
+  assert.equal(/onKeyDown|onKeyUp|Escape/.test(card.replace(/\/\/.*$/gm, '')), false, 'no key handler can confirm')
+  // The cancel button's handler never calls onConfirm.
+  const cancelFn = card.slice(card.indexOf('const handleCancel'), card.indexOf('return (', card.indexOf('const handleCancel')))
+  assert.equal(cancelFn.includes('onConfirm'), false)
+})
+
 test('ChatMessageList shows the preview card for add_tasks and not the destructive-action card', () => {
   const list = read('../src/components/chat/ChatMessageList.jsx')
   assert.ok(list.includes("pendingKind === 'add_tasks'"))

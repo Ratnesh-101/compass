@@ -4,6 +4,7 @@ Compass — Skill Orchestrator.
 Coordinates routing via Nemotron-3 Nano and execution of structured database operations.
 """
 
+import os
 import time
 import uuid
 import logging
@@ -72,7 +73,9 @@ _parse_iso_date = parse_iso_date
 
 # T-014 / N-025: single-task chat adds show the same preview-then-confirm card as multi-task adds.
 # Tests of the old save-immediately behavior can set this to False.
-SINGLE_TASK_PREVIEW = True
+# Read from the environment at import (default on; 0/false/no/off turn it off) so it can be rolled back
+# on the host without a deploy. Kept as a plain module attribute so tests can monkeypatch it.
+SINGLE_TASK_PREVIEW = os.environ.get("SINGLE_TASK_PREVIEW", "true").strip().lower() not in {"0", "false", "no", "off"}
 
 
 class _PreviewSingleAdd(Exception):
@@ -833,6 +836,8 @@ async def _handle_message_core(
                 items=[{
                     "title": title, "domain": domain, "priority": priority,
                     "duration_minutes": duration, "due_text": due_text,
+                    "project": str(project_name).strip() if project_name else None,
+                    "notes": str(notes).strip() if notes else None,
                 }],
             )
         except Exception as e:

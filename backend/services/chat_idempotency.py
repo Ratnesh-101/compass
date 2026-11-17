@@ -19,6 +19,7 @@ import re
 from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
 
 from backend.services.task_time import is_valid_timezone, request_timezone, resolve_effective_timezone
+from backend.services.stream_watch import timed_acquire
 
 logger = logging.getLogger("compass.services.chat_idempotency")
 
@@ -27,6 +28,7 @@ IN_FLIGHT_SECONDS = 300
 PRUNE_ONE_IN = 50
 # Only successful state changes are remembered; reads and previews are always recomputed.
 REPLAYABLE_SKILLS = frozenset({"add_task", "undo", "pending_action_confirm"})
+PREVIEW_SKILL = "add_tasks_preview"  # stored for replay but never reported as a committed change
 
 CLAIMED, REPLAY, IN_FLIGHT = "claimed", "replay", "in_flight"
 IN_FLIGHT_REPLY = "That request is still being processed. Give it a moment, then check your tasks before retrying."
@@ -82,6 +84,13 @@ def is_replayable(result: Dict[str, Any]) -> bool:
 
     skill = result.get("skill_used")
     return bool(result.get("success")) and (skill in REPLAYABLE_SKILLS or skill in MUTATING_TOOLS)
+
+
+def is_storable(result: Dict[str, Any]) -> bool:
+    """Results kept under a request id: replayable changes, plus a preview, so a repeated send of the same
+    id returns the same preview (same pending action) instead of creating a second one. A preview is not a
+    committed change, so committed_summary() still ignores it."""
+    return is_replayable(result) or (bool(result.get("success")) and result.get("skill_used") == PREVIEW_SKILL)
 
 
 def committed_summary(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -194,8 +203,8 @@ async def peek_replay(pool: Any, owner: str, request_id: Optional[str]) -> Optio
 async def _finish(pool: Any, owner: str, request_id: str, result: Optional[Dict[str, Any]]) -> None:
     """Store a replayable result; release the claim for everything else so a retry can run."""
     try:
-        async with pool.acquire() as conn:
-            if result is not None and is_replayable(result):
+        async with timed_acquire(pool, request_id, "idempotency_finish") as conn:
+            if result is not None and is_storable(result):
                 await conn.execute(
                     "UPDATE chat_request_log SET state = 'done', response = $3::jsonb "
                     "WHERE owner_identity = $1 AND request_id = $2",

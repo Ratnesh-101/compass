@@ -45,6 +45,8 @@ def _preview_items(parsed: ParsedIntake, tz_name: str) -> list[dict]:
             "due_at": due.due_at.isoformat() if due.due_at else None,
             "due_label": due.label,
             "due_unparsed": due.unparsed_text,
+            "project": item.project,
+            "notes": item.notes,
         })
     return out
 
@@ -175,9 +177,14 @@ async def _create_all(conn: Any, items: list[dict], owner: str, conv_id: str) ->
     for it in items:
         due_date = datetime.fromisoformat(it["due_date"]).date() if it.get("due_date") else None
         due_at = datetime.fromisoformat(it["due_at"]) if it.get("due_at") else None
+        project_id = None
+        if it.get("project"):  # old pending rows have no project/notes keys
+            proj = await structured.get_or_create_project(conn, name=it["project"], domain=it["domain"], owner_id=owner)
+            project_id = proj.get("id")
         task = await structured.create_task(
             conn, domain=it["domain"], title=it["title"], due_date=due_date, due_at=due_at,
             priority=it["priority"], duration_minutes=it.get("duration_minutes"), user_id=owner,
+            project_id=project_id, notes=it.get("notes") or None,
         )
         await conn.execute(
             """

@@ -16,9 +16,11 @@ import inspect
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Callable, Dict, List, Optional, Tuple
 
+from backend.services import stream_watch
 from backend.services.chat_idempotency import (
     committed_event,
     reset_commit_listener,
@@ -208,7 +210,15 @@ async def orchestrate_with_early_commit(
     handle_message: Callable[..., Any], **kwargs: Any
 ) -> AsyncGenerator[Tuple[str, Any], None]:
     """Run the orchestrator and yield ("committed", sse) the moment a mutation row is written,
-    then ("result", result_dict). Falls back to the normal post-hoc event when no early signal fired."""
+    then ("result", result_dict). Falls back to the normal post-hoc event when no early signal fired.
+
+    Once a change is saved, the orchestrator gets stream_watch.POST_COMMIT_TIMEOUT_S to return. If it is
+    late (for example a database write waiting on an exhausted pool) or raises, the result is rebuilt from
+    the committed payload so the reply and done event still go out. Logs:
+      ERROR post_commit_timeout request_id=<id> waited_s=<n.n> limit_s=<n.n>
+      ERROR post_commit_error request_id=<id> error=<Type: message>
+    """
+    trace_id = kwargs.pop("trace_id", None) or kwargs.get("request_id") or "-"
     queue: "asyncio.Queue[Dict[str, Any]]" = asyncio.Queue()
     token = set_commit_listener(queue.put_nowait)
     try:
@@ -217,27 +227,50 @@ async def orchestrate_with_early_commit(
         reset_commit_listener(token)
 
     emitted = False
+    committed_payload: Optional[Dict[str, Any]] = None
+    committed_at = 0.0
+    timed_out = False
     getter: Optional["asyncio.Future[Dict[str, Any]]"] = None
     try:
         while not task.done():
             if getter is None:
                 getter = asyncio.ensure_future(queue.get())
-            await asyncio.wait({task, getter}, return_when=asyncio.FIRST_COMPLETED)
+            wait_s = max(0.0, stream_watch.POST_COMMIT_TIMEOUT_S - (time.monotonic() - committed_at)) if emitted else None
+            await asyncio.wait({task, getter}, timeout=wait_s, return_when=asyncio.FIRST_COMPLETED)
             if getter.done():
-                evt = committed_event(getter.result())
+                payload = getter.result()
+                evt = committed_event(payload)
                 getter = None
                 if evt and not emitted:
-                    emitted = True
+                    emitted, committed_payload, committed_at = True, payload, time.monotonic()
                     yield ("committed", evt)
+            elif emitted and not task.done() and time.monotonic() - committed_at >= stream_watch.POST_COMMIT_TIMEOUT_S:
+                timed_out = True
+                break
         while not queue.empty() and not emitted:
-            evt = committed_event(queue.get_nowait())
+            payload = queue.get_nowait()
+            evt = committed_event(payload)
             if evt:
-                emitted = True
+                emitted, committed_payload = True, payload
                 yield ("committed", evt)
     finally:
         if getter is not None and not getter.done():
             getter.cancel()
-    result = task.result()
+    if timed_out:
+        logger.error(
+            "post_commit_timeout request_id=%s waited_s=%.1f limit_s=%.1f",
+            trace_id, time.monotonic() - committed_at, stream_watch.POST_COMMIT_TIMEOUT_S,
+        )
+        task.add_done_callback(stream_watch.late_outcome_logger(str(trace_id)))
+        yield ("result", stream_watch.degraded_result(committed_payload, "post_commit_timeout"))
+        return
+    try:
+        result = task.result()
+    except Exception as err:
+        if committed_payload is None:
+            raise
+        logger.error("post_commit_error request_id=%s error=%s: %s", trace_id, type(err).__name__, err)
+        result = stream_watch.degraded_result(committed_payload, "post_commit_error")
     if not emitted:
         evt = committed_event(result)
         if evt:

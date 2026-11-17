@@ -6,6 +6,7 @@ concurrent context pre-fetching, and resilient background conversation persisten
 """
 
 import asyncio
+import functools
 import json
 import logging
 import sys
@@ -71,6 +72,7 @@ get_pool = db_get_pool
 
 
 from backend.services.streaming_filter import StreamingThinkFilter
+from backend.services.stream_watch import StreamTrace, timed_acquire
 
 
 async def _resolve_pool():
@@ -125,6 +127,7 @@ async def persist_stream_messages(
     verifiable: Optional[bool] = None,
     is_truncated: bool = False,
     stream_status: Optional[str] = None,
+    request_id: Optional[str] = None,
 ) -> bool:
     """Persist user prompt and assistant response asynchronously after SSE stream completion.
 
@@ -146,7 +149,7 @@ async def persist_stream_messages(
             )
             return False
 
-        async with pool.acquire() as conn:
+        async with timed_acquire(pool, request_id, "persist_stream_messages") as conn:
             real_cid = await conversations.get_or_create_conversation(
                 conn, conv_id, user_id=user_id, guest_id=guest_id
             )
@@ -181,10 +184,12 @@ def _schedule_stream_persistence(
     verifiable: Optional[bool] = None,
     is_truncated: bool = False,
     stream_status: Optional[str] = None,
+    request_id: Optional[str] = None,
 ) -> asyncio.Task:
     """Schedule stream persistence as an async background task with an exception handler."""
     task = asyncio.create_task(
         persist_stream_messages(
+            request_id=request_id,
             conv_id=conv_id,
             message=message,
             final_text=final_text,
@@ -224,14 +229,27 @@ async def stream_chunks(text: str) -> AsyncGenerator[str, None]:
         cursor += take
 
 
-async def generate_chat_events(
+def generate_chat_events(
     req: StreamChatRequest,
     request: Request,
     user_id: Optional[str] = None,
     guest_id: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
+    """Traced entry point: logs stream start/end and runs the silent-stream watchdog around the real generator."""
+    trace = StreamTrace(normalize_request_id(getattr(req, "request_id", None)), str(getattr(req, "conversation_id", None) or "") or None)
+    return cast(AsyncGenerator[str, None], trace.run(_generate_chat_events(req, request, user_id, guest_id, trace.request_id), request))
+
+
+async def _generate_chat_events(
+    req: StreamChatRequest,
+    request: Request,
+    user_id: Optional[str] = None,
+    guest_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
+) -> AsyncGenerator[str, None]:
     """Generate Server-Sent Events (SSE) for conversational and tool-dispatching chat requests."""
     _settings = get_settings()
+    _persist_bg = functools.partial(_schedule_stream_persistence, request_id=trace_id)
     conv_id = req.conversation_id or str(uuid.uuid4())
     message = req.message.strip()
     req_tone = getattr(req, "tone", None)
@@ -277,7 +295,7 @@ async def generate_chat_events(
 
         try:
             if pool and response_text:
-                async with pool.acquire() as conn:
+                async with timed_acquire(pool, trace_id, "persist_specialist") as conn:
                     real_cid = await conversations.get_or_create_conversation(conn, conv_id, user_id=user_id, guest_id=guest_id)
                     await conversations.add_message(conn, real_cid, role="user", content=f"[{valid_id}] {message}")
                     saved_spec = await conversations.add_message(conn, real_cid, role="assistant", content=response_text, skill_called=f"specialist_{valid_id}")
@@ -484,6 +502,7 @@ async def generate_chat_events(
             early_committed = False
             async for orch_kind, orch_val in orchestrate_with_early_commit(
                 orchestrator.handle_message,
+                trace_id=trace_id,
                 conversation_id=conv_id,
                 request_id=getattr(req, "request_id", None),
                 tz=getattr(req, "tz", None),
@@ -555,7 +574,7 @@ async def generate_chat_events(
             if result.get('is_truncated') or (isinstance(raw_data, dict) and raw_data.get('is_truncated')):
                 done_payload['is_truncated'] = True
             yield f"data: {json.dumps(done_payload, default=str)}\n\n"
-            _schedule_stream_persistence(
+            _persist_bg(
                 conv_id,
                 message,
                 response_text,
@@ -624,7 +643,7 @@ async def generate_chat_events(
                 yield f"data: {json.dumps({'type': 'token', 'value': text_chunk})}\n\n"
 
             yield f"data: {json.dumps({'type': 'done', 'conversation_id': result.get('conversation_id', conv_id), 'skill_used': skill_used})}\n\n"
-            _schedule_stream_persistence(conv_id, message, response_text, user_id, guest_id, skill_used)
+            _persist_bg(conv_id, message, response_text, user_id, guest_id, skill_used)
             return
 
         full_text = ""
@@ -643,7 +662,7 @@ async def generate_chat_events(
                     if hasattr(stream, "aclose"):
                         await stream.aclose()
                     full_text += think_filter.flush()
-                    _schedule_stream_persistence(
+                    _persist_bg(
                         conv_id, message, full_text.strip(), user_id, guest_id, "chat",
                         is_truncated=True, stream_status=STATUS_INTERRUPTED,
                     )
@@ -722,7 +741,7 @@ async def generate_chat_events(
                 full_text, emitted_text = cont_state.full_text, cont_state.emitted_text
                 last_finish_reason = cont_state.finish
                 if cont_state.disconnected:
-                    _schedule_stream_persistence(
+                    _persist_bg(
                         conv_id, message, full_text.strip(), user_id, guest_id, "chat",
                         is_truncated=True, stream_status=STATUS_INTERRUPTED,
                     )
@@ -739,7 +758,7 @@ async def generate_chat_events(
                 await stream.aclose()
             full_text += think_filter.flush() if not tool_call_detected else ""
             yield friendly_error_event(partial=full_text)
-            _schedule_stream_persistence(
+            _persist_bg(
                 conv_id, message, full_text.strip(), user_id, guest_id, "chat",
                 is_truncated=True, stream_status=STATUS_INTERRUPTED,
             )
@@ -781,7 +800,7 @@ async def generate_chat_events(
                 logger.warning("Retry after an empty first pass failed: %s", retry_err)
             if retry_state.disconnected:
                 if retry_state.full_text.strip():
-                    _schedule_stream_persistence(
+                    _persist_bg(
                         conv_id, message, retry_state.full_text.strip(), user_id, guest_id, "chat",
                         is_truncated=True, stream_status=STATUS_INTERRUPTED,
                     )
@@ -819,6 +838,7 @@ async def generate_chat_events(
             early_committed = False
             async for orch_kind, orch_val in orchestrate_with_early_commit(
                 orchestrator.handle_message,
+                trace_id=trace_id,
                 conversation_id=conv_id,
                 request_id=getattr(req, "request_id", None),
                 tz=getattr(req, "tz", None),
@@ -907,7 +927,7 @@ async def generate_chat_events(
             if result.get('is_truncated') or (isinstance(raw_data2, dict) and raw_data2.get('is_truncated')):
                 done_payload2['is_truncated'] = True
             yield f"data: {json.dumps(done_payload2, default=str)}\n\n"
-            _schedule_stream_persistence(
+            _persist_bg(
                 conv_id, message, response_text, user_id, guest_id, skill_used,
                 evidence=done_payload2.get('evidence'),
                 is_truncated=bool(done_payload2.get('is_truncated')),
@@ -924,7 +944,7 @@ async def generate_chat_events(
             async for greet_token in stream_chunks(greeting_text):
                 yield f"data: {json.dumps({'type': 'token', 'value': greet_token})}\n\n"
             yield f"data: {json.dumps({'type': 'done', 'conversation_id': conv_id, 'skill_used': 'chat'}, default=str)}\n\n"
-            _schedule_stream_persistence(conv_id, message, greeting_text, user_id, guest_id, "chat")
+            _persist_bg(conv_id, message, greeting_text, user_id, guest_id, "chat")
             return
 
         final_truncated = last_finish_reason == "length"
@@ -942,7 +962,7 @@ async def generate_chat_events(
                 final_truncated = False
                 final_skill = "search_web"
 
-        _schedule_stream_persistence(
+        _persist_bg(
             conv_id, message, full_text, user_id, guest_id, final_skill,
             is_truncated=final_truncated, stream_status=STATUS_TRUNCATED if final_truncated else None,
         )
@@ -963,7 +983,7 @@ async def generate_chat_events(
     except asyncio.CancelledError:
         logger.info("Chat SSE stream cancelled by client disconnect.")
         if full_text.strip():
-            _schedule_stream_persistence(
+            _persist_bg(
                 conv_id, message, full_text.strip(), user_id, guest_id, "chat",
                 is_truncated=True, stream_status=STATUS_INTERRUPTED,
             )
@@ -976,7 +996,7 @@ async def generate_chat_events(
             await stream.aclose()
         yield friendly_error_event(partial=full_text, detail=GENERIC_ERROR_MESSAGE)
         if full_text.strip():
-            _schedule_stream_persistence(
+            _persist_bg(
                 conv_id, message, full_text.strip(), user_id, guest_id, "chat",
                 is_truncated=True, stream_status=STATUS_INTERRUPTED,
             )

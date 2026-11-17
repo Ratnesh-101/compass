@@ -1,11 +1,18 @@
-import React, { useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { describeIntakeItem } from '../../utils/chatRequest'
 
 // Preview of several pasted tasks. Nothing is saved until the user confirms.
 export default function IntakePreviewCard({ pendingAction, onConfirm, onCancel }) {
   const [busy, setBusy] = useState(false)
+  const confirmRef = useRef(null)
   const items = Array.isArray(pendingAction?.items) ? pendingAction.items : []
   const count = items.length || pendingAction?.count || 0
+
+  // The primary button takes focus when the card appears, so pressing Enter confirms.
+  // Escape has no handler here and Cancel is a separate button, so neither can confirm.
+  useEffect(() => {
+    confirmRef.current?.focus({ preventScroll: true })
+  }, [])
 
   const handleConfirm = async () => {
     if (busy) return
@@ -58,6 +65,7 @@ export default function IntakePreviewCard({ pendingAction, onConfirm, onCancel }
         <button
           type="button"
           id="btn-intake-confirm"
+          ref={confirmRef}
           className="btn-primary"
           disabled={busy}
           style={{

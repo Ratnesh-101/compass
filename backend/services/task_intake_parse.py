@@ -46,6 +46,8 @@ class IntakeItem:
     priority: str
     duration_minutes: Optional[int]
     due_text: str
+    project: Optional[str] = None
+    notes: Optional[str] = None
 
 
 @dataclass(frozen=True)
