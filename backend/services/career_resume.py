@@ -23,6 +23,12 @@ from backend.models_career import (
     ResumeValidationStatus,
 )
 from backend.models_radar import OpportunityOut, UserOpportunityProfileIn
+from backend.services.career_resume_parse_fixes import (
+    education_line_parts,
+    extract_grade,
+    is_description_line,
+    merge_split_education_items,
+)
 
 
 def identity_fields_from_user_id(user_id: Optional[str]) -> tuple[str, str]:
@@ -722,6 +728,7 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
     leadership_and_volunteering: List[str] = []
     publications: List[str] = []
     summary_lines: List[str] = []
+    education_notes: Dict[str, str] = {}
 
     current_section = None
     current_project: Optional[ResumeProjectItem] = None
@@ -845,14 +852,17 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
 
         elif current_section == "education":
             if any(term in line_low for term in ("b.tech", "b.e.", "bs", "bachelor", "master", "m.tech", "ph.d", "university", "institute", "college", "school")):
-                inst, deg = _split_education_line(line_clean)
+                # A note like "(currently in 3rd year)" is kept as a note, never glued to the college name.
+                split_line, edu_note, _stated_year = education_line_parts(line_clean)
+                inst, deg = _split_education_line(split_line)
+                if edu_note:
+                    education_notes[f"education_note_{len(edu_list) + 1}"] = edu_note
 
                 year_match = re.findall(r"\b(20\d\d)\b", line_clean)
                 start_yr = int(year_match[0]) if len(year_match) > 1 else None
                 end_yr = int(year_match[-1]) if year_match else None
 
-                gpa_match = re.search(r"(?:CGPA|GPA|Grade)[\s:]*([0-9.]+(?:/[0-9.]+)?%?)", line_clean, re.IGNORECASE)
-                cgpa = gpa_match.group(1) if gpa_match else None
+                cgpa = extract_grade(line_clean)
 
                 edu_list.append(
                     ResumeEducationItem(
@@ -950,6 +960,16 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
 
             is_bullet = line_clean.startswith("• ")
             has_dates = _has_date_range(line_clean)
+
+            # A description sentence under a project header ("used by 200 students.") belongs to that
+            # project; it must not start a project of its own.
+            if (
+                not is_bullet
+                and current_project is not None
+                and is_description_line(line_clean, PROJECT_TITLE_SEPARATORS, has_dates, ACTION_VERBS)
+            ):
+                line_clean = "• " + line_clean
+                is_bullet = True
 
             if is_bullet:
                 bullet_txt = _clean_bullet(line_clean)
@@ -1059,6 +1079,8 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
             if re.search(r"\b" + re.escape(tech) + r"\b", raw_text, re.IGNORECASE):
                 skills.append(tech)
 
+    edu_list = merge_split_education_items(edu_list)
+
     evidence_tags = {
         "contact": "SOURCE_DOCUMENT",
         "education": "SOURCE_DOCUMENT" if edu_list else "NEEDS_CONFIRMATION",
@@ -1087,6 +1109,7 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
         publications=publications,
         relevant_links=relevant_links,
         evidence_classifications=evidence_tags,
+        evidence_notes=education_notes,
     )
 
 
@@ -1188,10 +1211,11 @@ def _is_non_engineering_role(role_title: str) -> bool:
 
 
 def _as_sentence(text: str) -> str:
-    """Trim and end with a period; leave existing terminal punctuation alone."""
-    trimmed = text.strip()
+    """Trim and end with one period; trailing joiners (";", ":", ",") are dropped first."""
+    trimmed = text.strip().rstrip(";:,- ").strip()
     if not trimmed:
         return ""
+    trimmed = re.sub(r"\.{2,}$", ".", trimmed)
     return trimmed if trimmed[-1] in ".!?" else trimmed + "."
 
 

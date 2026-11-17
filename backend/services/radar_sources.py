@@ -190,7 +190,7 @@ def _process_table_block(
         category = infer_category(role_clean)
         emp_type = infer_employer_type(comp_clean, category, source_name)
         work_arr = "remote" if "remote" in raw_location.lower() else "onsite"
-        from backend.services.radar_ats_adapters import is_india_or_remote
+        from backend.services.radar_ats_adapters import is_india_location, is_india_or_remote
         is_india = is_india_or_remote(raw_location, is_remote=(work_arr == "remote"))
 
         out.append({
@@ -201,7 +201,7 @@ def _process_table_block(
             "category": category,
             "location": raw_location,
             "work_arrangement": work_arr,
-            "country": "India" if "india" in raw_location.lower() else "Global",
+            "country": "India" if is_india_location(raw_location) else "Global",
             "is_india_eligible": is_india,
             "official_application_url": app_url,
             "canonical_url": canonicalize_url(app_url, role_clean),

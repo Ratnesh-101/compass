@@ -40,7 +40,7 @@ export default function HandoffKitModal({ activeKit, onClose }) {
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
           <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800', color: 'var(--text-primary)' }}>
-            📋 Application Handoff Package
+            📋 Application pack
           </h3>
           <button
             type="button"

@@ -346,6 +346,44 @@ export async function prepareApplication(opportunityId) {
   return res.json()
 }
 
+/** Paste a job link: the server reads the page, finds or creates the listing and prepares the application. */
+export async function prepareFromLink(url) {
+  await ensureSession()
+  const res = await fetch(`${API_BASE}/applications/from-url`, {
+    method: 'POST',
+    headers: getJsonHeaders(),
+    credentials: 'include',
+    body: JSON.stringify({ url }),
+  })
+  if (!res.ok) throw await errorFromResponse(res, 'Could not prepare an application from that link')
+  return res.json()
+}
+
+/** "Prepare my top 3 matches": the existing auto-prepare endpoint in top-matches mode. */
+export async function prepareTopMatches() {
+  await ensureSession()
+  const res = await fetch(`${API_BASE}/auto-prepare?scope=top_matches`, {
+    method: 'POST',
+    headers: getJsonHeaders(),
+    credentials: 'include',
+  })
+  if (!res.ok) throw await errorFromResponse(res, 'Could not prepare your top matches')
+  return res.json()
+}
+
+/** Estimate how a basic applicant tracking system reads a resume (the master resume when no id is given). */
+export async function runAtsCheck(resumeId = null, opportunityId = null) {
+  await ensureSession()
+  const res = await fetch(`${API_BASE}/ats-check`, {
+    method: 'POST',
+    headers: getJsonHeaders(),
+    credentials: 'include',
+    body: JSON.stringify({ resume_id: resumeId, opportunity_id: opportunityId }),
+  })
+  if (!res.ok) throw await errorFromResponse(res, 'Could not run the ATS check')
+  return res.json()
+}
+
 export async function updateApplication(appId, updates) {
   await ensureSession()
   const res = await fetch(`${API_BASE}/applications/${appId}`, {
@@ -456,6 +494,6 @@ export async function fetchHandoffKit(appId) {
     headers: getAuthHeaders({ Accept: 'application/json' }),
     credentials: 'include',
   })
-  if (!res.ok) throw await errorFromResponse(res, 'Failed to load Handoff Kit')
+  if (!res.ok) throw await errorFromResponse(res, 'Failed to load the application pack')
   return res.json()
 }

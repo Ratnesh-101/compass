@@ -203,7 +203,7 @@ async def test_4_fenced_json_handled_and_invalid_json_gives_error_state(mock_opp
         brief = await generate_company_intel_brief(mock_opp)
         assert brief["status"] == "ready"
         assert brief.get("is_sources_only") is True
-        assert brief.get("fallback_label") == "Sources found, summary unavailable"
+        assert brief.get("fallback_label") == "Quoted from public sources"
         assert len(brief["sources"]) == 1
 
 

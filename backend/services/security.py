@@ -205,7 +205,8 @@ async def _send_pinned(
     path_query = (parsed.path or "/") + (f"?{parsed.query}" if parsed.query else "")
     extensions: Dict[str, Any] = {}
     if parsed.scheme == "https":
-        extensions["sni_hostname"] = hostname.encode("ascii")
+        # httpx 0.28 expects a str here (bytes raised on every HTTPS fetch).
+        extensions["sni_hostname"] = hostname
 
     last_error: Optional[Exception] = None
     for ip in ips:

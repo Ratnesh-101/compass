@@ -120,7 +120,7 @@ export default function HandoffKitDrawer({
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span style={{ fontSize: '18px' }}>🚀</span>
               <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 800, color: 'var(--text-primary, #0f172a)' }}>
-                Application Handoff Kit
+                Application pack
               </h3>
             </div>
             <div style={{ fontSize: '13px', color: 'var(--text-muted, #64748b)', marginTop: '4px' }}>
@@ -130,7 +130,7 @@ export default function HandoffKitDrawer({
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close Handoff Kit"
+            aria-label="Close application pack"
             style={{
               background: 'transparent',
               border: 'none',
@@ -148,7 +148,7 @@ export default function HandoffKitDrawer({
         <div style={{ padding: '24px', flex: 1, display: 'flex', flexDirection: 'column', gap: '20px' }}>
           {loading && (
             <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-muted, #64748b)' }}>
-              <div>Loading Handoff Kit…</div>
+              <div>Loading application pack…</div>
             </div>
           )}
 
@@ -357,7 +357,7 @@ export default function HandoffKitDrawer({
               {/* 5. Pre-Submission Checklist */}
               <div style={{ border: '1px solid var(--border, #e2e8f0)', borderRadius: '12px', padding: '16px', background: 'var(--bg-card, #ffffff)' }}>
                 <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary, #0f172a)' }}>
-                  ✅ Handoff Checklist
+                  ✅ Before you apply
                 </span>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px' }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer' }}>

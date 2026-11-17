@@ -153,6 +153,8 @@ KNOWN_ROUTE_METADATA = {
     ("/api/career/applications/{app_id}/mark-applied", "POST"): ("_get_current_identity", "Mark application applied by candidate", "test_career_e2e_workflow.py"),
     ("/api/career/auto-prepare", "POST"): ("_get_current_identity", "Trigger background opt-in auto-prepare", "test_career_e2e_workflow.py"),
     ("/api/career/auto-prepare/status", "GET"): ("_get_current_identity", "Check user auto-prepare quota status", "test_career_e2e_workflow.py"),
+    ("/api/career/applications/from-url", "POST"): ("_get_current_identity + rate_limit", "Prepare an application from a pasted job link (SSRF-checked, owner scoped)", "test_career_flow.py"),
+    ("/api/career/ats-check", "POST"): ("_get_current_identity", "ATS parsing estimate for the caller's own resume", "test_career_flow.py"),
     ("/api/career/opportunities/{opportunity_id}/company-intel", "GET"): ("_get_current_identity", "Get opportunity company intelligence", "test_career_copilot.py"),
     ("/api/career/opportunities/{opportunity_id}/company-intel/jobs/{job_id}", "GET"): ("_get_current_identity", "Get background company intel refresh job status", "test_company_intel_resilience.py::test_async_refresh_job_queue_and_polling"),
     ("/api/career/opportunities/{opportunity_id}/company-intel/refresh", "POST"): ("_get_current_identity", "Trigger async company intelligence refresh", "test_company_intel_resilience.py::test_async_refresh_job_queue_and_polling"),

@@ -117,7 +117,7 @@ async def test_sources_only_fallback_when_model_times_out():
         brief = await generate_company_intel_brief(opp)
         assert brief["status"] == "ready"
         assert brief.get("is_sources_only") is True
-        assert brief.get("fallback_label") == "Sources found, summary unavailable"
+        assert brief.get("fallback_label") == "Quoted from public sources"
         assert brief.get("reason") == "model_timeout"
         assert len(brief["sources"]) == 1
         assert brief["sources"][0]["domain"] == "stripe.com"
