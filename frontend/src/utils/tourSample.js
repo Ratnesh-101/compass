@@ -44,16 +44,25 @@ export function addDays(date, days) {
   return next
 }
 
+const SAMPLE_WEEK_INTRO = 'Add these 8 tasks to my deadlines:'
+
 // One chat message: an intro line (no pipe or tab, so the parser ignores it) then a markdown table.
 export function buildSampleWeekMessage(now = new Date()) {
   const row = (cells) => `| ${cells.join(' | ')} |`
   const lines = [
-    'Add these 8 tasks to my deadlines:',
+    SAMPLE_WEEK_INTRO,
     row(SAMPLE_TABLE_HEADERS),
     row(SAMPLE_TABLE_HEADERS.map(() => '---')),
     ...SAMPLE_TASKS.map((t) => row([t.title, t.domain, t.priority, `${t.hours}h`, formatIsoDate(addDays(now, t.daysAhead))])),
   ]
   return lines.join('\n')
+}
+
+// The chat bubble shows this instead of the raw table; the full table is still what gets sent.
+export const SAMPLE_WEEK_DISPLAY_TEXT = 'Load a sample week'
+
+export function isSampleWeekMessage(text) {
+  return typeof text === 'string' && text.startsWith(SAMPLE_WEEK_INTRO)
 }
 
 export function isTourRequested(search) {

@@ -183,7 +183,7 @@ export default function ChatMessageList({
                         <ThinkingBlock thought={msg.thought} />
                       )}
                       {msg.role === 'user' ? (
-                        msg.text
+                        msg.displayText || msg.text
                       ) : (() => {
                         const isContinuationTarget = isStreaming && Boolean(continuingMessageId) && (msg.id === continuingMessageId)
                         let rawText = msg.text || ''
