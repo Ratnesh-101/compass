@@ -113,7 +113,7 @@ def company_from_url(url: str) -> str:
     slug = ""
     if any(host.endswith(h) for h in _ATS_PATH_COMPANY_HOSTS) and segments:
         slug = segments[0]
-    elif host.endswith("myworkdayjobs.com") or host.endswith("breezy.hr"):
+    elif any(host == h or host.endswith("." + h) for h in ("myworkdayjobs.com", "breezy.hr")):
         slug = host.split(".")[0]
     else:
         labels = [p for p in host.split(".") if p and p not in _GENERIC_HOST_LABELS]

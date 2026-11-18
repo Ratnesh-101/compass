@@ -47,7 +47,7 @@ def tidy_title(text: str) -> str:
     """Remove dangling connectors ("by ,", trailing "by"), doubled commas and edge punctuation."""
     t = re.sub(r"\s+", " ", text or "").strip()
     t = _DANGLING_BEFORE_PUNCT.sub("", t)
-    t = re.sub(r"\s+([,;])", r"\1", t)
+    t = re.sub(r" ([,;])", r"\1", t)  # whitespace already collapsed to single spaces
     t = re.sub(r"([,;])(?:\s*[,;])+", r"\1", t)
     t = t.strip(_EDGE_PUNCT)
     while True:
