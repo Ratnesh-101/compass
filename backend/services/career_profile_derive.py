@@ -104,6 +104,52 @@ def academic_year_from_dates(
     return year if 1 <= year <= min(length, 5) else None
 
 
+_YEAR = r"(?<!\d)(20\d\d)(?!\d)"
+# "Expected (2028)", "Expected 2028", "Class of 2028", "graduating May 2028", "batch of 2028", "till 2028".
+_GRAD_CUE_RE = re.compile(
+    r"\b(?:expected|exp\.?|class\s+of|batch(?:\s+of)?|graduat\w*|passing\s+out|until|till|to)"
+    r"[\s:()\[\],.-]{0,8}(?:[A-Za-z]{3,9}\.?[\s,]+)?" + _YEAR,
+    re.IGNORECASE,
+)
+# "2024 - 2028", "2024-28", "2024 to 2028".
+_YEAR_RANGE_RE = re.compile(_YEAR + r"\s*(?:[-\u2013\u2014~/]|to)\s*(20\d\d|\d{2})(?!\d)", re.IGNORECASE)
+_ANY_YEAR_RE = re.compile(_YEAR)
+
+
+def extract_education_years(*texts: Optional[str]) -> tuple[Optional[int], Optional[int]]:
+    """(start_year, graduation_year) stated in education text, either may be None.
+
+    Reads "Expected (2028)", "Expected 2028", "Class of 2028", "2024 - 2028", "2024-28" and a bare
+    "May 2028". A graduation cue ("expected", "class of", ...) wins over other years in the text; a
+    range gives start and end; otherwise the last year mentioned is the graduation year.
+    """
+    text = " ".join(str(t) for t in texts if t)
+    if not text.strip():
+        return None, None
+    start: Optional[int] = None
+    end: Optional[int] = None
+    rng = None
+    for rng in _YEAR_RANGE_RE.finditer(text):
+        pass  # keep the last range
+    if rng is not None:
+        first = int(rng.group(1))
+        raw_end = rng.group(2)
+        last = int(raw_end) if len(raw_end) == 4 else 2000 + int(raw_end)
+        if last >= first:
+            start, end = first, last
+    cue = None
+    for cue in _GRAD_CUE_RE.finditer(text):
+        pass  # keep the last cue
+    if cue is not None:
+        end = int(cue.group(1))
+    if end is None:
+        years = [int(y) for y in _ANY_YEAR_RE.findall(text)]
+        end = years[-1] if years else None
+    if start is not None and end is not None and start >= end:
+        start = None
+    return start, end
+
+
 def split_education_note(text: Optional[str]) -> tuple[str, Optional[str]]:
     """Split "Pune Institute of Technology, (currently in 3rd year)" into (institution, note).
 
@@ -172,6 +218,14 @@ def resume_facts(content: Any, today: Optional[date] = None) -> Dict[str, Any]:
             note_text, _get(edu, "institution"), _get(edu, "degree"), _get(edu, "field_of_study")
         )
         start, end = _get(edu, "start_year"), _get(edu, "end_year")
+        if not end:
+            # The parser can miss a year written as "Expected (2028)" or "Class of 2028"; read it from the text.
+            text_start, text_end = extract_education_years(
+                _get(edu, "institution"), _get(edu, "degree"), _get(edu, "field_of_study"), note_text
+            )
+            end = text_end
+            start = start or text_start
+    grad_year = int(end) if end and 2024 <= int(end) <= 2035 else None  # the profile accepts only this range
     academic_year = stated or academic_year_from_dates(start, end, today)
     skills = [s for s in (_get(content, "skills", []) or []) if isinstance(s, str)]
     project_text = " ".join(
@@ -180,6 +234,7 @@ def resume_facts(content: Any, today: Optional[date] = None) -> Dict[str, Any]:
     return {
         "academic_year": academic_year,
         "academic_year_source": "stated" if stated else ("computed" if academic_year else None),
+        "grad_year": grad_year,
         "country": infer_country(_get(content, "location"), _get(content, "phone")),
         "tracks": derive_tracks(skills, project_text),
     }
@@ -201,6 +256,9 @@ async def enrich_radar_profile_from_resume(user_id: str, content: Any, today: Op
             profile = radar_memory.derive_profile_from_master_resume(content)
         if profile is None:
             return changed
+        if facts["grad_year"] and not profile.grad_year:
+            profile.grad_year = facts["grad_year"]
+            changed["grad_year"] = facts["grad_year"]
         if facts["academic_year"] and (
             profile.academic_year is None or facts["academic_year_source"] == "stated"
         ):

@@ -228,24 +228,30 @@ def evaluate_eligibility(
     # 1. Academic Year Check
     academic_year_status = "pass"
     if reqs.eligible_academic_years:
-        if profile.academic_year is None:
+        # A saved graduation year implies the year of study, so a profile that lacks one is not "unknown".
+        year_of_study = profile.academic_year
+        if year_of_study is None and profile.grad_year:
+            from backend.services.career_profile_derive import academic_year_from_dates
+
+            year_of_study = academic_year_from_dates(None, profile.grad_year)
+        if year_of_study is None:
             reasons.append({
                 "field": "academic_year",
                 "status": "unknown",
                 "detail": f"Position requires academic year(s) {plain.join_plain(reqs.eligible_academic_years)}, but your year is not set in profile."
             })
             academic_year_status = "unknown"
-        elif profile.academic_year in reqs.eligible_academic_years:
+        elif year_of_study in reqs.eligible_academic_years:
             reasons.append({
                 "field": "academic_year",
                 "status": "pass",
-                "detail": f"Your academic year ({profile.academic_year}) matches accepted years: {plain.join_plain(reqs.eligible_academic_years)}."
+                "detail": f"Your academic year ({year_of_study}) matches accepted years: {plain.join_plain(reqs.eligible_academic_years)}."
             })
         else:
             reasons.append({
                 "field": "academic_year",
                 "status": "fail",
-                "detail": plain.year_fail(reqs.eligible_academic_years, profile.academic_year)
+                "detail": plain.year_fail(reqs.eligible_academic_years, year_of_study)
             })
             academic_year_status = "fail"
 

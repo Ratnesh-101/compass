@@ -85,6 +85,84 @@ def _dedupe_skills(skills: List[str]) -> List[str]:
     return out
 
 
+# Alias -> canonical key. Keys are compared after _skill_key() lowercasing/whitespace cleanup.
+_SKILL_ALIASES: Dict[str, str] = {
+    "js": "javascript", "ecmascript": "javascript",
+    "ts": "typescript",
+    "py": "python", "python3": "python",
+    "cpp": "c++", "cplusplus": "c++", "c plus plus": "c++",
+    "csharp": "c#", "c sharp": "c#",
+    "golang": "go",
+    "node": "node.js", "nodejs": "node.js", "node js": "node.js",
+    "react.js": "react", "reactjs": "react",
+    "postgres": "postgresql",
+    "k8s": "kubernetes",
+    "open-source": "open source", "opensource": "open source",
+    "ml": "machine learning",
+}
+_NO_SPLIT_SLASH = {"ci/cd", "tcp/ip", "i/o", "ui/ux", "a/b testing"}
+_LABEL_MAX_CHARS = 40
+
+
+def _skill_key(name: str) -> str:
+    """Case-insensitive canonical key: lowercased, whitespace collapsed, aliases folded."""
+    key = " ".join((name or "").lower().split()).strip(" .;:-*•·")
+    return _SKILL_ALIASES.get(key, key)
+
+
+def _skill_variants(key: str) -> Set[str]:
+    """All spellings that fold to this canonical key (used for the project-text partial match)."""
+    return {key} | {alias for alias, canon in _SKILL_ALIASES.items() if canon == key}
+
+
+def split_skill_entry(entry: str) -> List[str]:
+    """
+    Split one saved/required skill entry into individual skill names.
+    'Languages: Python, JavaScript, C/C++' -> Python, JavaScript, C/C++, C, C++
+    The original combined token (e.g. 'C/C++') is kept alongside its parts.
+    """
+    text = (entry or "").strip()
+    if not text:
+        return []
+    label, colon, rest = text.partition(":")
+    if colon and rest.strip() and "," not in label and len(label) <= _LABEL_MAX_CHARS:
+        text = rest  # drop a 'Languages:' / 'Tools:' style prefix
+    out: List[str] = []
+    for chunk in re.split(r"[,;|•·\n]+|\s+&\s+|\s+and\s+", text):
+        # 'Python (NumPy, Pandas)' arrives split by the comma; also unwrap simple parentheses
+        chunk = chunk.strip().strip("()[]").strip()
+        chunk = re.sub(r"\s*\([^)]*\)?\s*$", "", chunk).strip() or chunk
+        chunk = chunk.strip(" .:-*")
+        if not chunk:
+            continue
+        out.append(chunk)
+        if "/" in chunk and chunk.lower() not in _NO_SPLIT_SLASH:
+            out.extend(p.strip() for p in chunk.split("/") if p.strip())
+    return out
+
+
+def build_skill_index(skills: List[str]) -> Dict[str, str]:
+    """Canonical skill key -> the saved entry it came from (for evidence text)."""
+    index: Dict[str, str] = {}
+    for entry in skills or []:
+        for part in split_skill_entry(entry):
+            index.setdefault(_skill_key(part), entry.strip())
+    return index
+
+
+def skill_in_index(skill: str, index: Dict[str, str]) -> Optional[str]:
+    """Saved entry that truly contains `skill` (aliases, case and 'C/C++' parts handled), else None."""
+    whole = _skill_key(skill)
+    if whole in index:
+        return index[whole]
+    if "/" in skill and skill.strip().lower() not in _NO_SPLIT_SLASH:
+        for part in skill.split("/"):  # 'C/C++' is satisfied by either listed language
+            hit = index.get(_skill_key(part))
+            if hit:
+                return hit
+    return None
+
+
 def extract_job_sections(job_text: str) -> Dict[str, List[str]]:
     """
     Extracts structured requirements from raw job description text.
@@ -222,8 +300,8 @@ def analyze_job_and_match(
         )
 
     # Build Master Profile evidence index
-    master_skills_norm = {s.strip().lower(): s for s in master.skills}
-    learning_skills_norm = {s.strip().lower(): s for s in getattr(master, "learning_skills", [])}
+    master_skills_norm = build_skill_index(master.skills)
+    learning_skills_norm = build_skill_index(getattr(master, "learning_skills", []))
     master_projects_text = " ".join(
         f"{p.title} {p.description} {' '.join(p.highlights)} {' '.join(p.technologies)}"
         for p in master.projects
@@ -237,8 +315,10 @@ def analyze_job_and_match(
 
     # 1. Match Required Skills
     for skill in skills_list:
-        s_low = skill.lower()
-        if s_low in master_skills_norm:
+        saved_entry = skill_in_index(skill, master_skills_norm)
+        learning_entry = skill_in_index(skill, learning_skills_norm)
+        in_projects = any(contains_term(master_projects_text, v) for v in _skill_variants(_skill_key(skill)))
+        if saved_entry:
             matched_skills.append(skill)
             matches.append(
                 JobMatchEvidence(
@@ -246,14 +326,14 @@ def analyze_job_and_match(
                     category="technical_skill",
                     is_mandatory=True,
                     match_status="supported",
-                    supporting_facts=[f"Verified in Master Profile: '{master_skills_norm[s_low]}'"],
+                    supporting_facts=[f"Verified in Master Profile: '{saved_entry}'"],
                     reasoning=f"Candidate has verified mastery of {skill}.",
                     confidence=1.0,
                 )
             )
-        elif contains_term(master_projects_text, s_low) or s_low in learning_skills_norm:
+        elif in_projects or learning_entry:
             partial_skills.append(skill)
-            source = "learning list" if s_low in learning_skills_norm else "project implementations"
+            source = "learning list" if learning_entry else "project implementations"
             matches.append(
                 JobMatchEvidence(
                     requirement=skill,
