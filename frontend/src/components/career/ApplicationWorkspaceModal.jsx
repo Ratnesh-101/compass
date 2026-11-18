@@ -19,6 +19,7 @@ import {
   ExternalLink,
 } from 'lucide-react'
 import { cleanOpportunity } from '../../utils/jobCardCleaner'
+import { plainJobDescription } from '../../utils/plainJobDescription'
 import {
   prepareApplication,
   fetchResume,
@@ -1808,8 +1809,8 @@ export default function ApplicationWorkspaceModal({
                     <h3 style={{ margin: '0 0 8px 0', fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>
                       Role Description & Verified Requirements
                     </h3>
-                    <p style={{ margin: '0 0 12px 0', fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-                      {opportunity.description || 'Verified opportunity description is retrieved directly from official career postings.'}
+                    <p style={{ margin: '0 0 12px 0', fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.6, whiteSpace: 'pre-line' }}>
+                      {plainJobDescription(opportunity.description) || 'Verified opportunity description is retrieved directly from official career postings.'}
                     </p>
                     <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                       {requiredSkills.length > 0 ? (

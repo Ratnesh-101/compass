@@ -918,7 +918,9 @@ def derive_profile_from_master_resume(content: Any) -> Optional[UserOpportunityP
     if not edu_list and not skills:
         return None
 
-    first_edu = latest_education(list(edu_list))
+    from backend.services.career_profile_derive import pick_education
+
+    first_edu = pick_education(list(edu_list))
     grade_str = ""
     if isinstance(first_edu, dict):
         degree = first_edu.get("degree")
