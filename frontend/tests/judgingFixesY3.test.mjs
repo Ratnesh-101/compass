@@ -89,3 +89,9 @@ test('radar detail pop-up points to the Application Center, wired through Career
   assert.match(career, /handleNavigateToApplications = useCallback\(\(\) => \{\s*setActiveSubTab\('applications'\)/)
   assert.ok(career.includes('onNavigateToApplications={handleNavigateToApplications}'))
 })
+
+test('the sidebar section is called "My areas", not "Context Domains"', () => {
+  const src = read('components/Sidebar.jsx')
+  assert.ok(src.includes('My areas'))
+  assert.ok(!src.includes('Context Domains'))
+})

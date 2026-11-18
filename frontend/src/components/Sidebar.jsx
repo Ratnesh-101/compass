@@ -398,7 +398,7 @@ export default function Sidebar({
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', padding: '0 4px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <p style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--sidebar-text)', opacity: 0.75, fontWeight: '600', margin: 0 }}>
-                Context Domains
+                My areas
               </p>
               <button
                 id="btn-add-domain"
