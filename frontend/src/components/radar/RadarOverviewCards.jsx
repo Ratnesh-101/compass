@@ -194,7 +194,9 @@ export default function RadarOverviewCards({
             {stats?.strong_matches_count ?? 0}
           </div>
           <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            Satisfies your academic criteria
+            {(stats?.strong_matches_count ?? 0) > 0
+              ? 'Satisfies your academic criteria'
+              : 'None confirmed yet. Most listings do not state requirements, so Compass will not claim a match.'}
           </div>
         </div>
 

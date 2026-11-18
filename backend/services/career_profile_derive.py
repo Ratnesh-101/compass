@@ -205,26 +205,66 @@ def _get(obj: Any, name: str, default: Any = None) -> Any:
     return obj.get(name, default) if isinstance(obj, dict) else getattr(obj, name, default)
 
 
+_SCHOOL_RE = re.compile(
+    r"\bclass\s*(?:x|xi|xii|10|11|12)(?:th)?\b|\b(?:10|12)th\b|\bschool\b(?!\s+of\b)|\bdps\b|\bhsc\b|\bssc\b"
+    r"|\bcbse\b|\bicse\b|\b(?:senior\s+)?(?:higher\s+)?secondary\b|\bintermediate\b",
+    re.IGNORECASE,
+)
+
+
+def _is_school_entry(edu: Any) -> bool:
+    """True for a high-school entry (Class X / XII, school, DPS, ...)."""
+    text = " ".join(str(_get(edu, k) or "") for k in ("institution", "degree", "field_of_study"))
+    return bool(_SCHOOL_RE.search(text))
+
+
+def _entry_years(edu: Any, note_text: str = "") -> tuple[Optional[int], Optional[int]]:
+    """(start, end) of one education entry: parsed years first, else read from its text."""
+    start, end = _get(edu, "start_year"), _get(edu, "end_year")
+    if not end:
+        text_start, text_end = extract_education_years(
+            _get(edu, "institution"), _get(edu, "degree"), _get(edu, "field_of_study"), note_text
+        )
+        end = text_end
+        start = start or text_start
+    return (int(start) if start else None), (int(end) if end else None)
+
+
+def pick_education(edu_list: List[Any], today: Optional[date] = None, note_text: str = "") -> Any:
+    """The education entry that describes the candidate's current degree.
+
+    High-school entries are skipped (unless nothing else is listed). Among entries still in
+    progress (end year this year or later) the one listed first wins, because resumes list the
+    main degree first. With none in progress, the entry with the most recent end year wins.
+    """
+    if not edu_list:
+        return None
+    today = today or date.today()
+    pool = [e for e in edu_list if not _is_school_entry(e)] or list(edu_list)
+    dated = [(e, _entry_years(e, note_text)[1]) for e in pool]
+    in_progress = [e for e, end in dated if end is not None and end >= today.year]
+    if in_progress:
+        return in_progress[0]
+    past = [(e, end) for e, end in dated if end is not None]
+    if past:
+        return max(past, key=lambda pair: pair[1])[0]
+    return latest_education(pool)
+
+
 def resume_facts(content: Any, today: Optional[date] = None) -> Dict[str, Any]:
     """Facts the profile form needs, taken from resume content (ResumeContent or dict)."""
     edu_list = list(_get(content, "education", []) or [])
-    edu = latest_education(edu_list)
     notes = _get(content, "evidence_notes", {}) or {}
     note_text = " ".join(str(v) for k, v in notes.items() if str(k).startswith("education"))
+    edu = pick_education(edu_list, today, note_text if len(edu_list) == 1 else "")
     stated = None
     start = end = None
     if edu is not None:
         stated = stated_year_of_study(
             note_text, _get(edu, "institution"), _get(edu, "degree"), _get(edu, "field_of_study")
         )
-        start, end = _get(edu, "start_year"), _get(edu, "end_year")
-        if not end:
-            # The parser can miss a year written as "Expected (2028)" or "Class of 2028"; read it from the text.
-            text_start, text_end = extract_education_years(
-                _get(edu, "institution"), _get(edu, "degree"), _get(edu, "field_of_study"), note_text
-            )
-            end = text_end
-            start = start or text_start
+        # The parser can miss a year written as "Expected (2028)" or "Class of 2028"; read it from the text.
+        start, end = _entry_years(edu, note_text)
     grad_year = int(end) if end and 2024 <= int(end) <= 2035 else None  # the profile accepts only this range
     academic_year = stated or academic_year_from_dates(start, end, today)
     skills = [s for s in (_get(content, "skills", []) or []) if isinstance(s, str)]
