@@ -996,6 +996,13 @@ async def sync_candidate_profile_from_master(user_id: str, content: Any) -> None
 
 
 async def get_user_opportunity_profile(user_id: str) -> Optional[UserOpportunityProfileIn]:
+    profile, _master = await get_user_opportunity_profile_and_master(user_id)
+    return profile
+
+
+async def get_user_opportunity_profile_and_master(user_id: str) -> Tuple[Optional[UserOpportunityProfileIn], Any]:
+    """Same as get_user_opportunity_profile, but also returns the master resume it read (or None),
+    so a caller that needs both does a single resume read."""
     pool = await get_pool()
     existing_profile = None
 
@@ -1044,7 +1051,7 @@ async def get_user_opportunity_profile(user_id: str) -> Optional[UserOpportunity
             derived = None
         if derived:
             if not existing_profile:
-                return derived
+                return derived, master
             if not existing_profile.degree and derived.degree:
                 existing_profile.degree = derived.degree
             if not existing_profile.university and derived.university:
@@ -1058,9 +1065,9 @@ async def get_user_opportunity_profile(user_id: str) -> Optional[UserOpportunity
             if existing_profile.cgpa is None and derived.cgpa is not None:
                 existing_profile.cgpa = derived.cgpa
                 existing_profile.cgpa_scale = derived.cgpa_scale
-            return existing_profile
+            return existing_profile, master
 
-    return existing_profile
+    return existing_profile, master
 
 
 async def upsert_user_opportunity_profile(user_id: str, p: UserOpportunityProfileIn) -> None:

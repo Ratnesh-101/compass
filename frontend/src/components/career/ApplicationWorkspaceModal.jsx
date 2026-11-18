@@ -810,11 +810,16 @@ export default function ApplicationWorkspaceModal({
       setError(plan.reason)
       return
     }
-    for (const step of plan.steps) {
+    for (let i = 0; i < plan.steps.length; i += 1) {
+      const step = plan.steps[i]
       const ok = step.type === 'mark_applied'
         ? await handleMarkAppliedRecord()
         : await handleUpdateApplicationRecord(step.status.toLowerCase())
-      if (!ok) return
+      if (!ok) {
+        // Each step updates the shown status from the server reply, so the UI keeps the real stored status.
+        if (i > 0 && target === 'closed') setError('The application was withdrawn but could not be closed. Try closing it again.')
+        return
+      }
     }
     setStageChoice('')
   }

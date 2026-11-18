@@ -28,6 +28,7 @@ import TopMatchesBar from './career/TopMatchesBar'
 
 export default function InternshipRadar({
   refreshTrigger = 0,
+  hasResume = false,
   onRefreshComplete,
   onRefreshError,
   onOpenProfile,
@@ -365,7 +366,7 @@ export default function InternshipRadar({
 
       {/* One-click preparation for the best matches (calls POST /api/career/auto-prepare) */}
       <TopMatchesBar
-        hasProfile={hasCandidateProfile}
+        hasProfile={hasCandidateProfile || hasResume}
         hasMatches={opportunities.length > 0}
         onPrepared={() => {
           loadMetadata()

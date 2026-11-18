@@ -44,15 +44,26 @@ from backend.services.career_submission import (
     get_batch_lock,
     verify_batch_approval_token,
 )
+from backend.services.ownership import has_caller
 from backend.skills.registry import register_skill
 
 logger = logging.getLogger("compass.skills.career")
+
+_NO_CALLER: Dict[str, Any] = {
+    "success": False,
+    "error": "user_id required",
+    "summary": "user_id required: career data is per-user and no caller identity was supplied.",
+    "response": "user_id required: career data is per-user and no caller identity was supplied.",
+    "data": {"error": "user_id required"},
+}
 
 
 @register_skill("tailor_resume")
 async def handle_tailor_resume(args: Dict[str, Any], pool: Any = None) -> Dict[str, Any]:
     """Tailor candidate resume for a specified opportunity."""
-    user_id = args.get("user_id", "default_user")
+    user_id = args.get("user_id")
+    if not has_caller(user_id):
+        return dict(_NO_CALLER)
     opp_id = args.get("opportunity_id")
     target_comp = args.get("target_company")
 
@@ -117,7 +128,9 @@ async def handle_tailor_resume(args: Dict[str, Any], pool: Any = None) -> Dict[s
 @register_skill("prepare_application")
 async def handle_prepare_application(args: Dict[str, Any], pool: Any = None) -> Dict[str, Any]:
     """Prepare application record with tailored resume and answers."""
-    user_id = args.get("user_id", "default_user")
+    user_id = args.get("user_id")
+    if not has_caller(user_id):
+        return dict(_NO_CALLER)
     opp_id = args.get("opportunity_id")
     if not opp_id:
         return {"success": False, "error": "opportunity_id is required."}
@@ -172,7 +185,9 @@ async def handle_prepare_application(args: Dict[str, Any], pool: Any = None) -> 
 @register_skill("submit_approved_application_batch")
 async def handle_submit_approved_application_batch(args: Dict[str, Any], pool: Any = None) -> Dict[str, Any]:
     """Submit approved application batch enforcing explicit approval gate."""
-    user_id = args.get("user_id", "default_user")
+    user_id = args.get("user_id")
+    if not has_caller(user_id):
+        return dict(_NO_CALLER)
     batch_id = args.get("batch_id")
     if not batch_id:
         return {"success": False, "error": "batch_id is required."}
@@ -279,7 +294,9 @@ async def handle_track_career_applications(args: Dict[str, Any], pool: Any = Non
 @register_skill("draft_cover_letter")
 async def handle_draft_cover_letter(args: Dict[str, Any], pool: Any = None) -> Dict[str, Any]:
     """Draft a truthful, verified cover letter strictly referencing master projects and skills."""
-    user_id = args.get("user_id", "default_user")
+    user_id = args.get("user_id")
+    if not has_caller(user_id):
+        return dict(_NO_CALLER)
     opp_id = args.get("opportunity_id")
     target_comp = args.get("target_company")
 

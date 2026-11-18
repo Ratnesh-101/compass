@@ -73,6 +73,8 @@ class StreamState:
     failed: bool = False  # the pass(es) raised or produced no visible text at all
     tool_call_detected: bool = False
     tool_calls: Dict[int, Dict[str, str]] = field(default_factory=dict)
+    prompt_tokens: int = 0  # provider-reported usage summed over the passes run on this state
+    completion_tokens: int = 0
 
     @property
     def truncated(self) -> bool:
@@ -119,9 +121,12 @@ async def text_pass_events(
     dispatches them) instead of being ignored.
     Raises if the completion cannot be created or the stream breaks; the caller decides what to tell the user."""
     call_kwargs = {**kwargs, "stream": True, "timeout": STREAM_REQUEST_TIMEOUT_S}
+    call_kwargs.setdefault("stream_options", {"include_usage": True})  # same option as the first pass
     stream = await no_retry_client(client).chat.completions.create(**call_kwargs)
     state.finish = None
     think_filter = StreamingThinkFilter()
+    pass_usage: List[int] = []  # [prompt_tokens, completion_tokens] when the provider reported usage
+    started = time.monotonic()
 
     def _take(text: str) -> List[str]:
         events: List[str] = []
@@ -138,6 +143,9 @@ async def text_pass_events(
                 state.disconnected = True
                 state.full_text += think_filter.flush()  # keep text still held back so the saved partial is complete
                 return
+            usage = _read_usage(chunk)
+            if usage:
+                pass_usage = list(usage)
             choices = getattr(chunk, "choices", None) or []
             if not choices:
                 continue
@@ -176,6 +184,32 @@ async def text_pass_events(
                 yield evt
     finally:
         await _aclose(stream)
+        _record_pass_usage(state, kwargs.get("model"), pass_usage, int((time.monotonic() - started) * 1000))
+
+
+def _read_usage(chunk: Any) -> Optional[Tuple[int, int]]:
+    """(prompt_tokens, completion_tokens) from a stream chunk, or None. Fakes without usage are fine."""
+    usage = getattr(chunk, "usage", None)
+    if not usage:
+        return None
+    prompt, completion = getattr(usage, "prompt_tokens", None), getattr(usage, "completion_tokens", None)
+    if isinstance(prompt, int) and isinstance(completion, int) and not isinstance(prompt, bool):
+        return prompt, completion
+    return None
+
+
+def _record_pass_usage(state: StreamState, model: Any, pass_usage: List[int], duration_ms: int) -> None:
+    """Accumulate on the state and record once for this pass. Never raises."""
+    if len(pass_usage) != 2 or not model:
+        return
+    state.prompt_tokens += pass_usage[0]
+    state.completion_tokens += pass_usage[1]
+    try:
+        from backend.services.usage import record_usage
+
+        record_usage(str(model), pass_usage[0], pass_usage[1], duration_ms=duration_ms)
+    except Exception as e:  # telemetry must never break a chat turn
+        logger.debug("Could not record usage for a streamed pass: %s", e)
 
 
 async def continuation_events(
@@ -540,71 +574,13 @@ async def continue_message_events(
     })
 
 
-# ---------------------------------------------------------------------------
-# Saved Career profile in chat context (N-010)
-# ---------------------------------------------------------------------------
-
-def _ordinal(n: int) -> str:
-    return {1: "1st", 2: "2nd", 3: "3rd"}.get(n, f"{n}th")
-
-
-def format_candidate_profile(profile: Any, full_name: str = "") -> str:
-    """One compact context block from the saved candidate profile, or '' when there is nothing to say."""
-    parts: List[str] = []
-    if full_name:
-        parts.append(f"Name: {full_name}")
-    degree = " ".join(x for x in (getattr(profile, "degree", None), getattr(profile, "degree_specialization", None)) if x)
-    if degree:
-        parts.append(f"Degree: {degree}")
-    if getattr(profile, "university", None):
-        parts.append(f"University: {profile.university}")
-    year = getattr(profile, "academic_year", None)
-    if isinstance(year, int):
-        parts.append(f"Current year of study: {_ordinal(year)} year")
-    if getattr(profile, "grad_year", None):
-        parts.append(f"Graduation year: {profile.grad_year}")
-    cgpa = getattr(profile, "cgpa", None)
-    if cgpa is not None:
-        scale = getattr(profile, "cgpa_scale", None) or 10.0
-        parts.append(f"CGPA: {cgpa}/{scale:g}")
-    skills = [s for s in (getattr(profile, "skills", None) or []) if s][:15]
-    if skills:
-        parts.append("Skills: " + ", ".join(skills))
-    country = getattr(profile, "country_of_study", None)
-    if country:
-        parts.append(f"Country: {country}")
-    if not parts:
-        return ""
-    return (
-        "[CANDIDATE PROFILE saved in the Career tab. Use these facts directly; do not ask the user for them "
-        "and never write placeholders like [Your Name]]:\n" + "\n".join(f"- {p}" for p in parts)
-    )
-
-
-async def load_candidate_profile_context(owner_id: Optional[str]) -> str:
-    """Read-only: the caller's saved candidate profile as a context block. '' on any miss or error."""
-    if not owner_id:
-        return ""
-    try:
-        from backend.memory.radar import get_user_opportunity_profile
-
-        profile = await get_user_opportunity_profile(owner_id)
-        full_name = ""
-        try:
-            from backend.memory.career import get_master_resume
-
-            master = await get_master_resume(owner_id)
-            full_name = (getattr(getattr(master, "content", None), "full_name", "") or "").strip()
-        except Exception:
-            full_name = ""
-        if profile is None and not full_name:
-            return ""
-        if profile is None:
-            return f"[CANDIDATE PROFILE saved in the Career tab]:\n- Name: {full_name}"
-        return format_candidate_profile(profile, full_name)
-    except Exception as e:
-        logger.debug("Candidate profile context unavailable: %s", e)
-        return ""
+# Saved Career profile in chat context (N-010): lives in chat_profile_context.py (file-size limit);
+# re-exported here so existing imports and tests keep working.
+from backend.services.chat_profile_context import (  # noqa: E402,F401
+    _ordinal,
+    format_candidate_profile,
+    load_candidate_profile_context,
+)
 
 
 # ---------------------------------------------------------------------------

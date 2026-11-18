@@ -657,13 +657,13 @@ def test_candidate_profile_block_has_the_facts():
 async def test_load_candidate_profile_context_is_read_only_and_scoped_to_the_caller():
     from backend.services.chat_stream_extras import load_candidate_profile_context
 
-    get_profile = AsyncMock(return_value=_profile())
-    get_master = AsyncMock(return_value=SimpleNamespace(content=SimpleNamespace(full_name="Priya Sharma")))
-    with patch("backend.memory.radar.get_user_opportunity_profile", get_profile), \
+    get_both = AsyncMock(return_value=(_profile(), SimpleNamespace(content=SimpleNamespace(full_name="Priya Sharma"))))
+    get_master = AsyncMock()
+    with patch("backend.memory.radar.get_user_opportunity_profile_and_master", get_both), \
          patch("backend.memory.career.get_master_resume", get_master):
         ctx = await load_candidate_profile_context("guest-1")
-    get_profile.assert_awaited_once_with("guest-1")
-    get_master.assert_awaited_once_with("guest-1")
+    get_both.assert_awaited_once_with("guest-1")
+    get_master.assert_not_awaited()  # one resume read only, inside the profile call
     assert "Priya Sharma" in ctx
     assert await load_candidate_profile_context(None) == ""
 

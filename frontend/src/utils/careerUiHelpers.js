@@ -296,6 +296,18 @@ export function hasSavedProfile(profile) {
   )
 }
 
+/**
+ * True when a master resume holds real content. GET /resumes/master always returns a draft (it creates an
+ * empty one when none exists), so the mere presence of a response does not mean a resume was saved.
+ */
+export function hasSavedResume(master) {
+  const c = master?.content
+  if (!c || typeof c !== 'object') return false
+  return ['skills', 'education', 'projects', 'experience', 'internships'].some(
+    key => Array.isArray(c[key]) && c[key].length > 0
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Job analysis: score display, skill match, request shape
 // ---------------------------------------------------------------------------

@@ -142,8 +142,13 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
       setError(plan.reason)
       return
     }
+    let latest = null
+    const showLatest = () => {
+      if (latest) {
+        setApplications(prev => prev.map(a => (a.id === app.id ? { ...a, status: latest.status, target_deadline: latest.target_deadline } : a)))
+      }
+    }
     try {
-      let latest = null
       for (const step of plan.steps) {
         // "Applied" must go through the explicit confirmation endpoint: it logs the timeline event and
         // schedules the follow-up reminder. A plain status update would skip both.
@@ -151,11 +156,13 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
           ? await markApplied(app.id)
           : await updateApplication(app.id, { status: step.status })
       }
-      if (latest) {
-        setApplications(prev => prev.map(a => (a.id === app.id ? { ...a, status: latest.status, target_deadline: latest.target_deadline } : a)))
-      }
+      showLatest()
     } catch (err) {
-      setError(err.message || 'Failed to update status')
+      // An earlier step may already be stored (closing = withdraw, then close). Show the real stored status.
+      showLatest()
+      setError(latest && targetStage === 'closed'
+        ? 'The application was withdrawn but could not be closed. Try closing it again.'
+        : (err.message || 'Failed to update status'))
     }
   }
 

@@ -7,7 +7,8 @@ import CareerStartPanel from './career/CareerStartPanel'
 import JobLinkInput from './career/JobLinkInput'
 import CandidateDetailsGate from './career/CandidateDetailsGate'
 import { fetchRadarProfile } from '../api/radarApi'
-import { hasSavedProfile } from '../utils/careerUiHelpers'
+import { fetchMasterResume } from '../api/careerApi'
+import { hasSavedProfile, hasSavedResume } from '../utils/careerUiHelpers'
 import { SAVED_RESUME_MESSAGE } from '../utils/careerFlowText'
 
 const ResumeStudio = React.lazy(() => import('./career/ResumeStudio'))
@@ -20,6 +21,7 @@ export default function CareerCopilot({ isDarkMode, onToggleDarkMode }) {
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false)
   // null while unknown, so the "Upload your resume to begin" panel never flashes for a returning user
   const [hasProfile, setHasProfile] = useState(null)
+  const [hasResume, setHasResume] = useState(false)
   const [linkedApp, setLinkedApp] = useState(null)
 
   // Every callback below is memoized: they are passed to InternshipRadar, and a new function on every
@@ -45,6 +47,15 @@ export default function CareerCopilot({ isDarkMode, onToggleDarkMode }) {
       })
       .catch(() => {
         if (alive) setHasProfile(true) // unknown: do not push a returning user back to the start screen
+      })
+    // Same effect, same trigger: a saved resume also enables "Prepare my top 3 matches" when its
+    // degree or graduation year could not be read into the academic profile.
+    fetchMasterResume()
+      .then(master => {
+        if (alive) setHasResume(hasSavedResume(master))
+      })
+      .catch(() => {
+        if (alive) setHasResume(false)
       })
     return () => {
       alive = false
@@ -316,6 +327,7 @@ export default function CareerCopilot({ isDarkMode, onToggleDarkMode }) {
             </div>
             <InternshipRadar
               refreshTrigger={profileRefreshTrigger}
+              hasResume={hasResume}
               onRefreshComplete={handleRefreshComplete}
               onRefreshError={handleRefreshError}
               onNavigateToResumeStudio={handleNavigateToResumeStudio}

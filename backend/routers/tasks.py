@@ -182,9 +182,18 @@ async def get_dashboard(
     try:
         pool = await get_pool()
         async with pool.acquire() as conn:
-            proj_rows = await conn.fetch(
-                "SELECT domain, COUNT(*) AS count FROM projects GROUP BY domain"
-            )
+            if _ident.is_admin:
+                proj_rows = await conn.fetch(
+                    "SELECT domain, COUNT(*) AS count FROM projects GROUP BY domain"
+                )
+            else:
+                # Same scoping as list_projects: only projects holding one of the caller's live tasks.
+                proj_rows = await conn.fetch(
+                    "SELECT p.domain AS domain, COUNT(DISTINCT p.id) AS count "
+                    "FROM projects p JOIN tasks t ON t.project_id = p.id "
+                    "WHERE LOWER(t.user_id) = LOWER($1) AND t.deleted_at IS NULL GROUP BY p.domain",
+                    user_id,
+                )
             for r in proj_rows:
                 d = r["domain"]
                 if d in domains:
