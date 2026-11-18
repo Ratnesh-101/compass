@@ -214,7 +214,7 @@ async def test_sse_disconnect_cancels_upstream():
     from backend.routers.chat import stream_chat
 
     # 1. Test client disconnect stops iteration cleanly
-    req = StreamChatRequest(message="hi", conversation_id="conv-1")
+    req = StreamChatRequest(message="tell me a fun fact", conversation_id="conv-1")
     request = MagicMock(spec=Request)
     request.is_disconnected = AsyncMock(side_effect=[False, True])
 
@@ -304,7 +304,7 @@ async def test_sse_mid_stream_failure_emits_terminal_error():
     """Verify that mid-stream failure emits a terminal error event."""
     from backend.routers.chat import stream_chat
 
-    req = StreamChatRequest(message="hi", conversation_id="conv-3")
+    req = StreamChatRequest(message="tell me a fun fact", conversation_id="conv-3")
     request = MagicMock(spec=Request)
     request.is_disconnected = AsyncMock(return_value=False)
 
@@ -326,7 +326,8 @@ async def test_sse_mid_stream_failure_emits_terminal_error():
         error_events = [e for e in events if '"type": "error"' in e]
         assert len(error_events) == 1
         assert '"terminal": true' in error_events[0]
-        assert "An internal error occurred while processing the stream." in error_events[0]
+        assert "Your question is saved. Try again?" in error_events[0]  # plain wording, with Retry
+        assert '"can_retry": true' in error_events[0]
         assert "upstream timeout" not in error_events[0]
 
 

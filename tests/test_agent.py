@@ -440,6 +440,7 @@ async def test_run_state_survives_disconnect_reconnect(monkeypatch):
         max_steps=4,
         enable_critic=False,
         run_id=run_id,
+        user_id="recon-user",  # a run must belong to someone: no ownerless tasks
         wait_for_confirmation=False,
     ):
         pass
@@ -460,6 +461,7 @@ async def test_run_state_survives_disconnect_reconnect(monkeypatch):
         max_steps=4,
         enable_critic=False,
         run_id=run_id,
+        user_id="recon-user",
         action="approve",
     ):
         turn2_steps.append(step)
@@ -489,6 +491,7 @@ async def test_audit_log_entry_created_for_mutation():
         pool=pool,
         run_id=run_id,
         approved_by="test_user",
+        user_id="audit-test-user",  # add_task now rejects a missing caller
     )
     assert len(results) == 1
     assert results[0]["status"] == "success"
@@ -524,6 +527,7 @@ async def test_undo_correctly_reverts_last_mutation(client: AsyncClient, auth_he
         confirmed_actions=[{"tool": "add_task", "args": {"title": title, "domain": "code"}}],
         pool=pool,
         run_id=run_id,
+        user_id="undo-test-user",  # add_task now rejects a missing caller
     )
     created_id = results[0]["result"]["data"]["id"]
 

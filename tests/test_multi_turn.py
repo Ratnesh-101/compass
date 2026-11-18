@@ -31,7 +31,8 @@ async def test_multiturn_task_followup_resolution(client: AsyncClient, auth_head
     assert resp1.status_code == 200
     data1 = resp1.json()
     assert "conversation_id" in data1
-    assert data1.get("skill_used") == "add_task"
+    # A single add now shows the preview-and-confirm step first (nothing saved yet).
+    assert data1.get("skill_used") == "add_tasks_preview"
     conv_id = data1["conversation_id"]
 
     # Turn 2: Ask follow-up question referencing the prior task

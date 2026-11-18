@@ -99,7 +99,7 @@ test('validation card shows Resume incomplete with missing fields and warnings',
     missing_fields: ['name', 'email'], warnings: ['No education'],
   })
   assert.equal(state.incompleteLabel, 'Resume incomplete')
-  assert.match(state.hint, /name, email and education in Resume Studio/)
+  assert.match(state.hint, /name, email and education in My resume/)
   assert.deepEqual(state.missingFields, ['name', 'email'])
   assert.deepEqual(state.warnings, ['No education'])
   assert.equal(getValidationCardState({ is_valid: true }).incompleteLabel, null)
@@ -139,8 +139,12 @@ test('status options include every backend status and keep unknown current value
   assert.deepEqual(Object.keys(APPLICATION_STATUS_LABELS).sort(), [...BACKEND_STATUSES].sort())
   assert.ok(buildStatusOptions('FUTURE_STATUS').some(o => o.value === 'FUTURE_STATUS'))
   assert.ok(buildStatusOptions('handoff_kit_ready', { useLowerCase: true }).some(o => o.value === 'handoff_kit_ready'))
-  assert.match(read('components/career/ApplicationCenter.jsx'), /buildStatusOptions\(app\.status\)/)
-  assert.match(read('components/career/ApplicationWorkspaceModal.jsx'), /buildStatusOptions\(appStatus/)
+  // The screens show the six-stage tracker (see applicationStages.test.mjs); buildStatusOptions stays the
+  // full-list helper for any caller that needs every backend value.
+  assert.match(read('components/career/ApplicationCenter.jsx'), /STAGES\.map\(stage =>/)
+  assert.match(read('components/career/ApplicationCenter.jsx'), /planStageMove\(app\.status, targetStage\)/)
+  assert.match(read('components/career/ApplicationWorkspaceModal.jsx'), /STAGES\.map\(stage =>/)
+  assert.match(read('components/career/ApplicationWorkspaceModal.jsx'), /planStageMove\(appStatus, target\)/)
 })
 
 test('extractErrorDetail handles strings, lists and fallbacks', () => {
@@ -163,7 +167,9 @@ test('clearing a deadline sends clear_target_deadline', () => {
   assert.deepEqual(buildDeadlinePayload('2026-12-01'), { target_deadline: '2026-12-01' })
   const src = read('components/career/ApplicationWorkspaceModal.jsx')
   assert.match(src, /\.\.\.buildDeadlinePayload\(targetDeadline\)/)
-  assert.match(src, /Local checklist \(not saved\)/)
+  assert.match(src, /Your checklist \(saved automatically\)/)
+  assert.doesNotMatch(src, /Local checklist \(not saved\)/)
+  assert.match(src, /prep_checklist/)
   assert.match(src, /onClick=\{handleConfirmExternalSubmission\}\s+disabled=\{savingStatus\}/)
 })
 

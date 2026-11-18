@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     ROUTER_MODEL: str = "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B"
     SKILL_MODEL: str = "nvidia/nemotron-3-super-120b-a12b"
     REASONING_MODEL: str = "nvidia/nemotron-3-super-120b-a12b"
+    ROUTER_EXTRA_BODY: str = ""  # JSON object sent as extra_body on the router-tier chat call only; empty = send nothing
     SYNTHESIS_MODEL: str = "nvidia/Nemotron-3-Ultra-550b-a55b"
     EMBEDDING_MODEL: str = "Qwen/Qwen3-Embedding-8B"
     EMBEDDING_DIMENSION: int = 768

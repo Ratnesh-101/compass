@@ -21,7 +21,12 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from backend.models_radar import EmployerType, OpportunityStatus
-from backend.services.radar_ats_adapters import is_india_or_remote, is_internship_role
+from backend.services.radar_ats_adapters import (
+    is_india_location,
+    is_india_or_remote,
+    is_internship_role,
+    states_india_applicants_accepted,
+)
 from backend.services.radar_sources import canonicalize_url, infer_category, infer_employer_type
 
 logger = logging.getLogger("compass.services.radar_jobspy")
@@ -356,7 +361,7 @@ def normalize_jobspy_opportunity(row: Dict[str, Any]) -> Optional[Dict[str, Any]
 
     precision_val = "exact" if recency_meta["timestamp_precision"] == "EXACT_TIMESTAMP" else ("date_only" if recency_meta["timestamp_precision"] == "DATE_ONLY" else "unknown")
 
-    india_eligible = is_india_or_remote(location, is_remote=False)
+    india_eligible = is_india_or_remote(location, is_remote=False) or states_india_applicants_accepted(desc)
 
     return {
         "company_name": company,
@@ -366,7 +371,7 @@ def normalize_jobspy_opportunity(row: Dict[str, Any]) -> Optional[Dict[str, Any]
         "category": cat,
         "location": location,
         "work_arrangement": work_arr,
-        "country": "India" if "india" in location.lower() else ("USA" if "usa" in location.lower() or "united states" in location.lower() else "Global"),
+        "country": "India" if is_india_location(location) else ("USA" if "usa" in location.lower() or "united states" in location.lower() else "Global"),
         "is_india_eligible": india_eligible,
         "compensation": compensation_str,
         "official_application_url": raw_url,
@@ -393,7 +398,9 @@ def normalize_jobspy_opportunity(row: Dict[str, Any]) -> Optional[Dict[str, Any]
         "first_seen_at": first_seen_at,
         "requirements": {
             "required_skills": required_skills[:8],
-            "eligible_countries": ["India"] if india_eligible else [],
+            # Inferred from the location text, not published by the employer: never store it as a
+            # requirement (it would otherwise be read back as a passed country check).
+            "eligible_countries": [],
             "eligible_degree_types": deg_types,
         },
     }

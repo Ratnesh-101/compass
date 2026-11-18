@@ -52,8 +52,8 @@ export const APPLICATION_STATUS_LABELS = {
   SUBMITTED: 'Submitted',
   SUBMISSION_FAILED: 'Submission Failed',
   SUBMISSION_OUTCOME_UNKNOWN: 'Submission Outcome Unknown',
-  MANUAL_SUBMISSION_REQUIRED: 'Manual Handoff',
-  HANDOFF_KIT_READY: 'Handoff Kit Ready',
+  MANUAL_SUBMISSION_REQUIRED: 'Apply on company site',
+  HANDOFF_KIT_READY: 'Application Pack Ready',
   ASSESSMENT_RECEIVED: 'Assessment Received',
   INTERVIEW: 'Interviewing',
   REJECTED: 'Rejected',
@@ -135,7 +135,7 @@ export function buildDeadlinePayload(deadline) {
 // Resume validation card decision
 // ---------------------------------------------------------------------------
 
-export const RESUME_INCOMPLETE_HINT = 'Add your name, email and education in Resume Studio.'
+export const RESUME_INCOMPLETE_HINT = 'Add your name, email and education in My resume.'
 
 export function getValidationCardState(report) {
   if (!report) return null
@@ -293,6 +293,18 @@ export function hasSavedProfile(profile) {
     profile.grad_year ||
     profile.academic_year ||
     (Array.isArray(profile.skills) && profile.skills.length > 0)
+  )
+}
+
+/**
+ * True when a master resume holds real content. GET /resumes/master always returns a draft (it creates an
+ * empty one when none exists), so the mere presence of a response does not mean a resume was saved.
+ */
+export function hasSavedResume(master) {
+  const c = master?.content
+  if (!c || typeof c !== 'object') return false
+  return ['skills', 'education', 'projects', 'experience', 'internships'].some(
+    key => Array.isArray(c[key]) && c[key].length > 0
   )
 }
 

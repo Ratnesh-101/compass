@@ -45,6 +45,8 @@ def _preview_items(parsed: ParsedIntake, tz_name: str) -> list[dict]:
             "due_at": due.due_at.isoformat() if due.due_at else None,
             "due_label": due.label,
             "due_unparsed": due.unparsed_text,
+            "project": item.project,
+            "notes": item.notes,
         })
     return out
 
@@ -70,7 +72,8 @@ def _preview_text(items: list[dict], parsed: ParsedIntake, tz_name: str) -> str:
         )
     if parsed.skipped:
         notes.append("Skipped (no usable task name): " + "; ".join(f'"{s}"' for s in parsed.skipped))
-    notes.append(f"Times are in {tz_name}. Reply \"Confirm\" to add all {n}, or \"Cancel\".")
+    confirm_hint = 'Reply "Confirm" to add it' if n == 1 else f'Reply "Confirm" to add all {n}'
+    notes.append(f'Times are in {tz_name}. {confirm_hint}, or "Cancel".')
     return "\n".join(lines + [""] + notes)
 
 
@@ -174,9 +177,14 @@ async def _create_all(conn: Any, items: list[dict], owner: str, conv_id: str) ->
     for it in items:
         due_date = datetime.fromisoformat(it["due_date"]).date() if it.get("due_date") else None
         due_at = datetime.fromisoformat(it["due_at"]) if it.get("due_at") else None
+        project_id = None
+        if it.get("project"):  # old pending rows have no project/notes keys
+            proj = await structured.get_or_create_project(conn, name=it["project"], domain=it["domain"], owner_id=owner)
+            project_id = proj.get("id")
         task = await structured.create_task(
             conn, domain=it["domain"], title=it["title"], due_date=due_date, due_at=due_at,
             priority=it["priority"], duration_minutes=it.get("duration_minutes"), user_id=owner,
+            project_id=project_id, notes=it.get("notes") or None,
         )
         await conn.execute(
             """
@@ -208,4 +216,14 @@ async def confirm_add_tasks(conn: Any, action: Dict[str, Any], owner_identity: s
         )
     lines = [f"Added {len(created)} {'task' if len(created) == 1 else 'tasks'}:", ""]
     lines += [f"{i}. {t['title']} — {t['due_label']}" for i, t in enumerate(created, 1)]
-    return "\n".join(lines), {"created_tasks": created, "created_count": len(created)}, True
+    reply = "\n".join(lines)
+    data = {"created_tasks": created, "created_count": len(created)}
+    # The transaction has committed: signal it now so the stream can send "committed" and start the
+    # post-commit time bound before any later (reply/persist) step can stall.
+    from backend.services.chat_idempotency import record_committed_outcome
+
+    record_committed_outcome(
+        task_ids=[t.get("id") for t in created if t.get("id") is not None],
+        reply_text=reply, conv_id=conv_id, skill_used="pending_action_confirm", data=data,
+    )
+    return reply, data, True

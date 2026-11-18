@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   fetchApplications,
   updateApplication,
+  markApplied,
   prepareBatch,
   approveBatch,
   submitBatch,
@@ -14,7 +15,16 @@ import HandoffKitDrawer from './HandoffKitDrawer'
 import ReturnSubmissionPrompt from './ReturnSubmissionPrompt'
 import CoverLetterModal from './CoverLetterModal'
 import { cleanOpportunity } from '../../utils/jobCardCleaner'
-import { buildStatusOptions, summarizeBatchResults } from '../../utils/careerUiHelpers'
+import { summarizeBatchResults } from '../../utils/careerUiHelpers'
+import {
+  STAGES,
+  stageOfStatus,
+  stageDetail,
+  countApplications,
+  filterByStage,
+  planStageMove,
+  blockedMessage,
+} from '../../utils/applicationStages'
 
 export default function ApplicationCenter({ onNavigateToResumeStudio }) {
   const [applications, setApplications] = useState([])
@@ -25,7 +35,7 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
   const [activeDrawerApp, setActiveDrawerApp] = useState(null)
   const [activeLetterApp, setActiveLetterApp] = useState(null)
   const [letterDraftingId, setLetterDraftingId] = useState(null)
-  const [statusFilter, setStatusFilter] = useState('ALL')
+  const [statusFilter, setStatusFilter] = useState('all')
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState(false)
   const [submitResult, setSubmitResult] = useState(null)
@@ -62,17 +72,9 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
     })
   }
 
-  const visibleApps = useMemo(() => {
-    return applications.filter(a => {
-      if (statusFilter === 'ALL') return true
-      if (statusFilter === 'HANDOFF_READY') return a.status === 'HANDOFF_KIT_READY'
-      if (statusFilter === 'NEEDS_REVIEW') return ['READY_FOR_REVIEW', 'READY_FOR_APPROVAL', 'PREPARING'].includes(a.status)
-      if (statusFilter === 'APPROVED') return a.status === 'APPROVED_FOR_SUBMISSION'
-      if (statusFilter === 'SUBMITTED') return ['SUBMITTED', 'MANUAL_SUBMISSION_REQUIRED'].includes(a.status)
-      if (statusFilter === 'INTERVIEWS') return ['INTERVIEW', 'OFFER_RECEIVED'].includes(a.status)
-      return true
-    })
-  }, [applications, statusFilter])
+  // One tracker, six stages. An application whose resume check failed shows under "Preparing".
+  const visibleApps = useMemo(() => filterByStage(applications, statusFilter), [applications, statusFilter])
+  const counts = useMemo(() => countApplications(applications), [applications])
 
   const handleSelectAll = () => {
     setSelectedAppIds(prev => {
@@ -133,14 +135,34 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
     }
   }
 
-  const handleStatusChange = async (appId, newStatus) => {
+  const handleStageChange = async (app, targetStage) => {
+    setError(null)
+    const plan = planStageMove(app.status, targetStage)
+    if (!plan.ok) {
+      setError(plan.reason)
+      return
+    }
+    let latest = null
+    const showLatest = () => {
+      if (latest) {
+        setApplications(prev => prev.map(a => (a.id === app.id ? { ...a, status: latest.status, target_deadline: latest.target_deadline } : a)))
+      }
+    }
     try {
-      await updateApplication(appId, { status: newStatus })
-      setApplications(prev =>
-        prev.map(a => (a.id === appId ? { ...a, status: newStatus } : a))
-      )
+      for (const step of plan.steps) {
+        // "Applied" must go through the explicit confirmation endpoint: it logs the timeline event and
+        // schedules the follow-up reminder. A plain status update would skip both.
+        latest = step.type === 'mark_applied'
+          ? await markApplied(app.id)
+          : await updateApplication(app.id, { status: step.status })
+      }
+      showLatest()
     } catch (err) {
-      setError(err.message || 'Failed to update status')
+      // An earlier step may already be stored (closing = withdraw, then close). Show the real stored status.
+      showLatest()
+      setError(latest && targetStage === 'closed'
+        ? 'The application was withdrawn but could not be closed. Try closing it again.'
+        : (err.message || 'Failed to update status'))
     }
   }
 
@@ -191,7 +213,10 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
             🚀 Application Center
           </h2>
           <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-muted)' }}>
-            Track application pipelines, review batches, enforce explicit submission approvals, and access verified handoff kits.
+            See where each application is and open its application pack when you are ready to apply.
+          </p>
+          <p data-testid="applications-counter" style={{ margin: '6px 0 0', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>
+            Applications: {counts.active} active{counts.total !== counts.active ? `, ${counts.total} in total` : ''}
           </p>
         </div>
 
@@ -281,12 +306,8 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
         }}
       >
         {[
-          { id: 'ALL', label: `All (${applications.length})` },
-          { id: 'HANDOFF_READY', label: `Handoff Ready (${applications.filter(a => a.status === 'HANDOFF_KIT_READY').length})` },
-          { id: 'NEEDS_REVIEW', label: `Needs Review (${applications.filter(a => ['READY_FOR_REVIEW', 'READY_FOR_APPROVAL', 'PREPARING'].includes(a.status)).length})` },
-          { id: 'APPROVED', label: `Approved (${applications.filter(a => a.status === 'APPROVED_FOR_SUBMISSION').length})` },
-          { id: 'SUBMITTED', label: `Submitted (${applications.filter(a => ['SUBMITTED', 'MANUAL_SUBMISSION_REQUIRED'].includes(a.status)).length})` },
-          { id: 'INTERVIEWS', label: `Interviews & Offers (${applications.filter(a => ['INTERVIEW', 'OFFER_RECEIVED'].includes(a.status)).length})` },
+          { id: 'all', label: `All (${counts.total})` },
+          ...STAGES.map(stage => ({ id: stage.key, label: `${stage.label} (${counts.byStage[stage.key]})` })),
         ].map(tab => {
           const isActive = statusFilter === tab.id
           return (
@@ -312,13 +333,13 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
           <span style={{ fontSize: '40px', display: 'block', marginBottom: '12px' }}>📁</span>
           <h3 style={{ margin: '0 0 8px', fontSize: '17px', color: 'var(--text-primary)' }}>No Applications Tracked Yet</h3>
           <p style={{ margin: '0 0 16px', fontSize: '13px', color: 'var(--text-muted)' }}>
-            Discover verified openings in Internship Radar and click &quot;Prepare Application&quot; to begin your personalized pipeline.
+            Find an internship in the Radar and choose &quot;Prepare Application&quot;, or paste a job link on the Radar page.
           </p>
         </div>
       ) : (
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px', overflow: 'hidden' }}>
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+            <table className="application-center-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
               <thead>
                 <tr style={{ background: 'var(--bg-card-soft)', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)' }}>
                   <th style={{ padding: '12px 16px', width: '36px' }}>
@@ -390,8 +411,9 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
                         </td>
                         <td style={{ padding: '12px 16px' }}>
                           <select
-                            value={app.status}
-                            onChange={(e) => handleStatusChange(app.id, e.target.value)}
+                            value={stageOfStatus(app.status)}
+                            onChange={(e) => handleStageChange(app, e.target.value)}
+                            aria-label={`Stage for ${cleanedOpp.company}`}
                             style={{
                               padding: '4px 8px',
                               borderRadius: '6px',
@@ -402,10 +424,25 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
                               fontWeight: '600',
                             }}
                           >
-                            {buildStatusOptions(app.status).map(opt => (
-                              <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            {STAGES.map(stage => (
+                              <option key={stage.key} value={stage.key}>{stage.label}</option>
                             ))}
                           </select>
+                          {stageDetail(app.status) && (
+                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>{stageDetail(app.status)}</div>
+                          )}
+                          {blockedMessage(app) && (
+                            <div data-testid="application-blocked-note" style={{ fontSize: '11px', color: '#92400e', marginTop: '4px', maxWidth: '260px', lineHeight: 1.4 }}>
+                              {blockedMessage(app)}{' '}
+                              <button
+                                type="button"
+                                onClick={() => onNavigateToResumeStudio?.()}
+                                style={{ background: 'transparent', border: 'none', color: '#92400e', fontWeight: 700, cursor: 'pointer', padding: 0, fontSize: '11px', textDecoration: 'underline' }}
+                              >
+                                Open My resume
+                              </button>
+                            </div>
+                          )}
                         </td>
                         <td style={{ padding: '12px 16px' }}>
                           {resume.title ? (
@@ -477,7 +514,7 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
                                 cursor: 'pointer',
                               }}
                             >
-                              📋 Handoff Kit
+                              📋 Application pack
                             </button>
                             {opp.official_application_url && (
                               <a

@@ -19,6 +19,7 @@ import re
 from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
 
 from backend.services.task_time import is_valid_timezone, request_timezone, resolve_effective_timezone
+from backend.services.stream_watch import timed_acquire
 
 logger = logging.getLogger("compass.services.chat_idempotency")
 
@@ -27,6 +28,7 @@ IN_FLIGHT_SECONDS = 300
 PRUNE_ONE_IN = 50
 # Only successful state changes are remembered; reads and previews are always recomputed.
 REPLAYABLE_SKILLS = frozenset({"add_task", "undo", "pending_action_confirm"})
+PREVIEW_SKILL = "add_tasks_preview"  # stored for replay but never reported as a committed change
 
 CLAIMED, REPLAY, IN_FLIGHT = "claimed", "replay", "in_flight"
 IN_FLIGHT_REPLY = "That request is still being processed. Give it a moment, then check your tasks before retrying."
@@ -45,6 +47,24 @@ def normalize_request_id(raw: Any) -> Optional[str]:
     if REQUEST_ID_PATTERN.match(val):
         return val
     return None
+
+
+def validate_request_id(raw: Any) -> Optional[str]:
+    """Like normalize_request_id, but a supplied id that is malformed is an error (HTTP 422).
+
+    A short or odd id used to be dropped silently, so a retry ran again and duplicated the task.
+    Absent or blank ids are fine: the request just runs without idempotency."""
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return None
+    normalized = normalize_request_id(raw)
+    if normalized is None:
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=422,
+            detail="request_id must be 8-64 characters: letters, digits, '_' or '-'.",
+        )
+    return normalized
 
 
 def may_mutate(message: Any) -> bool:
@@ -66,6 +86,13 @@ def is_replayable(result: Dict[str, Any]) -> bool:
     return bool(result.get("success")) and (skill in REPLAYABLE_SKILLS or skill in MUTATING_TOOLS)
 
 
+def is_storable(result: Dict[str, Any]) -> bool:
+    """Results kept under a request id: replayable changes, plus a preview, so a repeated send of the same
+    id returns the same preview (same pending action) instead of creating a second one. A preview is not a
+    committed change, so committed_summary() still ignores it."""
+    return is_replayable(result) or (bool(result.get("success")) and result.get("skill_used") == PREVIEW_SKILL)
+
+
 def committed_summary(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """What the client needs to know that a change is already saved, even if the stream breaks."""
     if not is_replayable(result):
@@ -78,6 +105,19 @@ def committed_summary(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 _committed_outcome: contextvars.ContextVar[Optional[Dict[str, Any]]] = contextvars.ContextVar(
     "_committed_outcome", default=None
 )
+# Optional callback invoked the moment a mutation row is written (see record_committed_outcome), so the
+# stream can send its "committed" event before the orchestrator returns.
+_commit_listener: contextvars.ContextVar[Optional[Callable[[Dict[str, Any]], None]]] = contextvars.ContextVar(
+    "_commit_listener", default=None
+)
+
+
+def set_commit_listener(callback: Optional[Callable[[Dict[str, Any]], None]]) -> contextvars.Token:
+    return _commit_listener.set(callback)
+
+
+def reset_commit_listener(token: contextvars.Token) -> None:
+    _commit_listener.reset(token)
 
 
 def record_committed_outcome(
@@ -109,6 +149,12 @@ def record_committed_outcome(
         "routing_latency_ms": 0,
     }
     _committed_outcome.set(payload)
+    listener = _commit_listener.get()
+    if listener is not None:
+        try:
+            listener(payload)
+        except Exception as e:  # a broken listener must never undo or block a committed change
+            logger.debug("commit listener failed: %s", e)
 
 
 async def _claim(conn: Any, owner: str, request_id: str) -> Tuple[str, Optional[Dict[str, Any]]]:
@@ -157,8 +203,8 @@ async def peek_replay(pool: Any, owner: str, request_id: Optional[str]) -> Optio
 async def _finish(pool: Any, owner: str, request_id: str, result: Optional[Dict[str, Any]]) -> None:
     """Store a replayable result; release the claim for everything else so a retry can run."""
     try:
-        async with pool.acquire() as conn:
-            if result is not None and is_replayable(result):
+        async with timed_acquire(pool, request_id, "idempotency_finish") as conn:
+            if result is not None and is_storable(result):
                 await conn.execute(
                     "UPDATE chat_request_log SET state = 'done', response = $3::jsonb "
                     "WHERE owner_identity = $1 AND request_id = $2",

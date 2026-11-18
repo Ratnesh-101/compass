@@ -27,6 +27,7 @@ import {
   draftCoverLetter,
   setApplicationCoverLetter,
   updateApplication,
+  markApplied,
   getResumeExportUrl,
   getResumeExportDocxUrl,
   fetchJobAnalysis,
@@ -43,9 +44,12 @@ import {
   inspectDraftConflict,
 } from '../../utils/workspaceDraft'
 import ValidationReportCard from './ValidationReportCard'
+import TailorChangesCard from './TailorChangesCard'
+import AtsCheckPanel from './AtsCheckPanel'
+import { STAGES, stageOfStatus, stageLabel, stageDetail, planStageMove, blockedMessage } from '../../utils/applicationStages'
+import { readWhatChanged } from '../../utils/careerFlowText'
 import { getSafeHttpUrl } from '../../utils/safeUrl.js'
 import {
-  buildStatusOptions,
   buildDeadlinePayload,
   formatMatchScore,
   resolveSkillMatch,
@@ -68,8 +72,8 @@ const STATUS_LABELS = {
   approved: 'Approved',
   approved_for_submission: 'Approved for submission',
   submitted: 'Submitted',
-  manual_submission_required: 'Manual handoff',
-  handoff_kit_ready: 'Handoff kit ready',
+  manual_submission_required: 'Ready to apply',
+  handoff_kit_ready: 'Ready to apply',
   interview: 'Interviewing',
   offer_received: 'Offer received',
   rejected: 'Rejected',
@@ -238,6 +242,8 @@ export default function ApplicationWorkspaceModal({
   const [appStatus, setAppStatus] = useState('preparing')
   const [privateNotes, setPrivateNotes] = useState('')
   const [targetDeadline, setTargetDeadline] = useState('')
+  const [stageChoice, setStageChoice] = useState('')
+  const [justTailored, setJustTailored] = useState(false)
 
   // Draft recovery state
   const [draftConflict, setDraftConflict] = useState(null)
@@ -464,6 +470,8 @@ export default function ApplicationWorkspaceModal({
       setPrivateNotes(app.private_notes || '')
       setTargetDeadline(app.target_deadline || '')
       setCoverLetterText(app.cover_letter || '')
+      // Preparing now reads the full job page on the server: use that text, not the short list stub.
+      if (app.opportunity?.description) setCustomJobDesc(app.opportunity.description)
 
       let currentResume = null
       if (app.resume_id) {
@@ -476,6 +484,11 @@ export default function ApplicationWorkspaceModal({
           coverLetterDrafted: Boolean(app.cover_letter),
           submittedExternally: String(app.status || '').toLowerCase() === 'submitted',
         }))
+      }
+      // Ticks are saved on the application, so they are still there next time.
+      const savedChecklist = app.form_answers?.prep_checklist
+      if (savedChecklist && typeof savedChecklist === 'object') {
+        setChecklist(prev => ({ ...prev, ...savedChecklist }))
       }
 
       // Check for local unsaved draft
@@ -608,8 +621,13 @@ export default function ApplicationWorkspaceModal({
         setApplication(prev => ({ ...prev, resume_id: tailored.id, resume: tailored }))
       }
       setChecklist(prev => ({ ...prev, resumeTailored: true }))
+      setJustTailored(true)
+      const changes = readWhatChanged(tailored)
       const verified = tailored?.validation_report?.status && tailored.validation_report.status !== 'NOT ENOUGH DATA'
-      if (verified) {
+      if (changes && !changes.changed) {
+        // Say why nothing moved instead of a silent "done".
+        showNotification(`Nothing needed to change. ${changes.reason}`, 'info')
+      } else if (verified) {
         showNotification('Tailored resume snapshot created and validated against your master profile!')
       } else {
         showNotification('Tailored resume snapshot created. Add more details to your master profile to enable verification.')
@@ -733,6 +751,27 @@ export default function ApplicationWorkspaceModal({
   }
 
   // Handle Status & Notes Updates
+  // Moving to "Applied" uses the explicit confirmation endpoint (timeline event + follow-up reminder).
+  const handleMarkAppliedRecord = async () => {
+    if (!application) return false
+    setSavingStatus(true)
+    setError(null)
+    try {
+      const updated = await markApplied(application.id)
+      setApplication(updated)
+      setAppStatus(String(updated.status || 'submitted').toLowerCase())
+      clearWorkspaceDraft(opportunity.id)
+      if (onApplicationUpdated) onApplicationUpdated(updated)
+      showNotification(`Saved. This application is now in the "${stageLabel(stageOfStatus(updated.status))}" stage.`)
+      return true
+    } catch (err) {
+      setError(err.message || 'Failed to mark the application as applied')
+      return false
+    } finally {
+      setSavingStatus(false)
+    }
+  }
+
   const handleUpdateApplicationRecord = async (newStatus = appStatus) => {
     if (!application) return false
     setSavingStatus(true)
@@ -748,13 +787,55 @@ export default function ApplicationWorkspaceModal({
       setAppStatus(String(updated.status || newStatus).toLowerCase())
       clearWorkspaceDraft(opportunity.id)
       if (onApplicationUpdated) onApplicationUpdated(updated)
-      showNotification(`Application updated: Status is now "${(statusToSend || '').toUpperCase()}"`)
+      showNotification(`Saved. This application is now in the "${stageLabel(stageOfStatus(updated.status))}" stage.`)
       return true
     } catch (err) {
       setError(err.message || 'Failed to update application status')
       return false
     } finally {
       setSavingStatus(false)
+    }
+  }
+
+  // Move along the six-stage tracker. The server still decides which moves are allowed.
+  const handleSaveTracker = async () => {
+    if (!application) return
+    const target = stageChoice || stageOfStatus(appStatus)
+    if (target === stageOfStatus(appStatus)) {
+      await handleUpdateApplicationRecord(appStatus)
+      return
+    }
+    const plan = planStageMove(appStatus, target)
+    if (!plan.ok) {
+      setError(plan.reason)
+      return
+    }
+    for (let i = 0; i < plan.steps.length; i += 1) {
+      const step = plan.steps[i]
+      const ok = step.type === 'mark_applied'
+        ? await handleMarkAppliedRecord()
+        : await handleUpdateApplicationRecord(step.status.toLowerCase())
+      if (!ok) {
+        // Each step updates the shown status from the server reply, so the UI keeps the real stored status.
+        if (i > 0 && target === 'closed') setError('The application was withdrawn but could not be closed. Try closing it again.')
+        return
+      }
+    }
+    setStageChoice('')
+  }
+
+  // The checklist is saved with the application (inside its saved answers), so ticks survive a reload.
+  const handleChecklistToggle = async (key, checked) => {
+    const next = { ...checklist, [key]: checked }
+    setChecklist(next)
+    if (!application) return
+    try {
+      const updated = await updateApplication(application.id, {
+        form_answers: { ...(application.form_answers || {}), prep_checklist: next },
+      })
+      setApplication(prev => ({ ...prev, form_answers: updated.form_answers }))
+    } catch {
+      showNotification('Could not save the checklist. Your last tick may not be kept.', 'error')
     }
   }
 
@@ -918,7 +999,7 @@ export default function ApplicationWorkspaceModal({
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <span
                 style={{
-                  fontSize: '11px',
+                  fontSize: '12px',
                   fontWeight: 600,
                   padding: '3px 8px',
                   borderRadius: 'var(--radius-chip, 6px)',
@@ -933,7 +1014,7 @@ export default function ApplicationWorkspaceModal({
               </span>
               <span
                 style={{
-                  fontSize: '11px',
+                  fontSize: '12px',
                   fontWeight: 600,
                   padding: '3px 8px',
                   borderRadius: 'var(--radius-chip, 6px)',
@@ -1175,7 +1256,11 @@ export default function ApplicationWorkspaceModal({
               {/* TAB: Company Intel Brief */}
               {activeTab === 'company_intel' && !workspaceError && (() => {
                 const isOldBrief = companyIntel && !('summary' in companyIntel) && Boolean(companyIntel.strategic_insights || companyIntel.technical_pain_points)
-                const isError = Boolean(companyIntel?.status === 'error' || companyIntel?.error || intelError)
+                const isError = Boolean(
+                  companyIntel?.status === 'error' || companyIntel?.error || intelError ||
+                  // briefs cached before the fix: "ready" next to "summary unavailable" is shown as one plain message
+                  companyIntel?.summary === 'Sources found, summary unavailable.'
+                )
                 const isEmptyInfo = Boolean(
                   !isError && (
                     companyIntel?.status === 'empty' ||
@@ -1265,7 +1350,7 @@ export default function ApplicationWorkspaceModal({
                                 border: '1px solid var(--border)',
                                 background: 'var(--bg-card)',
                                 color: 'var(--text-secondary)',
-                                fontSize: '11px',
+                                fontSize: '12px',
                                 fontWeight: 600,
                               }}
                             >
@@ -1280,7 +1365,7 @@ export default function ApplicationWorkspaceModal({
                                 border: '1px solid var(--border)',
                                 background: 'var(--bg-card)',
                                 color: 'var(--amber-text)',
-                                fontSize: '11px',
+                                fontSize: '12px',
                                 fontWeight: 600,
                               }}
                             >
@@ -1291,7 +1376,7 @@ export default function ApplicationWorkspaceModal({
                             <span>{formatAttemptTime(lastAttemptTime)}</span>
                           )}
                           {cooldownSeconds > 0 && (
-                            <span style={{ color: 'var(--amber-text)', fontSize: '11px', fontWeight: 600 }} aria-live="polite">
+                            <span style={{ color: 'var(--amber-text)', fontSize: '12px', fontWeight: 600 }} aria-live="polite">
                               Refresh available in {cooldownSeconds}s
                             </span>
                           )}
@@ -1413,7 +1498,7 @@ export default function ApplicationWorkspaceModal({
                         aria-live="assertive"
                       >
                         <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                          {intelError || companyIntel?.error || "We couldn't generate company intel right now. Please try again with Refresh Intel."}
+                          {intelError || companyIntel?.error || (companyIntel?.summary === 'Sources found, summary unavailable.' ? "Couldn't summarise this company right now." : null) || "We couldn't generate company intel right now. Please try again with Refresh Intel."}
                         </p>
                         <button
                           type="button"
@@ -1568,7 +1653,7 @@ export default function ApplicationWorkspaceModal({
                                     >
                                       <span>{p.point}</span>
                                       {p.similar_role && (
-                                        <span style={{ marginLeft: '6px', fontSize: '11px', fontStyle: 'italic', color: 'var(--text-muted)' }}>
+                                        <span style={{ marginLeft: '6px', fontSize: '12px', fontStyle: 'italic', color: 'var(--text-muted)' }}>
                                           (from a similar role listing)
                                         </span>
                                       )}
@@ -1581,7 +1666,7 @@ export default function ApplicationWorkspaceModal({
                                             display: 'inline-block',
                                             marginLeft: '6px',
                                             padding: '0 4px',
-                                            fontSize: '11px',
+                                            fontSize: '12px',
                                             fontWeight: 700,
                                             color: 'var(--amber-text)',
                                             background: 'transparent',
@@ -1774,7 +1859,7 @@ export default function ApplicationWorkspaceModal({
                         🎯 Factual Match Analysis
                       </h3>
                       <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                        Calculated deterministically from verified profile background
+                        Worked out from your saved profile
                       </span>
                     </div>
 
@@ -1819,7 +1904,7 @@ export default function ApplicationWorkspaceModal({
                           <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                             {matchedSkills.length > 0 ? (
                               matchedSkills.map((sk, i) => (
-                                <span key={i} style={{ background: '#ffffff', color: '#15803d', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, border: '1px solid #bbf7d0' }}>
+                                <span key={i} style={{ background: '#ffffff', color: '#15803d', padding: '2px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: 600, border: '1px solid #bbf7d0' }}>
                                   {sk}
                                 </span>
                               ))
@@ -1845,7 +1930,7 @@ export default function ApplicationWorkspaceModal({
                             </div>
                             <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                               {missingSkills.map((sk, i) => (
-                                <span key={i} style={{ background: '#ffffff', color: '#92400e', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, border: '1px solid #fde68a' }}>
+                                <span key={i} style={{ background: '#ffffff', color: '#92400e', padding: '2px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: 600, border: '1px solid #fde68a' }}>
                                   {sk}
                                 </span>
                               ))}
@@ -1856,7 +1941,7 @@ export default function ApplicationWorkspaceModal({
                     )}
 
                     <div style={{ marginTop: '14px', fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.5, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span>🛡️ <strong>Zero Hallucination Guarantee:</strong> Tailored resumes strictly derived from verified profile background.</span>
+                      <span>Match is checked against your saved resume.</span>
                       <button
                         type="button"
                         onClick={() => setActiveTab('job_analysis')}
@@ -1866,7 +1951,7 @@ export default function ApplicationWorkspaceModal({
                           background: 'transparent',
                           border: '1px solid var(--border)',
                           color: 'var(--amber-text)',
-                          fontSize: '11px',
+                          fontSize: '12px',
                           fontWeight: 700,
                           cursor: 'pointer',
                         }}
@@ -1896,8 +1981,8 @@ export default function ApplicationWorkspaceModal({
                     }}
                   >
                     <div>
-                      <div style={{ fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-muted)', marginBottom: '4px' }}>
-                        Deterministic Requirement Alignment
+                      <div style={{ fontSize: '12px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                        How well you match
                       </div>
                       <h3 style={{ margin: '0 0 6px 0', fontSize: '18px', fontWeight: 800, color: 'var(--text-primary)' }}>
                         {opportunity.role_title} @ {opportunity.company_name}
@@ -1918,7 +2003,7 @@ export default function ApplicationWorkspaceModal({
                             type="button"
                             onClick={() => loadJobAnalysisData(jobAnalysis ? customJobDesc : null)}
                             disabled={loadingAnalysis}
-                            style={{ padding: '3px 10px', borderRadius: '6px', border: '1px solid #fecaca', background: '#ffffff', color: '#991b1b', fontWeight: 700, fontSize: '11px', cursor: loadingAnalysis ? 'not-allowed' : 'pointer' }}
+                            style={{ padding: '3px 10px', borderRadius: '6px', border: '1px solid #fecaca', background: '#ffffff', color: '#991b1b', fontWeight: 700, fontSize: '12px', cursor: loadingAnalysis ? 'not-allowed' : 'pointer' }}
                           >
                             Retry
                           </button>
@@ -1945,9 +2030,9 @@ export default function ApplicationWorkspaceModal({
                         {loadingAnalysis && !jobAnalysis ? '…' : analysisError && !jobAnalysis ? '?' : matchScoreView.text}
                       </div>
                       {matchScoreView.caption && !loadingAnalysis && (
-                        <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '2px' }}>{matchScoreView.caption}</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '2px' }}>{matchScoreView.caption}</div>
                       )}
-                      <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                      <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
                         Match Score
                       </div>
                     </div>
@@ -2005,7 +2090,7 @@ export default function ApplicationWorkspaceModal({
                           background: 'var(--brand)',
                           color: '#ffffff',
                           border: 'none',
-                          fontSize: '11px',
+                          fontSize: '12px',
                           fontWeight: 700,
                           cursor: loadingAnalysis ? 'not-allowed' : 'pointer',
                         }}
@@ -2099,7 +2184,7 @@ export default function ApplicationWorkspaceModal({
                                     {m.is_mandatory ? 'Mandatory' : 'Preferred'} {m.category}
                                   </span>
                                 </div>
-                                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
                                   Confidence: {Math.round(m.confidence * 100)}%
                                 </span>
                               </div>
@@ -2115,7 +2200,7 @@ export default function ApplicationWorkspaceModal({
                               )}
 
                               {m.reasoning && (
-                                <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                                <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
                                   {m.reasoning}
                                 </div>
                               )}
@@ -2125,7 +2210,7 @@ export default function ApplicationWorkspaceModal({
                       </div>
                     ) : (
                       <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-muted)', fontSize: '13px' }}>
-                        {loadingAnalysis ? 'Extracting mandatory and preferred criteria…' : 'No requirements parsed. Paste detailed job description above.'}
+                        {loadingAnalysis ? 'Extracting mandatory and preferred criteria…' : "We couldn't read this job's description. Paste it above to check how well you match."}
                       </div>
                     )}
                   </div>
@@ -2160,7 +2245,7 @@ export default function ApplicationWorkspaceModal({
                           cursor: tailoring ? 'not-allowed' : 'pointer',
                         }}
                       >
-                        {tailoring ? 'Tailoring with AI…' : '✨ Re-Tailor with AI'}
+                        {tailoring ? 'Tailoring…' : 'Re-tailor to this job'}
                       </button>
                       {resume?.id && (
                         <>
@@ -2213,6 +2298,12 @@ export default function ApplicationWorkspaceModal({
                     <ValidationReportCard validationReport={resume.validation_report} />
                   )}
 
+                  {/* What changed after tailoring, or why nothing did */}
+                  <TailorChangesCard changes={readWhatChanged(resume)} justUpdated={justTailored} />
+
+                  {/* ATS check: estimate of how a basic applicant tracking system reads this resume */}
+                  {resume?.id && <AtsCheckPanel resumeId={resume.id} opportunityId={opportunity.id} />}
+
                   {/* Template Style Selector */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px', borderRadius: '8px', background: 'var(--bg-app)', border: '1px solid var(--border)' }}>
                     <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)' }}>ATS Template Style:</span>
@@ -2231,7 +2322,7 @@ export default function ApplicationWorkspaceModal({
                           border: resumeTemplate === t.id ? '1px solid var(--brand)' : '1px solid var(--border)',
                           background: resumeTemplate === t.id ? 'var(--brand)' : 'var(--bg-card)',
                           color: resumeTemplate === t.id ? '#ffffff' : 'var(--text-primary)',
-                          fontSize: '11px',
+                          fontSize: '12px',
                           fontWeight: 600,
                           cursor: 'pointer',
                         }}
@@ -2248,7 +2339,7 @@ export default function ApplicationWorkspaceModal({
                     </h4>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '12px' }}>
                       <div>
-                        <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Full Name</label>
+                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Full Name</label>
                         <input
                           type="text"
                           value={fullName}
@@ -2257,7 +2348,7 @@ export default function ApplicationWorkspaceModal({
                         />
                       </div>
                       <div>
-                        <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Email</label>
+                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Email</label>
                         <input
                           type="email"
                           value={email}
@@ -2266,7 +2357,7 @@ export default function ApplicationWorkspaceModal({
                         />
                       </div>
                       <div>
-                        <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Phone</label>
+                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Phone</label>
                         <input
                           type="text"
                           value={phone}
@@ -2275,7 +2366,7 @@ export default function ApplicationWorkspaceModal({
                         />
                       </div>
                       <div>
-                        <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Location</label>
+                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Location</label>
                         <input
                           type="text"
                           value={location}
@@ -2286,7 +2377,7 @@ export default function ApplicationWorkspaceModal({
                     </div>
 
                     <div style={{ marginBottom: '12px' }}>
-                      <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Professional Summary</label>
+                      <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Professional Summary</label>
                       <textarea
                         rows={3}
                         value={summary}
@@ -2296,7 +2387,7 @@ export default function ApplicationWorkspaceModal({
                     </div>
 
                     <div style={{ marginBottom: '14px' }}>
-                      <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Skills (comma separated)</label>
+                      <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Skills (comma separated)</label>
                       <input
                         type="text"
                         value={skillsText}
@@ -2403,7 +2494,7 @@ export default function ApplicationWorkspaceModal({
                   {/* Preparation Checklist */}
                   <div style={{ padding: '16px', borderRadius: '10px', background: 'var(--bg-app)', border: '1px solid var(--border)' }}>
                     <h3 style={{ margin: '0 0 12px 0', fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                      Local checklist (not saved)
+                      Your checklist (saved automatically)
                     </h3>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                       {[
@@ -2427,7 +2518,7 @@ export default function ApplicationWorkspaceModal({
                           <input
                             type="checkbox"
                             checked={Boolean(checklist[item.key])}
-                            onChange={e => setChecklist(prev => ({ ...prev, [item.key]: e.target.checked }))}
+                            onChange={e => handleChecklistToggle(item.key, e.target.checked)}
                             style={{ width: '16px', height: '16px', cursor: 'pointer' }}
                           />
                           <span>{item.label}</span>
@@ -2443,22 +2534,31 @@ export default function ApplicationWorkspaceModal({
                     </h3>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px', marginBottom: '14px' }}>
                       <div>
-                        <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Pipeline Status</label>
+                        <label htmlFor="application-stage" style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Where is this application?</label>
                         <select
-                          value={appStatus}
-                          onChange={e => setAppStatus(e.target.value)}
+                          id="application-stage"
+                          value={stageChoice || stageOfStatus(appStatus)}
+                          onChange={e => setStageChoice(e.target.value)}
                           style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: '13px' }}
                         >
-                          {buildStatusOptions(appStatus, { useLowerCase: true }).map(opt => (
-                            <option key={opt.value} value={opt.value}>
-                              {opt.value === 'submitted' ? 'Applied / Submitted Externally (self-reported)' : opt.label}
+                          {STAGES.map(stage => (
+                            <option key={stage.key} value={stage.key}>
+                              {stage.key === 'applied' ? 'Applied (you sent it on the company site)' : stage.label}
                             </option>
                           ))}
                         </select>
+                        {stageDetail(appStatus) && !stageChoice && (
+                          <div style={{ marginTop: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>{stageDetail(appStatus)}</div>
+                        )}
+                        {blockedMessage({ ...(application || {}), status: appStatus.toUpperCase(), resume }) && (
+                          <div role="note" style={{ marginTop: '6px', fontSize: '12px', color: '#92400e' }}>
+                            {blockedMessage({ ...(application || {}), status: appStatus.toUpperCase(), resume })}
+                          </div>
+                        )}
                       </div>
 
                       <div>
-                        <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Personal Target Deadline</label>
+                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Personal Target Deadline</label>
                         <input
                           type="date"
                           value={targetDeadline}
@@ -2469,7 +2569,7 @@ export default function ApplicationWorkspaceModal({
                     </div>
 
                     <div style={{ marginBottom: '14px' }}>
-                      <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Private Candidate Notes</label>
+                      <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Private Candidate Notes</label>
                       <textarea
                         rows={3}
                         value={privateNotes}
@@ -2481,7 +2581,7 @@ export default function ApplicationWorkspaceModal({
 
                     <button
                       type="button"
-                      onClick={() => handleUpdateApplicationRecord(appStatus)}
+                      onClick={handleSaveTracker}
                       disabled={savingStatus}
                       style={{
                         padding: '8px 18px',

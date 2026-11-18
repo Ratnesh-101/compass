@@ -338,6 +338,56 @@ export default function ExtractionReviewModal({
                       />
                     </div>
                   </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginTop: '10px' }}>
+                    <div>
+                      <label htmlFor={`edu-start-${idx}`} style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Start year</label>
+                      <input
+                        id={`edu-start-${idx}`}
+                        type="number"
+                        value={edu.start_year ?? ''}
+                        onChange={(e) => {
+                          const updated = [...content.education]
+                          updated[idx].start_year = e.target.value === '' ? null : Number(e.target.value)
+                          setContent({ ...content, education: updated })
+                        }}
+                        style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--border)' }}
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor={`edu-end-${idx}`} style={{ fontSize: '11px', color: 'var(--text-muted)' }}>End (graduation) year</label>
+                      <input
+                        id={`edu-end-${idx}`}
+                        type="number"
+                        value={edu.end_year ?? ''}
+                        onChange={(e) => {
+                          const updated = [...content.education]
+                          updated[idx].end_year = e.target.value === '' ? null : Number(e.target.value)
+                          setContent({ ...content, education: updated })
+                        }}
+                        style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--border)' }}
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor={`edu-grade-${idx}`} style={{ fontSize: '11px', color: 'var(--text-muted)' }}>CGPA / grade</label>
+                      <input
+                        id={`edu-grade-${idx}`}
+                        type="text"
+                        value={edu.cgpa_or_grade || ''}
+                        placeholder="e.g. 8.4/10"
+                        onChange={(e) => {
+                          const updated = [...content.education]
+                          updated[idx].cgpa_or_grade = e.target.value
+                          setContent({ ...content, education: updated })
+                        }}
+                        style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--border)' }}
+                      />
+                    </div>
+                  </div>
+                  {content.evidence_notes?.[`education_note_${idx + 1}`] && (
+                    <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                      Note from your resume: {content.evidence_notes[`education_note_${idx + 1}`]}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

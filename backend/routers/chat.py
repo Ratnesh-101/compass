@@ -9,7 +9,7 @@ import re
 import time
 import uuid
 from datetime import date
-from typing import Any, List, Optional, cast
+from typing import Any, List, Optional, Union, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -25,6 +25,8 @@ except (ImportError, ModuleNotFoundError):
 from backend.config import get_settings
 from backend.router import TOOLS
 from backend.services.sse_keepalive import with_keepalive
+from backend.services.chat_idempotency import validate_request_id
+from backend.services.chat_stream_extras import fetch_message_states
 from backend.services.usage import record_usage
 
 _settings = get_settings()
@@ -58,6 +60,25 @@ logger = logging.getLogger("compass.routers.chat")
 router = APIRouter(tags=["chat"])
 
 
+class StreamChatRequestV2(StreamChatRequest):
+    """Stream request plus continue mode: `continue_message_id` is the id of the caller's own assistant
+    message to resume. The server streams only the NEW text and appends it to that message."""
+
+    continue_message_id: Optional[Union[str, int]] = None
+
+
+class MessageOutWithState(MessageOut):
+    """Stored message plus whether its text was cut short (`is_truncated`) and why (`stream_status`:
+    "truncated" = ended on the token limit, "interrupted" = the connection dropped mid-answer)."""
+
+    is_truncated: bool = False
+    stream_status: Optional[str] = None
+
+
+class MessagesResponseWithState(MessagesResponse):
+    messages: List[MessageOutWithState]  # type: ignore[assignment]
+
+
 # ---- POST /chat -----------------------------------------------------------
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest, req: Request, _token: str = Depends(verify_token)):
@@ -65,6 +86,7 @@ async def chat(request: ChatRequest, req: Request, _token: str = Depends(verify_
     ident = _get_current_identity(req)
     user_id = ident.user_id if ident else None
     guest_id = ident.guest_id if ident else None
+    validate_request_id(request.request_id)
 
     if request.conversation_id:
         pool = await get_pool()
@@ -215,7 +237,7 @@ async def chat_recap(
 # ---- GET /api/conversations/{conversation_id}/messages --------------------
 @router.get(
     "/api/conversations/{conversation_id}/messages",
-    response_model=MessagesResponse,
+    response_model=MessagesResponseWithState,
 )
 async def get_messages(
     conversation_id: str,
@@ -239,8 +261,9 @@ async def get_messages(
                 raise HTTPException(status_code=status_code, detail=err)
 
             rows = await conversations.get_recent_messages(conn, conversation_id, limit=limit)
+            states = await fetch_message_states(conn, [r["id"] for r in rows if r.get("id") is not None])
             messages = [
-                MessageOut(
+                MessageOutWithState(
                     id=r["id"],
                     role=r["role"],
                     content=r["content"],
@@ -248,15 +271,17 @@ async def get_messages(
                     evidence=r.get("evidence"),
                     verifiable=r.get("verifiable"),
                     created_at=r["created_at"].isoformat() if hasattr(r["created_at"], "isoformat") else str(r["created_at"]),
+                    is_truncated=states.get(r["id"], (False, None))[0],
+                    stream_status=states.get(r["id"], (False, None))[1],
                 )
                 for r in rows
             ]
-            return MessagesResponse(conversation_id=conversation_id, messages=messages)
+            return MessagesResponseWithState(conversation_id=conversation_id, messages=messages)
     except HTTPException:
         raise
     except Exception as e:
         logger.warning(f"Database query failed for get_messages, returning empty list: {e}")
-        return MessagesResponse(conversation_id=conversation_id, messages=[])
+        return MessagesResponseWithState(conversation_id=conversation_id, messages=[])
 
 
 # ---- GET /api/conversations -----------------------------------------------
@@ -470,6 +495,7 @@ async def public_chat(req: PublicChatRequest, request: Request, _rl: None = Depe
         )
     user_id = ident.id if ident and not ident.is_guest else None
     guest_id = ident.id if ident and ident.is_guest else None
+    validate_request_id(req.request_id)
     if req.conversation_id:
         pool = await get_pool()
         if pool:
@@ -573,7 +599,7 @@ async def log_memory_entry(req: LogMemoryRequest, request: Request, _rl: None = 
         async with pool.acquire() as conn:
             project_id = None
             if req.project:
-                proj = await structured.get_or_create_project(conn, name=req.project, domain=domain_str)
+                proj = await structured.get_or_create_project(conn, name=req.project, domain=domain_str, owner_id=user_id)
                 project_id = proj.get("id")
 
             has_user_col = await conn.fetchval(
@@ -613,8 +639,11 @@ async def log_memory_entry(req: LogMemoryRequest, request: Request, _rl: None = 
 
 # ---- POST /api/chat/stream -----------------------------------------------
 @router.post("/api/chat/stream")
-async def stream_chat(req: StreamChatRequest, request: Request, _rl: None = Depends(rate_limit)):
-    """Real Server-Sent Events endpoint with token-by-token streaming."""
+async def stream_chat(req: StreamChatRequestV2, request: Request, _rl: None = Depends(rate_limit)):
+    """Real Server-Sent Events endpoint with token-by-token streaming.
+
+    Body keys beyond the base StreamChatRequest: `continue_message_id` (continue mode). A malformed
+    `request_id` is rejected with HTTP 422 instead of silently disabling retry protection."""
     from backend.services.chat_stream import generate_chat_events
 
     ident = _get_current_identity(request)
@@ -623,6 +652,7 @@ async def stream_chat(req: StreamChatRequest, request: Request, _rl: None = Depe
             status_code=401,
             detail="Authentication required: active session or valid guest token required",
         )
+    validate_request_id(req.request_id)
     user_id = ident.id if ident and not ident.is_guest else None
     guest_id = ident.id if ident and ident.is_guest else None
 

@@ -236,24 +236,23 @@ export default function TimelineFilterBar({
                   background: isSelected ? 'var(--bg-card)' : 'transparent',
                   color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
                   fontWeight: isSelected ? '600' : '500',
-                  fontSize: '12.5px',
+                  fontSize: '13px',
                   cursor: 'pointer',
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: '5px',
                   whiteSpace: 'nowrap',
-                  opacity: isDimmed ? 0.45 : 1,
                   boxShadow: isSelected ? 'var(--shadow-sm)' : 'none',
-                  transition: 'background 0.15s ease, color 0.15s ease, opacity 0.15s ease',
+                  transition: 'background 0.15s ease, color 0.15s ease',
                   flexShrink: 0,
                 }}
               >
                 <span>{opt.label}</span>
                 <span
                   style={{
-                    fontSize: '11px',
-                    fontWeight: isSelected ? '700' : '500',
-                    color: isSelected ? 'var(--accent, #f5a623)' : 'var(--text-muted)',
+                    fontSize: '12px',
+                    fontWeight: isSelected ? '700' : '600',
+                    color: isSelected ? 'var(--tab-active-text)' : 'var(--text-secondary)',
                   }}
                 >
                   ({count})
@@ -285,7 +284,7 @@ export default function TimelineFilterBar({
               background: dueFilter !== 'all' ? 'var(--bg-card)' : 'var(--bg-card-soft)',
               color: dueFilter !== 'all' ? 'var(--text-primary)' : 'var(--text-secondary)',
               fontWeight: dueFilter !== 'all' ? '600' : '500',
-              fontSize: '12.5px',
+              fontSize: '13px',
               cursor: 'pointer',
               display: 'inline-flex',
               alignItems: 'center',

@@ -1,18 +1,59 @@
 """
 Compass — Feasibility and Triage Skill Handlers.
+
+This is the single implementation of ``assess_feasibility`` and ``apply_triage_plan``.
+Both are tenant-scoped: the caller's ``user_id`` is required.
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 import logging
 
+from backend.services.ownership import scope_owner
 from backend.skills.registry import register_skill
 
 logger = logging.getLogger("compass.skills.feasibility")
 
 
+def _missing_user() -> Dict[str, Any]:
+    return {"success": False, "data": {}, "summary": "",
+            "error": "Authenticated user required."}
+
+
+def _as_int_ids(raw: Any) -> list:
+    ids = []
+    for i in raw or []:
+        try:
+            ids.append(int(i))
+        except (TypeError, ValueError):
+            continue
+    return ids
+
+
+async def _run_scoped_review(pool: Any, *, days: int, hours: float, domain: Optional[str],
+                             user_id: str, include_demo: bool):
+    """Non-streaming wrapper that, unlike agents.feasibility.assess_feasibility,
+    passes the owner through to the task query."""
+    from backend.agents.feasibility import run_feasibility_review, TriagePlan
+    final: Optional[Dict[str, Any]] = None
+    async for ev in run_feasibility_review(
+        pool, days=days, hours_per_day=hours, domain=domain,
+        user_id=user_id, include_demo=include_demo,
+    ):
+        if ev["type"] == "done":
+            final = ev
+        elif ev["type"] == "error":
+            raise RuntimeError(ev["content"])
+    if not final:
+        raise RuntimeError("Feasibility review produced no verdict")
+    return TriagePlan.model_validate(final["metadata"]["triage_plan"])
+
+
 @register_skill("assess_feasibility")
 async def handle_assess_feasibility(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
-    from backend.agents.feasibility import assess_feasibility, DEFAULT_HOURS_PER_DAY
+    from backend.agents.feasibility import DEFAULT_HOURS_PER_DAY
+    user_id = args.get("user_id")
+    if not user_id:
+        return _missing_user()
     try:
         days = int(args.get("days") or 5)
         hours = float(args.get("hours_per_day") or DEFAULT_HOURS_PER_DAY)
@@ -26,7 +67,10 @@ async def handle_assess_feasibility(args: Dict[str, Any], pool: Any) -> Dict[str
         domain = None
 
     try:
-        plan = await assess_feasibility(pool, days=days, hours_per_day=hours, domain=domain)
+        plan = await _run_scoped_review(
+            pool, days=days, hours=hours, domain=domain,
+            user_id=str(user_id), include_demo=bool(args.get("include_demo", False)),
+        )
     except Exception as e:
         logger.error("Feasibility review failed: %s", e, exc_info=True)
         return {"success": False, "data": {}, "summary": "",
@@ -53,24 +97,36 @@ async def handle_assess_feasibility(args: Dict[str, Any], pool: Any) -> Dict[str
 
 @register_skill("apply_triage_plan")
 async def handle_apply_triage_plan(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
-    """Set deferred tasks to 'open' with pushed dates and drop others.
+    """Set deferred tasks to 'open' and drop others, only for the caller's own tasks.
     MUTATING — must be confirm-gated."""
     from backend.memory import structured
-    defer_ids = [int(i) for i in (args.get("defer_ids") or [])]
-    drop_ids = [int(i) for i in (args.get("drop_ids") or [])]
+    user_id = args.get("user_id")
+    if not user_id:
+        return _missing_user()
+    defer_ids = _as_int_ids(args.get("defer_ids"))
+    drop_ids = _as_int_ids(args.get("drop_ids"))
     changed = []
+    skipped = []
     async with pool.acquire() as conn:
         async with conn.transaction():
-            for tid in drop_ids:
-                await structured.update_task_status(conn, tid, "done")
-                changed.append({"id": tid, "action": "dropped"})
-            for tid in defer_ids:
-                await structured.update_task_status(conn, tid, "open")
-                changed.append({"id": tid, "action": "deferred"})
+            for tid, status, label in (
+                [(t, "done", "dropped") for t in drop_ids]
+                + [(t, "open", "deferred") for t in defer_ids]
+            ):
+                # Admin sees all (scope_owner -> None = unscoped), same as routers/tasks.py; users stay scoped.
+                row = await structured.update_task(conn, tid, owner_id=scope_owner(user_id), status=status)
+                if row:
+                    changed.append({"id": tid, "action": label})
+                else:
+                    skipped.append(tid)
+    n_drop = sum(1 for c in changed if c["action"] == "dropped")
+    n_defer = len(changed) - n_drop
+    summary = f"Applied triage: {n_drop} dropped, {n_defer} deferred."
+    if skipped:
+        summary += f" Skipped {len(skipped)} task id(s) not found for this user."
     return {
         "success": True,
-        "data": {"changed": changed},
-        "summary": f"Applied triage: {len(drop_ids)} dropped, {len(defer_ids)} deferred.",
+        "data": {"changed": changed, "skipped_ids": skipped},
+        "summary": summary,
         "error": None,
     }
-

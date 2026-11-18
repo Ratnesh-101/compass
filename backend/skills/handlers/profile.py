@@ -8,6 +8,7 @@ personal details (name, goals, preferences) across conversations.
 from typing import Any, Dict
 import logging
 from backend.skills.registry import register_skill
+from backend.services.ownership import has_caller
 from backend.memory.profile import (
     set_profile_fact,
     delete_profile_fact,
@@ -17,6 +18,14 @@ from backend.memory.profile import (
 
 logger = logging.getLogger("compass.skills.profile")
 
+_NO_CALLER: Dict[str, Any] = {
+    "success": False,
+    "error": "user_id required",
+    "summary": "user_id required: profile facts are per-user and no caller identity was supplied.",
+    "response": "user_id required: profile facts are per-user and no caller identity was supplied.",
+    "data": {"error": "user_id required"},
+}
+
 
 @register_skill("remember_fact")
 async def handle_remember_fact(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
@@ -25,7 +34,9 @@ async def handle_remember_fact(args: Dict[str, Any], pool: Any) -> Dict[str, Any
     raw_value = str(args.get("value", ""))
     key = sanitize_fact_key(raw_key)
     value = sanitize_fact_value(raw_value)
-    user_id = str(args.get("user_id") or "default_user")
+    user_id = str(args.get("user_id") or "")
+    if not has_caller(user_id):
+        return dict(_NO_CALLER)
 
     if not key or not value:
         return {
@@ -66,7 +77,9 @@ async def handle_remember_fact(args: Dict[str, Any], pool: Any) -> Dict[str, Any
 async def handle_forget_fact(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
     """Remove a previously stored personal fact or preference."""
     key = str(args.get("key", "")).strip().lower()
-    user_id = str(args.get("user_id") or "default_user")
+    user_id = str(args.get("user_id") or "")
+    if not has_caller(user_id):
+        return dict(_NO_CALLER)
 
     if not key:
         return {

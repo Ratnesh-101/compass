@@ -220,10 +220,13 @@ async def get_calendar_freebusy(
     task_user_id: Optional[str] = None,
     calendar_errors: Optional[List[str]] = None,
     include_demo: bool = False,
+    all_tenants: bool = False,
 ) -> List[Dict[str, Any]]:
     """Query busy blocks within a date range.
 
     `task_user_id`, when set, restricts the Compass task blocks to that owner.
+    With no `task_user_id`, task blocks are only read when `all_tenants=True` (admin / internal jobs);
+    otherwise they are skipped so a missing owner never means "everyone".
     `calendar_errors`, when given, collects human-readable reasons the live Google
     read failed so callers can show them instead of silently showing an empty week.
 
@@ -238,8 +241,8 @@ async def get_calendar_freebusy(
 
     busy_blocks: List[Dict[str, Any]] = []
 
-    # 1. Fetch existing scheduled tasks from DB
-    if pool is not None:
+    # 1. Fetch existing scheduled tasks from DB (fail closed: needs an owner or explicit all_tenants)
+    if pool is not None and (task_user_id or all_tenants):
         try:
             async with pool.acquire() as conn:
                 rows = await conn.fetch(

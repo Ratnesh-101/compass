@@ -2,9 +2,6 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import Sidebar from './components/Sidebar'
 import Dashboard from './components/Dashboard'
 import MobileNavBar from './components/MobileNavBar'
-import Timeline from './components/Timeline'
-import CalendarView from './components/CalendarView'
-import CompassPanel from './components/CompassPanel'
 import AuthModal from './components/AuthModal'
 import SharedChatView from './components/SharedChatView'
 import DemoDataBanner from './components/DemoDataBanner'
@@ -12,6 +9,10 @@ import LegalView from './components/LegalView'
 import NotFoundView from './components/NotFoundView'
 import TabErrorBoundary from './components/TabErrorBoundary'
 import StatusNotices from './components/StatusNotices'
+import Timeline from './components/Timeline'
+import CalendarView from './components/CalendarView'
+import CompassPanel from './components/CompassPanel'
+import TourStrip from './components/TourStrip'
 import { fetchDemoStatusResult, clearDemoPersona, setChatIncludeDemo } from './api/chatApi'
 
 import MigrationModal from './components/MigrationModal'
@@ -28,6 +29,7 @@ import {
   fetchMigrationStatus,
 } from './api/client'
 import { isDemoTask } from './utils/demoConstants'
+import { isTourRequested } from './utils/tourSample'
 import { haveTasksChanged } from './utils/taskDiff'
 import {
   identityActionFor,
@@ -50,7 +52,10 @@ export default function App() {
   const [allTasks, setAllTasks] = useState([])
   const [customDomains, setCustomDomains] = useState(() => getCustomDomains())
   const initialNav = useMemo(() => parseLocation(), [])
-  const [activeTab, setActiveTab] = useState(() => initialNav.tab)
+  const [tourStripOpen, setTourStripOpen] = useState(() => isTourRequested(window.location.search))
+  const [activeTab, setActiveTab] = useState(() => (
+    isTourRequested(window.location.search) && initialNav.tab === 'dashboard' ? 'compass' : initialNav.tab
+  ))
   const [selectedDomain, setSelectedDomain] = useState(() => initialNav.domain)
   const [shareToken, setShareToken] = useState(() => initialNav.shareToken || null)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
@@ -68,6 +73,7 @@ export default function App() {
   const [notice, setNotice] = useState(null) // { type: 'success' | 'error' | 'info', text }
   const [serviceBusy, setServiceBusy] = useState(false)
   const [careerAttempt, setCareerAttempt] = useState(0)
+
   // careerAttempt forces a fresh import() after a failed chunk load (React.lazy caches rejections)
   const CareerCopilot = useMemo(
     () => React.lazy(() => import('./components/CareerCopilot')),
@@ -138,6 +144,19 @@ export default function App() {
         window.history.pushState({ tab, domain }, '', targetUrl)
       }
     }
+  }, [])
+
+  // ?tour=1 opens the chat with the three tour buttons showing; swap the URL to the clean /compass route
+  useEffect(() => {
+    if (!tourStripOpen) return
+    try {
+      if (window.location.pathname + window.location.search !== '/compass' && parseLocation().tab === 'dashboard') {
+        window.history.replaceState({ tab: 'compass', domain: 'all' }, '', '/compass')
+      }
+    } catch {
+      /* ignore history access error */
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Synchronize browser Back/Forward navigation
@@ -225,17 +244,6 @@ export default function App() {
       setResettingDemo(false)
     }
   }, [loadTasks])
-
-  // Listen for explicit "Load Judge Persona" clicks
-  useEffect(() => {
-    const handleDemoLoaded = () => {
-      isDemoActiveRef.current = true
-      setIsDemoActive(true)
-      loadTasks(selectedDomain, true)
-    }
-    window.addEventListener('compass:demo-persona-loaded', handleDemoLoaded)
-    return () => window.removeEventListener('compass:demo-persona-loaded', handleDemoLoaded)
-  }, [selectedDomain, loadTasks])
 
   // Mounted flag + "this check completed" flags so a check that failed while the backend
   // was asleep is re-run when the health poll flips to online.
@@ -456,6 +464,7 @@ export default function App() {
 
     // Health Polling (Every 10 seconds)
     const pollHealth = async () => {
+      if (!isMounted) return
       try {
         const status = await checkBackendHealth()
         if (isMounted) applyBackendStatus(status)
@@ -612,6 +621,11 @@ export default function App() {
 
   return (
     <div className="app-shell" style={{ display: 'flex', width: '100%', background: 'var(--bg-app)', overflow: 'hidden', position: 'relative' }}>
+      {/* Skip to Content accessible link (N-030 / T-028) */}
+      <a href="#main-content" className="skip-to-content">
+        Skip to content
+      </a>
+
       {/* Mobile Drawer Backdrop */}
       {mobileMenuOpen && (
         <div
@@ -640,7 +654,7 @@ export default function App() {
         onRetryConnection={handleRetryConnection}
       />
 
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'var(--bg-app)', minWidth: 0, overflow: 'hidden' }}>
+      <main id="main-content" style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'var(--bg-app)', minWidth: 0, overflow: 'hidden' }}>
         {/* Mobile Header Bar */}
         <header className="mobile-header">
           <button
@@ -829,35 +843,43 @@ export default function App() {
             onToggleDarkMode={toggleTheme}
           />
         ) : (
-          <CompassPanel
-            initialSubTab={
-              activeTab === 'agent' || activeTab === 'planner'
-                ? 'planner'
-                : 'assistant'
-            }
-            messages={messages}
-            setMessages={setMessages}
-            conversationId={conversationId}
-            setConversationId={setConversationId}
-            onSendMessage={handleSendMessage}
-            isTyping={isTyping}
-            onChatComplete={() => {
-              refreshUsage()
-              loadTasks(selectedDomain)
-            }}
-            tasks={tasks}
-            backendStatus={backendStatus}
-            onTaskMutated={() => {
-              loadTasks(selectedDomain)
-              refreshUsage()
-            }}
-            onSelectTab={handleSelectTab}
-            pendingPrompt={pendingPrompt}
-            onClearPendingPrompt={() => setPendingPrompt(null)}
-            onOpenMigration={() => setShowMigrationModal(true)}
-            isDarkMode={theme === 'dark'}
-            onToggleDarkMode={toggleTheme}
-          />
+          <>
+            {tourStripOpen && (
+              <TourStrip
+                onRun={(prompt) => setPendingPrompt(prompt)}
+                onClose={() => setTourStripOpen(false)}
+              />
+            )}
+            <CompassPanel
+              initialSubTab={
+                activeTab === 'agent' || activeTab === 'planner'
+                  ? 'planner'
+                  : 'assistant'
+              }
+              messages={messages}
+              setMessages={setMessages}
+              conversationId={conversationId}
+              setConversationId={setConversationId}
+              onSendMessage={handleSendMessage}
+              isTyping={isTyping}
+              onChatComplete={() => {
+                refreshUsage()
+                loadTasks(selectedDomain)
+              }}
+              tasks={tasks}
+              backendStatus={backendStatus}
+              onTaskMutated={() => {
+                loadTasks(selectedDomain)
+                refreshUsage()
+              }}
+              onSelectTab={handleSelectTab}
+              pendingPrompt={pendingPrompt}
+              onClearPendingPrompt={() => setPendingPrompt(null)}
+              onOpenMigration={() => setShowMigrationModal(true)}
+              isDarkMode={theme === 'dark'}
+              onToggleDarkMode={toggleTheme}
+            />
+          </>
         )}
         </TabErrorBoundary>
       </main>

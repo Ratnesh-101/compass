@@ -17,24 +17,24 @@ test('missing academic_year points at Candidate Profile, not Resume Studio', () 
   assert.equal(info.missingAcademicYear, true)
   assert.equal(info.missingGradYear, false)
   assert.equal(info.title, 'Add your year of study to confirm eligibility')
-  assert.match(info.body, /Resume import can't tell which year you are in/)
+  assert.match(info.body, /could not find your year of study/)
   assert.match(info.body, /Candidate Profile/)
 })
 
-test('missing grad_year mentions graduation year and resume import', () => {
+test('missing grad_year mentions graduation year and resume upload', () => {
   const info = getProfileBannerInfo(profileWith('grad_year'))
   assert.equal(info.show, true)
   assert.equal(info.missingGradYear, true)
   assert.equal(info.missingAcademicYear, false)
   assert.match(info.body, /graduation year/i)
-  assert.match(info.body, /Resume Studio/)
+  assert.match(info.body, /Upload your resume/)
 })
 
 test('both missing shows both hints', () => {
   const info = getProfileBannerInfo(profileWith('academic_year', 'grad_year'))
   assert.equal(info.missingAcademicYear, true)
   assert.equal(info.missingGradYear, true)
-  assert.match(info.body, /year you are in/)
+  assert.match(info.body, /year of study/)
   assert.match(info.body, /graduation year/i)
 })
 

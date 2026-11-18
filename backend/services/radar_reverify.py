@@ -22,7 +22,11 @@ from typing import Any, Callable, Dict, List, Optional
 
 from backend.memory import radar as radar_memory
 from backend.models_radar import OpportunityStatus
-from backend.services.radar_verifier import verify_opportunity_status
+from backend.services.radar_verifier import (
+    is_fetch_failure,
+    should_demote_after_failure,
+    verify_opportunity_status,
+)
 
 logger = logging.getLogger("compass.radar.reverify")
 
@@ -266,6 +270,19 @@ async def reverify_stale_opportunities(
                     verified_at = datetime.combine(verified_at, datetime.min.time(), tzinfo=timezone.utc)
                 elif isinstance(verified_at, datetime) and verified_at.tzinfo is None:
                     verified_at = verified_at.replace(tzinfo=timezone.utc)
+
+                # A failed fetch verified nothing: leave the timestamp alone, and demote a listing that has
+                # gone unverified for too long. Never write application_url_checked for a failed fetch.
+                if is_fetch_failure(str(evidence) if evidence is not None else ""):
+                    errors += 1
+                    prior = row.get("last_verified_at")
+                    prior_dt = _parse_datetime(prior)
+                    if not dry_run and should_demote_after_failure(str(curr_status), prior_dt):
+                        await radar_memory.update_opportunity_status(
+                            opp_id, OpportunityStatus.NEEDS_VERIFICATION, prior_dt
+                        )
+                        downgraded += 1
+                    continue
 
                 # Persist unless dry_run=True
                 if not dry_run:

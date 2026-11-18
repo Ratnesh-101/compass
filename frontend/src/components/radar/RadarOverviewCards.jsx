@@ -110,6 +110,7 @@ export default function RadarOverviewCards({
 
       {/* 5-Column Responsive Metric Highlights */}
       <div
+        className="radar-overview-grid"
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',

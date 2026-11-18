@@ -13,9 +13,17 @@ from backend.memory.parked import (
     sanitize_parked_text,
 )
 from backend.persona import format_tool_response
+from backend.services.ownership import has_caller
 from backend.skills.registry import register_skill
 
 logger = logging.getLogger("compass.skills.handlers.parked")
+
+_NO_CALLER: Dict[str, Any] = {
+    "success": False,
+    "response": "user_id required: the parked shelf is per-user and no caller identity was supplied.",
+    "data": {"status": "error", "error": "user_id required"},
+    "error": "user_id required",
+}
 
 
 @register_skill("park_thought")
@@ -23,7 +31,9 @@ async def handle_park_thought(args: Dict[str, Any], pool: Any) -> Dict[str, Any]
     """Park a thought or tangent on the shelf for later."""
     raw_text = str(args.get("text") or "").strip()
     clean_text = sanitize_parked_text(raw_text)
-    user_id = str(args.get("user_id") or "default_user")
+    user_id = str(args.get("user_id") or "")
+    if not has_caller(user_id):
+        return dict(_NO_CALLER)
     conv_id = args.get("conversation_id")
 
     if not clean_text:
@@ -91,7 +101,9 @@ async def handle_list_parked(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
 async def handle_resolve_parked(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
     """Resolve / mark done a parked thought."""
     thought_id = args.get("thought_id")
-    user_id = str(args.get("user_id") or "default_user")
+    user_id = str(args.get("user_id") or "")
+    if not has_caller(user_id):
+        return dict(_NO_CALLER)
 
     if thought_id is None:
         return {

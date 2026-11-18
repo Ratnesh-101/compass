@@ -2,14 +2,13 @@ import React from 'react'
 
 const TOAST_STYLE = {
   position: 'fixed',
-  top: '12px',
-  left: '50%',
-  transform: 'translateX(-50%)',
+  bottom: '24px',
+  right: '24px',
   zIndex: 1200,
   display: 'flex',
   flexDirection: 'column',
   gap: '8px',
-  width: 'min(92vw, 460px)',
+  width: 'min(92vw, 420px)',
   pointerEvents: 'none',
 }
 
@@ -41,7 +40,7 @@ const TYPE_ACCENT = {
 export default function StatusNotices({ notice, onDismissNotice, serviceBusy }) {
   if (!notice && !serviceBusy) return null
   return (
-    <div style={TOAST_STYLE}>
+    <div className="status-notices-container" style={TOAST_STYLE}>
       {serviceBusy && (
         <div id="service-busy-banner" role="status" style={{ ...ITEM_BASE, borderColor: TYPE_ACCENT.info }}>
           <span>Service is busy - retrying shortly.</span>

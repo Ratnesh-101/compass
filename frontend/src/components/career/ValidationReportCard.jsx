@@ -20,30 +20,30 @@ export default function ValidationReportCard({ validationReport }) {
         label: 'NOT ENOUGH DATA',
         bg: '#fef3c7',
         color: '#92400e',
-        tooltip: 'Master profile lacks sufficient substantive data (summary, skills, projects, experience) to evaluate factual consistency.',
-        explanation: 'Audited profile threshold: Minimum baseline sections not met for conclusive verification.',
+        tooltip: 'Your saved resume does not have enough detail (summary, skills, projects, experience) to check this copy against it.',
+        explanation: 'Add a few more details to your resume so this copy can be checked.',
       }
     : isConsistent
     ? {
         label: 'CONSISTENT WITH MASTER',
         bg: '#dcfce7',
         color: '#166534',
-        tooltip: 'All candidate skills, degrees, and project claims are anchored to verified master resume data without hallucination.',
-        explanation: 'Audited against Master Profile: verified skills, degrees, and project claims match master anchor.',
+        tooltip: 'Every skill, degree and project on this copy is also on your saved resume.',
+        explanation: 'Checked against your saved resume: everything here is something you told us.',
       }
     : {
         label: 'INCONSISTENT WITH MASTER',
         bg: '#fee2e2',
         color: '#991b1b',
-        tooltip: 'Divergence detected: Resume contains skills or claims not supported by the master profile.',
-        explanation: 'Audited against Master Profile: unsupported or unanchored claims detected.',
+        tooltip: 'This copy has skills or claims that are not on your saved resume.',
+        explanation: 'Some items here are not on your saved resume. Remove them or add them to My resume.',
       }
 
   return (
     <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px', padding: '18px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
         <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '700', color: 'var(--text-primary)' }}>
-          🛡️ Profile Consistency Audit
+          Resume check
         </h3>
         <span
           title={badgeConfig.tooltip}

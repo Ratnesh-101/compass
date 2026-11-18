@@ -14,11 +14,11 @@
 
 **[Live app](https://compass-farmlytics.vercel.app)** · **[Demo video](https://youtu.be/TSO7xV_5ZHw)** · [![MIT License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) · [API health](https://compass-backend-qryu-vcfv.onrender.com/health) · [Demo script](docs/demo_script.md)
 
-Compass is a persistent-memory AI copilot that bridges your tasks, hackathon deadlines, coursework, code context, and career pipeline into one unified, agent-driven workspace. Instead of serving as a stateless chat prompt, Compass reasons across all your work domains, queries live web sources, validates candidate eligibility, tailors verifiable resumes, and halts at strict human confirmation gates before mutating data or submitting applications.
+Compass is a persistent-memory AI copilot that bridges your tasks, hackathon deadlines, coursework, code context, and career pipeline into one unified, agent-driven workspace. Instead of serving as a stateless chat prompt, Compass reasons across all your work domains, queries live web sources, validates candidate eligibility, tailors verifiable resumes, and halts at strict human confirmation gates before mutating data, and prepares applications for you to review and submit yourself.
 
 ### Try it as a judge
 
-Open the [live app](https://compass-farmlytics.vercel.app); no signup, login or API key is needed. On first load the browser silently requests an anonymous guest session from `POST /api/guest/session` (an HMAC-signed token kept in a cookie and local storage) and everything you create is isolated to that guest. The backend runs on a free Render instance, so the first request after a period of inactivity can be slow while it wakes. Guest access is rate-limited (5 new guest sessions per IP per hour, 25 Tavily credits per guest per day) and guest data is kept for 30 days. Things to try: ask the chat *"What is the official submission deadline for the Nebius x NVIDIA AI Hackathon?"* (memory abstains, then Tavily search), add a task and watch the confirmation gate, or open the Career tab. The 1-click demo-persona seeding endpoint is disabled in production.
+Open the [live app](https://compass-farmlytics.vercel.app); no signup, login or API key is needed. On first load the browser silently requests an anonymous guest session from `POST /api/guest/session` (an HMAC-signed token kept in a cookie and local storage) and everything you create is isolated to that guest. The backend runs on a free Render instance that sleeps when idle, so the first request after a quiet period can take 20 to 45 seconds; the app shows a "Waking Compass up" message while it wakes. Guest access is rate-limited (5 new guest sessions per IP per hour, 25 Tavily credits per guest per day) and guest data is kept for 30 days. Things to try: ask the chat *"What is the official submission deadline for the Nebius x NVIDIA AI Hackathon?"* (when memory has no answer, chat falls back to a Tavily web search; this needs `TAVILY_ENABLED=true` and a key, and uses part of the guest's daily Tavily credits), add a task in chat and confirm the preview card before it is saved (typing `undo` reverts a confirmed add), or open the Career tab. The demo-persona seeding endpoint (`POST /api/demo/seed-persona`) is disabled unless `ENABLE_DEMO_SEEDING` is true or `ENVIRONMENT` is `development`, so it is off on a production host that sets neither.
 
 ## Built with NVIDIA Nemotron on Nebius Token Factory
 
@@ -120,7 +120,7 @@ graph TD
 
 ### 1. 🤖 Autonomous ReAct Agent & Confirmation Gates
 - **Multi-Step Execution**: Runs bounded ReAct reasoning loops that plan, call tools, inspect responses, and synthesize answers using real backend state.
-- **Human-in-the-Loop Safeguards**: State-mutating tools (`add_task`, `edit_task`, `delete_task`, `apply_triage_plan`, `commit_schedule`, `ingest_url`) halt execution and present color-coded action proposals for explicit user approval.
+- **Human-in-the-Loop Safeguards**: State-mutating tools (`add_task`, `edit_task`, `delete_task`, `apply_triage_plan`, `commit_schedule`, `ingest_url`) halt execution and present color-coded action proposals for explicit user approval. In the chat, adding a task (one or several) shows a preview card to confirm before anything is saved, and `undo` reverts a confirmed add.
 - **Audit & Undo Engine**: Every mutation is logged with previous and next state snapshots, allowing immediate rollback via `/api/agent/undo` or the UI.
 - **Specialist Multi-Agent Team**: Dedicated specialist agents (`coursework`, `research`, `calendar`, `memory`, and `auto-dispatcher`) for focused, in-depth analysis.
 
@@ -130,7 +130,7 @@ graph TD
 - **Session Continuity**: Multi-turn chat persistence supporting pinned conversations, custom renaming, guest-to-account migration, and public shareable links.
 
 ### 3. 🌐 Web Intelligence & Deep Research (Tavily)
-- **Epistemic Abstention (`search_web`)**: When internal memory lacks verified facts, the agent emits `[ABSTAIN]`, triggering targeted Tavily searches instead of hallucinating.
+- **Epistemic Abstention (`search_web`)**: When internal memory lacks verified facts, the agent emits `[ABSTAIN]`, triggering targeted Tavily searches instead of hallucinating. In plain chat, when memory has no answer the reply falls back to a Tavily web search (when `TAVILY_ENABLED` and a key are set; each search counts against the guest's daily credit budget).
 - **Indirect Prompt Injection Fencing**: Retrieved web content is enclosed in `<untrusted_web_content>` boundaries and parsed with toolless JSON extractors to prevent adversarial webpage instructions from hijacking the agent.
 - **Confirm-Gated Web Ingestion (`ingest_url`)**: Authoritative web documentation can be scraped, chunked, embedded, and added to vector memory — only after explicit user confirmation.
 - **Proactive Staleness & Deadline Verification (`verify_deadline`)**: Cross-references stored hackathon or project deadlines against live contest websites to detect schedule drift without corrupting database state.
@@ -141,11 +141,11 @@ graph TD
 - **Google Calendar (optional)**: With Google OAuth configured, reads free/busy to place work slots and creates calendar events for scheduled tasks; ICS export is available without it.
 
 ### 5. 🎯 Career Copilot (5th Navigation Tab)
-A comprehensive system for internship discovery, verified eligibility analysis, truthful resume tailoring, and controlled application submission:
+A comprehensive system for internship discovery, verified eligibility analysis, truthful resume tailoring, and guided application handoff:
 
 #### A. Internship Radar (`/career` → Radar)
-- **Multi-Source Sourced Opportunities**: Curates verified openings across AI/ML, Software Engineering, Backend, Systems, and Data Science.
-- **Deterministic Eligibility Classification**: Rigorously evaluates candidate university degree, academic year (e.g., 2nd or 3rd-year B.Tech), expected graduation year, country, and work authorization against published job requirements. Produces explainable outcomes: `ELIGIBLE`, `POTENTIAL_MATCH`, `INELIGIBLE`, or `INSUFFICIENT_INFORMATION`.
+- **Multi-Source Sourced Opportunities**: Collects openings across AI/ML, Software Engineering, Backend, Systems, and Data Science from several sources, with duplicate listings merged. A listing counts as verified only when its page was actually fetched, and many listings have no published deadline.
+- **Deterministic Eligibility Classification**: Rigorously evaluates candidate university degree, academic year (e.g., 2nd or 3rd-year B.Tech), expected graduation year, country, and work authorization against published job requirements. Produces explainable outcomes: `ELIGIBLE`, `POTENTIAL_MATCH`, `INELIGIBLE`, or `INSUFFICIENT_INFORMATION`. "Confirmed eligible" needs at least one real requirement check; otherwise the result is a potential match. Treat all outcomes as estimates.
 - **Hiring Cycle Forecasting**: Distinguishes **Open Confirmed**, **Upcoming Confirmed**, and **Predicted** recruitment cycles based on empirical historical data, preventing statistical forecasts from masquerading as open applications.
 
 #### B. Resume Studio (`/career` → Resume Studio)
@@ -365,7 +365,7 @@ compass agent "Propose a triage schedule for coursework and hackathons"
 | `TAVILY_API_KEY` | Optional | Backend | API key for Tavily live web intelligence | `tvly-your_key_here` |
 | `TAVILY_ENABLED` | Optional | Backend | Master flag for Tavily tools; **defaults to `false`** in `backend/config.py`, so set `true` together with a key | `true` or `false` |
 | `TAVILY_ABSTAIN_FIRST` | No | Backend | Search memory first and escalate to the web only after an abstention (default `true`) | `true` |
-| `ENABLE_DEMO_SEEDING` | No | Backend | Allows the demo-persona seeding endpoint in production (default `false`) | `false` |
+| `ENABLE_DEMO_SEEDING` | No | Backend | Allows the demo-persona seeding endpoint outside `development` (default `false`; keep it off in production) | `false` |
 | `LOG_LEVEL` / `PORT` | No | Backend | Log verbosity (default `INFO`) and listen port (default `8000`) | `INFO` / `8000` |
 | `EDGE_HMAC_SECRET` | Production | Both | Shared HMAC secret between Vercel edge proxy and Render | Generate via `openssl rand -hex 32` |
 | `TOKEN_ENCRYPTION_KEY` | Production | Backend | 32-byte key for AES encryption of stored OAuth secrets | Generate via `openssl rand -hex 32` |
@@ -507,11 +507,16 @@ For comprehensive deployment topologies, zero-downtime database migration proced
 5. **Multi-Tenant User Isolation**: Every database query and cache lookup enforces strict `user_id` scoping to prevent Insecure Direct Object References (IDOR).
 6. **Graceful Degradation**: If external APIs or database pools experience transient downtime, non-blocking in-memory layers maintain core application availability without hanging.
 7. **Environment Mode & Impersonation Prevention**: `ENVIRONMENT` must be explicitly set to `development` for local testing. In `production` or when unset, unauthenticated header impersonation (`x-user-id`) is rejected with HTTP 403, and unverified stale cookies (`compass_user_id`) return HTTP 401 with `Set-Cookie` expiration headers.
-8. **Demo Persona Seeding Gate**: The 1-click Judge Persona seeding endpoint (`/api/demo/seed`) is strictly guarded. In `production` environments, seeding is disabled by default and rejected with HTTP 403 unless explicitly enabled with `ENABLE_DEMO_SEEDING=true`.
+8. **Demo Persona Seeding Gate**: The Judge Persona seeding endpoint (`POST /api/demo/seed-persona`) is strictly guarded. It is rejected with HTTP 403 unless `ENABLE_DEMO_SEEDING=true` or `ENVIRONMENT=development`, so neither may be set on a production host.
 
 ---
 
 ## Known Limitations
+
+- **Free-tier cold start**: The backend runs on a free Render instance that sleeps when idle. The first request after a quiet period can take 20 to 45 seconds, and the app shows a "Waking Compass up" message meanwhile.
+- **Compass does not submit applications for you**: It prepares the tailored resume, pre-filled answers and a checklist; you apply on the employer's own site. The approval gate and attestations apply to that handoff.
+- **Listing deadlines are often unknown**: Most discovered internship listings have no published close date, so many show as rolling or unconfirmed.
+- **Eligibility is an estimate**: Results come from comparing your profile to the requirements a listing publishes. Missing or unpublished requirements lower confidence, and the employer's own posting is the authority.
 
 - **ATS Enterprise Key Requirement**: Public job board integrations (e.g., Greenhouse, Lever) permit open listing discovery and detail ingestion. Direct programmatic application submission requires enterprise employer API keys; for candidate submissions, Compass safely generates complete one-click manual handoff packages.
 - **Anti-Bot & CAPTCHA Boundaries**: Compass respects destination access restrictions and anti-bot protections. Portals utilizing interactive CAPTCHAs are handled via browser-assisted form pre-fill rather than fragile automated bypasses.

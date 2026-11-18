@@ -191,7 +191,8 @@ async def reactive_schedule_check_endpoint(
     owner = scope_owner(ident.id)
     async with pool.acquire() as conn:
         all_tasks = await structured.list_tasks(
-            conn, user_id=owner, include_demo=bool(body and body.include_demo)
+            conn, user_id=owner, include_demo=bool(body and body.include_demo),
+            all_tenants=owner is None,  # admin identity is intentionally unscoped
         )
         dep_map = await structured.get_all_dependencies_map(conn)
         prefs = await structured.get_scheduling_preferences(conn, user_id=ident.id)
@@ -209,6 +210,7 @@ async def reactive_schedule_check_endpoint(
     busy = await get_calendar_freebusy(
         now, now + timedelta(days=7), pool=pool, user_id=ident.id, task_user_id=owner,
         include_demo=bool(body and body.include_demo),
+        all_tenants=owner is None,  # admin identity is intentionally unscoped
     )
     windows = get_available_windows(
         busy,

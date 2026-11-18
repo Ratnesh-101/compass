@@ -1,10 +1,12 @@
-import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react'
-import { X } from 'lucide-react'
+import React, { useState, useMemo, useCallback, useEffect } from 'react'
+import { X, BookOpen } from 'lucide-react'
 import DarkModeToggle from './DarkModeToggle'
 import { getDomainMeta } from './timeline/domainMeta'
 import AddDeadlineModal from './timeline/AddDeadlineModal'
-import { updateTask, seedJudgeDemoPersona } from '../api/client'
-import { mapPersonaError } from '../utils/personaNotice'
+import AboutJudgesModal from './AboutJudgesModal'
+import TourCard from './TourCard'
+import { updateTask } from '../api/client'
+import { DEMO_VIDEO_URL } from '../utils/tourSample'
 import Logo from './Logo'
 import TimelineFilterBar from './timeline/TimelineFilterBar'
 import {
@@ -106,70 +108,16 @@ export default function Dashboard({
   const [priorityFilter, setPriorityFilter] = useState('all') // 'all' | 'overdue' | 'today' | 'upcoming'
   const [optimisticOverrides, setOptimisticOverrides] = useState({})
   const [showAddModal, setShowAddModal] = useState(false)
+  const [showAboutModal, setShowAboutModal] = useState(false)
+  const [savedToast, setSavedToast] = useState(false)
+  const [completedInSession, setCompletedInSession] = useState(() => new Set())
   const [isRefreshing, setIsRefreshing] = useState(false)
-  const [seedingPersona, setSeedingPersona] = useState(false)
-  const [seedSuccess, setSeedSuccess] = useState(false)
-  const [seedNotice, setSeedNotice] = useState(null) // { type: 'success' | 'error' | 'disabled', text: string }
   const [lastRefreshedAt, setLastRefreshedAt] = useState(() => new Date())
 
   const handleClearFilters = useCallback(() => {
     setStatusFilter('all')
     setDueFilter('all')
   }, [])
-
-  const retryTimeoutRef = useRef(null)
-
-  useEffect(() => {
-    return () => {
-      if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current)
-    }
-  }, [])
-
-  const handleSeedJudgePersona = useCallback(async (isRetry = false) => {
-    if (seedingPersona && !isRetry) return
-    if (!isRetry && retryTimeoutRef.current) {
-      clearTimeout(retryTimeoutRef.current)
-      retryTimeoutRef.current = null
-    }
-    setSeedingPersona(true)
-    if (!isRetry) {
-      setSeedNotice(null)
-    }
-    try {
-      await seedJudgeDemoPersona()
-      setSeedSuccess(true)
-      setSeedNotice({
-        type: 'success',
-        text: 'Judge Persona loaded successfully! 21 multi-domain tasks & timeline populated.',
-        canRetry: false,
-      })
-      setTimeout(() => setSeedSuccess(false), 4000)
-      if (onTasksUpdated) await onTasksUpdated()
-    } catch (err) {
-      const mapped = mapPersonaError(err)
-      if (mapped.is503 && !isRetry) {
-        setSeedNotice({
-          type: 'info',
-          text: mapped.text,
-          canRetry: true,
-        })
-        const delay = (mapped.retryDelay || 5) * 1000
-        retryTimeoutRef.current = setTimeout(() => {
-          handleSeedJudgePersona(true)
-        }, delay)
-      } else {
-        setSeedNotice({
-          type: mapped.type === 'info' ? 'error' : mapped.type,
-          text: mapped.is503
-            ? 'The server is waking up or temporarily unavailable.'
-            : mapped.text,
-          canRetry: mapped.canRetry,
-        })
-      }
-    } finally {
-      setSeedingPersona(false)
-    }
-  }, [seedingPersona, onTasksUpdated])
 
   const today = useMemo(() => {
     return new Date().toLocaleDateString('en-US', {
@@ -268,6 +216,7 @@ export default function Dashboard({
     const now = new Date()
     const todayStr = now.toDateString()
     const todayShort = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toLowerCase()
+    const todayIsoDate = now.toISOString().slice(0, 10)
 
     domainFilteredTasks.forEach((t) => {
       const s = (t.status || '').toLowerCase()
@@ -275,25 +224,34 @@ export default function Dashboard({
       const isCompleted = s === 'completed' || s === 'done' || c === 'completed'
 
       if (isCompleted) {
-        if (t.updated_at) {
-          const d = new Date(t.updated_at)
+        let isToday = false
+        const candidateDate = t.completed_at || t.updated_at || t.timestamp
+        if (candidateDate) {
+          const d = new Date(candidateDate)
           if (!isNaN(d.getTime()) && d.toDateString() === todayStr) {
-            completedTodayCount++
+            isToday = true
           }
-        } else if (t.timestamp) {
-          const ts = String(t.timestamp).toLowerCase()
+          const ts = String(candidateDate).toLowerCase()
           if (
             ts.includes('just now') ||
             ts.includes('min') ||
             ts.includes('hour') ||
             ts.includes('today') ||
-            ts.includes(todayShort)
+            ts.includes(todayShort) ||
+            ts.startsWith(todayIsoDate)
           ) {
-            completedTodayCount++
+            isToday = true
           }
+        }
+        if (completedInSession.has(t.id)) {
+          isToday = true
+        }
+        if (isToday) {
+          completedTodayCount++
         }
       }
     })
+    completedTodayCount = Math.min(completedTodayCount, completedCount)
 
     const completionRate = total > 0 ? Math.round((completedCount / total) * 100) : 0
 
@@ -304,7 +262,7 @@ export default function Dashboard({
       overdueCount,
       completedTodayCount,
     }
-  }, [domainFilteredTasks, viewCounts])
+  }, [domainFilteredTasks, viewCounts, completedInSession])
 
 
   // Tasks by Domain breakdown
@@ -436,6 +394,15 @@ export default function Dashboard({
       const newStatus = currentlyCompleted ? 'open' : 'completed'
       // Optimistic update
       setOptimisticOverrides((prev) => ({ ...prev, [taskId]: newStatus }))
+      if (!currentlyCompleted) {
+        setCompletedInSession((prev) => new Set([...prev, taskId]))
+      } else {
+        setCompletedInSession((prev) => {
+          const next = new Set(prev)
+          next.delete(taskId)
+          return next
+        })
+      }
 
       try {
         await updateTask(taskId, { status: newStatus })
@@ -579,8 +546,8 @@ export default function Dashboard({
                 </span>
               </h2>
             </div>
-            <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '4px', marginBottom: 0 }}>
-              Live workspace telemetry, task distribution, upcoming deadlines, and system telemetry
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px', marginBottom: 0 }}>
+              Your student workspace for internships, deadlines, and weekly planning
             </p>
           </div>
 
@@ -602,27 +569,23 @@ export default function Dashboard({
 
             <button
               type="button"
-              id="dashboard-btn-load-judge-persona"
-              onClick={() => handleSeedJudgePersona(false)}
-              disabled={seedingPersona}
+              id="dashboard-btn-about-judges"
+              onClick={() => setShowAboutModal(true)}
               className="btn-secondary"
-              title="Explicit 1-Click Demo: Populates sample multi-domain tasks and vector memory for hackathon judges"
+              title="Architecture, AI telemetry, and evaluation guide for hackathon judges"
               style={{
-                cursor: seedingPersona ? 'wait' : 'pointer',
+                minHeight: '44px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '0 12px',
+                borderRadius: 'var(--radius-btn, 6px)',
+                fontSize: '13px',
+                fontWeight: '500',
               }}
             >
-              {seedSuccess ? (
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--domain-code, #1c8a62)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-              ) : (
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <circle cx="12" cy="12" r="10" />
-                  <circle cx="12" cy="12" r="6" />
-                  <circle cx="12" cy="12" r="2" />
-                </svg>
-              )}
-              <span>{seedingPersona ? 'Loading…' : seedSuccess ? 'Persona Loaded!' : 'Load Judge Persona'}</span>
+              <BookOpen size={14} strokeWidth={1.8} style={{ color: 'var(--accent)' }} />
+              <span>About / for judges</span>
             </button>
 
             <button
@@ -675,98 +638,266 @@ export default function Dashboard({
         </div>
       </div>
 
-      {/* Inline Judge Persona Feedback Banner */}
-      {seedNotice && (
+      {/* Welcome Card for Students with 3 Big Buttons (N-005) */}
+      <div
+        className="dashboard-welcome-card"
+        style={{
+          background: 'var(--bg-card)',
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-card, 8px)',
+          padding: '20px 22px',
+          marginBottom: '20px',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px', marginBottom: '16px' }}>
+          <div>
+            <h3 style={{ fontSize: '18px', fontWeight: '600', color: 'var(--text-primary)', margin: '0 0 4px 0', lineHeight: 1.35 }}>
+              Compass keeps your deadlines, coursework and internship hunt in one place, and asks before it changes anything.
+            </h3>
+            <p style={{ fontSize: '13.5px', color: 'var(--text-secondary)', margin: 0 }}>
+              You are in a private guest workspace. No signup. Nothing you add is shared.
+            </p>
+            <p id="welcome-sponsor-line" style={{ fontSize: '12.5px', color: 'var(--text-muted)', margin: '6px 0 0 0' }}>
+              Runs on NVIDIA Nemotron models through Nebius Token Factory, with Tavily web search.{' '}
+              <button
+                type="button"
+                id="welcome-link-how-it-works"
+                onClick={() => setShowAboutModal(true)}
+                style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', color: 'var(--accent)', textDecoration: 'underline', cursor: 'pointer' }}
+              >
+                How it works
+              </button>
+            </p>
+          </div>
+          <button
+            type="button"
+            id="welcome-link-about-judges"
+            onClick={() => setShowAboutModal(true)}
+            style={{
+              background: 'transparent',
+              border: '1px solid var(--border)',
+              borderRadius: '6px',
+              padding: '6px 12px',
+              fontSize: '12px',
+              fontWeight: '500',
+              color: 'var(--text-secondary)',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+            title="Architecture, AI telemetry, and evaluation guide"
+          >
+            <span>About / for judges</span>
+            <span style={{ fontSize: '12px', background: 'var(--bg-card-soft)', padding: '1px 5px', borderRadius: '4px', border: '1px solid var(--border)' }}>Guide</span>
+          </button>
+        </div>
+
+        {/* 3 Big Buttons */}
         <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+            gap: '12px',
+          }}
+        >
+          <button
+            type="button"
+            id="welcome-btn-internships"
+            onClick={() => onSelectTab && onSelectTab('career')}
+            className="btn-touch-target"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              padding: '14px 16px',
+              background: 'var(--bg-card-soft)',
+              border: '1px solid var(--border)',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              textAlign: 'left',
+              color: 'var(--text-primary)',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <div
+              style={{
+                width: '40px',
+                height: '40px',
+                borderRadius: '8px',
+                background: 'rgba(28, 138, 98, 0.12)',
+                color: 'var(--domain-code, #1c8a62)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect width="20" height="14" x="2" y="7" rx="2" ry="2" />
+                <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+              </svg>
+            </div>
+            <div>
+              <div style={{ fontSize: '14px', fontWeight: '600' }}>Find internships</div>
+              <div style={{ fontSize: '12.5px', color: 'var(--text-secondary)', marginTop: '2px' }}>Explore matched roles</div>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            id="welcome-btn-plan-week"
+            onClick={() => {
+              if (onOpenCompass) {
+                onOpenCompass('Plan my week: help me organize my deadlines and study schedule')
+              }
+            }}
+            className="btn-touch-target"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              padding: '14px 16px',
+              background: 'var(--bg-card-soft)',
+              border: '1px solid var(--border)',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              textAlign: 'left',
+              color: 'var(--text-primary)',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <div
+              style={{
+                width: '40px',
+                height: '40px',
+                borderRadius: '8px',
+                background: 'rgba(245, 166, 35, 0.12)',
+                color: 'var(--accent, #f5a623)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect width="18" height="18" x="3" y="4" rx="2" ry="2" />
+                <line x1="16" y1="2" x2="16" y2="6" />
+                <line x1="8" y1="2" x2="8" y2="6" />
+                <line x1="3" y1="10" x2="21" y2="10" />
+              </svg>
+            </div>
+            <div>
+              <div style={{ fontSize: '14px', fontWeight: '600' }}>Plan my week</div>
+              <div style={{ fontSize: '12.5px', color: 'var(--text-secondary)', marginTop: '2px' }}>Organize deadlines & schedule</div>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            id="welcome-btn-ask-question"
+            onClick={() => {
+              if (onOpenCompass) {
+                onOpenCompass('')
+              }
+            }}
+            className="btn-touch-target"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              padding: '14px 16px',
+              background: 'var(--bg-card-soft)',
+              border: '1px solid var(--border)',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              textAlign: 'left',
+              color: 'var(--text-primary)',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <div
+              style={{
+                width: '40px',
+                height: '40px',
+                borderRadius: '8px',
+                background: 'rgba(59, 130, 246, 0.12)',
+                color: '#2563eb',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
+            </div>
+            <div>
+              <div style={{ fontSize: '14px', fontWeight: '600' }}>Ask a question</div>
+              <div style={{ fontSize: '12.5px', color: 'var(--text-secondary)', marginTop: '2px' }}>Chat with Compass AI</div>
+            </div>
+          </button>
+        </div>
+
+        <TourCard onRun={(prompt) => onOpenCompass && onOpenCompass(prompt)} />
+      </div>
+
+      {/* SECTION: Waking backend state (N-012) */}
+      {!isOnline && cleanTasks.length === 0 && (
+        <div
+          className="dashboard-waking-card"
           role="status"
           aria-live="polite"
           style={{
             display: 'flex',
+            flexDirection: 'column',
             alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '12px',
-            padding: '10px 14px',
-            marginBottom: '16px',
-            borderRadius: '6px',
-            background:
-              seedNotice.type === 'success'
-                ? 'rgba(16, 185, 129, 0.12)'
-                : seedNotice.type === 'disabled'
-                ? 'rgba(217, 119, 6, 0.12)'
-                : seedNotice.type === 'info'
-                ? 'rgba(59, 130, 246, 0.12)'
-                : 'rgba(239, 68, 68, 0.12)',
-            border:
-              seedNotice.type === 'success'
-                ? '1px solid rgba(16, 185, 129, 0.35)'
-                : seedNotice.type === 'disabled'
-                ? '1px solid rgba(217, 119, 6, 0.35)'
-                : seedNotice.type === 'info'
-                ? '1px solid rgba(59, 130, 246, 0.35)'
-                : '1px solid rgba(239, 68, 68, 0.35)',
-            color:
-              seedNotice.type === 'success'
-                ? '#059669'
-                : seedNotice.type === 'disabled'
-                ? '#d97706'
-                : seedNotice.type === 'info'
-                ? '#2563eb'
-                : '#dc2626',
-            fontSize: '13px',
-            fontWeight: '500',
+            justifyContent: 'center',
+            padding: '44px 24px',
+            textAlign: 'center',
+            background: 'var(--bg-card)',
+            borderRadius: 'var(--radius-card, 8px)',
+            border: '1px solid var(--border)',
+            marginBottom: '20px',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontWeight: '600' }}>
-              {seedNotice.type === 'success' ? '✓' : seedNotice.type === 'disabled' ? '⚠️' : seedNotice.type === 'info' ? 'ℹ️' : '✕'}
-            </span>
-            <span>{seedNotice.text}</span>
+          <div style={{ marginBottom: '16px' }}>
+            <Logo size={42} alt="Compass Logo" />
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {seedNotice.canRetry && (
-              <button
-                type="button"
-                onClick={() => handleSeedJudgePersona(true)}
-                disabled={seedingPersona}
-                style={{
-                  background: 'transparent',
-                  border: '1px solid currentColor',
-                  borderRadius: '4px',
-                  padding: '2px 8px',
-                  fontSize: '12px',
-                  fontWeight: '600',
-                  color: 'inherit',
-                  cursor: seedingPersona ? 'wait' : 'pointer',
-                }}
-              >
-                Retry
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => {
-                if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current)
-                setSeedNotice(null)
-              }}
-              className="btn-touch-target"
+          <h3 style={{ fontSize: '18px', fontWeight: '600', color: 'var(--text-primary)', margin: '0 0 8px 0' }}>
+            Starting the server. This takes about 30 seconds and only happens after a quiet period.
+          </h3>
+          <p style={{ fontSize: '13.5px', color: 'var(--text-secondary)', maxWidth: '480px', margin: '0 0 20px 0', lineHeight: 1.5 }}>
+            While you wait:{' '}
+            <a href={DEMO_VIDEO_URL} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)', fontWeight: 600 }}>
+              watch the 3-minute demo
+            </a>
+          </p>
+          <div
+            style={{
+              width: '100%',
+              maxWidth: '320px',
+              height: '6px',
+              background: 'var(--bg-card-soft)',
+              borderRadius: '3px',
+              overflow: 'hidden',
+              border: '1px solid var(--border)',
+            }}
+          >
+            <div
+              className="waking-progress-bar"
               style={{
-                background: 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-                color: 'inherit',
-                padding: '4px',
-                display: 'flex',
-                alignItems: 'center',
+                height: '100%',
+                background: 'var(--accent, #f5a623)',
+                borderRadius: '3px',
               }}
-              aria-label="Dismiss message"
-            >
-              <X size={14} />
-            </button>
+            />
           </div>
         </div>
       )}
 
-      {/* SECTION: Today's Caught Up Banner (Shown only when user has tasks and none are overdue or due today) */}
+      {/* SECTION: Today's Focus Banner (Shown only when user has tasks and none are overdue or due today) */}
       {cleanTasks.length > 0 && viewCounts.overdue === 0 && viewCounts.due_today === 0 && (
         <div className="dashboard-focus-card" role="region" aria-label="Today's focus area" style={{ borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
@@ -794,12 +925,12 @@ export default function Dashboard({
             <div style={{ minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: '15px', fontWeight: '600', color: 'var(--text-primary)' }}>
-                  You're all caught up for today!
+                  {todayFocus.nextItem ? 'No deadlines due today' : "You're all caught up for today!"}
                 </span>
                 {todayFocus.nextUrgency && (
                   <span
                     style={{
-                      fontSize: '11px',
+                      fontSize: '12px',
                       fontWeight: '600',
                       padding: '2px 8px',
                       borderRadius: '4px',
@@ -830,7 +961,7 @@ export default function Dashboard({
                     <span style={{ color: 'var(--text-muted)' }}>({todayFocus.nextItem.project || todayFocus.nextItem.domain})</span>
                   </>
                 ) : (
-                  'Enjoy your focused time or plan your upcoming schedule with Compass.'
+                  'No deadlines scheduled for today. Enjoy your focused time or plan your upcoming schedule.'
                 )}
               </div>
             </div>
@@ -855,7 +986,9 @@ export default function Dashboard({
         </div>
       )}
 
-
+      {/* DOMAIN FILTER BAR AND STATS (Only render once connected or when tasks exist - N-012) */}
+      {(isOnline || cleanTasks.length > 0) && (
+      <>
       {/* DOMAIN FILTER BAR */}
       <div className="dashboard-filter-bar" role="tablist" aria-label="Filter dashboard by context domain">
         <button
@@ -1209,12 +1342,12 @@ export default function Dashboard({
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px', flexWrap: 'wrap' }}>
                         <span className="domain-swatch" style={{ background: meta.color }} />
-                        <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '500' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: '500' }}>
                           {task.project || meta.label}
                         </span>
                         <span
                           style={{
-                            fontSize: '10px',
+                            fontSize: '12px',
                             fontWeight: '600',
                             padding: '1px 6px',
                             borderRadius: '4px',
@@ -1229,7 +1362,7 @@ export default function Dashboard({
                         {c.lifecycle !== 'pending' && (
                           <span
                             style={{
-                              fontSize: '10px',
+                              fontSize: '12px',
                               fontWeight: '600',
                               padding: '1px 6px',
                               borderRadius: '4px',
@@ -1260,7 +1393,7 @@ export default function Dashboard({
                     <div style={{ flexShrink: 0 }}>
                       <span
                         style={{
-                          fontSize: '11px',
+                          fontSize: '12px',
                           fontWeight: '600',
                           padding: '3px 8px',
                           borderRadius: '6px',
@@ -1310,9 +1443,20 @@ export default function Dashboard({
           <h3 style={{ fontSize: '16px', fontWeight: '600', color: 'var(--text-primary)', margin: '0 0 8px 0' }}>
             No tasks or deadlines tracked yet
           </h3>
-          <p style={{ fontSize: '13.5px', color: 'var(--text-secondary)', maxWidth: '520px', margin: '0 auto', lineHeight: 1.5 }}>
-            Use the <strong>New Deadline</strong> button in the header above to create your first milestone, or click <strong>Load Judge Persona</strong> to populate demo multi-domain tasks and telemetry.
+          <p style={{ fontSize: '13.5px', color: 'var(--text-secondary)', maxWidth: '520px', margin: '0 auto 16px auto', lineHeight: 1.5 }}>
+            Use the <strong>New Deadline</strong> button above to track your first milestone, or take the 60-second tour above to see Compass work on a sample week.
           </p>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              id="empty-state-btn-new-task"
+              onClick={() => setShowAddModal(true)}
+              className="btn-primary-amber"
+              style={{ minHeight: '38px', padding: '0 16px', fontSize: '13px', fontWeight: '600', borderRadius: 'var(--radius-btn, 6px)', cursor: 'pointer' }}
+            >
+              + New Deadline
+            </button>
+          </div>
         </div>
       ) : (
         <div className="dashboard-main-grid">
@@ -1384,7 +1528,7 @@ export default function Dashboard({
                       <span style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text-secondary)' }}>
                         {item.count} {item.count === 1 ? 'task' : 'tasks'}
                       </span>
-                      <span style={{ fontSize: '11px', color: 'var(--text-muted)', minWidth: '34px', textAlign: 'right' }}>
+                      <span style={{ fontSize: '12px', color: 'var(--text-muted)', minWidth: '34px', textAlign: 'right' }}>
                         {item.pct}%
                       </span>
                     </div>
@@ -1425,7 +1569,7 @@ export default function Dashboard({
                       onClick={() => setPriorityFilter('all')}
                       style={{
                         padding: '3px 8px',
-                        fontSize: '11px',
+                        fontSize: '12px',
                         fontWeight: priorityFilter === 'all' ? '600' : '400',
                         borderRadius: '4px',
                         border: 'none',
@@ -1442,7 +1586,7 @@ export default function Dashboard({
                         onClick={() => setPriorityFilter('overdue')}
                         style={{
                           padding: '3px 8px',
-                          fontSize: '11px',
+                          fontSize: '12px',
                           fontWeight: priorityFilter === 'overdue' ? '600' : '400',
                           borderRadius: '4px',
                           border: 'none',
@@ -1460,7 +1604,7 @@ export default function Dashboard({
                         onClick={() => setPriorityFilter('today')}
                         style={{
                           padding: '3px 8px',
-                          fontSize: '11px',
+                          fontSize: '12px',
                           fontWeight: priorityFilter === 'today' ? '600' : '400',
                           borderRadius: '4px',
                           border: 'none',
@@ -1478,7 +1622,7 @@ export default function Dashboard({
                         onClick={() => setPriorityFilter('due_soon')}
                         style={{
                           padding: '3px 8px',
-                          fontSize: '11px',
+                          fontSize: '12px',
                           fontWeight: priorityFilter === 'due_soon' ? '600' : '400',
                           borderRadius: '4px',
                           border: 'none',
@@ -1496,7 +1640,7 @@ export default function Dashboard({
                         onClick={() => setPriorityFilter('upcoming')}
                         style={{
                           padding: '3px 8px',
-                          fontSize: '11px',
+                          fontSize: '12px',
                           fontWeight: priorityFilter === 'upcoming' ? '600' : '400',
                           borderRadius: '4px',
                           border: 'none',
@@ -1595,7 +1739,7 @@ export default function Dashboard({
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px' }}>
                         <span className="domain-swatch" style={{ background: meta.color }} />
-                        <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '500' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: '500' }}>
                           {task.project || meta.label}
                         </span>
                       </div>
@@ -1625,7 +1769,7 @@ export default function Dashboard({
                           border: `1px solid ${badge.border}`,
                           padding: '3px 8px',
                           borderRadius: '6px',
-                          fontSize: '11.5px',
+                          fontSize: '12px',
                           fontWeight: '600',
                           whiteSpace: 'nowrap',
                         }}
@@ -1746,7 +1890,7 @@ export default function Dashboard({
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px', flexWrap: 'wrap' }}>
                         <span
                           style={{
-                            fontSize: '11px',
+                            fontSize: '12px',
                             padding: '2px 8px',
                             borderRadius: '4px',
                             fontWeight: '500',
@@ -1761,7 +1905,7 @@ export default function Dashboard({
                           <span className="domain-swatch" style={{ background: meta.color }} />
                           <span>{meta.label}</span>
                         </span>
-                        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
                           {formatActivityTimestamp(task.timestamp || task.created_at)}
                         </span>
                       </div>
@@ -1785,7 +1929,7 @@ export default function Dashboard({
                     <div style={{ flexShrink: 0, pointerEvents: 'none' }}>
                       <span
                         style={{
-                          fontSize: '11px',
+                          fontSize: '12px',
                           fontWeight: '500',
                           padding: '3px 9px',
                           borderRadius: '12px',
@@ -1819,8 +1963,8 @@ export default function Dashboard({
         </div>
       )}
 
-        {/* System & Telemetry Status */}
-        <div className="dashboard-section-card" role="region" aria-label="System connectivity and model telemetry">
+        {/* Workspace & Privacy Status (Clean student view, N-005) */}
+        <div className="dashboard-section-card" role="region" aria-label="Workspace and account status">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
             <h3 style={{ fontSize: '15px', fontWeight: '600', color: 'var(--text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1829,14 +1973,14 @@ export default function Dashboard({
                 <line x1="6" y1="6" x2="6.01" y2="6" />
                 <line x1="6" y1="18" x2="6.01" y2="18" />
               </svg>
-              <span>System & Telemetry</span>
+              <span>Workspace Status</span>
             </h3>
             <span
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '6px',
-                fontSize: '11.5px',
+                fontSize: '12px',
                 fontWeight: '500',
                 padding: '3px 8px',
                 borderRadius: '6px',
@@ -1853,43 +1997,11 @@ export default function Dashboard({
                   background: isOnline ? '#1c8a62' : '#f5a623',
                 }}
               />
-              {isOnline ? 'System Online' : 'Connecting'}
+              {isOnline ? 'Synced & Online' : 'Connecting'}
             </span>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {/* Backend Database Status */}
-            <div
-              style={{
-                padding: '10px 12px',
-                borderRadius: '6px',
-                background: 'var(--bg-card)',
-                border: '1px solid var(--border)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-              }}
-            >
-              <div>
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600', textTransform: 'uppercase' }}>
-                  Backend Database
-                </div>
-                <div style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)', marginTop: '2px' }}>
-                  {backendStatus || 'Online'}
-                </div>
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '1px' }}>
-                  PostgreSQL 16 · pgvector HNSW
-                </div>
-              </div>
-              <span style={{ color: 'var(--text-muted)', display: 'inline-flex' }}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <ellipse cx="12" cy="5" rx="9" ry="3" />
-                  <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
-                  <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
-                </svg>
-              </span>
-            </div>
-
             {/* Workspace & Google Calendar Connection */}
             <div
               style={{
@@ -1903,16 +2015,16 @@ export default function Dashboard({
               }}
             >
               <div>
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600', textTransform: 'uppercase' }}>
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: '600', textTransform: 'uppercase' }}>
                   Workspace & Calendar
                 </div>
                 <div style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)', marginTop: '2px' }}>
                   {currentUser?.calendar?.connected
                     ? `Google Calendar (${currentUser.calendar.mode === 'live' ? 'Live' : 'Demo'})`
-                    : 'Local Sandbox Workspace'}
+                    : 'Private Guest Workspace'}
                 </div>
-                <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '1px' }}>
-                  {currentUser?.email || 'Anonymous Guest Session'}
+                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '1px' }}>
+                  {currentUser?.email || 'Saved locally in this browser'}
                 </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -1924,58 +2036,61 @@ export default function Dashboard({
                     style={{
                       minHeight: '36px',
                       padding: '0 10px',
-                      fontSize: '11.5px',
+                      fontSize: '12px',
                     }}
                   >
                     {currentUser?.authenticated ? 'Account' : 'Sign in'}
                   </button>
                 )}
-                <span style={{ color: 'var(--text-muted)', display: 'inline-flex' }}>
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <rect width="18" height="18" x="3" y="4" rx="2" />
-                    <path d="M3 10h18" />
-                    <path d="M8 2v4" />
-                    <path d="M16 2v4" />
-                  </svg>
-                </span>
               </div>
             </div>
 
-            {/* API Usage & Cost */}
+            {/* Link to About & Telemetry for judges */}
             <div
               style={{
-                padding: '10px 12px',
+                padding: '12px',
                 borderRadius: '6px',
-                background: 'var(--bg-card)',
+                background: 'var(--bg-card-soft)',
                 border: '1px solid var(--border)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '8px',
               }}
             >
               <div>
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600', textTransform: 'uppercase' }}>
-                  Nebius API Telemetry
+                <div style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)' }}>
+                  System Architecture & Telemetry
                 </div>
-                <div style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)', marginTop: '2px' }}>
-                  {usageStats?.total_requests ?? 0} calls ·{' '}
-                  {usageStats?.total_estimated_cost_usd !== undefined
-                    ? `$${Number(usageStats.total_estimated_cost_usd).toFixed(5)}`
-                    : '$0.00000'}
-                </div>
-                <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '1px' }}>
-                  Nebius Token Factory · Nemotron-3 MoE
+                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '1px' }}>
+                  Model metrics, token usage, and evaluation resources for hackathon judges
                 </div>
               </div>
-              <span style={{ color: 'var(--text-muted)', display: 'inline-flex' }}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-                </svg>
-              </span>
+              <button
+                type="button"
+                id="dashboard-btn-open-about-footer"
+                onClick={() => setShowAboutModal(true)}
+                className="btn-secondary"
+                style={{
+                  minHeight: '34px',
+                  padding: '0 12px',
+                  fontSize: '12px',
+                  fontWeight: '600',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+              >
+                <BookOpen size={13} style={{ color: 'var(--accent)' }} />
+                <span>View About / Judges →</span>
+              </button>
             </div>
           </div>
         </div>
       </div>
+      </>
+      )}
 
       {/* Task Creation Modal */}
       {showAddModal && (
@@ -1984,6 +2099,8 @@ export default function Dashboard({
           onClose={() => setShowAddModal(false)}
           onCreated={() => {
             setShowAddModal(false)
+            setSavedToast(true)
+            setTimeout(() => setSavedToast(false), 3000)
             if (onTasksUpdated) {
               onTasksUpdated()
             }
@@ -1993,6 +2110,43 @@ export default function Dashboard({
           customDomains={customDomains}
           onOpenCompass={onOpenCompass}
         />
+      )}
+
+      {/* About & Judges Guide Modal (N-005, N-026, N-027) */}
+      <AboutJudgesModal
+        isOpen={showAboutModal}
+        onClose={() => setShowAboutModal(false)}
+        usageStats={usageStats}
+        backendStatus={backendStatus}
+        isOnline={isOnline}
+      />
+
+      {/* Saved Toast Notification (N-033) */}
+      {savedToast && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            position: 'fixed',
+            bottom: '24px',
+            right: '24px',
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border)',
+            boxShadow: 'var(--shadow-lg)',
+            padding: '10px 16px',
+            borderRadius: '8px',
+            color: 'var(--text-primary)',
+            fontSize: '13px',
+            fontWeight: '600',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            zIndex: 1200,
+          }}
+        >
+          <span style={{ color: '#10b981', fontWeight: 'bold' }}>✓</span>
+          <span>Deadline saved</span>
+        </div>
       )}
     </div>
   )

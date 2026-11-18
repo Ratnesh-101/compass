@@ -24,7 +24,7 @@ import ChatHeaderToolbar from './chat/ChatHeaderToolbar'
 import ParkedThoughtsShelf from './chat/ParkedThoughtsShelf'
 import ProfileFactsShelf from './chat/ProfileFactsShelf'
 
-const CONNECT_ERROR = "I encountered an issue connecting to Compass. Please verify the service is running and try again."
+const CONNECT_ERROR = "That took too long and the connection dropped. Your question is saved. Try again?"
 
 export default function ChatPanel({
   messages, setMessages, conversationId, setConversationId, isTyping, onChatComplete,
@@ -35,6 +35,7 @@ export default function ChatPanel({
   const [activeSpecialist, setActiveSpecialist] = useState(null)
   const [streamingText, setStreamingText] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
+  const [continuingMessageId, setContinuingMessageId] = useState(null)
   const [showContext, setShowContext] = useState(false)
   const [showHistoryDrawer, setShowHistoryDrawer] = useState(false)
   const [pastConversations, setPastConversations] = useState([])
@@ -105,9 +106,10 @@ export default function ChatPanel({
   const isSendingRef = useRef(false)
   const activeAbortControllerRef = useRef(null)
   const activeRequestIdRef = useRef(0)
+  const autoReopenedRef = useRef(false)
 
   // Load past conversations and memory overview on mount & drawer open
-  const loadHistoryData = async () => {
+  const loadHistoryData = async (isInitialMount = false) => {
     setLoadingHistory(true)
     try {
       const [convs, mem, facts, parked] = await Promise.all([
@@ -122,6 +124,11 @@ export default function ChatPanel({
           return new Date(b.last_active_at) - new Date(a.last_active_at)
         })
         setPastConversations(sorted)
+        // N-022: Automatically reopen the most recent conversation after page refresh
+        if (isInitialMount && !autoReopenedRef.current && !conversationId && sorted.length > 0 && (!initialPrompt || !initialPrompt.trim())) {
+          autoReopenedRef.current = true
+          handleSelectPastChat(sorted[0].id)
+        }
       }
       if (mem) {
         setMemoryOverview(mem)
@@ -150,7 +157,7 @@ export default function ChatPanel({
   }
 
   useEffect(() => {
-    loadHistoryData()
+    loadHistoryData(true)
   }, [])
 
   useEffect(() => {
@@ -191,33 +198,20 @@ export default function ChatPanel({
   const handleRecap = async () => {
     if (isStreaming || isTyping || isSendingRef.current) return
     if (!conversationId || messages.length === 0) {
-      setMessages(prev => [
-        ...prev,
-        { role: 'assistant', text: "This conversation is empty right now, there are no messages to recap." }
-      ])
+      setMessages(prev => [...prev, { role: 'assistant', text: "This conversation is empty right now, there are no messages to recap." }])
       return
     }
-
     setMessages(prev => [...prev, { role: 'user', text: "Recap where I left off" }])
     setIsStreaming(true)
     setStreamingText('Generating recap of decisions, open questions, and next steps…')
-
     try {
       const data = await fetchChatRecap(conversationId)
-      setIsStreaming(false)
-      setStreamingText('')
-      setMessages(prev => [
-        ...prev,
-        { role: 'assistant', text: data.recap || "Unable to generate recap right now." }
-      ])
+      setIsStreaming(false); setStreamingText('')
+      setMessages(prev => [...prev, { role: 'assistant', text: data?.recap || "Unable to generate recap right now." }])
     } catch (err) {
       console.warn('Recap error:', err)
-      setIsStreaming(false)
-      setStreamingText('')
-      setMessages(prev => [
-        ...prev,
-        { role: 'assistant', text: "Unable to generate recap right now." }
-      ])
+      setIsStreaming(false); setStreamingText('')
+      setMessages(prev => [...prev, { role: 'assistant', text: "Unable to generate recap right now." }])
     }
   }
 
@@ -230,11 +224,13 @@ export default function ChatPanel({
     let text = ''
     let targetMessageId = extraMeta?.targetMessageId || null
     let targetMessageContent = extraMeta?.targetMessageContent || null
+    let continueMessageId = extraMeta?.continueMessageId || extraMeta?.continue_message_id || null
 
     if (textToSend && typeof textToSend === 'object') {
       text = (textToSend.text || '').trim()
       targetMessageId = textToSend.targetMessageId || targetMessageId
       targetMessageContent = textToSend.targetMessageContent || targetMessageContent
+      continueMessageId = textToSend.continue_message_id || textToSend.continueMessageId || continueMessageId
     } else {
       text = (textToSend || input).trim()
     }
@@ -264,13 +260,14 @@ export default function ChatPanel({
     isSendingRef.current = true
     setInput('')
     setActiveSpecialist(null)
+    if (continueMessageId) setContinuingMessageId(continueMessageId)
 
     const specPrefix = effectiveSpecialist
       ? `[${effectiveSpecialist.icon === 'compass' ? effectiveSpecialist.name : `${effectiveSpecialist.icon} ${effectiveSpecialist.name}`}] `
       : ''
     const userMsgText = `${specPrefix}${text}`
 
-    if (!isRetry) {
+    if (!isRetry && !continueMessageId) {
       setMessages(prev => [...prev, { role: 'user', text: userMsgText }])
     }
     setIsStreaming(true)
@@ -288,6 +285,7 @@ export default function ChatPanel({
         specialistId: specialistIdToUse,
         targetMessageId,
         targetMessageContent,
+        continueMessageId,
         signal: abortController.signal,
         requestId: clientRequestId,
         onStatus: (statusEvt) => {
@@ -315,7 +313,26 @@ export default function ChatPanel({
           setStreamingThought('')
           setStreamingStatus(null)
           isSendingRef.current = false
-          if (finalText) {
+          if (continueMessageId) {
+            setContinuingMessageId(null)
+            const addedText = (doneData?.response || receivedTokens || '').trim()
+            setMessages(prev => prev.map(m => {
+              if (m.id === continueMessageId || (!m.id && m.role === 'assistant' && m === prev[prev.length - 1])) {
+                const combined = (m.text && addedText.startsWith(m.text))
+                  ? addedText
+                  : (m.text ? `${m.text}\n${addedText}` : addedText)
+                return {
+                  ...m,
+                  text: combined,
+                  isTruncated: Boolean(doneData?.is_truncated),
+                  is_truncated: Boolean(doneData?.is_truncated),
+                  evidence: doneData?.evidence || m.evidence,
+                  tasks: Array.isArray(doneData?.tasks) ? doneData.tasks : m.tasks,
+                }
+              }
+              return m
+            }))
+          } else if (finalText) {
             setMessages(prev => [...prev, {
               role: 'assistant',
               text: finalText,
@@ -323,6 +340,7 @@ export default function ChatPanel({
               tasks: Array.isArray(doneData?.tasks) ? doneData.tasks : null,
               evidence: doneData?.evidence || null,
               isTruncated: Boolean(doneData?.is_truncated),
+              is_truncated: Boolean(doneData?.is_truncated),
               verifiable: doneData?.verifiable,
               pending_action: doneData?.pending_action || doneData?.data?.pending_action,
               can_undo: Boolean(doneData?.can_undo || doneData?.data?.can_undo),
@@ -347,14 +365,29 @@ export default function ChatPanel({
             setIsStreaming(false)
             setStreamingText('')
             setStreamingThought('')
+            setContinuingMessageId(null)
             isSendingRef.current = false
             return
+          }
+          // N-011: Retry once automatically on transient stream interruption
+          if (!extraMeta?.autoRetried && !err?.committed) {
+            isSendingRef.current = false
+            setContinuingMessageId(null)
+            return handleSend(textToSend, overrideMode, explicitSpecialistId, true, {
+              ...extraMeta,
+              autoRetried: true,
+              requestId: clientRequestId,
+              targetMessageId,
+              targetMessageContent,
+              continueMessageId,
+            })
           }
           console.warn('[SSE Stream Error]', err)
           setIsStreaming(false)
           setStreamingText('')
           setStreamingThought('')
           setStreamingStatus(null)
+          setContinuingMessageId(null)
           isSendingRef.current = false
           const partialText = (err?.partialResponse || receivedTokens || '').trim()
           setMessages(prev => [...prev, failureMessage({
@@ -370,13 +403,28 @@ export default function ChatPanel({
         setIsStreaming(false)
         setStreamingText('')
         setStreamingThought('')
+        setContinuingMessageId(null)
         isSendingRef.current = false
         return
+      }
+      // N-011: Retry once automatically on transient stream interruption
+      if (!extraMeta?.autoRetried && !err?.committed) {
+        isSendingRef.current = false
+        setContinuingMessageId(null)
+        return handleSend(textToSend, overrideMode, explicitSpecialistId, true, {
+          ...extraMeta,
+          autoRetried: true,
+          requestId: clientRequestId,
+          targetMessageId,
+          targetMessageContent,
+          continueMessageId,
+        })
       }
       console.warn('[SSE Stream Failed]', err)
       setIsStreaming(false)
       setStreamingText('')
       setStreamingThought('')
+      setContinuingMessageId(null)
       isSendingRef.current = false
       const partialText = (err?.partialResponse || receivedTokens || '').trim()
       setMessages(prev => [...prev, failureMessage({
@@ -387,8 +435,18 @@ export default function ChatPanel({
     }
   }
 
+  const handleContinueResponse = (msg) => {
+    // A message that has just finished streaming has no database id yet (it is saved in the background).
+    // 'last' tells the server to continue the newest assistant message of this conversation.
+    const targetId = msg?.id || 'last'
+    handleSend({
+      text: "Continue response",
+      continue_message_id: targetId,
+      continueMessageId: targetId,
+    })
+  }
+
   const handleRetry = (msgIndex, retryPrompt, retrySpecialistId = null, retryRequestId = null) => {
-    // Remove the failed assistant message at msgIndex, preserving original user prompt
     setMessages(prev => prev.filter((_, idx) => idx !== msgIndex))
     handleSend(retryPrompt, null, retrySpecialistId, true, { requestId: retryRequestId })
   }
@@ -407,42 +465,27 @@ export default function ChatPanel({
   }, [initialPrompt, onClearInitialPrompt])
 
   const handleNewChat = () => {
-    activeRequestIdRef.current += 1 // invalidate any in-flight stream
+    activeRequestIdRef.current += 1
     if (activeAbortControllerRef.current) {
       activeAbortControllerRef.current.abort()
       activeAbortControllerRef.current = null
     }
     clearStreamTimer()
-    setIsStreaming(false)
-    setStreamingText('')
-    setStreamingThought('')
-    setStreamingStatus(null)
-    isSendingRef.current = false
-    setConvMode(null)
-    setMessages([
-      {
-        role: 'assistant',
-        text: "New conversation started! Long-term memory is active across sessions, so I remember your past decisions, tasks, and deadlines. How can I help you plan today?"
-      }
-    ])
+    setIsStreaming(false); setStreamingText(''); setStreamingThought(''); setStreamingStatus(null); isSendingRef.current = false; setConvMode(null)
+    setMessages([{ role: 'assistant', text: "New conversation started! How can I help you plan today?" }])
     if (setConversationId) setConversationId(null)
     setShowHistoryDrawer(false)
   }
 
   const handleSelectPastChat = async (pastConvId) => {
-    activeRequestIdRef.current += 1 // invalidate any in-flight stream
+    activeRequestIdRef.current += 1
     const loadRequestId = activeRequestIdRef.current
     if (activeAbortControllerRef.current) {
       activeAbortControllerRef.current.abort()
       activeAbortControllerRef.current = null
     }
     clearStreamTimer()
-    setIsStreaming(false)
-    setStreamingText('')
-    setStreamingThought('')
-    setStreamingStatus(null)
-    isSendingRef.current = false
-    setConvMode(null)
+    setIsStreaming(false); setStreamingText(''); setStreamingThought(''); setStreamingStatus(null); isSendingRef.current = false; setConvMode(null)
     try {
       if (setConversationId) setConversationId(pastConvId)
       const msgs = await fetchConversationMessages(pastConvId)
@@ -584,6 +627,8 @@ export default function ChatPanel({
             onSendMessage={handleSend}
             onSelectMode={handleSelectMode}
             onRetry={handleRetry}
+            continuingMessageId={continuingMessageId}
+            onContinueResponse={handleContinueResponse}
             tasks={tasks}
             userInput={input}
           />

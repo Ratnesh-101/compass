@@ -101,7 +101,7 @@ async def test_list_projects(db_conn):
     await get_or_create_project(db_conn, f"Coursework Proj {unique_id}", "coursework")
     await get_or_create_project(db_conn, f"Code Proj {unique_id}", "code")
 
-    coursework_projs = await list_projects(db_conn, domain="coursework")
+    coursework_projs = await list_projects(db_conn, domain="coursework", all_tenants=True)
     assert any(p["name"] == f"Coursework Proj {unique_id}" for p in coursework_projs)
     assert all(p["domain"] == "coursework" for p in coursework_projs)
 
@@ -151,7 +151,7 @@ async def test_task_crud_lifecycle(db_conn):
     assert fetched["project"]["id"] == proj_id
 
     # 4. List Tasks with filter
-    code_tasks = await list_tasks(db_conn, domain="code", status="open")
+    code_tasks = await list_tasks(db_conn, domain="code", status="open", all_tenants=True)
     assert any(t["id"] == task_id for t in code_tasks)
 
     # 5. Update Task

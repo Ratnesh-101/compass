@@ -62,30 +62,11 @@ test('mapPersonaError maps network error properly', () => {
   assert.equal(res.canRetry, true)
 })
 
-test('Dashboard.jsx and Timeline.jsx static audit: no alert() in persona seed handler, double-click guard exists', () => {
-  const dashPath = path.resolve(__dirname, '../src/components/Dashboard.jsx')
-  const dashSrc = fs.readFileSync(dashPath, 'utf8')
-  const timelinePath = path.resolve(__dirname, '../src/components/Timeline.jsx')
-  const timelineSrc = fs.readFileSync(timelinePath, 'utf8')
-
-  // Check no alert() calls in persona handlers
-  const dashSeedHandler = dashSrc.slice(
-    dashSrc.indexOf('const handleSeedJudgePersona ='),
-    dashSrc.indexOf('const today = useMemo')
-  )
-  assert.equal(dashSeedHandler.includes('alert('), false, 'Dashboard handleSeedJudgePersona must not call alert()')
-  assert.ok(dashSeedHandler.includes('if (seedingPersona && !isRetry) return'), 'Dashboard handleSeedJudgePersona must prevent double clicks')
-
-  const timeSeedHandler = timelineSrc.slice(
-    timelineSrc.indexOf('const handleSeedJudgePersona ='),
-    timelineSrc.indexOf('const handleDelete =')
-  )
-  assert.equal(timeSeedHandler.includes('alert('), false, 'Timeline handleSeedJudgePersona must not call alert()')
-  assert.ok(timeSeedHandler.includes('if (seedingPersona && !isRetry) return'), 'Timeline handleSeedJudgePersona must prevent double clicks')
-
-  // Check inline dismissible notice banner rendered in both
-  assert.ok(dashSrc.includes('role="status"'), 'Dashboard must render accessible status role banner')
-  assert.ok(dashSrc.includes('Retry'), 'Dashboard notice must provide Retry button when retryable')
-  assert.ok(timelineSrc.includes('role="status"'), 'Timeline must render accessible status role banner')
-  assert.ok(timelineSrc.includes('Retry'), 'Timeline notice must provide Retry button when retryable')
+test('Dashboard.jsx and Timeline.jsx no longer import the persona notice mapper (seeding UI removed)', () => {
+  const dashSrc = fs.readFileSync(path.resolve(__dirname, '../src/components/Dashboard.jsx'), 'utf8')
+  const timelineSrc = fs.readFileSync(path.resolve(__dirname, '../src/components/Timeline.jsx'), 'utf8')
+  assert.equal(dashSrc.includes('personaNotice'), false)
+  assert.equal(timelineSrc.includes('personaNotice'), false)
+  assert.equal(dashSrc.includes('handleSeedJudgePersona'), false)
+  assert.equal(timelineSrc.includes('handleSeedJudgePersona'), false)
 })

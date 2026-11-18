@@ -10,9 +10,26 @@ import logging
 import re
 from urllib.parse import urlparse
 
+from backend.services.ownership import has_caller, scope_owner
 from backend.skills.registry import register_skill
 
 logger = logging.getLogger("compass.skills.web")
+
+
+def _owner_required_result() -> Dict[str, Any]:
+    """Error result for memory writes with no caller (an ownerless chunk is never retrievable)."""
+    return {
+        "success": False,
+        "data": {},
+        "summary": "user_id required to store memory",
+        "response": "Cannot store memory without a user identity.",
+        "error": "user_id required",
+    }
+
+
+def _chunk_owner(user_id: Any) -> str:
+    """Owner for stored chunks. Admin ("admin") is kept literal so its chunks stay searchable by admin."""
+    return scope_owner(user_id) or str(user_id)
 
 
 @register_skill("search_web")
@@ -57,6 +74,8 @@ async def handle_search_web(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
 
     results = resp.get("results", [])
     from backend.services.tavily_authority import sort_and_enrich_sources
+    from backend.services.web_answer import drop_social_results, synthesize_web_answer
+    results = drop_social_results(results)  # N-009: social posts are noise, not sources
     ranked_results = sort_and_enrich_sources(results) if results else results
 
     citations = [
@@ -143,23 +162,10 @@ async def handle_search_web(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
 
             formatted_response = "\n".join(out_lines).strip()
         else:
-            # Deadline query but no explicit dates extracted
-            parts = [
-                f"### Web Research: *{query}*",
-                "",
-                "No explicit deadline date could be conclusively verified from the official sources. Here are the most authoritative references found:",
-                "",
-            ]
-            for r in ranked_results[:3]:
-                badge = r.get("authority_badge", "Web")
-                parts.append(f"• [{r.get('title', 'Untitled')}]({r.get('url', '')}) `{badge}`\n  {r.get('content', '')[:350].strip()}...")
-            formatted_response = "\n".join(parts)
+            # Deadline query but no explicit dates extracted: short answer + source links, no pasted snippets
+            formatted_response = await synthesize_web_answer(query, ranked_results)
     elif ranked_results:
-        parts = [f"**Web Search Results for:** *{query}*"]
-        for r in ranked_results[:3]:
-            badge = r.get("authority_badge", "Web")
-            parts.append(f"• [{r.get('title', 'Untitled')}]({r.get('url', '')}) `{badge}`\n  {r.get('content', '')[:400].strip()}...")
-        formatted_response = "\n".join(parts)
+        formatted_response = await synthesize_web_answer(query, ranked_results)
 
     return {
         "success": True,
@@ -214,6 +220,9 @@ async def handle_ingest_url(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
             "error": f"SSRF blocked: {reason}",
         }
 
+    if not has_caller(args.get("user_id")):
+        return _owner_required_result()
+
     if not tavily_service.tavily_available():
         return {
             "success": False,
@@ -256,7 +265,9 @@ async def handle_ingest_url(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
     async with pool.acquire() as conn:
         project_id = None
         if args.get("project"):
-            proj = await structured.get_or_create_project(conn, args["project"], domain)
+            proj = await structured.get_or_create_project(
+                conn, args["project"], domain, owner_id=args.get("user_id") or None
+            )
             project_id = proj["id"]
 
         tags = ["web", "tavily-extract"]
@@ -273,6 +284,7 @@ async def handle_ingest_url(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
                 project_id=project_id,
                 source=url,
                 tags=tags,
+                user_id=_chunk_owner(args.get("user_id")),
             )
             stored += 1
 
@@ -623,6 +635,9 @@ async def handle_save_verified_finding(args: Dict[str, Any], pool: Any) -> Dict[
     source_url = (args.get("source_url") or "tavily-research").strip()
     citation = args.get("citation") or ""
 
+    if not has_caller(args.get("user_id")):
+        return _owner_required_result()
+
     stored_text = f"{fact}\n\nEvidence Source: {source_url}"
     if citation:
         stored_text += f" ({citation})"
@@ -630,7 +645,9 @@ async def handle_save_verified_finding(args: Dict[str, Any], pool: Any) -> Dict[
     async with pool.acquire() as conn:
         project_id = None
         if args.get("project"):
-            proj = await structured.get_or_create_project(conn, args["project"], domain)
+            proj = await structured.get_or_create_project(
+                conn, args["project"], domain, owner_id=args.get("user_id") or None
+            )
             project_id = proj["id"]
 
         await vector.store_chunk(
@@ -640,6 +657,7 @@ async def handle_save_verified_finding(args: Dict[str, Any], pool: Any) -> Dict[
             project_id=project_id,
             source=source_url,
             tags=["web", "tavily-verified", "research-finding"],
+            user_id=_chunk_owner(args.get("user_id")),
         )
 
     summary = f"Saved verified finding to {domain.upper()} memory with citation provenance."

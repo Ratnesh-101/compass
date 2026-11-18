@@ -488,7 +488,7 @@ textarea {
 
 .vector-tag {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
   background: var(--bg-card-soft);
   padding: 2px 8px;
@@ -984,7 +984,7 @@ textarea {
     gap: 10px !important;
   }
   .countdown-badge {
-    font-size: 11px !important;
+    font-size: 12px !important;
     padding: 3px 8px !important;
   }
 }
@@ -1224,7 +1224,7 @@ textarea {
   }
 
   .calendar-policy-subtext {
-    font-size: 11px !important;
+    font-size: 12px !important;
     line-height: 1.4 !important;
   }
 
@@ -1720,7 +1720,7 @@ textarea {
 }
 
 .compass-page-badge {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-secondary);
   background: var(--bg-card-soft);
   border: 1px solid var(--border);
@@ -1825,7 +1825,7 @@ textarea {
   background: var(--bg-card-soft);
   color: var(--text-primary);
   border: 1px solid var(--border);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   padding: 1px 6px;
   border-radius: 4px;
@@ -2386,5 +2386,145 @@ textarea {
   white-space: nowrap;
   border-width: 0;
 }
+
+/* Accessible Skip-to-Content Link (N-030 / T-028) */
+.skip-to-content {
+  position: absolute;
+  top: -9999px;
+  left: 16px;
+  z-index: 9999;
+  padding: 8px 16px;
+  background: var(--primary, #f5a623);
+  color: var(--accent-text, #1b1a17);
+  font-weight: 700;
+  border-radius: var(--radius-btn, 6px);
+  text-decoration: none;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  transition: top 0.15s ease;
+}
+.skip-to-content:focus {
+  top: 16px;
+  outline: 2px solid var(--accent, #f5a623);
+  outline-offset: 2px;
+}
+
+/* Waking Compass Progress Bar Animation (N-012) */
+@keyframes wakingProgressAnim {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(20%); }
+  100% { transform: translateX(100%); }
+}
+
+.waking-progress-bar {
+  animation: wakingProgressAnim 2.2s ease-in-out infinite;
+  width: 100%;
+}
+
+/* Status Notices container positioning & mobile responsiveness (N-012) */
+.status-notices-container {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 1050;
+  max-width: 420px;
+}
+
+@media (max-width: 640px) {
+  .status-notices-container {
+    bottom: 76px !important;
+    left: 16px !important;
+    right: 16px !important;
+    max-width: none !important;
+  }
+}
+
+/* Accessible typography scale for body text on the dashboard (N-030 / T-028) */
+.dashboard-container {
+  font-size: 14px;
+}
+
+.dashboard-container p {
+  font-size: max(13px, 0.93rem);
+}
+
+/* Darkened chip and counter styling for 4.5:1 contrast (N-030) */
+.timeline-filter-tab .tab-counter,
+.filter-counter-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* Phone Layout (390px): Stacked Cards for Tables and Compressed Stat Cards (N-032) */
+@media (max-width: 640px) {
+  /* Application Center and Data Tables become stacked cards */
+  .application-center-table,
+  .career-table,
+  table.data-table {
+    display: block !important;
+    width: 100% !important;
+  }
+
+  .application-center-table thead,
+  .career-table thead,
+  table.data-table thead {
+    display: none !important;
+  }
+
+  .application-center-table tbody,
+  .career-table tbody,
+  table.data-table tbody {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+    width: 100% !important;
+  }
+
+  .application-center-table tr,
+  .career-table tr,
+  table.data-table tr {
+    display: flex !important;
+    flex-direction: column !important;
+    padding: 14px !important;
+    background: var(--bg-card) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-card, 8px) !important;
+    gap: 6px !important;
+  }
+
+  .application-center-table td,
+  .career-table td,
+  table.data-table td {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    padding: 4px 0 !important;
+    border: none !important;
+    font-size: 13px !important;
+    min-height: auto !important;
+  }
+
+  /* Career overview 5 stat cards: swipeable compact horizontal row on mobile so listings start near the top (N-032) */
+  .radar-overview-grid,
+  .career-stats-grid,
+  div[style*="repeat(auto-fit, minmax(180px"] {
+    display: flex !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    gap: 10px !important;
+    padding-bottom: 8px !important;
+    margin-bottom: 14px !important;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  div[style*="repeat(auto-fit, minmax(180px"] > * {
+    min-width: 155px !important;
+    flex-shrink: 0 !important;
+    scroll-snap-align: start;
+    padding: 12px !important;
+  }
+}
+
 
 

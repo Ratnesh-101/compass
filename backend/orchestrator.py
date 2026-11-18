@@ -4,6 +4,7 @@ Compass — Skill Orchestrator.
 Coordinates routing via Nemotron-3 Nano and execution of structured database operations.
 """
 
+import os
 import time
 import uuid
 import logging
@@ -69,6 +70,17 @@ from backend.orchestrator_helpers import (
 )
 
 _parse_iso_date = parse_iso_date
+
+# T-014 / N-025: single-task chat adds show the same preview-then-confirm card as multi-task adds.
+# Tests of the old save-immediately behavior can set this to False.
+# Read from the environment at import (default on; 0/false/no/off turn it off) so it can be rolled back
+# on the host without a deploy. Kept as a plain module attribute so tests can monkeypatch it.
+SINGLE_TASK_PREVIEW = os.environ.get("SINGLE_TASK_PREVIEW", "true").strip().lower() not in {"0", "false", "no", "off"}
+
+
+class _PreviewSingleAdd(Exception):
+    """Raised inside the add_task branch to leave the DB block and answer with a preview instead."""
+
 
 # Replies that only make sense for a single-task delete / disambiguation, never for clear_schedule.
 _SINGLE_TASK_REPLIES = frozenset({
@@ -654,10 +666,21 @@ async def _handle_message_core(
         domain = args.get("domain") or "general"
         project_name = args.get("project")
         due_str = args.get("due_date")
-        due_date = _parse_iso_date(due_str)
         user_tz = request_timezone.get() or "UTC"
+        # N-004: the model's weekday arithmetic is not trusted; a relative phrase in the user's own
+        # message ("next wednesday", "tomorrow", "in 3 days") is resolved deterministically in their zone.
+        from backend.services.task_dates import reconcile_due_date
+        from backend.router_helpers import _current_today
+        model_due = _parse_iso_date(due_str)
+        due_date = reconcile_due_date(message, model_due, _current_today())
+        if due_date != model_due:
+            logger.info("Due date corrected from %s to %s using the message text", model_due, due_date)
         due_clock = extract_clock(due_str, args.get("time_str"), message) if due_date else None
         due_at = combine_local(due_date, due_clock, user_tz) if due_date and due_clock else None
+        from backend.services.task_title_clean import clean_title
+        cleaned_title = clean_title(title)
+        if cleaned_title and cleaned_title != title and not title_problem(cleaned_title):
+            title = cleaned_title
 
         # Normalize priority & status
         raw_p = str(args.get("priority") or "medium").lower().strip()
@@ -781,9 +804,14 @@ async def _handle_message_core(
                             "routing_latency_ms": int((time.perf_counter() - start_time) * 1000),
                         }
 
+                # T-014 / N-025: a single add goes through the same preview-then-confirm card as a
+                # pasted list. Nothing is written until the user confirms (Undo still works afterwards).
+                if SINGLE_TASK_PREVIEW:
+                    raise _PreviewSingleAdd()
+
                 project_id = None
                 if project_name:
-                    proj = await structured.get_or_create_project(conn, name=project_name, domain=domain)
+                    proj = await structured.get_or_create_project(conn, name=project_name, domain=domain, owner_id=task_owner)
                     project_id = proj.get("id")
 
                 task_record = await structured.create_task(
@@ -793,6 +821,25 @@ async def _handle_message_core(
                 )
                 from backend.services.chat_idempotency import record_committed_outcome
                 record_committed_outcome(task_record, conv_id=conv_id)
+        except _PreviewSingleAdd:
+            from backend.services.task_intake import handle_intake_preview
+            due_text = ""
+            if due_date:
+                due_text = f"{due_date.isoformat()} {due_clock:%H:%M}" if due_clock else due_date.isoformat()
+            try:
+                duration = int(args.get("duration_minutes")) if args.get("duration_minutes") else None
+            except (TypeError, ValueError):
+                duration = None
+            return await handle_intake_preview(
+                message=message, conv_id=conv_id, owner_identity=owner_identity, user_id=user_id,
+                guest_id=guest_id, persist=persist, active_pool=active_pool, start_time=start_time,
+                items=[{
+                    "title": title, "domain": domain, "priority": priority,
+                    "duration_minutes": duration, "due_text": due_text,
+                    "project": str(project_name).strip() if project_name else None,
+                    "notes": str(notes).strip() if notes else None,
+                }],
+            )
         except Exception as e:
             logger.error(f"add_task failed — database unavailable: {e}", exc_info=True)
             latency_ms = int((time.perf_counter() - start_time) * 1000)

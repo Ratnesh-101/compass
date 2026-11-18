@@ -79,7 +79,7 @@ export default function ChatHeaderToolbar({
     if (isOnline && memoryActive) {
       return {
         dotColor: 'var(--domain-code, #1c8a62)',
-        text: 'Connected, memory on',
+        text: 'Memory is on',
         ariaText: 'Workspace connected and cross-session memory is active',
       }
     }
@@ -107,9 +107,9 @@ export default function ChatHeaderToolbar({
   const statusMeta = getStatusMeta()
 
   const toneOptions = [
-    { id: 'brief', label: 'Brief' },
-    { id: 'balanced', label: 'Balanced' },
-    { id: 'exploratory', label: 'Exploratory' },
+    { id: 'brief', label: 'Short' },
+    { id: 'balanced', label: 'Normal' },
+    { id: 'exploratory', label: 'Detailed' },
   ]
 
   const handleToneKeyDown = (e, currentId) => {
@@ -210,7 +210,7 @@ export default function ChatHeaderToolbar({
             role="radiogroup"
             aria-labelledby="label-compass-style"
             className="compass-style-segmented"
-            title="Adjust assistant response style (Brief, Balanced, Exploratory)"
+            title="Adjust assistant response style (Short, Normal, Detailed)"
           >
             {toneOptions.map((t) => {
               const isSelected = tone === t.id

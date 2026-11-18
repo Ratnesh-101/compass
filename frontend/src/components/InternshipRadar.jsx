@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Radar, RefreshCw, Loader2, ArrowDown, Info, X } from 'lucide-react'
 import RadarOverviewCards from './radar/RadarOverviewCards'
 import RadarFilters from './radar/RadarFilters'
 import RadarOpportunityCard from './radar/RadarOpportunityCard'
 import RadarDetailModal from './radar/RadarDetailModal'
+import { radarHeadingText } from './radar/radarDisplay'
 
 const ApplicationWorkspaceModal = React.lazy(() => import('./career/ApplicationWorkspaceModal'))
 import {
@@ -13,7 +14,6 @@ import {
   fetchUpcomingOpportunities,
   fetchRadarAnalytics,
   fetchWatchlist,
-  fetchApplications,
   saveOpportunity,
   unsaveOpportunity,
   updateApplication,
@@ -21,14 +21,19 @@ import {
   verifyOpportunity,
 } from '../api/radarApi'
 import { hasSavedProfile } from '../utils/careerUiHelpers'
-import { newestRefreshDate } from '../utils/radarRefresh'
+import { newestRefreshDate, createRefreshGate } from '../utils/radarRefresh'
+import { fetchApplications as fetchCareerApplications } from '../api/careerApi'
+import { countApplications, stageOfStatus } from '../utils/applicationStages'
+import TopMatchesBar from './career/TopMatchesBar'
 
 export default function InternshipRadar({
   refreshTrigger = 0,
+  hasResume = false,
   onRefreshComplete,
   onRefreshError,
   onOpenProfile,
   onNavigateToResumeStudio,
+  onNavigateToApplications,
 } = {}) {
   const handleGoToResumeStudio = onNavigateToResumeStudio || onOpenProfile
   const handleOpenCandidateProfile = onOpenProfile || onNavigateToResumeStudio
@@ -49,7 +54,7 @@ export default function InternshipRadar({
   const [page, setPage] = useState(1)
   const [hasMore, setHasMore] = useState(false)
   const [isLoadingMore, setIsLoadingMore] = useState(false)
-  const isFirstMountRef = useRef(true)
+  const [careerApps, setCareerApps] = useState(null)
 
   const [selectedDetailOpp, setSelectedDetailOpp] = useState(null)
   const [activeWorkspaceOpp, setActiveWorkspaceOpp] = useState(null)
@@ -57,19 +62,27 @@ export default function InternshipRadar({
 
   const hasCandidateProfile = hasSavedProfile(profile)
 
-  // Load analytics & profile
+  // Load analytics, profile and the one application list that feeds the Applications counter
   const loadMetadata = useCallback(async () => {
     try {
-      const [analyticsData, profileData] = await Promise.allSettled([
+      const [analyticsData, profileData, careerData] = await Promise.allSettled([
         fetchRadarAnalytics(),
         fetchRadarProfile(),
+        fetchCareerApplications(),
       ])
       if (analyticsData.status === 'fulfilled') setStats(analyticsData.value)
       if (profileData.status === 'fulfilled') setProfile(profileData.value)
+      if (careerData.status === 'fulfilled') setCareerApps(careerData.value)
     } catch (e) {
       console.warn('[Radar] Error fetching metadata:', e)
     }
   }, [])
+
+  // The Applications card shows the career tracker's count (not the old radar-only tracker).
+  const displayStats = useMemo(
+    () => (stats && careerApps ? { ...stats, applications_in_progress_count: countApplications(careerApps).active } : stats),
+    [stats, careerApps]
+  )
 
   // Load list based on active tab and filters
   const loadOpportunities = useCallback(async (options = {}) => {
@@ -116,7 +129,12 @@ export default function InternshipRadar({
       } else if (activeTab === 'watchlist') {
         items = await fetchWatchlist()
       } else if (activeTab === 'applications') {
-        items = await fetchApplications()
+        // One tracker: the same career applications the Application Center lists and the counter counts.
+        const apps = await fetchCareerApplications()
+        setCareerApps(apps)
+        items = apps
+          .filter(a => a.opportunity)
+          .map(a => ({ ...a.opportunity, application_status: stageOfStatus(a.status) }))
       } else {
         // 'all'
         const res = await fetchOpportunities({
@@ -185,7 +203,14 @@ export default function InternshipRadar({
     }
   }, [activeTab, selectedCategory, selectedEmployerType, workArrangement, searchQuery, indiaOnly])
 
-  // Asynchronous background refresh for recommendation and eligibility updates
+  // Asynchronous background refresh for recommendation and eligibility updates.
+  // The parent's callbacks are new functions on every render, so they are read from a ref and are
+  // NOT dependencies: otherwise every refresh re-rendered the parent and started the next one.
+  const refreshHandlersRef = useRef({ onRefreshComplete, onRefreshError })
+  useEffect(() => {
+    refreshHandlersRef.current = { onRefreshComplete, onRefreshError }
+  })
+
   const handleBackgroundRefresh = useCallback(async () => {
     setIsRefreshingMatches(true)
     try {
@@ -193,28 +218,27 @@ export default function InternshipRadar({
         loadMetadata(),
         loadOpportunities({ background: true }),
       ])
-      if (typeof onRefreshComplete === 'function') {
-        onRefreshComplete()
-      }
+      refreshHandlersRef.current.onRefreshComplete?.()
     } catch (err) {
       console.error('[Radar] Background refresh failed:', err)
-      if (typeof onRefreshError === 'function') {
-        onRefreshError(err)
-      }
+      refreshHandlersRef.current.onRefreshError?.(err)
     } finally {
       setIsRefreshingMatches(false)
     }
-  }, [loadMetadata, loadOpportunities, onRefreshComplete, onRefreshError])
+  }, [loadMetadata, loadOpportunities])
 
+  // Run once per profile save (the counter going up), never because a dependency changed identity.
+  const [refreshGate] = useState(() => createRefreshGate(refreshTrigger))
+  const isFirstMountRef = useRef(true)
   useEffect(() => {
     if (isFirstMountRef.current) {
       isFirstMountRef.current = false
       return
     }
-    if (refreshTrigger > 0) {
+    if (refreshGate.check(refreshTrigger)) {
       handleBackgroundRefresh()
     }
-  }, [refreshTrigger, handleBackgroundRefresh])
+  }, [refreshTrigger, refreshGate, handleBackgroundRefresh])
 
   useEffect(() => {
     loadMetadata()
@@ -270,6 +294,7 @@ export default function InternshipRadar({
                 ...o,
                 current_status: res.current_status,
                 last_verified_at: res.last_verified_at,
+                check_failed: res.check_failed === true,
               }
             : o
         )
@@ -279,6 +304,7 @@ export default function InternshipRadar({
           ...prev,
           current_status: res.current_status,
           last_verified_at: res.last_verified_at,
+          check_failed: res.check_failed === true,
         }))
       }
       loadMetadata()
@@ -321,22 +347,33 @@ export default function InternshipRadar({
               textTransform: 'uppercase',
             }}
           >
-            Live Intel
+            Updated daily
           </span>
         </div>
         <p style={{ margin: '6px 0 0 0', fontSize: '14px', color: 'var(--text-secondary)' }}>
-          Verified AI, software engineering, and research internships for undergraduates in India with deterministic eligibility matching.
+          {radarHeadingText(indiaOnly, opportunities)}
         </p>
       </div>
 
       {/* 1. Overview Metric Cards */}
       <RadarOverviewCards
-        stats={stats}
+        stats={displayStats}
         opportunities={loading ? null : opportunities}
         profile={profile}
         onOpenProfile={handleOpenCandidateProfile}
         onNavigateToResumeStudio={handleGoToResumeStudio}
         onSelectTab={setActiveTab}
+      />
+
+      {/* One-click preparation for the best matches (calls POST /api/career/auto-prepare) */}
+      <TopMatchesBar
+        hasProfile={hasCandidateProfile || hasResume}
+        hasMatches={opportunities.length > 0}
+        onPrepared={() => {
+          loadMetadata()
+        }}
+        onShowApplications={() => setActiveTab('applications')}
+        onGoToResume={handleGoToResumeStudio}
       />
 
       {/* 2. Filter Bar */}
@@ -446,7 +483,7 @@ export default function InternshipRadar({
               Candidate Profile Required for Recommendations
             </h3>
             <p style={{ fontSize: '13px', color: 'var(--text-secondary)', maxWidth: '480px', margin: '0 auto 20px auto', lineHeight: 1.5 }}>
-              Career Copilot evaluates internship eligibility and match fit against the verified candidate profile maintained in Resume Studio. Upload or build your resume in Resume Studio to unlock personalized match scoring.
+              Career Copilot evaluates internship eligibility and match fit against the verified candidate profile maintained in My resume. Upload or build your resume in My resume to unlock personalized match scoring.
             </p>
             {handleGoToResumeStudio && (
               <button
@@ -463,7 +500,7 @@ export default function InternshipRadar({
                   cursor: 'pointer',
                 }}
               >
-                Go to Resume Studio
+                Go to My resume
               </button>
             )}
           </div>
@@ -574,6 +611,45 @@ export default function InternshipRadar({
               Explore Recommendations
             </button>
           </div>
+        ) : activeTab === 'recommended' ? (
+          <div
+            data-testid="radar-no-fit"
+            style={{
+              padding: '48px 24px',
+              textAlign: 'center',
+              borderRadius: 'var(--radius-card, 8px)',
+              background: 'var(--bg-card)',
+              border: '1px dashed var(--border)',
+            }}
+          >
+            <Radar size={36} strokeWidth={1.5} color="var(--text-muted)" style={{ margin: '0 auto 12px auto' }} />
+            <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 6px 0' }}>
+              No internships fit your profile right now
+            </h3>
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', maxWidth: '460px', margin: '0 auto 16px auto', lineHeight: 1.5 }}>
+              {indiaOnly
+                ? 'We only show roles in India or open to applicants in India that match your degree and year. You can also look at roles in other countries, or check back in a few days.'
+                : 'Nothing open matches your degree and year at the moment. Check back in a few days, or update your profile if something has changed.'}
+            </p>
+            {indiaOnly && (
+              <button
+                type="button"
+                onClick={() => setIndiaOnly(false)}
+                style={{
+                  padding: '8px 18px',
+                  borderRadius: 'var(--radius-btn, 6px)',
+                  background: 'var(--brand)',
+                  color: 'var(--accent-text, #1b1a17)',
+                  border: 'none',
+                  fontWeight: 600,
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                }}
+              >
+                Also show roles outside India
+              </button>
+            )}
+          </div>
         ) : (
           <div
             style={{
@@ -632,7 +708,7 @@ export default function InternshipRadar({
                       font: 'inherit',
                     }}
                   >
-                    Resume Studio
+                    My resume
                   </button>{' '}
                   to check eligibility for these roles.
                 </span>
@@ -722,11 +798,11 @@ export default function InternshipRadar({
         <RadarDetailModal
           opportunity={selectedDetailOpp}
           onClose={() => setSelectedDetailOpp(null)}
-          onUpdateApp={handleUpdateApplication}
           onVerify={handleVerifyOpportunity}
           isVerifying={isVerifying}
           onApply={setActiveWorkspaceOpp}
           onNavigateToResumeStudio={handleGoToResumeStudio}
+          onNavigateToApplications={onNavigateToApplications}
         />
       )}
 

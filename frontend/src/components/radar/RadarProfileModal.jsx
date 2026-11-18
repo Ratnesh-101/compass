@@ -237,7 +237,7 @@ function RadarProfileModalContent({
               Academic Eligibility & Matching Profile
             </h2>
             <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-              Used strictly for deterministic eligibility calculation and customized recommendation ranking.
+              Used only to check your eligibility and to rank the recommendations for you.
               {loadingProfile && (
                 <span style={{ marginLeft: '8px', color: 'var(--amber-text)', fontStyle: 'italic' }}>
                   (Syncing latest profile…)

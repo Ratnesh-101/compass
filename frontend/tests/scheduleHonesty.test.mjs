@@ -209,6 +209,6 @@ test('CalendarView skips the sync call for guests and words empty/policy text ho
   assert.match(src, /'No pending tasks\.'/)
   assert.match(src, /\(tasks \|\| \[\]\)\.length > 0/)
   assert.doesNotMatch(src, /Google Calendar sync<\/li>/)
-  assert.match(src, /Export as \.ics \(RFC 5545\)/)
+  assert.match(src, /Export \.ics Feed/)
   assert.match(read('App.jsx'), /isSignedIn=\{Boolean\(currentUser\?\.authenticated\)\}/)
 })

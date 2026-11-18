@@ -66,7 +66,11 @@ async def get_projects(
     try:
         pool = await get_pool()
         async with pool.acquire() as conn:
-            rows = await structured.list_projects(conn, domain=domain)
+            rows = await structured.list_projects(
+                conn, domain=domain,
+                owner_id=None if _ident.is_admin else _ident.id,
+                all_tenants=bool(_ident.is_admin),
+            )
             projects = [
                 ProjectOut(
                     id=r["id"],
@@ -178,9 +182,18 @@ async def get_dashboard(
     try:
         pool = await get_pool()
         async with pool.acquire() as conn:
-            proj_rows = await conn.fetch(
-                "SELECT domain, COUNT(*) AS count FROM projects GROUP BY domain"
-            )
+            if _ident.is_admin:
+                proj_rows = await conn.fetch(
+                    "SELECT domain, COUNT(*) AS count FROM projects GROUP BY domain"
+                )
+            else:
+                # Same scoping as list_projects: only projects holding one of the caller's live tasks.
+                proj_rows = await conn.fetch(
+                    "SELECT p.domain AS domain, COUNT(DISTINCT p.id) AS count "
+                    "FROM projects p JOIN tasks t ON t.project_id = p.id "
+                    "WHERE LOWER(t.user_id) = LOWER($1) AND t.deleted_at IS NULL GROUP BY p.domain",
+                    user_id,
+                )
             for r in proj_rows:
                 d = r["domain"]
                 if d in domains:
@@ -446,7 +459,7 @@ async def update_frontend_task(task_id: str, req: UpdateTaskRequest, request: Re
             if req.project is not None:
                 proj_name = req.project.strip() or "General"
                 dom_for_proj = update_kwargs.get("domain") or existing.get("domain", "general")
-                proj_row = await structured.get_or_create_project(conn, proj_name, dom_for_proj)
+                proj_row = await structured.get_or_create_project(conn, proj_name, dom_for_proj, owner_id=user_id)
                 update_kwargs["project_id"] = proj_row.get("id")
 
             updated = await structured.update_task(conn, numeric_id, **update_kwargs)

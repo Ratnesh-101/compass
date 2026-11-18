@@ -2,20 +2,14 @@ import React, { useState } from 'react'
 import { ExternalLink, CheckCircle2, XCircle, AlertCircle, Info, RefreshCw } from 'lucide-react'
 import { cleanOpportunity, cleanText, cleanSource } from '../../utils/jobCardCleaner'
 import Dialog from '../Dialog'
-import { formatOpportunityVerifiedAge, needsRecheck } from '../../utils/radarFreshness'
+import { needsRecheck } from '../../utils/radarFreshness'
+import RadarDescription from './RadarDescription'
+import { descriptionBlocks, friendlySourceAuthority, friendlySourceType, isOpenWorldwide, isStubDescription, lastCheckedLabel, safeVerificationBasis, WORLDWIDE_CHIP_LABEL, WORLDWIDE_DETAIL_LINE } from './radarDisplay'
 
-const PIPELINE_STATUSES = [
-  { id: 'interested', label: 'Interested' },
-  { id: 'preparing', label: 'Preparing Application' },
-  { id: 'ready_to_apply', label: 'Ready to Apply' },
-  { id: 'applied', label: 'Applied' },
-  { id: 'assessment_pending', label: 'Assessment Pending' },
-  { id: 'interviewing', label: 'Interviewing' },
-  { id: 'offer_received', label: 'Offer Received' },
-  { id: 'rejected', label: 'Rejected' },
-  { id: 'withdrawn', label: 'Withdrawn' },
-  { id: 'closed_without_applying', label: 'Closed Without Applying' },
-]
+// One tracker only: the six stages live in the Application Center (utils/applicationStages.js).
+// The radar-only 10-option status list was removed from this pop-up.
+export const APPLICATION_STATUS_POINTER =
+  'Where each application stands (Saved, Preparing, Applied, Interview, Offer, Closed) is tracked in the Application Center. Open it to see or change this job.'
 
 function isCleanString(val) {
   if (!val) return false
@@ -26,36 +20,14 @@ function isCleanString(val) {
 export default function RadarDetailModal({
   opportunity,
   onClose,
-  onUpdateApp,
   onVerify,
   isVerifying,
   onNavigateToResumeStudio,
+  onNavigateToApplications,
 }) {
   const [activeTab, setActiveTab] = useState('overview') // 'overview' | 'eligibility' | 'history' | 'tracking'
-  const [appStatus, setAppStatus] = useState(opportunity?.application_status || 'interested')
-  const [personalDeadline, setPersonalDeadline] = useState(opportunity?.personal_deadline || '')
-  const [privateNotes, setPrivateNotes] = useState(opportunity?.private_notes || '')
-  const [isSavingApp, setIsSavingApp] = useState(false)
-  const [saveSuccess, setSaveSuccess] = useState(false)
 
   if (!opportunity) return null
-
-  const handleSaveTracking = async e => {
-    e.preventDefault()
-    setIsSavingApp(true)
-    setSaveSuccess(false)
-    try {
-      await onUpdateApp(opportunity.id, {
-        application_status: appStatus,
-        personal_deadline: personalDeadline || null,
-        private_notes: privateNotes || null,
-      })
-      setSaveSuccess(true)
-      setTimeout(() => setSaveSuccess(false), 3000)
-    } finally {
-      setIsSavingApp(false)
-    }
-  }
 
   const {
     work_arrangement,
@@ -93,9 +65,9 @@ export default function RadarDetailModal({
     ? new Date(rawPostingDate).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
     : null
 
-  const formattedVerified = last_verified_at
-    ? `${new Date(last_verified_at).toLocaleDateString()} ${new Date(last_verified_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-    : null
+  const lastChecked = lastCheckedLabel(last_verified_at, { checkFailed: opportunity.check_failed === true })
+  const verificationBasis = safeVerificationBasis(verification_evidence)
+  const descriptionBlocksNonEmpty = !isStubDescription(cleanDescription) && descriptionBlocks(cleanDescription).length > 0
 
   // Validate external application URL
   const originalUrl = official_application_url || canonical_url
@@ -215,7 +187,7 @@ export default function RadarDetailModal({
             { id: 'overview', label: 'Overview & Details' },
             { id: 'eligibility', label: 'Eligibility Audit' },
             { id: 'history', label: `Recruitment Cycles (${cycles.length})` },
-            { id: 'tracking', label: 'Application Tracker' },
+            { id: 'tracking', label: 'Application status' },
           ].map(tab => {
             const isActive = activeTab === tab.id
             return (
@@ -247,6 +219,11 @@ export default function RadarDetailModal({
                   <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary, #1b1a17)', marginTop: '2px' }}>
                     {cleanLocation || 'Flexible'}
                   </div>
+                  {isOpenWorldwide(opportunity) && (
+                    <div data-testid="worldwide-detail" style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-secondary, #3d3a35)', marginTop: '4px', lineHeight: 1.4 }}>
+                      <strong>{WORLDWIDE_CHIP_LABEL}.</strong> {WORLDWIDE_DETAIL_LINE}
+                    </div>
+                  )}
                 </div>
 
                 <div style={{ padding: '10px 12px', borderRadius: '6px', background: 'var(--bg-app, #f7f5ef)', border: '1px solid var(--border, #e6e1d6)' }}>
@@ -293,11 +270,8 @@ export default function RadarDetailModal({
                 <div>
                   <strong>Posted:</strong> {formattedPosted || 'Date unrecorded by source'}
                 </div>
-                <div>
-                  <strong>Last Verified:</strong> {formattedVerified || 'Pending verification'}
-                </div>
                 <div data-testid="detail-verified-age">
-                  {formatOpportunityVerifiedAge(opportunity)}
+                  {lastChecked}
                   {needsRecheck(opportunity) && (
                     <span
                       data-testid="detail-needs-recheck-chip"
@@ -368,10 +342,8 @@ export default function RadarDetailModal({
                 <h4 style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary, #1b1a17)', marginBottom: '8px' }}>
                   Role Overview
                 </h4>
-                {cleanDescription ? (
-                  <div style={{ fontSize: '13px', color: 'var(--text-secondary, #3d3a35)', lineHeight: 1.6, whiteSpace: 'pre-line' }}>
-                    {cleanDescription}
-                  </div>
+                {cleanDescription && descriptionBlocksNonEmpty ? (
+                  <RadarDescription text={cleanDescription} />
                 ) : (
                   <div style={{ fontSize: '13px', color: 'var(--text-muted, #5f5a52)', fontStyle: 'italic' }}>
                     No extended description was published for this listing. Please review the official employer posting.
@@ -401,16 +373,19 @@ export default function RadarDetailModal({
                         }}
                       >
                         <div>
-                          <strong>{cleanSource(src.source_name) || src.source_name}</strong> ({src.source_type})
+                          <strong>{cleanSource(src.source_name) || src.source_name}</strong>
+                          {friendlySourceType(src.source_type) ? ` (${friendlySourceType(src.source_type)})` : ''}
                           {src.source_url && (
                             <div style={{ color: 'var(--text-muted, #5f5a52)', fontSize: '11px' }}>
                               {src.source_url}
                             </div>
                           )}
                         </div>
-                        <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'var(--bg-card, #ffffff)', border: '1px solid var(--border-soft, #eee9de)', fontSize: '11px' }}>
-                          {src.source_authority}
-                        </span>
+                        {friendlySourceAuthority(src.source_authority) && (
+                          <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'var(--bg-card, #ffffff)', border: '1px solid var(--border-soft, #eee9de)', fontSize: '11px' }}>
+                            {friendlySourceAuthority(src.source_authority)}
+                          </span>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -418,10 +393,10 @@ export default function RadarDetailModal({
               )}
 
               {/* Verification Evidence */}
-              {verification_evidence && (
+              {verificationBasis && (
                 <div style={{ padding: '10px 12px', borderRadius: '6px', background: 'var(--bg-app, #f7f5ef)', border: '1px solid var(--border, #e6e1d6)', fontSize: '12px', color: 'var(--text-secondary, #3d3a35)' }}>
-                  <strong>Verification Basis: </strong>
-                  <span>{verification_evidence}</span>
+                  <strong>How we checked: </strong>
+                  <span>{verificationBasis}</span>
                 </div>
               )}
             </>
@@ -520,7 +495,7 @@ export default function RadarDetailModal({
                   }}
                 >
                   <div style={{ fontSize: '12px', color: 'var(--text-secondary, #3d3a35)' }}>
-                    Need to update your degree, skills, or graduation cohort? Manage your profile in Resume Studio.
+                    Need to update your degree, skills, or graduation cohort? Manage your profile in My resume.
                   </div>
                   <button
                     type="button"
@@ -539,7 +514,7 @@ export default function RadarDetailModal({
                       cursor: 'pointer',
                     }}
                   >
-                    Go to Resume Studio
+                    Go to My resume
                   </button>
                 </div>
               )}
@@ -607,82 +582,19 @@ export default function RadarDetailModal({
             </div>
           )}
 
-          {/* TAB 4: APPLICATION TRACKER */}
+          {/* TAB 4: APPLICATION STATUS (points to the single six-stage tracker) */}
           {activeTab === 'tracking' && (
-            <form onSubmit={handleSaveTracking} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-primary, #1b1a17)', marginBottom: '4px' }}>
-                  Application Pipeline Status
-                </label>
-                <select
-                  value={appStatus}
-                  onChange={e => setAppStatus(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '8px 10px',
-                    borderRadius: 'var(--radius-input, 6px)',
-                    border: '1px solid var(--border, #e6e1d6)',
-                    background: 'var(--bg-app, #f7f5ef)',
-                    color: 'var(--text-primary, #1b1a17)',
-                    fontSize: '13px',
-                  }}
-                >
-                  {PIPELINE_STATUSES.map(s => (
-                    <option key={s.id} value={s.id}>
-                      {s.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-primary, #1b1a17)', marginBottom: '4px' }}>
-                  Personal Target Deadline
-                </label>
-                <input
-                  type="date"
-                  value={personalDeadline}
-                  onChange={e => setPersonalDeadline(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '8px 10px',
-                    borderRadius: 'var(--radius-input, 6px)',
-                    border: '1px solid var(--border, #e6e1d6)',
-                    background: 'var(--bg-app, #f7f5ef)',
-                    color: 'var(--text-primary, #1b1a17)',
-                    fontSize: '13px',
-                    boxSizing: 'border-box',
-                  }}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-primary, #1b1a17)', marginBottom: '4px' }}>
-                  Private Notes & Preparation Topics
-                </label>
-                <textarea
-                  rows={4}
-                  value={privateNotes}
-                  onChange={e => setPrivateNotes(e.target.value)}
-                  placeholder="Record interview notes, referral contacts, or requirements for this role…"
-                  style={{
-                    width: '100%',
-                    padding: '8px 10px',
-                    borderRadius: 'var(--radius-input, 6px)',
-                    border: '1px solid var(--border, #e6e1d6)',
-                    background: 'var(--bg-app, #f7f5ef)',
-                    color: 'var(--text-primary, #1b1a17)',
-                    fontSize: '13px',
-                    resize: 'vertical',
-                    boxSizing: 'border-box',
-                  }}
-                />
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'flex-start' }}>
+              <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-secondary, #3d3a35)', lineHeight: 1.5 }}>
+                {APPLICATION_STATUS_POINTER}
+              </p>
+              {onNavigateToApplications && (
                 <button
-                  type="submit"
-                  disabled={isSavingApp}
+                  type="button"
+                  onClick={() => {
+                    onClose()
+                    onNavigateToApplications()
+                  }}
                   style={{
                     padding: '8px 16px',
                     borderRadius: 'var(--radius-btn, 6px)',
@@ -691,18 +603,13 @@ export default function RadarDetailModal({
                     border: 'none',
                     fontWeight: 600,
                     fontSize: '13px',
-                    cursor: isSavingApp ? 'not-allowed' : 'pointer',
+                    cursor: 'pointer',
                   }}
                 >
-                  {isSavingApp ? 'Saving…' : 'Save Application State'}
+                  Open Application Center
                 </button>
-                {saveSuccess && (
-                  <span style={{ fontSize: '12px', color: 'var(--domain-code, #1c8a62)', fontWeight: 600 }}>
-                    ✓ Application state saved
-                  </span>
-                )}
-              </div>
-            </form>
+              )}
+            </div>
           )}
         </div>
 

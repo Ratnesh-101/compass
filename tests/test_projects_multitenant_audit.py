@@ -6,9 +6,9 @@ from backend.memory.db import get_pool
 
 @pytest.mark.asyncio
 async def test_projects_multitenant_leakage_verified():
-    """SEC-06 Verification: Demonstrates that GET /projects returns projects globally
+    """SEC-06 regression: GET /projects only lists projects holding the caller's own tasks.
 
-    across all users because the 'projects' schema lacks a user_id column.
+    (Originally demonstrated the leak; the projects table still has no user_id column.)
     """
     pool = await get_pool()
     if not pool:
@@ -37,8 +37,8 @@ async def test_projects_multitenant_leakage_verified():
             assert resp.status_code == 200
             data = resp.json()
             project_names = [p["name"] for p in data.get("projects", [])]
-            # VERIFIED-REAL: Tenant B can see Tenant A's project!
-            assert project_name in project_names, "Tenant B should see Tenant A's project (demonstrating multi-tenant leakage)"
+            # Fixed: a project with none of tenant B's tasks is not listed for B.
+            assert project_name not in project_names, "Tenant B must not see Tenant A's project"
     finally:
         async with pool.acquire() as conn:
             await conn.execute("DELETE FROM projects WHERE name = $1", project_name)

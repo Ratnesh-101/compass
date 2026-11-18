@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
+from backend.services import radar_plain as plain
 from backend.models_radar import (
     EligibilityClassification,
     OpportunityOut,
@@ -98,7 +99,60 @@ def _country_allowed(student_country: str, allowed_entries: List[str]) -> bool:
     return False
 
 
-_SUBSTANTIVE_FIELDS = {"academic_year", "grad_year", "degree", "cgpa", "backlogs", "country", "work_auth"}
+# "country" is deliberately absent: ingestion infers eligible_countries from the location text, so a
+# country match alone is not an employer requirement and can never make a listing ELIGIBLE.
+_SUBSTANTIVE_FIELDS = {"academic_year", "grad_year", "degree", "cgpa", "backlogs", "work_auth"}
+
+_CHECK_LABELS = {
+    "academic_year": "year of study",
+    "grad_year": "graduation year",
+    "degree": "degree",
+    "cgpa": "CGPA",
+    "backlogs": "backlog status",
+    "work_auth": "work authorization",
+    "country": "country",
+    "required_skills": "required skills",
+}
+
+# Countries/regions a listing location may name. Used only to contradict an inferred "India" match.
+_NAMED_COUNTRIES = {
+    "united states": ("united states", "usa", "u s a", "u s", "us"),
+    "canada": ("canada",),
+    "united kingdom": ("united kingdom", "uk", "u k", "england"),
+    "germany": ("germany",),
+    "france": ("france",),
+    "ireland": ("ireland",),
+    "netherlands": ("netherlands",),
+    "singapore": ("singapore",),
+    "australia": ("australia",),
+    "united arab emirates": ("united arab emirates", "uae"),
+}
+
+
+def countries_named_in_location(location: Optional[str]) -> Set[str]:
+    """Canonical countries explicitly named in a location string, e.g. 'Remote (United States | Canada)'.
+
+    India is reported when the text names India or an Indian city. Whole-word matching only, so
+    'Indiana' never reads as India and 'us' inside 'Austin' is ignored.
+    """
+    norm = f" {_normalize_string(location)} "
+    found: Set[str] = set()
+    for canon, names in _NAMED_COUNTRIES.items():
+        if any(f" {n} " in norm for n in names):
+            found.add(canon)
+    if re.search(r"\b(india|bengaluru|bangalore|hyderabad|pune|mumbai|delhi|gurgaon|gurugram|noida|chennai|kolkata)\b", norm):
+        found.add("india")
+    return found
+
+
+def _passed_check_labels(reasons: List[Dict[str, Any]]) -> List[str]:
+    """Human labels of the checks that actually passed, in the order they ran."""
+    out: List[str] = []
+    for r in reasons:
+        label = _CHECK_LABELS.get(r.get("field", ""))
+        if r.get("status") == "pass" and label and label not in out:
+            out.append(label)
+    return out
 
 
 def _has_substantive_requirements(reqs: OpportunityRequirementsOut) -> bool:
@@ -178,20 +232,20 @@ def evaluate_eligibility(
             reasons.append({
                 "field": "academic_year",
                 "status": "unknown",
-                "detail": f"Position requires academic year(s) {reqs.eligible_academic_years}, but your year is not set in profile."
+                "detail": f"Position requires academic year(s) {plain.join_plain(reqs.eligible_academic_years)}, but your year is not set in profile."
             })
             academic_year_status = "unknown"
         elif profile.academic_year in reqs.eligible_academic_years:
             reasons.append({
                 "field": "academic_year",
                 "status": "pass",
-                "detail": f"Your academic year ({profile.academic_year}) matches accepted years: {reqs.eligible_academic_years}."
+                "detail": f"Your academic year ({profile.academic_year}) matches accepted years: {plain.join_plain(reqs.eligible_academic_years)}."
             })
         else:
             reasons.append({
                 "field": "academic_year",
                 "status": "fail",
-                "detail": f"Position targets year(s) {reqs.eligible_academic_years}; your profile indicates year {profile.academic_year}."
+                "detail": plain.year_fail(reqs.eligible_academic_years, profile.academic_year)
             })
             academic_year_status = "fail"
 
@@ -202,20 +256,20 @@ def evaluate_eligibility(
             reasons.append({
                 "field": "grad_year",
                 "status": "unknown",
-                "detail": f"Target graduation batch is {reqs.eligible_graduation_years}, but your graduation year is unset."
+                "detail": f"Target graduation batch is {plain.join_plain(reqs.eligible_graduation_years)}, but your graduation year is unset."
             })
             grad_year_status = "unknown"
         elif profile.grad_year in reqs.eligible_graduation_years:
             reasons.append({
                 "field": "grad_year",
                 "status": "pass",
-                "detail": f"Your graduation year ({profile.grad_year}) matches eligible batch: {reqs.eligible_graduation_years}."
+                "detail": f"Your graduation year ({profile.grad_year}) matches eligible batch: {plain.join_plain(reqs.eligible_graduation_years)}."
             })
         else:
             reasons.append({
                 "field": "grad_year",
                 "status": "fail",
-                "detail": f"Requires graduation in {reqs.eligible_graduation_years}. Your profile indicates {profile.grad_year}."
+                "detail": plain.grad_year_fail(reqs.eligible_graduation_years, profile.grad_year)
             })
             grad_year_status = "fail"
 
@@ -253,7 +307,7 @@ def evaluate_eligibility(
                 reasons.append({
                     "field": "cgpa",
                     "status": "fail",
-                    "detail": f"Requires minimum CGPA of {reqs.min_gpa}/{req_scale}. Your verified CGPA is {profile.cgpa}/{user_scale}."
+                    "detail": plain.cgpa_fail(float(reqs.min_gpa), req_scale, profile.cgpa, user_scale)
                 })
                 cgpa_status = "fail"
 
@@ -264,7 +318,7 @@ def evaluate_eligibility(
             reasons.append({
                 "field": "degree",
                 "status": "unknown",
-                "detail": f"Requires degree type ({reqs.eligible_degree_types}), but degree is unconfigured in profile."
+                "detail": f"Requires degree type ({plain.join_plain(reqs.eligible_degree_types)}), but degree is unconfigured in profile."
             })
             degree_status = "unknown"
         else:
@@ -279,7 +333,7 @@ def evaluate_eligibility(
                 reasons.append({
                     "field": "degree",
                     "status": "fail",
-                    "detail": f"Requires degree in {reqs.eligible_degree_types} ({', '.join(allowed_cats)}); candidate degree is {profile.degree} ({user_cat})."
+                    "detail": plain.degree_fail(sorted(allowed_cats), profile.degree, user_cat)
                 })
                 degree_status = "fail"
             else:
@@ -292,13 +346,13 @@ def evaluate_eligibility(
                     reasons.append({
                         "field": "degree",
                         "status": "pass",
-                        "detail": f"Degree ({profile.degree}) aligns with accepted degrees: {reqs.eligible_degree_types}."
+                        "detail": f"Degree ({profile.degree}) aligns with accepted degrees: {plain.join_plain(reqs.eligible_degree_types)}."
                     })
                 else:
                     reasons.append({
                         "field": "degree",
                         "status": "unknown",
-                        "detail": f"Accepted degree types: {reqs.eligible_degree_types}. Profile degree is {profile.degree}. Equivalence requires verification."
+                        "detail": f"Accepted degree types: {plain.join_plain(reqs.eligible_degree_types)}. Profile degree is {profile.degree}. Equivalence requires verification."
                     })
                     degree_status = "unknown"
 
@@ -335,20 +389,34 @@ def evaluate_eligibility(
             reasons.append({
                 "field": "country",
                 "status": "unspecified",
-                "detail": f"Position is restricted to {reqs.eligible_countries}; your country is not set in your profile."
+                "detail": f"Position is restricted to {plain.join_plain(reqs.eligible_countries)}; your country is not set in your profile."
             })
             country_status = "unspecified"
         elif _country_allowed(student_country, reqs.eligible_countries):
-            reasons.append({
-                "field": "country",
-                "status": "pass",
-                "detail": f"Applicant residence ({student_country.title()}) satisfies geographic criteria: {reqs.eligible_countries}."
-            })
+            named = countries_named_in_location(opportunity.location)
+            student_named = student_country in named
+            if named and not student_named and not any(
+                set(_canonical_country(e).split()) & _GLOBAL_COUNTRY_WORDS for e in reqs.eligible_countries
+            ):
+                # The stored country list says yes, but the published location names other countries only.
+                shown = ", ".join(sorted(c.title() for c in named))
+                reasons.append({
+                    "field": "country",
+                    "status": "fail",
+                    "detail": f"The listing location names {shown}, not {student_country.title()}."
+                })
+                country_status = "fail"
+            else:
+                reasons.append({
+                    "field": "country",
+                    "status": "pass",
+                    "detail": f"Applicant residence ({student_country.title()}) satisfies geographic criteria: {plain.join_plain(reqs.eligible_countries)}."
+                })
         else:
             reasons.append({
                 "field": "country",
                 "status": "fail",
-                "detail": f"Position is restricted to applicants in {reqs.eligible_countries}. Candidate is based in {student_country.title()}."
+                "detail": plain.country_fail(reqs.eligible_countries, student_country.title())
             })
             country_status = "fail"
 
@@ -430,7 +498,7 @@ def evaluate_eligibility(
             reasons.append({
                 "field": "required_skills",
                 "status": "unknown",
-                "detail": f"Mandatory skills require confirmation: missing [{', '.join(missing_mandatory)}]. Profile lists [{', '.join(user_skills_norm)}]."
+                "detail": f"This role asks for skills you have not listed yet: {plain.join_plain(missing_mandatory)}. Add them to your profile if you have them."
             })
             skills_status = "unknown"
         else:
@@ -467,7 +535,12 @@ def evaluate_eligibility(
     failed_reasons = [r for r in reasons if r.get("status") == "fail"]
     if failed_reasons:
         failed_fields = [r["field"] for r in failed_reasons]
-        explanation = f"Ineligible: Mandatory requirement(s) for {', '.join(failed_fields)} do not match your verified profile."
+        user_cat = _degree_category(profile.degree) if profile.degree else "other"
+        allowed_cats = sorted({_degree_category(d) for d in reqs.eligible_degree_types})
+        explanation = plain.ineligible_explanation(
+            [str(r.get("detail", "")).strip() for r in failed_reasons],
+            plain.next_step(failed_fields, allowed_cats, profile.degree, user_cat),
+        )
         return (EligibilityClassification.INELIGIBLE, explanation, reasons)
 
     # 2. Conflicting requirements or unknown mandatory requirements => POTENTIAL_MATCH (POTENTIALLY_ELIGIBLE)
@@ -483,6 +556,18 @@ def evaluate_eligibility(
         for r in reasons
     )
     has_substantive_unknown = any(r["field"] in _SUBSTANTIVE_FIELDS for r in unknown_reasons)
+    country_passed = any(r["field"] == "country" and r.get("status") == "pass" for r in reasons)
+    if (
+        not has_substantive_pass and not has_substantive_unknown and not reqs.has_conflicting_requirements
+        and country_passed
+    ):
+        # Only the (possibly inferred) country matched. That is not an employer requirement.
+        return (
+            EligibilityClassification.POTENTIAL_MATCH,
+            "Possible match: Requirements not published by the employer. Only your country was compared, "
+            "so check the listing for degree, year and other conditions before applying.",
+            reasons,
+        )
     if not has_substantive_pass and not has_substantive_unknown and not reqs.has_conflicting_requirements:
         return (
             EligibilityClassification.INSUFFICIENT_INFORMATION,
@@ -494,6 +579,10 @@ def evaluate_eligibility(
         explanation = f"Possible match: Aligns with profile, but requires verification of: {', '.join(unknown_fields)}."
         return (EligibilityClassification.POTENTIAL_MATCH, explanation, reasons)
 
-    # 3. All known mandatory requirements verified & passed
-    explanation = "Confirmed eligible (Strong match): Your degree, academic cohort, CGPA, and authorization satisfy all mandatory requirements."
+    # 3. All known mandatory requirements verified & passed. Name only the checks that were actually made.
+    checked = _passed_check_labels(reasons)
+    explanation = (
+        f"Confirmed eligible (Strong match): your {', '.join(checked)} meet the requirements the employer published."
+        if checked else "Confirmed eligible (Strong match)."
+    )
     return (EligibilityClassification.ELIGIBLE, explanation, reasons)

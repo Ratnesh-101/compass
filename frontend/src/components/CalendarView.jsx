@@ -33,6 +33,7 @@ import {
 } from 'lucide-react'
 import { CalendarGrid } from './calendar/CalendarGrid'
 import { CalendarSidebar } from './calendar/CalendarSidebar'
+import { PLANNING_HOURS_TEXT } from './calendar/planningHours'
 import { ProposedPlanModal, QuickConnectModal, IcsExportModal } from './calendar/CalendarModals'
 import DarkModeToggle from './DarkModeToggle'
 import { syncResultBanner, syncErrorBanner, commitResultBanner, reactiveResultBanner, availabilityNote } from '../utils/scheduleHonesty'
@@ -133,7 +134,7 @@ export default function CalendarView({
   isDarkMode,
   onToggleDarkMode,
 }) {
-  const [calendarStatus, setCalendarStatus] = useState({ connected: false, mode: 'demo', account_email: 'demo-scholar@compass.ai' })
+  const [calendarStatus, setCalendarStatus] = useState({ connected: false, mode: 'demo', account_email: '' })
   const [selectedDate, setSelectedDate] = useState(() => toIso(new Date()))
   const [monthCursor, setMonthCursor] = useState(() => new Date())
   const [busyIntervals, setBusyIntervals] = useState([])
@@ -365,7 +366,7 @@ export default function CalendarView({
 
   const handleDisconnect = async () => {
     await disconnectCalendar()
-    setCalendarStatus({ connected: false, mode: 'demo', account_email: 'demo-scholar@compass.ai' })
+    setCalendarStatus({ connected: false, mode: 'demo', account_email: '' })
     loadAvailability(weekStart)
     setShowMoreMenu(false)
   }
@@ -422,7 +423,7 @@ export default function CalendarView({
             </h2>
             <div
               onClick={() => { if (onOpenAuthModal) onOpenAuthModal(); else setShowQuickModal(true) }}
-              title="Click to switch account or manage Google Calendar"
+              title={isLive ? `Connected: ${calendarStatus.account_email}` : "Private Guest Workspace (Local Schedule)"}
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '6px 10px', borderRadius: 'var(--radius-btn, 6px)',
                 background: 'var(--bg-card-soft)', border: '1px solid var(--border)',
@@ -432,7 +433,7 @@ export default function CalendarView({
               }}>
               <span className="domain-swatch" style={{ width: '8px', height: '8px', borderRadius: '2px', background: isLive ? 'var(--code)' : 'var(--hackathon)', flexShrink: 0 }} />
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {isLive ? `${calendarStatus.account_email}` : (calendarStatus.account_email || 'demo')}
+                {isLive && calendarStatus.account_email ? calendarStatus.account_email : 'Guest Schedule'}
               </span>
             </div>
           </div>
@@ -446,7 +447,7 @@ export default function CalendarView({
 
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', marginTop: '8px' }}>
           <p className="calendar-policy-subtext" style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>
-            {workingWindowLabel(userTimeZone)} · 15m buffer · deterministic allocation
+            {PLANNING_HOURS_TEXT} · 15m focus breaks
           </p>
 
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -462,7 +463,7 @@ export default function CalendarView({
                 minHeight: '44px',
               }}>
               {checkingReactive ? <RefreshCw size={14} strokeWidth={1.8} className="animate-spin" /> : <Zap size={14} strokeWidth={1.8} />}
-              <span>{checkingReactive ? 'Scanning...' : 'Scan Slip'}</span>
+              <span>{checkingReactive ? 'Checking...' : 'Check schedule'}</span>
             </button>
 
             <div ref={moreMenuRef} style={{ position: 'relative' }}>
@@ -765,16 +766,18 @@ export default function CalendarView({
             </div>
 
             <div style={{ marginTop: 'auto', padding: '14px', borderRadius: 'var(--radius-card, 8px)', background: 'var(--bg-card-soft)', border: '1px solid var(--border)' }}>
-              <h4 style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <Settings size={14} strokeWidth={1.8} />
-                <span>Deterministic Policy</span>
-              </h4>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <h4 style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Settings size={14} strokeWidth={1.8} />
+                  <span>Study Schedule Preferences</span>
+                </h4>
+              </div>
+
               <ul style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.6', paddingLeft: '16px', margin: 0 }}>
-                <li>Working Window: {workingWindowLabel(userTimeZone)}</li>
-                <li>Days: Monday - Friday (workdays)</li>
-                <li>Inter-task buffer: 15 minutes</li>
-                <li>Deterministic slot allocator</li>
-                <li>Export as .ics (RFC 5545)</li>
+                <li>{PLANNING_HOURS_TEXT}</li>
+                <li>Break between tasks: 15 minutes</li>
+                <li>Automatic focus time allocator</li>
+                <li>Export to calendar (.ics format)</li>
               </ul>
             </div>
           </section>

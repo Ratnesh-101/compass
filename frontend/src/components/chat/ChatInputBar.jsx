@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { filterSpecialists, getSpecialistById } from '../../api/specialistRegistry'
 import { Send, X } from 'lucide-react'
 import Logo from '../Logo'
+import { autoGrowTextarea } from '../../utils/autoGrowTextarea'
 
 export default function ChatInputBar({
   input,
@@ -87,6 +88,13 @@ export default function ChatInputBar({
       }
     }
 
+    // Enter sends, Shift+Enter newline
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSubmit(e)
+      return
+    }
+
     // Clear active specialist on backspace when input is empty
     if (e.key === 'Backspace' && !input && activeSpecialist) {
       setActiveSpecialist(null)
@@ -107,6 +115,11 @@ export default function ChatInputBar({
     onSend(input.trim(), null, activeSpecialist ? activeSpecialist.id : null)
   }
 
+  // Grow the box with its content (up to 160px); resets when the input is cleared
+  useEffect(() => {
+    autoGrowTextarea(inputRef.current)
+  }, [input])
+
   // Close picker when clicking outside
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -126,7 +139,7 @@ export default function ChatInputBar({
           ref={pickerRef}
           id="slash-specialist-picker"
           role="listbox"
-          aria-label="Specialist Agents Slash Command Picker"
+          aria-label="Modes and focus topics picker"
           style={{
             position: 'absolute',
             bottom: '100%',
@@ -150,10 +163,10 @@ export default function ChatInputBar({
             justifyContent: 'space-between',
           }}>
             <span style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-secondary)', letterSpacing: '0.04em' }}>
-              SPECIALIST AGENTS
+              ASSISTANT MODES
             </span>
             <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-              Use ↑↓ to navigate, Enter to select, Esc to dismiss
+              Type "/" to choose an area, or just ask in plain words
             </span>
           </div>
 
@@ -204,7 +217,7 @@ export default function ChatInputBar({
               })
             ) : (
               <div style={{ padding: '16px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '12px' }}>
-                No specialist agents matching "/{slashQuery}"
+                No modes matching "/{slashQuery}"
               </div>
             )}
           </div>
@@ -249,17 +262,20 @@ export default function ChatInputBar({
                 alignItems: 'center',
                 justifyContent: 'center',
               }}
-              title="Remove specialist (switch to standard Chat Copilot)"
+              title="Clear mode (switch back to standard chat)"
             >
               <X size={13} strokeWidth={1.8} />
             </button>
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
-          <input
+        <div style={{ display: 'flex', gap: '10px', width: '100%', alignItems: 'flex-end' }}>
+          <textarea
             ref={inputRef}
-            type="text"
+            id="chat-message-input"
+            name="chat-message-input"
+            rows={1}
+            aria-label="Message Compass"
             className="chat-input-box"
             value={input}
             onChange={handleInputChange}
@@ -269,13 +285,16 @@ export default function ChatInputBar({
                 ? 'Streaming response...'
                 : activeSpecialist
                 ? activeSpecialist.placeholder
-                : 'Ask Compass anything, or type "/" to pick a Specialist Agent...'
+                : 'Ask anything, for example: Plan my week'
             }
+            title='Type / to choose a mode'
+            aria-description='Type / to choose a mode'
             disabled={isInputDisabled}
             style={{
               flex: 1,
-              padding: '0 16px',
+              padding: '12px 16px',
               minHeight: '44px',
+              maxHeight: '160px',
               borderRadius: 'var(--radius-btn, 6px)',
               background: isInputDisabled ? 'var(--bg-card-soft)' : 'var(--bg-card)',
               border: '1px solid var(--border)',
@@ -284,6 +303,9 @@ export default function ChatInputBar({
               outline: 'none',
               cursor: isInputDisabled ? 'not-allowed' : 'text',
               boxSizing: 'border-box',
+              resize: 'none',
+              lineHeight: '1.4',
+              fontFamily: 'inherit',
             }}
           />
           <button

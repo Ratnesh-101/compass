@@ -46,7 +46,7 @@ async def test_chat_gate_blocks_mutating_skills(skill_name, args):
 
 @pytest.mark.asyncio
 async def test_chat_gate_allows_add_task():
-    """Assert add_task still executes through chat dispatch."""
+    """Assert add_task is not blocked by the gate: it reaches the preview-and-confirm step (nothing saved yet)."""
     with patch("backend.orchestrator.route_message", new_callable=AsyncMock) as mock_route:
         mock_route.return_value = (
             "add_task",
@@ -59,16 +59,19 @@ async def test_chat_gate_allows_add_task():
             message="add a task: Gate Verification Task",
         )
 
-        assert res["skill_used"] == "add_task"
+        assert res.get("error") != "confirmation_required"
+        assert res["skill_used"] == "add_tasks_preview"
+        assert res["success"] is True
         assert "Gate Verification Task" in res["response"]
-        assert res.get("data") is not None
-        task_id = res["data"]["id"]
+        assert "Nothing has been added yet" in res["response"]
+        pending = res["data"]["pending_action"]
+        assert pending["action"] == "add_tasks" and len(pending["items"]) == 1
 
-        # Clean up the created task
+        # Clean up the pending preview row (no task was created)
         try:
             pool = await get_pool()
             if pool:
                 async with pool.acquire() as conn:
-                    await conn.execute("DELETE FROM tasks WHERE id = $1", int(task_id))
+                    await conn.execute("DELETE FROM chat_pending_actions WHERE id = $1", pending["id"])
         except Exception:
             pass

@@ -11,6 +11,13 @@ from backend.skills.registry import register_skill
 
 logger = logging.getLogger("compass.skills.calendar")
 
+_NO_CALLER_RESULT: Dict[str, Any] = {
+    "success": False,
+    "response": "user_id required: calendar data is per-user and no caller identity was supplied.",
+    "data": {},
+    "error": "user_id required",
+}
+
 
 @register_skill("get_calendar_availability")
 async def handle_get_calendar_availability(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
@@ -19,11 +26,13 @@ async def handle_get_calendar_availability(args: Dict[str, Any], pool: Any) -> D
     from backend.services.scheduler import get_available_windows
     from backend.memory.structured import get_scheduling_preferences
 
-    from backend.services.ownership import scope_owner
+    from backend.services.ownership import has_caller, scope_owner
 
     start_str = args.get("start_date")
     end_str = args.get("end_date")
     user_id = args.get("user_id")
+    if not has_caller(user_id):
+        return _NO_CALLER_RESULT
     scoped_owner = scope_owner(user_id)
     tz_name = resolve_timezone_name(args.get("timezone"))
     zone = resolve_zone(tz_name)
@@ -49,6 +58,7 @@ async def handle_get_calendar_availability(args: Dict[str, Any], pool: Any) -> D
     busy = await get_calendar_freebusy(
         start_dt, end_dt, pool=pool, user_id=user_id or "default_user", task_user_id=scoped_owner,
         calendar_errors=calendar_errors, include_demo=bool(args.get("include_demo", False)),
+        all_tenants=(scoped_owner is None and bool(user_id)),  # admin identity is intentionally unscoped
     )
 
     prefs: Dict[str, Any] = {"work_start_time": "09:00:00", "work_end_time": "18:00:00", "work_days": [1, 2, 3, 4, 5], "buffer_minutes": 15}
@@ -108,13 +118,16 @@ async def handle_propose_schedule(args: Dict[str, Any], pool: Any) -> Dict[str, 
         get_available_windows,
     )
 
-    from backend.services.ownership import scope_owner
+    from backend.services.ownership import has_caller, scope_owner
 
     target_date_str = args.get("target_date")
     domain = args.get("domain")
     task_ids = args.get("task_ids")
     user_id = args.get("user_id")
+    if not has_caller(user_id):
+        return _NO_CALLER_RESULT
     scoped_owner = scope_owner(user_id)
+    all_tenants = scoped_owner is None  # admin identity is intentionally unscoped (caller already checked)
     tz_name = resolve_timezone_name(args.get("timezone"))
     zone = resolve_zone(tz_name)
 
@@ -140,16 +153,16 @@ async def handle_propose_schedule(args: Dict[str, Any], pool: Any) -> Dict[str, 
             prefs = await get_scheduling_preferences(conn, user_id=user_id or "default_user")
             dep_map = await get_all_dependencies_map(conn)
             if task_ids:
-                all_tasks = await list_tasks(conn, domain=domain, user_id=scoped_owner, include_demo=include_demo)
+                all_tasks = await list_tasks(conn, domain=domain, user_id=scoped_owner, include_demo=include_demo, all_tenants=all_tenants)
                 id_set = set(task_ids)
                 tasks = [t for t in all_tasks if t["id"] in id_set]
             else:
-                tasks = await list_tasks(conn, domain=domain, status="open", user_id=scoped_owner, include_demo=include_demo)
+                tasks = await list_tasks(conn, domain=domain, status="open", user_id=scoped_owner, include_demo=include_demo, all_tenants=all_tenants)
     tasks = [t for t in tasks if str(t.get("status") or "").lower() not in INACTIVE_TASK_STATUSES]
 
     busy = await get_calendar_freebusy(
         start_dt, end_dt, pool=pool, user_id=user_id or "default_user", task_user_id=scoped_owner,
-        include_demo=include_demo,
+        include_demo=include_demo, all_tenants=all_tenants,
     )
     raw_buf = prefs.get("buffer_minutes", 15)
     buffer_minutes = int(raw_buf) if isinstance(raw_buf, (int, str)) else 15
@@ -264,9 +277,11 @@ async def handle_commit_schedule(args: Dict[str, Any], pool: Any) -> Dict[str, A
     """
     from backend.memory.structured import get_task, update_task
     from backend.services.calendar import link_calendar_event, summarize_calendar_outcome, tally_link_results
-    from backend.services.ownership import scope_owner
+    from backend.services.ownership import has_caller, scope_owner
 
     user_id = args.get("user_id")
+    if not has_caller(user_id):
+        return {"response": "user_id required", "data": {"status": "error", "error": "user_id required"}}
     scoped_owner = scope_owner(user_id)
     assignments = args.get("assignments") or []
     rationale = args.get("rationale") or "Schedule committed by Compass Agent."
@@ -373,12 +388,15 @@ async def handle_detect_schedule_conflicts(args: Dict[str, Any], pool: Any) -> D
     from backend.services.calendar import get_calendar_freebusy
     from backend.services.scheduler import detect_schedule_conflicts
 
-    from backend.services.ownership import scope_owner
+    from backend.services.ownership import has_caller, scope_owner
 
     start_date = args.get("start_date")
     end_date = args.get("end_date")
     user_id = args.get("user_id")
+    if not has_caller(user_id):
+        return _NO_CALLER_RESULT
     scoped_owner = scope_owner(user_id)
+    all_tenants = scoped_owner is None  # admin identity is intentionally unscoped (caller already checked)
     now = datetime.now(timezone.utc)
 
     if start_date:
@@ -401,7 +419,7 @@ async def handle_detect_schedule_conflicts(args: Dict[str, Any], pool: Any) -> D
     dep_map: Dict[int, List[int]] = {}
     if pool is not None:
         async with pool.acquire() as conn:
-            tasks = await list_tasks(conn, user_id=scoped_owner, include_demo=bool(args.get("include_demo", False)))
+            tasks = await list_tasks(conn, user_id=scoped_owner, include_demo=bool(args.get("include_demo", False)), all_tenants=all_tenants)
             dep_map = await get_all_dependencies_map(conn)
 
     # External busy intervals
@@ -409,7 +427,7 @@ async def handle_detect_schedule_conflicts(args: Dict[str, Any], pool: Any) -> D
     if pool is not None:
         all_busy = await get_calendar_freebusy(
             s_dt, e_dt, pool=pool, user_id=user_id or "default_user", task_user_id=scoped_owner,
-            include_demo=bool(args.get("include_demo", False)),
+            include_demo=bool(args.get("include_demo", False)), all_tenants=all_tenants,
         )
         ext_events = [b for b in all_busy if b.get("source") != "compass_task"]
 

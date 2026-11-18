@@ -93,13 +93,28 @@ async def execute_confirmed_actions(
     run_id: Optional[str] = None,
     approved_by: str = "user",
     user_id: Optional[str] = None,
+    is_guest: Optional[bool] = None,
 ) -> List[Dict[str, Any]]:
-    """Execute previously confirmed state-mutating actions."""
+    """Execute previously confirmed state-mutating actions.
+
+    Applies the same guest ban as the in-loop executor: a guest identity can never run a
+    GUEST_DISALLOWED_TOOLS tool, even if it was approved through the confirmation gate.
+    When ``is_guest`` is None it is inferred from ``user_id`` (``guest_`` prefix only), so
+    callers that know the identity should pass the flag explicitly.
+    """
     from backend.skills import SKILL_REGISTRY
+    from backend.skills.registry import is_tool_allowed_for_identity
     results = []
     for action in confirmed_actions:
         tool_name = action.get("tool", "")
         tool_args = action.get("args", {})
+        if (user_id or is_guest) and not is_tool_allowed_for_identity(tool_name, user_id, is_guest=is_guest):
+            results.append({
+                "tool": tool_name,
+                "status": "error",
+                "message": f"Permission denied: Guest sessions are forbidden from invoking high-risk or external side-effect tool '{tool_name}'. Please sign in.",
+            })
+            continue
         if user_id and isinstance(tool_args, dict):
             if approved_by == "admin_override":
                 tool_args.setdefault("user_id", user_id)

@@ -4,6 +4,10 @@ import CreateDomainModal from './timeline/CreateDomainModal'
 import Logo from './Logo'
 import { parseUsageBadge } from '../utils/usageBadgeParser'
 
+// Call counts and dollar amounts are for judges, not for first-time visitors: they live in
+// "About / for judges" (Telemetry). Keep them out of the sidebar footer.
+const SHOW_SIDEBAR_USAGE_BADGE = false
+
 // Re-export for convenience
 export { parseUsageBadge } from '../utils/usageBadgeParser'
 
@@ -224,7 +228,7 @@ export default function Sidebar({
               <Logo size={36} alt="" />
               <div>
                 <h1 style={{ fontSize: '15px', fontWeight: '600', letterSpacing: '-0.2px', color: 'var(--sidebar-active-text)', margin: 0, lineHeight: 1.2 }}>Compass</h1>
-                <p style={{ fontSize: '11px', color: 'var(--sidebar-text)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: '500', margin: 0, opacity: 0.8 }}>Workspace</p>
+                <p style={{ fontSize: '12px', color: 'var(--sidebar-text)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: '500', margin: 0, opacity: 0.8 }}>Workspace</p>
               </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -300,7 +304,7 @@ export default function Sidebar({
       {/* Navigation */}
       <div style={{ marginBottom: effectivelyCollapsed ? '16px' : '22px' }}>
         {!effectivelyCollapsed && (
-          <p style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--sidebar-text)', opacity: 0.75, fontWeight: '600', marginBottom: '8px', padding: '0 4px' }}>
+          <p style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--sidebar-text)', opacity: 0.75, fontWeight: '600', marginBottom: '8px', padding: '0 4px' }}>
             Navigation
           </p>
         )}
@@ -385,7 +389,7 @@ export default function Sidebar({
                 <div style={{ fontSize: '13.5px', fontWeight: isActive ? '600' : '500', color: isActive ? '#ffffff' : 'inherit' }}>
                   {item.label}
                 </div>
-                <div style={{ fontSize: '11px', opacity: 0.7 }}>{item.sub}</div>
+                <div style={{ fontSize: '12px', opacity: 0.7 }}>{item.sub}</div>
               </span>
             </button>
           )
@@ -397,8 +401,8 @@ export default function Sidebar({
         {!effectivelyCollapsed && (
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', padding: '0 4px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <p style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--sidebar-text)', opacity: 0.75, fontWeight: '600', margin: 0 }}>
-                Context Domains
+              <p style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--sidebar-text)', opacity: 0.75, fontWeight: '600', margin: 0 }}>
+                My areas
               </p>
               <button
                 id="btn-add-domain"
@@ -442,7 +446,7 @@ export default function Sidebar({
                   onSelectDomain('all')
                   if (onCloseMobile) onCloseMobile()
                 }}
-                style={{ fontSize: '11px', color: 'var(--brand)', cursor: 'pointer', fontWeight: '600', padding: '2px 4px' }}
+                style={{ fontSize: '12px', color: 'var(--brand)', cursor: 'pointer', fontWeight: '600', padding: '2px 4px' }}
               >
                 Reset
               </span>
@@ -567,7 +571,7 @@ export default function Sidebar({
               <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
                 {isCustom && confirmDeleteKey === dom.key ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }} onClick={e => e.stopPropagation()}>
-                    <span style={{ fontSize: '10px', color: '#f87171', fontWeight: '600' }}>Del?</span>
+                    <span style={{ fontSize: '12px', color: '#f87171', fontWeight: '600' }}>Del?</span>
                     <button
                       id={`btn-confirm-delete-domain-${dom.key}`}
                       onClick={(e) => {
@@ -575,7 +579,7 @@ export default function Sidebar({
                         if (onDomainDeleted) onDomainDeleted(dom.key)
                         setConfirmDeleteKey(null)
                       }}
-                      style={{ background: '#b91c1c', border: 'none', color: '#fff', borderRadius: '4px', padding: '2px 6px', fontSize: '11px', cursor: 'pointer', fontWeight: '600' }}
+                      style={{ background: '#b91c1c', border: 'none', color: '#fff', borderRadius: '4px', padding: '2px 6px', fontSize: '12px', cursor: 'pointer', fontWeight: '600' }}
                     >
                       Yes
                     </button>
@@ -584,14 +588,14 @@ export default function Sidebar({
                         e.stopPropagation()
                         setConfirmDeleteKey(null)
                       }}
-                      style={{ background: 'transparent', border: '1px solid var(--sidebar-divider)', color: 'var(--sidebar-text)', borderRadius: '4px', padding: '2px 6px', fontSize: '11px', cursor: 'pointer' }}
+                      style={{ background: 'transparent', border: '1px solid var(--sidebar-divider)', color: 'var(--sidebar-text)', borderRadius: '4px', padding: '2px 6px', fontSize: '12px', cursor: 'pointer' }}
                     >
                       No
                     </button>
                   </div>
                 ) : (
                   <>
-                    <span style={{ padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: '500', background: 'rgba(255, 255, 255, 0.08)', color: 'var(--sidebar-text)' }}>
+                    <span style={{ padding: '2px 6px', borderRadius: '4px', fontSize: '12px', fontWeight: '500', background: 'rgba(255, 255, 255, 0.08)', color: 'var(--sidebar-text)' }}>
                       {count}
                     </span>
                     {isCustom && (
@@ -728,7 +732,7 @@ export default function Sidebar({
                 flexShrink: 0
               }} />
               <span style={{ fontSize: '12.5px', fontWeight: '600', color: '#ffffff' }}>
-                {isOnline ? `${totalActive} tasks synced` : 'Reconnecting'}
+                {isOnline ? `${totalActive} ${totalActive === 1 ? 'task' : 'tasks'} synced` : 'Reconnecting'}
               </span>
             </div>
             {!isOnline && onRetryConnection && (
@@ -741,7 +745,7 @@ export default function Sidebar({
                 }}
                 title="Ping backend to wake up now"
                 style={{
-                  fontSize: '11px',
+                  fontSize: '12px',
                   fontWeight: '600',
                   padding: '2px 8px',
                   borderRadius: '6px',
@@ -758,10 +762,10 @@ export default function Sidebar({
               </button>
             )}
           </div>
-          <div style={{ fontSize: '11px', color: 'var(--sidebar-text)', opacity: 0.8, paddingLeft: '15px' }}>
+          <div style={{ fontSize: '12px', color: 'var(--sidebar-text)', opacity: 0.8, paddingLeft: '15px' }}>
             {backendStatus}
           </div>
-          {usageBadge && (() => {
+          {SHOW_SIDEBAR_USAGE_BADGE && usageBadge && (() => {
             const parsed = parseUsageBadge(usageBadge)
             const fullText = parsed?.isUsage ? parsed.fullText : usageBadge
             const titleTooltip = `Nebius Telemetry: ${fullText} (Click to open telemetry inspection)`
@@ -785,7 +789,7 @@ export default function Sidebar({
                 style={{
                   fontFamily: 'var(--font-mono, "JetBrains Mono", monospace)',
                   fontVariantNumeric: 'tabular-nums',
-                  fontSize: '10.5px',
+                  fontSize: '12px',
                   lineHeight: '1.4',
                   color: 'var(--sidebar-text)',
                   padding: '6px 8px',
@@ -866,7 +870,8 @@ export default function Sidebar({
 
       {/* Account / Workspace Switcher: min 44px tap target */}
       {effectivelyCollapsed ? (
-        <div
+        <button
+          type="button"
           id="sidebar-account-btn"
           onClick={() => onOpenAuth && onOpenAuth()}
           title={currentUser?.authenticated ? `Signed in as ${currentUser.email}, Click to switch` : 'Sign in / Account'}
@@ -887,6 +892,7 @@ export default function Sidebar({
             transition: 'all 0.15s ease',
             flexShrink: 0,
             color: 'var(--sidebar-text)',
+            padding: 0,
           }}
           onMouseEnter={e => {
             e.currentTarget.style.background = 'var(--sidebar-hover)'
@@ -901,12 +907,16 @@ export default function Sidebar({
             <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
             <circle cx="12" cy="7" r="4" />
           </svg>
-        </div>
+        </button>
       ) : (
-        <div
+        <button
+          type="button"
           id="sidebar-account-btn"
           onClick={() => onOpenAuth && onOpenAuth()}
+          aria-label={currentUser?.authenticated ? `Account: ${currentUser.email}. Click to manage account.` : 'Sign in to Compass. Click to login.'}
           style={{
+            width: '100%',
+            textAlign: 'left',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -934,15 +944,15 @@ export default function Sidebar({
               <div style={{ fontSize: '12px', color: '#ffffff', fontWeight: '500', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {currentUser?.authenticated ? currentUser.email : 'Sign in / Account'}
               </div>
-              <div style={{ fontSize: '10.5px', color: 'var(--sidebar-text)', opacity: 0.75 }}>
-                {currentUser?.calendar?.connected ? 'Google Calendar Connected' : 'Isolated Workspace'}
+              <div style={{ fontSize: '12px', color: 'var(--sidebar-text)', opacity: 0.75 }}>
+                {currentUser?.calendar?.connected ? 'Google Calendar Connected' : 'Private Workspace'}
               </div>
             </div>
           </div>
-          <span style={{ fontSize: '11px', color: 'var(--brand)', fontWeight: '600', flexShrink: 0, paddingLeft: '6px' }}>
+          <span style={{ fontSize: '12px', color: 'var(--brand)', fontWeight: '600', flexShrink: 0, paddingLeft: '6px' }}>
             {currentUser?.authenticated ? 'Switch ▾' : 'Login ▾'}
           </span>
-        </div>
+        </button>
       )}
 
       <CreateDomainModal
@@ -957,7 +967,7 @@ export default function Sidebar({
         existingDomains={displayDomains}
       />
           {!effectivelyCollapsed && (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", marginTop: "10px", fontSize: "11px", color: "var(--sidebar-text)", opacity: 0.7 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", marginTop: "10px", fontSize: "12px", color: "var(--sidebar-text)", opacity: 0.7 }}>
           <button
             type="button"
             id="sidebar-terms-link"

@@ -108,7 +108,9 @@ CREATE TABLE messages (
     role            TEXT         NOT NULL CHECK (role IN ('user','assistant','system')),
     content         TEXT         NOT NULL,
     skill_called    TEXT,        -- which skill was invoked, null for user messages
-    created_at      TIMESTAMPTZ  NOT NULL DEFAULT now()
+    created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    is_truncated    BOOLEAN      NOT NULL DEFAULT FALSE,  -- answer ended on the token limit or was cut off
+    stream_status   TEXT         -- NULL, 'truncated' or 'interrupted'
 );
 
 CREATE INDEX idx_messages_conv_created ON messages(conversation_id, created_at);

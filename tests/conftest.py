@@ -2,6 +2,7 @@
 Compass — Pytest Configuration & Test Fixtures.
 """
 
+import asyncio
 import os
 import sys
 from pathlib import Path
@@ -183,6 +184,15 @@ async def test_db_lifecycle():
                     DELETE FROM agent_runs WHERE id LIKE 'test_%' OR id LIKE 'run_%';
                     DELETE FROM pending_actions WHERE run_id LIKE 'test_%' OR run_id LIKE 'run_%';
                 """)
+    except Exception:
+        pass
+    # Each test runs on its own event loop. Close the pool on that loop before it goes away, or its
+    # connections linger until garbage collection and exhaust Postgres' max_connections late in the run.
+    try:
+        from backend.memory import db
+        if db._pool is not None:
+            pool, db._pool = db._pool, None
+            await asyncio.wait_for(pool.close(), timeout=5.0)
     except Exception:
         pass
 

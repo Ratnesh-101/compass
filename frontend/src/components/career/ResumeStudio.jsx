@@ -364,7 +364,7 @@ export default function ResumeStudio() {
     return (
       <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
         <div className="spinner" style={{ margin: '0 auto 12px' }} />
-        <p>Loading Evidence-Based Resume Studio...</p>
+        <p>Loading My resume...</p>
       </div>
     )
   }
@@ -379,10 +379,10 @@ export default function ResumeStudio() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginBottom: '22px' }}>
         <div>
           <h2 style={{ margin: '0 0 6px', fontSize: '22px', fontWeight: '800', color: 'var(--text-primary)', letterSpacing: '-0.02em' }}>
-            📄 Evidence-Based Resume Studio
+            📄 My resume
           </h2>
           <p style={{ margin: 0, fontSize: '13.5px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-            Anchor your master career profile to verified evidence and generate tailored ATS resumes without qualification hallucination.
+            Keep your resume here once. Compass copies it for each job and only reorders what is already on it.
           </p>
         </div>
 
@@ -458,8 +458,8 @@ export default function ResumeStudio() {
       )}
 
       {saveSuccess && (
-        <div style={{ background: '#dcfce7', color: '#166534', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', fontSize: '13px' }}>
-          ✅ Resume changes successfully saved and factually anchored!
+        <div role="status" aria-live="polite" style={{ background: '#dcfce7', color: '#166534', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', fontSize: '13px', fontWeight: 600 }}>
+          ✅ Saved. Your resume and your internship profile are up to date.
         </div>
       )}
 
@@ -537,7 +537,7 @@ export default function ResumeStudio() {
                         {res.title}
                       </div>
                       <div style={{ fontSize: '11.5px', color: isSelected ? 'var(--primary, #2563eb)' : 'var(--text-secondary)', fontWeight: isSelected ? '600' : '400', marginTop: '2px' }}>
-                        {res.is_master ? '★ Master Source of Truth' : `${getResumeKindLabel(res)} · v${res.version}`}
+                        {res.is_master ? '★ Your main resume' : `${getResumeKindLabel(res)} · v${res.version}`}
                       </div>
                     </div>
                     <span
@@ -580,6 +580,7 @@ export default function ResumeStudio() {
             {/* Template Selector & Export Dropdowns */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <select
+                aria-label="Resume template"
                 value={resumeTemplate}
                 onChange={(e) => setResumeTemplate(e.target.value)}
                 style={{ padding: '7px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '12.5px', background: 'var(--bg-card)', color: 'var(--text-primary)', fontWeight: '500' }}
@@ -743,7 +744,7 @@ export default function ResumeStudio() {
             <form onSubmit={handleSaveResume} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px' }}>
                 <div>
-                  <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12.5px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '6px' }}>
+                  <label htmlFor="resume-full-name" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12.5px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '6px' }}>
                     <span>Full Name</span>
                     {fullName.trim().toLowerCase() === 'compass candidate' && (
                       <span style={{ fontSize: '11px', color: '#92400e', background: '#fef3c7', padding: '2px 8px', borderRadius: '4px', fontWeight: '600' }}>
@@ -752,6 +753,7 @@ export default function ResumeStudio() {
                     )}
                   </label>
                   <input
+                    id="resume-full-name"
                     type="text"
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
@@ -760,7 +762,7 @@ export default function ResumeStudio() {
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12.5px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '6px' }}>
+                  <label htmlFor="resume-email" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12.5px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '6px' }}>
                     <span>Contact Email</span>
                     {email.trim().toLowerCase() === 'candidate@compass.local' && (
                       <span style={{ fontSize: '11px', color: '#92400e', background: '#fef3c7', padding: '2px 8px', borderRadius: '4px', fontWeight: '600' }}>
@@ -769,6 +771,7 @@ export default function ResumeStudio() {
                     )}
                   </label>
                   <input
+                    id="resume-email"
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
@@ -780,8 +783,9 @@ export default function ResumeStudio() {
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12.5px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '6px' }}>Phone</label>
+                  <label htmlFor="resume-phone" style={{ display: 'block', fontSize: '12.5px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '6px' }}>Phone</label>
                   <input
+                    id="resume-phone"
                     type="text"
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
@@ -790,8 +794,9 @@ export default function ResumeStudio() {
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12.5px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '6px' }}>Location</label>
+                  <label htmlFor="resume-location" style={{ display: 'block', fontSize: '12.5px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '6px' }}>Location</label>
                   <input
+                    id="resume-location"
                     type="text"
                     value={location}
                     onChange={(e) => setLocation(e.target.value)}
@@ -802,8 +807,9 @@ export default function ResumeStudio() {
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '12.5px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '6px' }}>Summary</label>
+                <label htmlFor="resume-summary" style={{ display: 'block', fontSize: '12.5px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '6px' }}>Summary</label>
                 <textarea
+                  id="resume-summary"
                   value={summary}
                   onChange={(e) => setSummary(e.target.value)}
                   rows={3}
@@ -812,10 +818,11 @@ export default function ResumeStudio() {
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '12.5px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '6px' }}>
+                <label htmlFor="resume-skills" style={{ display: 'block', fontSize: '12.5px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '6px' }}>
                   Technical Skills (comma-separated, verified against factual grounding)
                 </label>
                 <textarea
+                  id="resume-skills"
                   value={skillsText}
                   onChange={(e) => setSkillsText(e.target.value)}
                   rows={2}
@@ -857,7 +864,7 @@ export default function ResumeStudio() {
                     transition: 'all 0.15s ease',
                   }}
                 >
-                  {saving ? 'Saving...' : (selectedResume?.is_master ? 'Save Master Anchor' : 'Save Tailored Resume')}
+                  {saving ? 'Saving...' : (selectedResume?.is_master ? 'Save' : 'Save Tailored Resume')}
                 </button>
               </div>
             </form>
@@ -890,6 +897,7 @@ export default function ResumeStudio() {
               </div>
 
               <textarea
+                aria-label="Cover letter"
                 value={coverLetterText}
                 onChange={(e) => setCoverLetterText(e.target.value)}
                 rows={12}

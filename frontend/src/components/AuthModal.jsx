@@ -152,7 +152,7 @@ export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged 
                 Account & Google Calendar
               </h3>
               <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '2px 0 0' }}>
-                Select your account and manage individual memory isolation
+                Choose your account and keep your data private to you
               </p>
             </div>
           </div>
@@ -238,14 +238,14 @@ export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged 
                 boxShadow: activeEmail ? '0 0 8px #10b981' : 'none'
               }} />
               <span style={{ fontSize: '12px', color: activeEmail ? '#059669' : 'var(--text-muted)', fontWeight: '600' }}>
-                {currentUser?.authenticated ? 'Isolated Memory Active' : 'Unauthenticated'}
+                {currentUser?.authenticated ? 'Private to your account' : 'Unauthenticated'}
               </span>
             </div>
           </div>
 
           <div style={{ marginTop: '10px', fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.5', display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
             <Lock size={14} strokeWidth={1.8} style={{ flexShrink: 0, marginTop: '2px' }} />
-            <span><strong>Per-Account Privacy:</strong> Deadlines, tasks, and assistant memory chunks belong strictly to your active account. Switching accounts automatically isolates all workspace state.</span>
+            <span><strong>Per-Account Privacy:</strong> Deadlines, tasks, and assistant memory chunks belong strictly to your active account. Switching accounts keeps each workspace separate.</span>
           </div>
         </div>
 
@@ -301,9 +301,9 @@ export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged 
               flexDirection: 'column',
               gap: '16px'
             }}>
-              {/* Google OAuth Button */}
-              <div style={{ textAlign: 'center' }}>
-                {oauthStatus?.configured ? (
+              {/* Google sign-in button */}
+              {oauthStatus?.configured && (
+                <div style={{ textAlign: 'center' }}>
                   <a
                     href={safeHref(getGoogleOAuthConnectUrl(true))}
                     style={{
@@ -321,31 +321,10 @@ export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged 
                     }}
                   >
                     <Key size={15} strokeWidth={1.8} />
-                    <span>Sign in with Google OAuth</span>
+                    <span>Sign in with Google</span>
                   </a>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setError('Google OAuth is not configured in .env (GOOGLE_CLIENT_ID missing). See the setup instructions below.')}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      padding: '10px 20px',
-                      borderRadius: 'var(--radius-btn, 6px)',
-                      background: 'var(--bg-card)',
-                      border: '1px solid var(--border)',
-                      color: 'var(--text-muted)',
-                      fontSize: '13px',
-                      fontWeight: '600',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <Key size={15} strokeWidth={1.8} />
-                    <span>Sign in with Google (Setup Required)</span>
-                  </button>
-                )}
-              </div>
+                </div>
+              )}
 
               {emailSignInEnabled && (
                 <>
@@ -361,7 +340,7 @@ export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged 
                   Instant Sign-In (Select or Enter Email)
                 </div>
                 <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '10px' }}>
-                  Enter your email to sign in instantly with isolated memory.
+                  Enter your email to sign in instantly. Your data stays private to that account.
                 </div>
 
                 <form
@@ -371,8 +350,11 @@ export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged 
                   }}
                   style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}
                 >
+                  <label htmlFor="auth-email-input" className="sr-only">Student email address</label>
                   <input
+                    id="auth-email-input"
                     type="email"
+                    aria-label="Student email address"
                     placeholder="student@vit.ac.in"
                     value={emailInput}
                     onChange={e => setEmailInput(e.target.value)}
@@ -482,7 +464,7 @@ export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged 
                       } else if (res.is_live) {
                         setSuccessMsg('Google Calendar connected! No pending scheduled tasks or deadlines to sync.')
                       } else {
-                        setError(res.message || 'Could not sync with Google Calendar API. Please check your OAuth connection.')
+                        setError(res.message || 'Could not sync with Google Calendar API. Please check your Google connection.')
                       }
                     } catch (e) {
                       setError(e.message)
@@ -535,7 +517,7 @@ export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged 
                       <span>Demo Mode Active (Simulated Calendar)</span>
                     </div>
                     <div style={{ fontSize: '11.5px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                      Mock calendar commitments active. Connect genuine Google OAuth below to sync live events to Google Calendar.
+                      Mock calendar commitments active. Connect your Google account below to sync live events to Google Calendar.
                     </div>
                   </div>
                   <button
@@ -563,7 +545,7 @@ export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-primary)' }}>
-                      Option A: Connect with Google OAuth
+                      Option A: Connect with Google
                     </div>
                     <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px', lineHeight: '1.4' }}>
                       Links your Google Calendar for live two-way sync.
@@ -588,14 +570,12 @@ export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged 
                     </a>
                   ) : (
                     <span style={{
-                      fontSize: '11px', color: 'var(--amber-text)', fontWeight: '600',
-                      background: 'rgba(245, 158, 11, 0.12)',
-                      border: '1px solid rgba(245, 158, 11, 0.3)',
+                      fontSize: '11px', color: 'var(--text-muted)', fontWeight: '500',
+                      background: 'var(--bg-card)',
+                      border: '1px solid var(--border)',
                       borderRadius: 'var(--radius-btn, 6px)', padding: '5px 9px', flexShrink: 0,
-                      display: 'inline-flex', alignItems: 'center', gap: '4px'
                     }}>
-                      <Settings size={13} strokeWidth={1.8} />
-                      <span>Setup Required</span>
+                      Not configured
                     </span>
                   )}
                 </div>
@@ -620,7 +600,16 @@ export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged 
                 )}
 
                 {/* Setup Guide shown when OAuth is not configured */}
-                {oauthStatus && !oauthStatus.configured && <GoogleCloudSetupGuide />}
+                {oauthStatus && !oauthStatus.configured && (
+                  <details style={{ marginTop: '12px' }}>
+                    <summary style={{ cursor: 'pointer', fontSize: '12px', color: 'var(--text-muted)', fontWeight: '500' }}>
+                      Developer setup guide (Google Cloud Console)
+                    </summary>
+                    <div style={{ marginTop: '8px' }}>
+                      <GoogleCloudSetupGuide />
+                    </div>
+                  </details>
+                )}
               </div>
 
               {/* ── Option B: iCal Subscription ───────────────────────── */}
@@ -631,10 +620,10 @@ export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
                   <div>
                     <div style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-primary)' }}>
-                      Option B: Instant 1-Click Google Calendar Subscription (RFC 5545)
+                      Option B: Instant 1-Click Google Calendar Subscription (iCal feed)
                     </div>
                     <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px', lineHeight: '1.4' }}>
-                      Zero OAuth setup required! In Google Calendar, click{' '}
+                      No Google sign-in needed. In Google Calendar, click{' '}
                       <strong style={{ color: 'var(--text-primary)' }}>Other calendars '+' → 'From URL'</strong> and paste this link:
                     </div>
                   </div>

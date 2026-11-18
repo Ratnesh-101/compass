@@ -98,7 +98,7 @@ def test_allocator_date_only_due_uses_local_end_of_day():
 async def test_availability_handler_uses_timezone_and_echoes_it():
     handler = SKILL_REGISTRY["get_calendar_availability"]
     result = await handler(
-        {"start_date": "2026-09-21", "end_date": "2026-09-21", "timezone": "Asia/Kolkata"}, pool=None)
+        {"start_date": "2026-09-21", "end_date": "2026-09-21", "timezone": "Asia/Kolkata", "user_id": "tz-user"}, pool=None)
     data = result["data"]
     assert data["timezone"] == "Asia/Kolkata"
     assert data["free_windows"][0]["start"].startswith("2026-09-21T03:30")
@@ -109,7 +109,7 @@ async def test_availability_handler_uses_timezone_and_echoes_it():
 async def test_availability_handler_unknown_timezone_is_utc():
     handler = SKILL_REGISTRY["get_calendar_availability"]
     result = await handler(
-        {"start_date": "2026-09-21", "end_date": "2026-09-21", "timezone": "Mars/Olympus"}, pool=None)
+        {"start_date": "2026-09-21", "end_date": "2026-09-21", "timezone": "Mars/Olympus", "user_id": "tz-user"}, pool=None)
     assert result["data"]["timezone"] == "UTC"
     assert result["data"]["free_windows"][0]["start"].startswith("2026-09-21T09:00")
 
@@ -117,9 +117,9 @@ async def test_availability_handler_unknown_timezone_is_utc():
 @pytest.mark.asyncio
 async def test_propose_handler_echoes_timezone():
     handler = SKILL_REGISTRY["propose_schedule"]
-    result = await handler({"target_date": "2099-01-05", "timezone": "Asia/Kolkata"}, pool=None)
+    result = await handler({"target_date": "2099-01-05", "timezone": "Asia/Kolkata", "user_id": "tz-user"}, pool=None)
     assert result["data"]["timezone"] == "Asia/Kolkata"
-    default = await handler({"target_date": "2099-01-05"}, pool=None)
+    default = await handler({"target_date": "2099-01-05", "user_id": "tz-user"}, pool=None)
     assert default["data"]["timezone"] == "UTC"
 
 

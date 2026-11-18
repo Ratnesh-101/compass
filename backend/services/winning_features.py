@@ -682,19 +682,15 @@ async def generate_company_intel_brief(
         return brief
 
 
-def simulate_ats_parsing(resume_content: Any) -> Dict[str, Any]:
+def simulate_ats_parsing(
+    resume_content: Any,
+    required_skills: Optional[List[str]] = None,
+    job_text: str = "",
+) -> Dict[str, Any]:
+    """Estimate how a basic ATS reads a resume (sections found, job keywords missing, formatting flags).
+
+    Always labelled an estimate. The rules live in backend.services.ats_check.
     """
-    Simulates how a legacy ATS parses a resume to identify 'Invisible' failures.
-    Returns an estimated report on parsing gaps, keyword density, and formatting red flags.
-    Labelled honestly as an estimate.
-    """
-    report = {
-        "parsed_text_preview": "...",
-        "detected_sections": [],
-        "missing_critical_keywords": [],
-        "formatting_warnings": [],
-        "score": 0.0,
-        "is_estimate": True,
-        "label": "estimate",
-    }
-    return report
+    from backend.services.ats_check import simulate_ats_check
+
+    return simulate_ats_check(resume_content, required_skills, job_text)

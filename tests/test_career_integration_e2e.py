@@ -146,7 +146,7 @@ async def test_controlled_eligibility_scenarios():
     )
     status2, exp2, reasons2 = evaluate_eligibility(opp, candidate_fail_gpa)
     assert status2 == EligibilityClassification.INELIGIBLE
-    assert "Ineligible" in exp2
+    assert "at least 8" in exp2 and "7.2" in exp2  # plain sentence with the requirement and the profile value
     assert any(r.get("field") == "cgpa" and r.get("status") == "fail" for r in reasons2)
 
     # Scenario 3: Candidate with insufficient evidence (missing academic year and degree)

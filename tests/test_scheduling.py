@@ -212,7 +212,7 @@ def test_scheduling_tools_registered():
 async def test_propose_schedule_handler_simulated():
     """Verify propose_schedule skill produces structured proposals."""
     handler = SKILL_REGISTRY["propose_schedule"]
-    result = await handler({"target_date": "2026-09-21"}, pool=None)
+    result = await handler({"target_date": "2026-09-21", "user_id": "sched-user"}, pool=None)
 
     assert "data" in result
     assert result["data"]["status"] == "proposed"
@@ -224,7 +224,7 @@ async def test_propose_schedule_handler_simulated():
 async def test_get_calendar_availability_handler():
     """Verify get_calendar_availability skill returns free and busy blocks."""
     handler = SKILL_REGISTRY["get_calendar_availability"]
-    result = await handler({"start_date": "2026-09-21", "end_date": "2026-09-23"}, pool=None)
+    result = await handler({"start_date": "2026-09-21", "end_date": "2026-09-23", "user_id": "sched-user"}, pool=None)
 
     assert "data" in result
     data = result["data"]

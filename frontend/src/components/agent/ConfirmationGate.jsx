@@ -9,47 +9,9 @@ import {
   PlusCircle,
 } from 'lucide-react'
 
-function friendlyAction(tool) {
-  const map = {
-    add_task: 'Create Task',
-    edit_task: 'Update Task',
-    delete_task: 'Delete Task',
-    update_task_status: 'Update Task Status',
-    ingest_url: 'Index Web Resource',
-    ingest_text: 'Store Context Memory',
-    apply_triage_plan: 'Execute Schedule Adjustment',
-    schedule_event: 'Book Calendar Slot',
-    commit_schedule: 'Commit Batch Schedule',
-  }
-  return map[tool] || (tool || '').replace(/_/g, ' ')
-}
+import { friendlyAction, formatActionDescription } from './actionText'
 
-export function formatActionDescription(action) {
-  if (!action) return 'Update data'
-  if (action.summary) return action.summary
-  const tool = action.tool
-  const args = action.args || {}
-  if (tool === 'add_task') {
-    return `Create task: "${args.title || 'New Task'}" (${args.domain || 'general'})`
-  }
-  if (tool === 'edit_task') {
-    return `Update task: "${args.title || `Task #${args.task_id || ''}`}"`
-  }
-  if (tool === 'delete_task') {
-    return `Permanently remove task #${args.task_id || ''}`
-  }
-  if (tool === 'update_task_status') {
-    const status = args.status || 'done'
-    return `Mark task #${args.task_id || ''} as ${status === 'done' ? 'completed' : status}`
-  }
-  if (tool === 'schedule_event' || tool === 'commit_schedule') {
-    return `Reserve calendar time slot for "${args.title || 'event'}"`
-  }
-  if (tool === 'apply_triage_plan') {
-    return 'Rebalance task deadlines to prevent cognitive burnout'
-  }
-  return friendlyAction(tool)
-}
+export { formatActionDescription }
 
 function getActionIcon(tool) {
   if (tool === 'add_task') return PlusCircle

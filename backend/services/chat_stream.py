@@ -6,6 +6,7 @@ concurrent context pre-fetching, and resilient background conversation persisten
 """
 
 import asyncio
+import functools
 import json
 import logging
 import sys
@@ -39,10 +40,33 @@ from backend.router_helpers import (
     is_undo_request,
 )
 from backend.services.chat_idempotency import committed_event, normalize_request_id, peek_replay, replay_events
+from backend.services.chat_fastpath import GREETING_REPLY, apply_router_extra_body, is_greeting_fastpath
 from backend.services.task_intent import is_intake_intent
 from backend.services.task_time import local_today, pick_timezone
-from backend.services.token_budget import HARD_CAP_FINISH_MAX_TOKENS, HARD_CAP_FINISH_PROMPT, stream_token_budget
+from backend.services.token_budget import stream_token_budget
 from backend.services.usage import record_usage
+from backend.services.chat_stream_extras import (
+    DIRECT_ANSWER_RULE,
+    GENERIC_ERROR_MESSAGE,
+    SPECIALIST_FAILED_MESSAGE,
+    STATUS_INTERRUPTED,
+    STATUS_TRUNCATED,
+    STREAM_REQUEST_TIMEOUT_S,
+    StreamState,
+    continuation_events,
+    continue_message_events,
+    friendly_error_event,
+    load_candidate_profile_context,
+    mark_message_state,
+    no_retry_client,
+    orchestrate_with_early_commit,
+    run_web_fallback,
+    should_search_web,
+    specialist_answer_events,
+    sse,
+    status_event,
+    text_pass_events,
+)
 
 logger = logging.getLogger("compass.services.chat_stream")
 
@@ -50,6 +74,7 @@ get_pool = db_get_pool
 
 
 from backend.services.streaming_filter import StreamingThinkFilter
+from backend.services.stream_watch import StreamTrace, timed_acquire
 
 
 async def _resolve_pool():
@@ -71,6 +96,18 @@ async def _resolve_pool():
     return await db_get_pool()
 
 
+def _get_stream_client(_settings: Any) -> Any:
+    """Model client for streaming chat (kept identical to the previous inline selection)."""
+    if not isinstance(openai.AsyncOpenAI, type) or hasattr(openai.AsyncOpenAI, "_mock_return_value"):
+        return openai.AsyncOpenAI(
+            api_key=_settings.NEBIUS_API_KEY,
+            base_url=_settings.NEBIUS_BASE_URL,
+            timeout=30.0,
+        )
+    from backend.router import get_openai_client
+    return get_openai_client()
+
+
 def _format_empty_model_error(result: Optional[dict] = None) -> str:
     s = get_settings()
     key = s.NEBIUS_API_KEY or ""
@@ -90,11 +127,15 @@ async def persist_stream_messages(
     skill_label: str = "chat",
     evidence: Optional[Dict[str, Any]] = None,
     verifiable: Optional[bool] = None,
+    is_truncated: bool = False,
+    stream_status: Optional[str] = None,
+    request_id: Optional[str] = None,
 ) -> bool:
     """Persist user prompt and assistant response asynchronously after SSE stream completion.
 
     Ensures failures are explicitly caught and logged with full context rather
-    than silently dropped.
+    than silently dropped. `is_truncated` / `stream_status` are stored on the assistant message so a
+    reload still shows that the answer was cut short or interrupted.
     """
     if not final_text:
         logger.debug("Skipping stream persistence for empty response in conv=%s", conv_id)
@@ -110,14 +151,18 @@ async def persist_stream_messages(
             )
             return False
 
-        async with pool.acquire() as conn:
+        async with timed_acquire(pool, request_id, "persist_stream_messages") as conn:
             real_cid = await conversations.get_or_create_conversation(
                 conn, conv_id, user_id=user_id, guest_id=guest_id
             )
             await conversations.add_message(conn, real_cid, role="user", content=message)
-            await conversations.add_message(
+            saved = await conversations.add_message(
                 conn, real_cid, role="assistant", content=final_text, skill_called=skill_label, evidence=evidence, verifiable=verifiable
             )
+            if is_truncated or stream_status:
+                await mark_message_state(
+                    conn, saved.get("id") if isinstance(saved, dict) else None, is_truncated, stream_status
+                )
         logger.debug("Successfully persisted streamed conversation message for conv=%s (real_cid=%s)", conv_id, real_cid)
         return True
     except Exception as save_err:
@@ -139,10 +184,14 @@ def _schedule_stream_persistence(
     skill_label: str = "chat",
     evidence: Optional[Dict[str, Any]] = None,
     verifiable: Optional[bool] = None,
+    is_truncated: bool = False,
+    stream_status: Optional[str] = None,
+    request_id: Optional[str] = None,
 ) -> asyncio.Task:
     """Schedule stream persistence as an async background task with an exception handler."""
     task = asyncio.create_task(
         persist_stream_messages(
+            request_id=request_id,
             conv_id=conv_id,
             message=message,
             final_text=final_text,
@@ -151,6 +200,8 @@ def _schedule_stream_persistence(
             skill_label=skill_label,
             evidence=evidence,
             verifiable=verifiable,
+            is_truncated=is_truncated,
+            stream_status=stream_status,
         )
     )
 
@@ -180,14 +231,27 @@ async def stream_chunks(text: str) -> AsyncGenerator[str, None]:
         cursor += take
 
 
-async def generate_chat_events(
+def generate_chat_events(
     req: StreamChatRequest,
     request: Request,
     user_id: Optional[str] = None,
     guest_id: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
+    """Traced entry point: logs stream start/end and runs the silent-stream watchdog around the real generator."""
+    trace = StreamTrace(normalize_request_id(getattr(req, "request_id", None)), str(getattr(req, "conversation_id", None) or "") or None)
+    return cast(AsyncGenerator[str, None], trace.run(_generate_chat_events(req, request, user_id, guest_id, trace.request_id), request))
+
+
+async def _generate_chat_events(
+    req: StreamChatRequest,
+    request: Request,
+    user_id: Optional[str] = None,
+    guest_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
+) -> AsyncGenerator[str, None]:
     """Generate Server-Sent Events (SSE) for conversational and tool-dispatching chat requests."""
     _settings = get_settings()
+    _persist_bg = functools.partial(_schedule_stream_persistence, request_id=trace_id)
     conv_id = req.conversation_id or str(uuid.uuid4())
     message = req.message.strip()
     req_tone = getattr(req, "tone", None)
@@ -205,24 +269,98 @@ async def generate_chat_events(
 
         from backend.agents.specialist import run_specialist_task
         pool = await _resolve_pool()
-        spec_result = await run_specialist_task(
-            capability=valid_id, user_goal=message, pool=pool, user_id=user_id or guest_id,
-            include_demo=req_include_demo,
-        )
-        response_text = spec_result.get("summary", f"Specialist analysis completed for '{message}'.")
+        yield status_event("thinking", f"Gathering {valid_id.replace('-', ' ')} context…")
+        try:
+            spec_result = await run_specialist_task(
+                capability=valid_id, user_goal=message, pool=pool, user_id=user_id or guest_id,
+                include_demo=req_include_demo, defer_synthesis=True,
+            )
+        except Exception as spec_err:
+            logger.error("Specialist %s failed before streaming: %s", valid_id, spec_err, exc_info=True)
+            yield sse({'type': 'error', 'detail': SPECIALIST_FAILED_MESSAGE, 'can_retry': True, 'terminal': True})
+            return
+        spec_state = StreamState()
+        spec_header = spec_result.get("task_created_header") or ""
+        try:
+            spec_settings = _settings
+            spec_key = spec_settings.NEBIUS_API_KEY or ""
+            spec_use_model = bool(spec_key) and not spec_key.startswith("your_nebius") and spec_key not in ("mock", "mock-key-not-used-in-tests")
+            spec_client = _get_stream_client(spec_settings) if spec_use_model else None
+            async for spec_evt in specialist_answer_events(
+                client=spec_client, settings=spec_settings, request=request, spec_result=spec_result,
+                user_goal=message, state=spec_state, max_tokens=int(getattr(spec_settings, "MAX_SYNTHESIS_TOKENS", 8192)),
+                use_model=spec_use_model,
+            ):
+                yield spec_evt
+        except Exception as spec_stream_err:
+            logger.error("Specialist %s stream failed: %s", valid_id, spec_stream_err, exc_info=True)
+            if not spec_header:
+                yield friendly_error_event(partial=spec_state.full_text, detail=SPECIALIST_FAILED_MESSAGE)
+                return
+            spec_state.failed = True
+        if spec_state.failed and spec_header:
+            # A task was already created and announced. Never answer with a retryable error (Retry would
+            # create it again): finish normally, with the plain summary when the model wrote nothing.
+            if spec_state.full_text.strip():
+                spec_state.continuation_failed = True  # partial text kept: flag it as cut short
+            else:
+                spec_fallback = str(spec_result.get("summary") or "")
+                if spec_fallback.strip():
+                    yield sse({"type": "token", "value": spec_fallback})
+                    spec_state.full_text = spec_fallback
+            spec_state.failed = False
+        response_text = (spec_header + spec_state.full_text).strip() if (spec_header or spec_state.full_text.strip()) else ""
+        spec_truncated = spec_state.truncated and not spec_state.failed
+        spec_status = STATUS_TRUNCATED if spec_truncated else (STATUS_INTERRUPTED if (spec_state.failed or spec_state.disconnected) else None)
 
         try:
-            if pool:
-                async with pool.acquire() as conn:
+            if pool and response_text:
+                async with timed_acquire(pool, trace_id, "persist_specialist") as conn:
                     real_cid = await conversations.get_or_create_conversation(conn, conv_id, user_id=user_id, guest_id=guest_id)
                     await conversations.add_message(conn, real_cid, role="user", content=f"[{valid_id}] {message}")
-                    await conversations.add_message(conn, real_cid, role="assistant", content=response_text, skill_called=f"specialist_{valid_id}")
+                    saved_spec = await conversations.add_message(conn, real_cid, role="assistant", content=response_text, skill_called=f"specialist_{valid_id}")
+                    await mark_message_state(conn, saved_spec.get("id") if isinstance(saved_spec, dict) else None, spec_truncated or bool(spec_status), spec_status)
                     conv_id = real_cid
         except Exception as e:
             logger.debug(f"Could not persist specialist message history in stream: {e}")
 
-        yield f"data: {json.dumps({'type': 'token', 'value': response_text})}\n\n"
-        yield f"data: {json.dumps({'type': 'done', 'conversation_id': conv_id, 'skill_used': f'specialist_{valid_id}'})}\n\n"
+        if spec_state.disconnected:
+            return
+        if spec_state.failed:
+            err_payload: dict[str, Any] = {'type': 'error', 'detail': SPECIALIST_FAILED_MESSAGE, 'can_retry': True, 'terminal': True}
+            if response_text:
+                err_payload['partialResponse'] = response_text
+            yield sse(err_payload)
+            return
+        yield f"data: {json.dumps({'type': 'done', 'conversation_id': conv_id, 'skill_used': f'specialist_{valid_id}', 'is_truncated': spec_truncated})}\n\n"
+        return
+
+    continue_msg_id = getattr(req, "continue_message_id", None)
+    if continue_msg_id:
+        # Continue mode: resume a saved assistant message and stream only the new text.
+        from backend.persona import build_persona_system_prompt as _persona_prompt
+
+        try:
+            cont_pool = await _resolve_pool()
+            cont_today = local_today(pick_timezone(getattr(req, "tz", None), None)).isoformat()
+            cont_sys_prompt = _persona_prompt(
+                profile_facts=None,
+                extra_context=f"Today's date is {cont_today}.",
+                tone=effective_tone,
+                parked_thoughts=None,
+                conv_mode=getattr(req, "mode", None),
+            )
+            yield status_event("thinking", "Picking up where the answer stopped…")
+            async for cont_evt in continue_message_events(
+                client=_get_stream_client(_settings), settings=_settings, request=request, pool=cont_pool,
+                owner_id=user_id or guest_id, message_id_raw=continue_msg_id, system_prompt=cont_sys_prompt,
+                max_tokens=stream_token_budget(effective_tone, int(getattr(_settings, "MAX_SYNTHESIS_TOKENS", 8192)))[0],
+                conversation_id=getattr(req, "conversation_id", None),
+            ):
+                yield cont_evt
+        except Exception as cont_err:
+            logger.error("Continue mode failed: %s", cont_err, exc_info=True)
+            yield friendly_error_event(detail=GENERIC_ERROR_MESSAGE)
         return
 
     replayed = await peek_replay(
@@ -231,6 +369,15 @@ async def generate_chat_events(
     if replayed:
         for replay_evt in replay_events(replayed, conv_id):
             yield replay_evt
+        return
+
+    if is_greeting_fastpath(req, message):
+        # Pure greeting in a plain chat turn: answer at once, no model call.
+        yield f"data: {json.dumps({'type': 'ping'})}\n\n"
+        yield f"data: {json.dumps({'type': 'status', 'stage': 'thinking', 'label': 'Understanding your request…'})}\n\n"
+        yield f"data: {json.dumps({'type': 'token', 'value': GREETING_REPLY})}\n\n"
+        yield f"data: {json.dumps({'type': 'done', 'conversation_id': conv_id, 'skill_used': 'chat'}, default=str)}\n\n"
+        _persist_bg(conv_id, message, GREETING_REPLY, user_id, guest_id, "chat")
         return
 
     stream_start = time.perf_counter()
@@ -288,13 +435,15 @@ async def generate_chat_events(
                     return []
 
             gather_res: tuple[Any, ...] = await asyncio.gather(
-                _load_history(), _load_prior(), _load_tasks(), _load_facts(), _load_parked(), return_exceptions=True
+                _load_history(), _load_prior(), _load_tasks(), _load_facts(), _load_parked(),
+                load_candidate_profile_context(user_id or guest_id), return_exceptions=True
             )
             rows_h = gather_res[0]
             prior = gather_res[1]
             tasks_rows = gather_res[2]
             profile_facts = gather_res[3]
             parked_items = gather_res[4]
+            candidate_ctx = gather_res[5]
 
             if not isinstance(profile_facts, dict):
                 profile_facts = {}
@@ -307,6 +456,8 @@ async def generate_chat_events(
                     if role in ("user", "assistant") and content:
                         history_items.append({"role": role, "content": content})
             mem_parts = []
+            if isinstance(candidate_ctx, str) and candidate_ctx:
+                mem_parts.append(candidate_ctx)
             if isinstance(prior, list) and prior:
                 prior_text = "\n".join([f"- [{p.get('role', 'user')}]: {p.get('content', '')[:100]}" for p in prior])
                 mem_parts.append(f"Past Chats Recall:\n{prior_text}")
@@ -325,15 +476,7 @@ async def generate_chat_events(
     stream = None
     full_text = ""
     try:
-        if not isinstance(openai.AsyncOpenAI, type) or hasattr(openai.AsyncOpenAI, "_mock_return_value"):
-            client = openai.AsyncOpenAI(
-                api_key=_settings.NEBIUS_API_KEY,
-                base_url=_settings.NEBIUS_BASE_URL,
-                timeout=30.0,
-            )
-        else:
-            from backend.router import get_openai_client
-            client = get_openai_client()
+        client = _get_stream_client(_settings)
 
         profile_tz = profile_facts.get("timezone") if isinstance(profile_facts, dict) else None
         today_iso = local_today(pick_timezone(getattr(req, "tz", None), profile_tz)).isoformat()
@@ -389,7 +532,11 @@ async def generate_chat_events(
         )
 
         if (not is_mocked and is_placeholder_key) or is_schedule_or_agent_intent(message) or is_tavily_verification_intent(message) or is_safety_intent:
-            result = await orchestrator.handle_message(
+            result: dict[str, Any] = {}
+            early_committed = False
+            async for orch_kind, orch_val in orchestrate_with_early_commit(
+                orchestrator.handle_message,
+                trace_id=trace_id,
                 conversation_id=conv_id,
                 request_id=getattr(req, "request_id", None),
                 tz=getattr(req, "tz", None),
@@ -405,10 +552,15 @@ async def generate_chat_events(
                 target_message_content=target_msg_content,
                 pool=pool,
                 conv_mode=getattr(req, "mode", None),
-            )
+            ):
+                if orch_kind == "committed":
+                    early_committed = True
+                    yield orch_val
+                else:
+                    result = orch_val
             response_text = result.get("response", "")
             committed_evt = committed_event(result)
-            if committed_evt:
+            if committed_evt and not early_committed:
                 yield committed_evt
             skill_used = result.get("skill_used") or "agent"
             thought = (result.get("data") or {}).get("thought") if isinstance(result.get("data"), dict) else None
@@ -456,7 +608,7 @@ async def generate_chat_events(
             if result.get('is_truncated') or (isinstance(raw_data, dict) and raw_data.get('is_truncated')):
                 done_payload['is_truncated'] = True
             yield f"data: {json.dumps(done_payload, default=str)}\n\n"
-            _schedule_stream_persistence(
+            _persist_bg(
                 conv_id,
                 message,
                 response_text,
@@ -465,12 +617,14 @@ async def generate_chat_events(
                 skill_used,
                 evidence=done_payload.get('evidence'),
                 verifiable=result.get('verifiable', False),
+                is_truncated=bool(done_payload.get('is_truncated')),
+                stream_status=STATUS_TRUNCATED if done_payload.get('is_truncated') else None,
             )
             return
 
         logger.info("Serving chat stream request with model=%s", _settings.ROUTER_MODEL)
         max_synth_budget = int(getattr(_settings, "MAX_SYNTHESIS_TOKENS", 8192))
-        stream_max_tokens, hard_capped_tone = stream_token_budget(effective_tone, max_synth_budget)
+        stream_max_tokens, _ = stream_token_budget(effective_tone, max_synth_budget)
 
         call_kwargs: dict[str, Any] = {
             "model": _settings.ROUTER_MODEL,
@@ -479,15 +633,17 @@ async def generate_chat_events(
             "temperature": 0.7,
             "stream": True,
             "stream_options": {"include_usage": True},
+            "timeout": STREAM_REQUEST_TIMEOUT_S,
         }
         if tools:
             call_kwargs["tools"] = tools
             call_kwargs["tool_choice"] = "auto"
+        apply_router_extra_body(call_kwargs, _settings)
 
         try:
             stream = cast(
                 openai.AsyncStream[ChatCompletionChunk],
-                await client.chat.completions.create(**call_kwargs),
+                await no_retry_client(client).chat.completions.create(**call_kwargs),
             )
         except Exception as create_err:
             logger.warning("Upstream stream creation failed: %s, falling back to orchestrator", create_err)
@@ -522,14 +678,16 @@ async def generate_chat_events(
                 yield f"data: {json.dumps({'type': 'token', 'value': text_chunk})}\n\n"
 
             yield f"data: {json.dumps({'type': 'done', 'conversation_id': result.get('conversation_id', conv_id), 'skill_used': skill_used})}\n\n"
-            _schedule_stream_persistence(conv_id, message, response_text, user_id, guest_id, skill_used)
+            _persist_bg(conv_id, message, response_text, user_id, guest_id, skill_used)
             return
 
         full_text = ""
         emitted_text = ""
+        thinking_sent = False
         tool_call_detected = False
         usage_data = None
         last_finish_reason: Optional[str] = None
+        cont_failed = False
         think_filter = StreamingThinkFilter()
         accumulated_tool_calls: Dict[int, Dict[str, str]] = {}
 
@@ -539,7 +697,11 @@ async def generate_chat_events(
                     logger.info("Client disconnected from chat SSE stream; closing upstream stream.")
                     if hasattr(stream, "aclose"):
                         await stream.aclose()
-                    _schedule_stream_persistence(conv_id, message, full_text.strip(), user_id, guest_id, "chat")
+                    full_text += think_filter.flush()
+                    _persist_bg(
+                        conv_id, message, full_text.strip(), user_id, guest_id, "chat",
+                        is_truncated=True, stream_status=STATUS_INTERRUPTED,
+                    )
                     return
 
                 if hasattr(stream_chunk, "usage") and stream_chunk.usage:
@@ -572,11 +734,11 @@ async def generate_chat_events(
                             await stream.aclose()
                         break
 
-                    # Do not stream private model reasoning tokens or internal deliberations to the user
+                    # Private reasoning is never shown, but tell the user the model is working.
                     reasoning_val = getattr(delta, "reasoning", None) or getattr(delta, "reasoning_content", None)
-                    if reasoning_val:
-                        # Private reasoning suppressed from normal UI
-                        pass
+                    if isinstance(reasoning_val, str) and reasoning_val and not emitted_text and not thinking_sent:
+                        thinking_sent = True
+                        yield status_event("thinking", "Thinking it through…")
 
                     # Strip reasoning_content and <think> blocks from user SSE token output
                     token = (delta.content if delta else None) or ""
@@ -591,73 +753,36 @@ async def generate_chat_events(
 
             tail = "" if tool_call_detected else think_filter.flush()
             if tail:
+                if not emitted_text:
+                    yield status_event("generating", "Generating response…")
                 full_text += tail
                 emitted_text += tail
                 yield f"data: {json.dumps({'type': 'token', 'value': tail})}\n\n"
 
-            # Bounded continuation if output token limit was reached
-            continuation_attempts = 0
-            max_cont_attempts = 1 if hard_capped_tone else int(getattr(_settings, "MAX_CONTINUATION_ATTEMPTS", 2))
-            while last_finish_reason == "length" and not tool_call_detected and continuation_attempts < max_cont_attempts:
-                if await request.is_disconnected():
-                    break
-                continuation_attempts += 1
-                logger.info("Direct stream hit token limit (length). Continuing response (%d/%d)...", continuation_attempts, max_cont_attempts)
-                yield f"data: {json.dumps({'type': 'status', 'stage': 'generating', 'label': f'Continuing response ({continuation_attempts}/{max_cont_attempts})…'})}\n\n"
-
-                cont_prompt = (
-                    HARD_CAP_FINISH_PROMPT
-                    if hard_capped_tone
-                    else (
-                        "Your previous response was cut off by the token limit. "
-                        "Continue generating EXACTLY where you left off. "
-                        "Do not repeat prior paragraphs, table rows, citations, or greetings."
+            # Bounded continuation if output token limit was reached (same prompt for every tone).
+            # Skipped when the first pass produced no visible text: there is nothing to continue.
+            cont_state = StreamState(
+                full_text=full_text, emitted_text=emitted_text, finish=last_finish_reason, thinking_sent=thinking_sent
+            )
+            if not tool_call_detected and last_finish_reason == "length" and full_text.strip():
+                async for cont_evt in continuation_events(
+                    client,
+                    {"model": _settings.ROUTER_MODEL, "max_tokens": max_synth_budget, "temperature": 0.7},
+                    list(cast(Any, messages)),
+                    cont_state,
+                    request,
+                    int(getattr(_settings, "MAX_CONTINUATION_ATTEMPTS", 2)),
+                ):
+                    yield cont_evt
+                full_text, emitted_text = cont_state.full_text, cont_state.emitted_text
+                last_finish_reason = cont_state.finish
+                cont_failed = cont_state.continuation_failed
+                if cont_state.disconnected:
+                    _persist_bg(
+                        conv_id, message, full_text.strip(), user_id, guest_id, "chat",
+                        is_truncated=True, stream_status=STATUS_INTERRUPTED,
                     )
-                )
-                cont_messages = list(messages)
-                cont_messages.append({"role": "assistant", "content": full_text})
-                cont_messages.append({"role": "user", "content": cont_prompt})
-                cont_kwargs = {
-                    "model": _settings.ROUTER_MODEL,
-                    "messages": cont_messages,
-                    "max_tokens": HARD_CAP_FINISH_MAX_TOKENS if hard_capped_tone else max_synth_budget,
-                    "temperature": 0.7,
-                    "stream": True,
-                }
-                try:
-                    cont_stream = cast(
-                        openai.AsyncStream[ChatCompletionChunk],
-                        await client.chat.completions.create(**cont_kwargs),
-                    )
-                    last_finish_reason = None
-                    cont_think_filter = StreamingThinkFilter()
-                    async for c_chunk in cont_stream:
-                        if await request.is_disconnected():
-                            if hasattr(cont_stream, "aclose"):
-                                await cont_stream.aclose()
-                            _schedule_stream_persistence(conv_id, message, full_text.strip(), user_id, guest_id, "chat")
-                            return
-                        c_choices = c_chunk.choices or []
-                        if c_choices:
-                            c_delta = c_choices[0].delta
-                            c_fr = c_choices[0].finish_reason
-                            if c_fr:
-                                last_finish_reason = c_fr
-                            c_token = (c_delta.content if c_delta else None) or ""
-                            if c_token:
-                                c_filtered = cont_think_filter.process(c_token)
-                                if c_filtered:
-                                    full_text += c_filtered
-                                    emitted_text += c_filtered
-                                    yield f"data: {json.dumps({'type': 'token', 'value': c_filtered})}\n\n"
-                    c_tail = cont_think_filter.flush()
-                    if c_tail:
-                        full_text += c_tail
-                        emitted_text += c_tail
-                        yield f"data: {json.dumps({'type': 'token', 'value': c_tail})}\n\n"
-                except Exception as cont_err:
-                    logger.warning("Continuation attempt %d failed: %s", continuation_attempts, cont_err)
-                    break
+                    return
 
         except asyncio.CancelledError:
             logger.info("Chat SSE stream cancelled; closing upstream model stream.")
@@ -668,9 +793,63 @@ async def generate_chat_events(
             logger.error("Mid-stream failure reading model chunks: %s", stream_err, exc_info=True)
             if stream and hasattr(stream, "aclose"):
                 await stream.aclose()
-            yield f"data: {json.dumps({'type': 'error', 'detail': 'An internal error occurred while processing the stream.', 'terminal': True})}\n\n"
-            _schedule_stream_persistence(conv_id, message, full_text.strip(), user_id, guest_id, "chat")
+            full_text += think_filter.flush() if not tool_call_detected else ""
+            yield friendly_error_event(partial=full_text)
+            _persist_bg(
+                conv_id, message, full_text.strip(), user_id, guest_id, "chat",
+                is_truncated=True, stream_status=STATUS_INTERRUPTED,
+            )
             return
+
+        if not tool_call_detected and not full_text.strip():
+            # T-008: the first pass produced no visible text (hidden reasoning used the whole budget).
+            # Retry the MODEL once with a short-reasoning hint rather than re-running the request through
+            # the non-streaming orchestrator, whose task parser can save a mangled title.
+            retry_state = StreamState(thinking_sent=thinking_sent)
+            yield status_event("thinking", "Still working on it…")
+            retry_messages = [dict(m) for m in cast(Any, messages)]
+            if retry_messages and retry_messages[0].get("role") == "system":
+                retry_messages[0]["content"] = str(retry_messages[0].get("content", "")) + DIRECT_ANSWER_RULE
+            retry_kwargs: dict[str, Any] = {
+                "model": _settings.ROUTER_MODEL, "messages": retry_messages,
+                "max_tokens": max_synth_budget, "temperature": 0.7,
+            }
+            if tools:
+                retry_kwargs["tools"] = tools
+                retry_kwargs["tool_choice"] = "auto"
+            try:
+                async for retry_evt in text_pass_events(
+                    client, retry_kwargs, retry_state, request, label="Generating response…", allow_tools=bool(tools)
+                ):
+                    yield retry_evt
+                if (
+                    not retry_state.disconnected and not retry_state.tool_call_detected
+                    and retry_state.finish == "length" and retry_state.full_text.strip()
+                ):
+                    async for retry_cont_evt in continuation_events(
+                        client,
+                        {"model": _settings.ROUTER_MODEL, "max_tokens": max_synth_budget, "temperature": 0.7},
+                        retry_messages, retry_state, request,
+                        int(getattr(_settings, "MAX_CONTINUATION_ATTEMPTS", 2)),
+                    ):
+                        yield retry_cont_evt
+            except Exception as retry_err:
+                logger.warning("Retry after an empty first pass failed: %s", retry_err)
+                if retry_state.full_text.strip():
+                    retry_state.continuation_failed = True  # partial text kept: flag it as cut short
+            if retry_state.disconnected:
+                if retry_state.full_text.strip():
+                    _persist_bg(
+                        conv_id, message, retry_state.full_text.strip(), user_id, guest_id, "chat",
+                        is_truncated=True, stream_status=STATUS_INTERRUPTED,
+                    )
+                return
+            full_text, emitted_text = retry_state.full_text, retry_state.emitted_text
+            last_finish_reason = retry_state.finish
+            cont_failed = retry_state.continuation_failed
+            if retry_state.tool_call_detected:
+                tool_call_detected = True
+                accumulated_tool_calls = retry_state.tool_calls
 
         if tool_call_detected:
             pre_routed_skill = None
@@ -695,7 +874,11 @@ async def generate_chat_events(
                 else:
                     yield f"data: {json.dumps({'type': 'status', 'stage': 'reasoning', 'label': f'Executing {pre_routed_skill}…'})}\n\n"
 
-            result = await orchestrator.handle_message(
+            result = {}
+            early_committed = False
+            async for orch_kind, orch_val in orchestrate_with_early_commit(
+                orchestrator.handle_message,
+                trace_id=trace_id,
                 conversation_id=conv_id,
                 request_id=getattr(req, "request_id", None),
                 tz=getattr(req, "tz", None),
@@ -712,12 +895,28 @@ async def generate_chat_events(
                 tone=effective_tone,
                 include_demo=req_include_demo,
                 conv_mode=getattr(req, "mode", None),
-            )
+            ):
+                if orch_kind == "committed":
+                    early_committed = True
+                    yield orch_val
+                else:
+                    result = orch_val
             response_text = result.get("response", "")
             committed_evt = committed_event(result)
-            if committed_evt:
+            if committed_evt and not early_committed:
                 yield committed_evt
             skill_used = result.get("skill_used") or "agent"
+
+            # T-013: a memory lookup for an outside event (e.g. an official hackathon deadline) that found
+            # nothing must search the web before replying. Falls through unchanged when search is off,
+            # over budget, or returns nothing.
+            if should_search_web(message, result):
+                yield status_event("searching", "Checking the web for the official answer…")
+                web_res = await run_web_fallback(message, pool)
+                if web_res:
+                    response_text = str(web_res.get("response") or response_text)
+                    skill_used = "search_web"
+                    result = {**result, "response": response_text, "skill_used": skill_used, "data": web_res.get("data")}
             thought = (result.get("data") or {}).get("thought") if isinstance(result.get("data"), dict) else None
             if thought:
                 yield f"data: {json.dumps({'type': 'thought', 'value': thought})}\n\n"
@@ -768,67 +967,45 @@ async def generate_chat_events(
             if result.get('is_truncated') or (isinstance(raw_data2, dict) and raw_data2.get('is_truncated')):
                 done_payload2['is_truncated'] = True
             yield f"data: {json.dumps(done_payload2, default=str)}\n\n"
-            _schedule_stream_persistence(conv_id, message, response_text, user_id, guest_id, skill_used, evidence=done_payload2.get('evidence'))
+            _persist_bg(
+                conv_id, message, response_text, user_id, guest_id, skill_used,
+                evidence=done_payload2.get('evidence'),
+                is_truncated=bool(done_payload2.get('is_truncated')),
+                stream_status=STATUS_TRUNCATED if done_payload2.get('is_truncated') else None,
+            )
             return
 
         if not full_text.strip():
-            result = await orchestrator.handle_message(
-                conversation_id=conv_id,
-                request_id=getattr(req, "request_id", None),
-                tz=getattr(req, "tz", None),
-                message=message,
-                user_id=user_id,
-                guest_id=guest_id,
-                history=history_items if history_items else None,
-                memory_context=memory_context if memory_context else None,
-                persist=False,
-                tone=effective_tone,
-                include_demo=req_include_demo,
-                conv_mode=getattr(req, "mode", None),
-            )
-            response_text = result.get("response", "")
-            committed_evt = committed_event(result)
-            if committed_evt:
-                yield committed_evt
-            skill_used = result.get("skill_used") or "chat"
-            thought = (result.get("data") or {}).get("thought") if isinstance(result.get("data"), dict) else None
-            if thought:
-                yield f"data: {json.dumps({'type': 'thought', 'value': thought}, default=str)}\n\n"
-
-            if not response_text.strip():
-                if not is_greeting_intent(message):
-                    yield f"data: {json.dumps({'type': 'error', 'detail': _format_empty_model_error(result), 'can_retry': True}, default=str)}\n\n"
-                    return
-                response_text = "How can I help you today?"
-
-            prompt_est = max(len(message.split()) * 3, 30)
-            completion_est = max(len(response_text.split()), 15)
-            record_usage(_settings.ROUTER_MODEL, prompt_est, completion_est, duration_ms=result.get("routing_latency_ms"))
-
-            is_first = True
-            async for sc_token in stream_chunks(response_text):
-                if not is_first:
-                    await asyncio.sleep(0.012)
-                is_first = False
-                yield f"data: {json.dumps({'type': 'token', 'value': sc_token})}\n\n"
-
-            done_payload_orchestrator: dict[str, Any] = {'type': 'done', 'conversation_id': result.get('conversation_id', conv_id), 'skill_used': skill_used}
-            raw_data_orch = result.get('data')
-            if isinstance(raw_data_orch, dict):
-                ev = raw_data_orch.get('evidence')
-                if ev:
-                    done_payload_orchestrator['evidence'] = ev
-                if 'pending_action' in raw_data_orch:
-                    done_payload_orchestrator['pending_action'] = raw_data_orch['pending_action']
-                if 'can_undo' in raw_data_orch:
-                    done_payload_orchestrator['can_undo'] = raw_data_orch['can_undo']
-            if result.get('is_truncated') or (isinstance(raw_data_orch, dict) and raw_data_orch.get('is_truncated')):
-                done_payload_orchestrator['is_truncated'] = True
-            yield f"data: {json.dumps(done_payload_orchestrator, default=str)}\n\n"
-            _schedule_stream_persistence(conv_id, message, response_text, user_id, guest_id, skill_used)
+            # Still nothing after one retry: answer a plain greeting, otherwise tell the user and offer Retry.
+            if not is_greeting_intent(message):
+                yield f"data: {json.dumps({'type': 'error', 'detail': _format_empty_model_error(None), 'can_retry': True}, default=str)}\n\n"
+                return
+            greeting_text = "How can I help you today?"
+            async for greet_token in stream_chunks(greeting_text):
+                yield f"data: {json.dumps({'type': 'token', 'value': greet_token})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'conversation_id': conv_id, 'skill_used': 'chat'}, default=str)}\n\n"
+            _persist_bg(conv_id, message, greeting_text, user_id, guest_id, "chat")
             return
 
-        _schedule_stream_persistence(conv_id, message, full_text, user_id, guest_id, "chat")
+        final_truncated = last_finish_reason == "length" or cont_failed
+        final_skill = "chat"
+
+        # T-013: a plain-chat reply that says "I don't have that" for an outside-event question gets a web
+        # search and the searched answer replaces it (search off / over budget / nothing found: unchanged).
+        if should_search_web(message, text=full_text):
+            yield status_event("searching", "Checking the web for the official answer…")
+            web_final = await run_web_fallback(message, pool)
+            web_text = str((web_final or {}).get("response") or "")
+            if web_text.strip():
+                yield f"data: {json.dumps({'type': 'replace', 'value': web_text})}\n\n"
+                full_text = web_text
+                final_truncated = False
+                final_skill = "search_web"
+
+        _persist_bg(
+            conv_id, message, full_text, user_id, guest_id, final_skill,
+            is_truncated=final_truncated, stream_status=STATUS_TRUNCATED if final_truncated else None,
+        )
 
         total_dur_ms = int((time.perf_counter() - stream_start) * 1000)
         if usage_data:
@@ -838,15 +1015,18 @@ async def generate_chat_events(
             completion_est = len(full_text.split())
             record_usage(_settings.ROUTER_MODEL, prompt_est, completion_est, duration_ms=total_dur_ms)
 
-        done_payload_final: dict[str, Any] = {'type': 'done', 'conversation_id': conv_id, 'skill_used': 'chat'}
-        if last_finish_reason == "length":
+        done_payload_final: dict[str, Any] = {'type': 'done', 'conversation_id': conv_id, 'skill_used': final_skill}
+        if final_truncated:
             done_payload_final['is_truncated'] = True
         yield f"data: {json.dumps(done_payload_final, default=str)}\n\n"
 
     except asyncio.CancelledError:
         logger.info("Chat SSE stream cancelled by client disconnect.")
         if full_text.strip():
-            _schedule_stream_persistence(conv_id, message, full_text.strip(), user_id, guest_id, "chat")
+            _persist_bg(
+                conv_id, message, full_text.strip(), user_id, guest_id, "chat",
+                is_truncated=True, stream_status=STATUS_INTERRUPTED,
+            )
         if stream and hasattr(stream, "aclose"):
             await stream.aclose()
         raise
@@ -854,13 +1034,9 @@ async def generate_chat_events(
         logger.error("SSE stream outer error: %s", e, exc_info=True)
         if stream and hasattr(stream, "aclose"):
             await stream.aclose()
-        err_payload = {
-            'type': 'error',
-            'detail': 'Internal error occurred while processing stream.',
-            'can_retry': True,
-            'terminal': True,
-        }
+        yield friendly_error_event(partial=full_text, detail=GENERIC_ERROR_MESSAGE)
         if full_text.strip():
-            err_payload['partialResponse'] = full_text.strip()
-            _schedule_stream_persistence(conv_id, message, full_text.strip(), user_id, guest_id, "chat")
-        yield f"data: {json.dumps(err_payload, default=str)}\n\n"
+            _persist_bg(
+                conv_id, message, full_text.strip(), user_id, guest_id, "chat",
+                is_truncated=True, stream_status=STATUS_INTERRUPTED,
+            )

@@ -442,7 +442,7 @@ async def check_slipped_schedules(conn: asyncpg.Connection, pool: Any = None, dr
     from backend.services.scheduler import find_slipped_tasks, replan_slipped_tasks, get_available_windows
     from backend.services.calendar import get_calendar_freebusy
 
-    tasks = await list_tasks(conn, include_demo=False)
+    tasks = await list_tasks(conn, include_demo=False, all_tenants=True)  # internal cross-tenant maintenance job
     slipped = find_slipped_tasks(tasks)
     if not slipped:
         logger.info("  [5/5] Slipped schedule check: 0 tasks slipped past end time.")
@@ -451,7 +451,7 @@ async def check_slipped_schedules(conn: asyncpg.Connection, pool: Any = None, dr
     logger.info(f"  [5/5] Found {len(slipped)} slipped task(s) past scheduled_end!")
     dep_map = await get_all_dependencies_map(conn)
     now = datetime.now(timezone.utc)
-    busy = await get_calendar_freebusy(now, now + timedelta(days=7), pool=pool)
+    busy = await get_calendar_freebusy(now, now + timedelta(days=7), pool=pool, all_tenants=True)  # internal job
     windows = get_available_windows(busy, now, now + timedelta(days=7))
     replan = replan_slipped_tasks(slipped, tasks, dependencies=dep_map, available_windows=windows)
     logger.info(f"    ⚡ Reactive re-plan computed: {replan['summary']}")

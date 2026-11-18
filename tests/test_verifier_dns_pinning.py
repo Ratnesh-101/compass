@@ -115,7 +115,7 @@ async def test_connection_goes_to_the_pinned_first_resolved_ip(monkeypatch):
     assert request.url.host == PUBLIC_IP
     assert request.url.path == "/job" and request.url.query == b"x=1"
     assert request.headers["Host"] == HOST
-    assert request.extensions["sni_hostname"] == HOST.encode("ascii")
+    assert request.extensions["sni_hostname"] == HOST  # httpx 0.28 expects a str; bytes crashed every HTTPS fetch
     assert dns.loop_calls == 1
 
 
@@ -304,7 +304,7 @@ async def test_unreachable_first_address_falls_back_to_the_next_pinned_address(m
     assert status == 200 and "Apply now" in text
     assert [r.url.host for r in send.requests] == [IPV6_PUBLIC, PUBLIC_IP]
     assert all(r.headers["Host"] == HOST for r in send.requests)
-    assert all(r.extensions["sni_hostname"] == HOST.encode("ascii") for r in send.requests)
+    assert all(r.extensions["sni_hostname"] == HOST for r in send.requests)
     assert dns.loop_calls == 1
     assert final_url == f"https://{HOST}/job"
 
