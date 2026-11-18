@@ -33,6 +33,7 @@ import {
 } from 'lucide-react'
 import { CalendarGrid } from './calendar/CalendarGrid'
 import { CalendarSidebar } from './calendar/CalendarSidebar'
+import { PLANNING_HOURS_TEXT } from './calendar/planningHours'
 import { ProposedPlanModal, QuickConnectModal, IcsExportModal } from './calendar/CalendarModals'
 import DarkModeToggle from './DarkModeToggle'
 import { syncResultBanner, syncErrorBanner, commitResultBanner, reactiveResultBanner, availabilityNote } from '../utils/scheduleHonesty'
@@ -152,40 +153,6 @@ export default function CalendarView({
   const [showMoreMenu, setShowMoreMenu] = useState(false)
   const [viewMode, setViewMode] = useState('week') // 'week' | 'agenda'
   const moreMenuRef = useRef(null)
-
-  // Editable working hours with localStorage persistence (N-028)
-  const [workingHours, setWorkingHours] = useState(() => {
-    try {
-      const saved = localStorage.getItem('compass_working_hours')
-      if (saved) {
-        const parsed = JSON.parse(saved)
-        if (parsed.start && parsed.end) return parsed
-      }
-    } catch {
-      /* ignore */
-    }
-    return { start: '09:00', end: '18:00' }
-  })
-  const [isEditingHours, setIsEditingHours] = useState(false)
-  const [tempStart, setTempStart] = useState('09:00')
-  const [tempEnd, setTempEnd] = useState('18:00')
-
-  const handleStartEditHours = () => {
-    setTempStart(workingHours.start)
-    setTempEnd(workingHours.end)
-    setIsEditingHours(true)
-  }
-
-  const handleSaveWorkingHours = () => {
-    const updated = { start: tempStart || '09:00', end: tempEnd || '18:00' }
-    setWorkingHours(updated)
-    try {
-      localStorage.setItem('compass_working_hours', JSON.stringify(updated))
-    } catch {
-      /* ignore */
-    }
-    setIsEditingHours(false)
-  }
 
   const selectedDateObj = useMemo(() => parseIsoLocal(selectedDate), [selectedDate])
   const weekStart = useMemo(() => startOfWeek(selectedDateObj), [selectedDateObj])
@@ -480,7 +447,7 @@ export default function CalendarView({
 
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', marginTop: '8px' }}>
           <p className="calendar-policy-subtext" style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>
-            Working hours: {workingHours.start} – {workingHours.end} · 15m focus breaks
+            {PLANNING_HOURS_TEXT} · 15m focus breaks
           </p>
 
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -804,68 +771,10 @@ export default function CalendarView({
                   <Settings size={14} strokeWidth={1.8} />
                   <span>Study Schedule Preferences</span>
                 </h4>
-                {!isEditingHours && (
-                  <button
-                    type="button"
-                    onClick={handleStartEditHours}
-                    style={{
-                      background: 'transparent',
-                      border: 'none',
-                      color: 'var(--accent, #f5a623)',
-                      fontSize: '11.5px',
-                      fontWeight: '600',
-                      cursor: 'pointer',
-                      padding: '2px 4px',
-                    }}
-                  >
-                    Edit hours
-                  </button>
-                )}
               </div>
 
-              {isEditingHours ? (
-                <div style={{ marginBottom: '10px', padding: '10px', background: 'var(--bg-card)', borderRadius: '6px', border: '1px solid var(--border)' }}>
-                  <div style={{ fontSize: '12px', fontWeight: '600', marginBottom: '8px', color: 'var(--text-primary)' }}>Set Working Hours</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                    <label htmlFor="calendar-hours-start" style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>From:</label>
-                    <input
-                      id="calendar-hours-start"
-                      type="time"
-                      value={tempStart}
-                      onChange={(e) => setTempStart(e.target.value)}
-                      style={{ padding: '4px 6px', fontSize: '12px', borderRadius: '4px', border: '1px solid var(--border)', background: 'var(--bg-app)', color: 'var(--text-primary)' }}
-                    />
-                    <label htmlFor="calendar-hours-end" style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>To:</label>
-                    <input
-                      id="calendar-hours-end"
-                      type="time"
-                      value={tempEnd}
-                      onChange={(e) => setTempEnd(e.target.value)}
-                      style={{ padding: '4px 6px', fontSize: '12px', borderRadius: '4px', border: '1px solid var(--border)', background: 'var(--bg-app)', color: 'var(--text-primary)' }}
-                    />
-                  </div>
-                  <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
-                    <button
-                      type="button"
-                      onClick={() => setIsEditingHours(false)}
-                      style={{ padding: '4px 10px', fontSize: '11.5px', borderRadius: '4px', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer' }}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleSaveWorkingHours}
-                      style={{ padding: '4px 12px', fontSize: '11.5px', borderRadius: '4px', border: 'none', background: 'var(--primary, #f5a623)', color: 'var(--accent-text, #1b1a17)', fontWeight: '600', cursor: 'pointer' }}
-                    >
-                      Save
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-
               <ul style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.6', paddingLeft: '16px', margin: 0 }}>
-                <li>Working Window: {workingHours.start} – {workingHours.end}</li>
-                <li>Days: Monday – Friday (study days)</li>
+                <li>{PLANNING_HOURS_TEXT}</li>
                 <li>Break between tasks: 15 minutes</li>
                 <li>Automatic focus time allocator</li>
                 <li>Export to calendar (.ics format)</li>

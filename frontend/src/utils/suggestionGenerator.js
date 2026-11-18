@@ -157,18 +157,10 @@ export function generateFollowUpSuggestions({
     combinedContext.includes('radar') ||
     combinedContext.includes('hiring')
 
-  const isCoursework =
-    combinedContext.includes('coursework') ||
-    combinedContext.includes('cs 61') ||
-    combinedContext.includes('risc-v') ||
-    combinedContext.includes('synthesis') ||
-    combinedContext.includes('lab') ||
-    combinedContext.includes('exam') ||
-    combinedContext.includes('homework') ||
-    combinedContext.includes('assignment') ||
-    combinedContext.includes('class') ||
-    combinedContext.includes('lecture') ||
-    combinedContext.includes('syllabus')
+  // Word-boundary matching: "exam" must not fire on "example", "lab" not on "available", "class" not on "classify"
+  const isCoursework = /\b(coursework|cs 61\w*|risc-v|synthesis|labs?|exams?|homework|assignments?|class(?:es)?|lectures?|syllabus)\b/.test(combinedContext)
+  // A real coursework signal in the conversation (used before offering any lab-specific chip)
+  const hasCourseworkWord = /\b(coursework|homework|assignments?|exams?|lectures?|syllabus|classes|class|course|cs 61\w*)\b/.test(combinedContext)
 
   // Code domain requires genuine architectural, algorithmic or code context (not a casual 'database' or 'api' word in prose)
   const isCode =
@@ -217,7 +209,7 @@ export function generateFollowUpSuggestions({
       candidatePool.push('Check for schedule conflicts this week')
       if (courseworkTasks.length > 0) {
         candidatePool.push('Prioritize my coursework tasks')
-      } else if (replyText.includes('lab')) {
+      } else if (/\blabs?\b/.test(replyText) && hasCourseworkWord) {
         candidatePool.push('Summarize key lab takeaways')
       }
     } else if (domain === 'hackathon') {

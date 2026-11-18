@@ -110,6 +110,6 @@ test('email sign-in form is hidden unless enabled and Google leads', () => {
   assert.ok(gate > -1)
   assert.ok(gate < authModal.indexOf('Instant Sign-In (Select or Enter Email)'))
   assert.ok(gate < authModal.indexOf('Sign In →'))
-  assert.ok(authModal.indexOf('Sign in with Google OAuth') < gate)
+  assert.ok(authModal.indexOf('Sign in with Google') < gate)
   assert.ok(!authModal.includes("{activeEmail ? 'Isolated Memory Active'"))
 })

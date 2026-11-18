@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { filterSpecialists, getSpecialistById } from '../../api/specialistRegistry'
 import { Send, X } from 'lucide-react'
 import Logo from '../Logo'
+import { autoGrowTextarea } from '../../utils/autoGrowTextarea'
 
 export default function ChatInputBar({
   input,
@@ -113,6 +114,11 @@ export default function ChatInputBar({
     }
     onSend(input.trim(), null, activeSpecialist ? activeSpecialist.id : null)
   }
+
+  // Grow the box with its content (up to 160px); resets when the input is cleared
+  useEffect(() => {
+    autoGrowTextarea(inputRef.current)
+  }, [input])
 
   // Close picker when clicking outside
   useEffect(() => {

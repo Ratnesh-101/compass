@@ -6,6 +6,7 @@ import StepCard, { STEP_STYLES, friendlyTool } from './agent/StepCard'
 import ConfirmationGate from './agent/ConfirmationGate'
 import ActivityFeed from './agent/ActivityFeed'
 import RunHistoryDrawer from './agent/RunHistoryDrawer'
+import { runStatusLabel } from './agent/runStatus'
 import AgentHeader from './agent/AgentHeader'
 import Logo from './Logo'
 
@@ -538,13 +539,13 @@ export default function AgentPanel({ onTaskMutated, conversationId }) {
             borderRadius: '8px',
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: '600', fontSize: '13px', color: isRunning ? 'var(--primary)' : '#059669' }}>
-                <span style={{ display: 'inline-block', width: '7px', height: '7px', borderRadius: '50%', background: isRunning ? 'var(--primary)' : '#10b981', animation: isRunning ? 'pulse 1s infinite' : 'none' }} />
-                {isRunning ? (
-                  'Working on it…'
+              <span style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: '600', fontSize: '13px', color: isRunning ? 'var(--primary)' : (pendingActions.length > 0 ? 'var(--accent, #f5a623)' : '#059669') }}>
+                <span style={{ display: 'inline-block', width: '7px', height: '7px', borderRadius: '50%', background: isRunning ? 'var(--primary)' : (pendingActions.length > 0 ? 'var(--accent, #f5a623)' : '#10b981'), animation: isRunning ? 'pulse 1s infinite' : 'none' }} />
+                {isRunning || pendingActions.length > 0 ? (
+                  runStatusLabel(isRunning, pendingActions)
                 ) : (
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                    All done <Check size={13} strokeWidth={2.2} />
+                    {runStatusLabel(isRunning, pendingActions)} <Check size={13} strokeWidth={2.2} />
                   </span>
                 )}
               </span>

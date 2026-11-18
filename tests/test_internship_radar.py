@@ -92,7 +92,7 @@ def test_eligibility_ineligible_academic_year():
     )
     classification, explanation, reasons = evaluate_eligibility(opp, profile)
     assert classification == EligibilityClassification.INELIGIBLE
-    assert "Ineligible" in explanation
+    assert "4th year" in explanation and "Skip it" in explanation  # plain sentence with a next step
     assert any(r["field"] == "academic_year" and r["status"] == "fail" for r in reasons)
 
 

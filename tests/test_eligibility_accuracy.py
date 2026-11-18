@@ -135,7 +135,9 @@ def test_short_country_name_not_matched_by_substring():
 def test_usa_alias_matches_united_states():
     opp = _opp(eligible_countries=["United States"])
     p = _profile(country_of_study="USA", country_of_residence="USA")
-    assert _cls(opp, p) == EC.ELIGIBLE
+    # The alias matches (never INELIGIBLE), but a country-only pass is not a real requirement check:
+    # without a published degree, year or GPA requirement the honest answer is a potential match.
+    assert _cls(opp, p) == EC.POTENTIAL_MATCH
 
 
 # ---- 8. GPA scale -----------------------------------------------------------

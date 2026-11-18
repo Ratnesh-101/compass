@@ -167,7 +167,10 @@ async def list_opportunities_endpoint(
         page_size=page_size,
     )
 
-    enriched = [_enrich_opportunity(item, profile) for item in dedupe_opportunities(raw_items)]
+    # Same rules as the recommendations: merged duplicates, no senior or clearance-only roles, and with the
+    # India filter on, no listings from other countries. The tab must never contradict its own heading.
+    visible = refine_listings(raw_items, profile_country_of(profile), country_filter=india_only)
+    enriched = [_enrich_opportunity(item, profile) for item in visible]
     return OpportunitiesListResponse(
         opportunities=enriched,
         total=total,

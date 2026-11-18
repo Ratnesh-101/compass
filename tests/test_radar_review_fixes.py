@@ -100,3 +100,22 @@ def test_an_invented_number_is_still_rejected():
     bad = LETTER.replace("a library app", "a library app used by 5000 students")
     problems = validate_cover_letter(bad, full_name="Priya Sharma", company="Acme", source_text="Summer internship at Acme. React.")
     assert any("figures" in p and "5000" in p for p in problems), problems
+
+
+# ---- All Listings tab uses the same refinement as the recommendations ---------------------------------
+@pytest.mark.asyncio
+async def test_all_listings_tab_drops_senior_and_non_india_rows(monkeypatch):
+    from backend.routers import radar as radar_router
+
+    india_intern = _opp(oid=1, company="Acme", title="Software Intern", country="India", location="Pune, India")
+    senior_us = _opp(oid=2, company="BigCo", title="Sr IT Project Specialist", country="USA", location="Remote, USA", india=False,
+                     compensation="USD 90,000 / year")
+    monkeypatch.setattr(radar_router, "_get_or_create_user_id", lambda request: "u1")
+    monkeypatch.setattr(radar_router, "get_user_opportunity_profile", AsyncMock(return_value=None))
+    monkeypatch.setattr(radar_router, "get_all_opportunities", AsyncMock(return_value=([india_intern, senior_us], 2)))
+    resp = await radar_router.list_opportunities_endpoint(
+        request=SimpleNamespace(), status=None, category=None, employer_type=None, work_arrangement=None,
+        country=None, search=None, india_only=True, verified_only=False, recent_24h=False, page=1, page_size=20,
+    )
+    titles = [o.role_title for o in resp.opportunities]
+    assert titles == ["Software Intern"], titles

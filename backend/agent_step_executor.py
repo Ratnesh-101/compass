@@ -11,6 +11,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from backend.agent_persistence import record_audit_log
+from backend.agent_observe_text import redact_internal_keys
 from backend.agent_types import AgentStep, MUTATING_TOOLS
 from backend.services.ownership import scope_owner
 from backend.services.task_id_hint import task_id_hint
@@ -198,7 +199,7 @@ async def execute_agent_tool_step(
     obs_tier = "Tavily Web Intelligence" if func_name in ("search_web", "ingest_url", "verify_deadline") else "Neon Postgres Engine"
     obs_step = AgentStep(
         type="observe",
-        content=tool_result,
+        content=redact_internal_keys(tool_result),
         tool_name=func_name,
         step_number=step_num,
         elapsed_ms=int((time.perf_counter() - step_start) * 1000),

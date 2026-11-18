@@ -689,7 +689,7 @@ export default function Dashboard({
             title="Architecture, AI telemetry, and evaluation guide"
           >
             <span>About / for judges</span>
-            <span style={{ fontSize: '10px', background: 'var(--bg-card-soft)', padding: '1px 5px', borderRadius: '4px', border: '1px solid var(--border)' }}>Guide</span>
+            <span style={{ fontSize: '12px', background: 'var(--bg-card-soft)', padding: '1px 5px', borderRadius: '4px', border: '1px solid var(--border)' }}>Guide</span>
           </button>
         </div>
 
@@ -930,7 +930,7 @@ export default function Dashboard({
                 {todayFocus.nextUrgency && (
                   <span
                     style={{
-                      fontSize: '11px',
+                      fontSize: '12px',
                       fontWeight: '600',
                       padding: '2px 8px',
                       borderRadius: '4px',
@@ -1342,12 +1342,12 @@ export default function Dashboard({
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px', flexWrap: 'wrap' }}>
                         <span className="domain-swatch" style={{ background: meta.color }} />
-                        <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '500' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: '500' }}>
                           {task.project || meta.label}
                         </span>
                         <span
                           style={{
-                            fontSize: '10px',
+                            fontSize: '12px',
                             fontWeight: '600',
                             padding: '1px 6px',
                             borderRadius: '4px',
@@ -1362,7 +1362,7 @@ export default function Dashboard({
                         {c.lifecycle !== 'pending' && (
                           <span
                             style={{
-                              fontSize: '10px',
+                              fontSize: '12px',
                               fontWeight: '600',
                               padding: '1px 6px',
                               borderRadius: '4px',
@@ -1393,7 +1393,7 @@ export default function Dashboard({
                     <div style={{ flexShrink: 0 }}>
                       <span
                         style={{
-                          fontSize: '11px',
+                          fontSize: '12px',
                           fontWeight: '600',
                           padding: '3px 8px',
                           borderRadius: '6px',
@@ -1528,7 +1528,7 @@ export default function Dashboard({
                       <span style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text-secondary)' }}>
                         {item.count} {item.count === 1 ? 'task' : 'tasks'}
                       </span>
-                      <span style={{ fontSize: '11px', color: 'var(--text-muted)', minWidth: '34px', textAlign: 'right' }}>
+                      <span style={{ fontSize: '12px', color: 'var(--text-muted)', minWidth: '34px', textAlign: 'right' }}>
                         {item.pct}%
                       </span>
                     </div>
@@ -1569,7 +1569,7 @@ export default function Dashboard({
                       onClick={() => setPriorityFilter('all')}
                       style={{
                         padding: '3px 8px',
-                        fontSize: '11px',
+                        fontSize: '12px',
                         fontWeight: priorityFilter === 'all' ? '600' : '400',
                         borderRadius: '4px',
                         border: 'none',
@@ -1586,7 +1586,7 @@ export default function Dashboard({
                         onClick={() => setPriorityFilter('overdue')}
                         style={{
                           padding: '3px 8px',
-                          fontSize: '11px',
+                          fontSize: '12px',
                           fontWeight: priorityFilter === 'overdue' ? '600' : '400',
                           borderRadius: '4px',
                           border: 'none',
@@ -1604,7 +1604,7 @@ export default function Dashboard({
                         onClick={() => setPriorityFilter('today')}
                         style={{
                           padding: '3px 8px',
-                          fontSize: '11px',
+                          fontSize: '12px',
                           fontWeight: priorityFilter === 'today' ? '600' : '400',
                           borderRadius: '4px',
                           border: 'none',
@@ -1622,7 +1622,7 @@ export default function Dashboard({
                         onClick={() => setPriorityFilter('due_soon')}
                         style={{
                           padding: '3px 8px',
-                          fontSize: '11px',
+                          fontSize: '12px',
                           fontWeight: priorityFilter === 'due_soon' ? '600' : '400',
                           borderRadius: '4px',
                           border: 'none',
@@ -1640,7 +1640,7 @@ export default function Dashboard({
                         onClick={() => setPriorityFilter('upcoming')}
                         style={{
                           padding: '3px 8px',
-                          fontSize: '11px',
+                          fontSize: '12px',
                           fontWeight: priorityFilter === 'upcoming' ? '600' : '400',
                           borderRadius: '4px',
                           border: 'none',
@@ -1739,7 +1739,7 @@ export default function Dashboard({
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px' }}>
                         <span className="domain-swatch" style={{ background: meta.color }} />
-                        <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '500' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: '500' }}>
                           {task.project || meta.label}
                         </span>
                       </div>
@@ -1769,7 +1769,7 @@ export default function Dashboard({
                           border: `1px solid ${badge.border}`,
                           padding: '3px 8px',
                           borderRadius: '6px',
-                          fontSize: '11.5px',
+                          fontSize: '12px',
                           fontWeight: '600',
                           whiteSpace: 'nowrap',
                         }}
@@ -1890,7 +1890,7 @@ export default function Dashboard({
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px', flexWrap: 'wrap' }}>
                         <span
                           style={{
-                            fontSize: '11px',
+                            fontSize: '12px',
                             padding: '2px 8px',
                             borderRadius: '4px',
                             fontWeight: '500',
@@ -1905,7 +1905,7 @@ export default function Dashboard({
                           <span className="domain-swatch" style={{ background: meta.color }} />
                           <span>{meta.label}</span>
                         </span>
-                        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
                           {formatActivityTimestamp(task.timestamp || task.created_at)}
                         </span>
                       </div>
@@ -1929,7 +1929,7 @@ export default function Dashboard({
                     <div style={{ flexShrink: 0, pointerEvents: 'none' }}>
                       <span
                         style={{
-                          fontSize: '11px',
+                          fontSize: '12px',
                           fontWeight: '500',
                           padding: '3px 9px',
                           borderRadius: '12px',
@@ -1980,7 +1980,7 @@ export default function Dashboard({
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '6px',
-                fontSize: '11.5px',
+                fontSize: '12px',
                 fontWeight: '500',
                 padding: '3px 8px',
                 borderRadius: '6px',
@@ -2015,7 +2015,7 @@ export default function Dashboard({
               }}
             >
               <div>
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600', textTransform: 'uppercase' }}>
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: '600', textTransform: 'uppercase' }}>
                   Workspace & Calendar
                 </div>
                 <div style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)', marginTop: '2px' }}>
@@ -2036,7 +2036,7 @@ export default function Dashboard({
                     style={{
                       minHeight: '36px',
                       padding: '0 10px',
-                      fontSize: '11.5px',
+                      fontSize: '12px',
                     }}
                   >
                     {currentUser?.authenticated ? 'Account' : 'Sign in'}

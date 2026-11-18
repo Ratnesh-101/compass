@@ -1,4 +1,5 @@
 import React from 'react'
+import { formatObserveContent } from './observeText'
 
 export const STEP_STYLES = {
   think: {
@@ -142,12 +143,7 @@ function formatStepContent(step) {
   }
 
   if (step.type === 'observe' && typeof step.content === 'string') {
-    const match = step.content.match(/^Found (\d+) task\(s\)(?: with status '([^']+)')?:/i)
-    if (match) {
-      const count = match[1]
-      const status = match[2] ? ` (status: ${match[2]})` : ''
-      return `Found ${count} task${count === '1' ? '' : 's'}${status}. Analyzing your schedule and commitments…`
-    }
+    return formatObserveContent(step.content)
   }
 
   if (step.type === 'confirm_request') {

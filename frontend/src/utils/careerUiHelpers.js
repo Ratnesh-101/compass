@@ -52,7 +52,7 @@ export const APPLICATION_STATUS_LABELS = {
   SUBMITTED: 'Submitted',
   SUBMISSION_FAILED: 'Submission Failed',
   SUBMISSION_OUTCOME_UNKNOWN: 'Submission Outcome Unknown',
-  MANUAL_SUBMISSION_REQUIRED: 'Manual Handoff',
+  MANUAL_SUBMISSION_REQUIRED: 'Apply on company site',
   HANDOFF_KIT_READY: 'Application Pack Ready',
   ASSESSMENT_RECEIVED: 'Assessment Received',
   INTERVIEW: 'Interviewing',
@@ -135,7 +135,7 @@ export function buildDeadlinePayload(deadline) {
 // Resume validation card decision
 // ---------------------------------------------------------------------------
 
-export const RESUME_INCOMPLETE_HINT = 'Add your name, email and education in Resume Studio.'
+export const RESUME_INCOMPLETE_HINT = 'Add your name, email and education in My resume.'
 
 export function getValidationCardState(report) {
   if (!report) return null

@@ -30,6 +30,10 @@ export default function CareerCopilot({ isDarkMode, onToggleDarkMode }) {
     setActiveSubTab('resumes')
   }, [])
 
+  const handleNavigateToApplications = useCallback(() => {
+    setActiveSubTab('applications')
+  }, [])
+
   const handleOpenProfileModal = useCallback(() => setIsProfileModalOpen(true), [])
   const handleCloseProfileModal = useCallback(() => setIsProfileModalOpen(false), [])
 
@@ -102,8 +106,8 @@ export default function CareerCopilot({ isDarkMode, onToggleDarkMode }) {
 
   const SUB_TABS = [
     { key: 'radar', label: 'Internship Radar', desc: 'Verified discovery & eligibility' },
-    { key: 'resumes', label: 'Resume Studio', desc: 'Factual tailoring & ATS export' },
-    { key: 'applications', label: 'Application Center', desc: 'Pipelines & batch approvals' },
+    { key: 'resumes', label: 'My resume', desc: 'Your resume, tailored for each job' },
+    { key: 'applications', label: 'Application Center', desc: 'Where each application stands' },
   ]
 
   return (
@@ -331,6 +335,7 @@ export default function CareerCopilot({ isDarkMode, onToggleDarkMode }) {
               onRefreshComplete={handleRefreshComplete}
               onRefreshError={handleRefreshError}
               onNavigateToResumeStudio={handleNavigateToResumeStudio}
+              onNavigateToApplications={handleNavigateToApplications}
               onOpenProfile={handleOpenProfileModal}
             />
           </>

@@ -33,6 +33,7 @@ export default function InternshipRadar({
   onRefreshError,
   onOpenProfile,
   onNavigateToResumeStudio,
+  onNavigateToApplications,
 } = {}) {
   const handleGoToResumeStudio = onNavigateToResumeStudio || onOpenProfile
   const handleOpenCandidateProfile = onOpenProfile || onNavigateToResumeStudio
@@ -346,7 +347,7 @@ export default function InternshipRadar({
               textTransform: 'uppercase',
             }}
           >
-            Live Intel
+            Updated daily
           </span>
         </div>
         <p style={{ margin: '6px 0 0 0', fontSize: '14px', color: 'var(--text-secondary)' }}>
@@ -482,7 +483,7 @@ export default function InternshipRadar({
               Candidate Profile Required for Recommendations
             </h3>
             <p style={{ fontSize: '13px', color: 'var(--text-secondary)', maxWidth: '480px', margin: '0 auto 20px auto', lineHeight: 1.5 }}>
-              Career Copilot evaluates internship eligibility and match fit against the verified candidate profile maintained in Resume Studio. Upload or build your resume in Resume Studio to unlock personalized match scoring.
+              Career Copilot evaluates internship eligibility and match fit against the verified candidate profile maintained in My resume. Upload or build your resume in My resume to unlock personalized match scoring.
             </p>
             {handleGoToResumeStudio && (
               <button
@@ -499,7 +500,7 @@ export default function InternshipRadar({
                   cursor: 'pointer',
                 }}
               >
-                Go to Resume Studio
+                Go to My resume
               </button>
             )}
           </div>
@@ -707,7 +708,7 @@ export default function InternshipRadar({
                       font: 'inherit',
                     }}
                   >
-                    Resume Studio
+                    My resume
                   </button>{' '}
                   to check eligibility for these roles.
                 </span>
@@ -797,11 +798,11 @@ export default function InternshipRadar({
         <RadarDetailModal
           opportunity={selectedDetailOpp}
           onClose={() => setSelectedDetailOpp(null)}
-          onUpdateApp={handleUpdateApplication}
           onVerify={handleVerifyOpportunity}
           isVerifying={isVerifying}
           onApply={setActiveWorkspaceOpp}
           onNavigateToResumeStudio={handleGoToResumeStudio}
+          onNavigateToApplications={onNavigateToApplications}
         />
       )}
 

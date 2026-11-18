@@ -67,7 +67,7 @@ async def test_edit_task_none_due_date_clears_deadline():
 async def test_update_task_status_none_defaults_open():
     pool, _ = _pool()
     with patch("backend.memory.structured.update_task", new=AsyncMock(return_value={"id": 1})) as upd:
-        await tasks.handle_update_task_status({"task_id": 1, "status": None}, pool)
+        await tasks.handle_update_task_status({"task_id": 1, "status": None, "user_id": "u1"}, pool)  # a caller is required (fail closed)
     assert upd.await_args.kwargs["status"] == "open"
 
 

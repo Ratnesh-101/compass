@@ -99,7 +99,7 @@ test('validation card shows Resume incomplete with missing fields and warnings',
     missing_fields: ['name', 'email'], warnings: ['No education'],
   })
   assert.equal(state.incompleteLabel, 'Resume incomplete')
-  assert.match(state.hint, /name, email and education in Resume Studio/)
+  assert.match(state.hint, /name, email and education in My resume/)
   assert.deepEqual(state.missingFields, ['name', 'email'])
   assert.deepEqual(state.warnings, ['No education'])
   assert.equal(getValidationCardState({ is_valid: true }).incompleteLabel, null)

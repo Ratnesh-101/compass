@@ -488,7 +488,7 @@ textarea {
 
 .vector-tag {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
   background: var(--bg-card-soft);
   padding: 2px 8px;
@@ -984,7 +984,7 @@ textarea {
     gap: 10px !important;
   }
   .countdown-badge {
-    font-size: 11px !important;
+    font-size: 12px !important;
     padding: 3px 8px !important;
   }
 }
@@ -1224,7 +1224,7 @@ textarea {
   }
 
   .calendar-policy-subtext {
-    font-size: 11px !important;
+    font-size: 12px !important;
     line-height: 1.4 !important;
   }
 
@@ -1720,7 +1720,7 @@ textarea {
 }
 
 .compass-page-badge {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-secondary);
   background: var(--bg-card-soft);
   border: 1px solid var(--border);
@@ -1825,7 +1825,7 @@ textarea {
   background: var(--bg-card-soft);
   color: var(--text-primary);
   border: 1px solid var(--border);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   padding: 1px 6px;
   border-radius: 4px;

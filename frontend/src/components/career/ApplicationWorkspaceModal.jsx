@@ -999,7 +999,7 @@ export default function ApplicationWorkspaceModal({
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <span
                 style={{
-                  fontSize: '11px',
+                  fontSize: '12px',
                   fontWeight: 600,
                   padding: '3px 8px',
                   borderRadius: 'var(--radius-chip, 6px)',
@@ -1014,7 +1014,7 @@ export default function ApplicationWorkspaceModal({
               </span>
               <span
                 style={{
-                  fontSize: '11px',
+                  fontSize: '12px',
                   fontWeight: 600,
                   padding: '3px 8px',
                   borderRadius: 'var(--radius-chip, 6px)',
@@ -1350,7 +1350,7 @@ export default function ApplicationWorkspaceModal({
                                 border: '1px solid var(--border)',
                                 background: 'var(--bg-card)',
                                 color: 'var(--text-secondary)',
-                                fontSize: '11px',
+                                fontSize: '12px',
                                 fontWeight: 600,
                               }}
                             >
@@ -1365,7 +1365,7 @@ export default function ApplicationWorkspaceModal({
                                 border: '1px solid var(--border)',
                                 background: 'var(--bg-card)',
                                 color: 'var(--amber-text)',
-                                fontSize: '11px',
+                                fontSize: '12px',
                                 fontWeight: 600,
                               }}
                             >
@@ -1376,7 +1376,7 @@ export default function ApplicationWorkspaceModal({
                             <span>{formatAttemptTime(lastAttemptTime)}</span>
                           )}
                           {cooldownSeconds > 0 && (
-                            <span style={{ color: 'var(--amber-text)', fontSize: '11px', fontWeight: 600 }} aria-live="polite">
+                            <span style={{ color: 'var(--amber-text)', fontSize: '12px', fontWeight: 600 }} aria-live="polite">
                               Refresh available in {cooldownSeconds}s
                             </span>
                           )}
@@ -1653,7 +1653,7 @@ export default function ApplicationWorkspaceModal({
                                     >
                                       <span>{p.point}</span>
                                       {p.similar_role && (
-                                        <span style={{ marginLeft: '6px', fontSize: '11px', fontStyle: 'italic', color: 'var(--text-muted)' }}>
+                                        <span style={{ marginLeft: '6px', fontSize: '12px', fontStyle: 'italic', color: 'var(--text-muted)' }}>
                                           (from a similar role listing)
                                         </span>
                                       )}
@@ -1666,7 +1666,7 @@ export default function ApplicationWorkspaceModal({
                                             display: 'inline-block',
                                             marginLeft: '6px',
                                             padding: '0 4px',
-                                            fontSize: '11px',
+                                            fontSize: '12px',
                                             fontWeight: 700,
                                             color: 'var(--amber-text)',
                                             background: 'transparent',
@@ -1859,7 +1859,7 @@ export default function ApplicationWorkspaceModal({
                         🎯 Factual Match Analysis
                       </h3>
                       <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                        Calculated deterministically from verified profile background
+                        Worked out from your saved profile
                       </span>
                     </div>
 
@@ -1904,7 +1904,7 @@ export default function ApplicationWorkspaceModal({
                           <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                             {matchedSkills.length > 0 ? (
                               matchedSkills.map((sk, i) => (
-                                <span key={i} style={{ background: '#ffffff', color: '#15803d', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, border: '1px solid #bbf7d0' }}>
+                                <span key={i} style={{ background: '#ffffff', color: '#15803d', padding: '2px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: 600, border: '1px solid #bbf7d0' }}>
                                   {sk}
                                 </span>
                               ))
@@ -1930,7 +1930,7 @@ export default function ApplicationWorkspaceModal({
                             </div>
                             <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                               {missingSkills.map((sk, i) => (
-                                <span key={i} style={{ background: '#ffffff', color: '#92400e', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, border: '1px solid #fde68a' }}>
+                                <span key={i} style={{ background: '#ffffff', color: '#92400e', padding: '2px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: 600, border: '1px solid #fde68a' }}>
                                   {sk}
                                 </span>
                               ))}
@@ -1951,7 +1951,7 @@ export default function ApplicationWorkspaceModal({
                           background: 'transparent',
                           border: '1px solid var(--border)',
                           color: 'var(--amber-text)',
-                          fontSize: '11px',
+                          fontSize: '12px',
                           fontWeight: 700,
                           cursor: 'pointer',
                         }}
@@ -1981,7 +1981,7 @@ export default function ApplicationWorkspaceModal({
                     }}
                   >
                     <div>
-                      <div style={{ fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                      <div style={{ fontSize: '12px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-muted)', marginBottom: '4px' }}>
                         How well you match
                       </div>
                       <h3 style={{ margin: '0 0 6px 0', fontSize: '18px', fontWeight: 800, color: 'var(--text-primary)' }}>
@@ -2003,7 +2003,7 @@ export default function ApplicationWorkspaceModal({
                             type="button"
                             onClick={() => loadJobAnalysisData(jobAnalysis ? customJobDesc : null)}
                             disabled={loadingAnalysis}
-                            style={{ padding: '3px 10px', borderRadius: '6px', border: '1px solid #fecaca', background: '#ffffff', color: '#991b1b', fontWeight: 700, fontSize: '11px', cursor: loadingAnalysis ? 'not-allowed' : 'pointer' }}
+                            style={{ padding: '3px 10px', borderRadius: '6px', border: '1px solid #fecaca', background: '#ffffff', color: '#991b1b', fontWeight: 700, fontSize: '12px', cursor: loadingAnalysis ? 'not-allowed' : 'pointer' }}
                           >
                             Retry
                           </button>
@@ -2030,9 +2030,9 @@ export default function ApplicationWorkspaceModal({
                         {loadingAnalysis && !jobAnalysis ? '…' : analysisError && !jobAnalysis ? '?' : matchScoreView.text}
                       </div>
                       {matchScoreView.caption && !loadingAnalysis && (
-                        <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '2px' }}>{matchScoreView.caption}</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '2px' }}>{matchScoreView.caption}</div>
                       )}
-                      <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                      <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
                         Match Score
                       </div>
                     </div>
@@ -2090,7 +2090,7 @@ export default function ApplicationWorkspaceModal({
                           background: 'var(--brand)',
                           color: '#ffffff',
                           border: 'none',
-                          fontSize: '11px',
+                          fontSize: '12px',
                           fontWeight: 700,
                           cursor: loadingAnalysis ? 'not-allowed' : 'pointer',
                         }}
@@ -2184,7 +2184,7 @@ export default function ApplicationWorkspaceModal({
                                     {m.is_mandatory ? 'Mandatory' : 'Preferred'} {m.category}
                                   </span>
                                 </div>
-                                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
                                   Confidence: {Math.round(m.confidence * 100)}%
                                 </span>
                               </div>
@@ -2200,7 +2200,7 @@ export default function ApplicationWorkspaceModal({
                               )}
 
                               {m.reasoning && (
-                                <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                                <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
                                   {m.reasoning}
                                 </div>
                               )}
@@ -2322,7 +2322,7 @@ export default function ApplicationWorkspaceModal({
                           border: resumeTemplate === t.id ? '1px solid var(--brand)' : '1px solid var(--border)',
                           background: resumeTemplate === t.id ? 'var(--brand)' : 'var(--bg-card)',
                           color: resumeTemplate === t.id ? '#ffffff' : 'var(--text-primary)',
-                          fontSize: '11px',
+                          fontSize: '12px',
                           fontWeight: 600,
                           cursor: 'pointer',
                         }}
@@ -2339,7 +2339,7 @@ export default function ApplicationWorkspaceModal({
                     </h4>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '12px' }}>
                       <div>
-                        <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Full Name</label>
+                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Full Name</label>
                         <input
                           type="text"
                           value={fullName}
@@ -2348,7 +2348,7 @@ export default function ApplicationWorkspaceModal({
                         />
                       </div>
                       <div>
-                        <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Email</label>
+                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Email</label>
                         <input
                           type="email"
                           value={email}
@@ -2357,7 +2357,7 @@ export default function ApplicationWorkspaceModal({
                         />
                       </div>
                       <div>
-                        <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Phone</label>
+                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Phone</label>
                         <input
                           type="text"
                           value={phone}
@@ -2366,7 +2366,7 @@ export default function ApplicationWorkspaceModal({
                         />
                       </div>
                       <div>
-                        <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Location</label>
+                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Location</label>
                         <input
                           type="text"
                           value={location}
@@ -2377,7 +2377,7 @@ export default function ApplicationWorkspaceModal({
                     </div>
 
                     <div style={{ marginBottom: '12px' }}>
-                      <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Professional Summary</label>
+                      <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Professional Summary</label>
                       <textarea
                         rows={3}
                         value={summary}
@@ -2387,7 +2387,7 @@ export default function ApplicationWorkspaceModal({
                     </div>
 
                     <div style={{ marginBottom: '14px' }}>
-                      <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Skills (comma separated)</label>
+                      <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Skills (comma separated)</label>
                       <input
                         type="text"
                         value={skillsText}
@@ -2534,7 +2534,7 @@ export default function ApplicationWorkspaceModal({
                     </h3>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px', marginBottom: '14px' }}>
                       <div>
-                        <label htmlFor="application-stage" style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Where is this application?</label>
+                        <label htmlFor="application-stage" style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Where is this application?</label>
                         <select
                           id="application-stage"
                           value={stageChoice || stageOfStatus(appStatus)}
@@ -2548,7 +2548,7 @@ export default function ApplicationWorkspaceModal({
                           ))}
                         </select>
                         {stageDetail(appStatus) && !stageChoice && (
-                          <div style={{ marginTop: '4px', fontSize: '11px', color: 'var(--text-muted)' }}>{stageDetail(appStatus)}</div>
+                          <div style={{ marginTop: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>{stageDetail(appStatus)}</div>
                         )}
                         {blockedMessage({ ...(application || {}), status: appStatus.toUpperCase(), resume }) && (
                           <div role="note" style={{ marginTop: '6px', fontSize: '12px', color: '#92400e' }}>
@@ -2558,7 +2558,7 @@ export default function ApplicationWorkspaceModal({
                       </div>
 
                       <div>
-                        <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Personal Target Deadline</label>
+                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Personal Target Deadline</label>
                         <input
                           type="date"
                           value={targetDeadline}
@@ -2569,7 +2569,7 @@ export default function ApplicationWorkspaceModal({
                     </div>
 
                     <div style={{ marginBottom: '14px' }}>
-                      <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Private Candidate Notes</label>
+                      <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Private Candidate Notes</label>
                       <textarea
                         rows={3}
                         value={privateNotes}

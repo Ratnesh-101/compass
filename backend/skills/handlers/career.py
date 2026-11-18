@@ -34,9 +34,9 @@ from backend.models_career import CareerApplicationStatus, SubmissionMethod
 from backend.models_radar import UserOpportunityProfileIn
 from backend.services.career_resume import (
     build_default_master_for_user,
-    draft_truthful_cover_letter,
     tailor_resume_for_opportunity,
 )
+from backend.services.career_cover_letter import compose_cover_letter
 from backend.services.career_submission import (
     compute_batch_content_hash,
     load_batch_apps_data,
@@ -323,11 +323,9 @@ async def handle_draft_cover_letter(args: Dict[str, Any], pool: Any = None) -> D
         profile = await get_user_opportunity_profile(user_id) or UserOpportunityProfileIn()
         master = await upsert_master_resume(user_id, build_default_master_for_user(profile, user_id), "Master Resume")
 
-    letter_text, verified_projs, verified_skls = draft_truthful_cover_letter(
-        master=master.content,
-        opportunity=opp,
-        emphasis_projects=args.get("emphasis_projects"),
-    )
+    # Same writer and checker as the Prepare Application flow: no placeholders, no invented figures.
+    composed = await compose_cover_letter(master.content, opp, emphasis_projects=args.get("emphasis_projects"))
+    letter_text, verified_projs, verified_skls = composed["content"], composed["projects"], composed["skills"]
 
     # Attach to application if application exists
     from backend.memory.career import get_or_create_career_application
