@@ -15,6 +15,7 @@ import {
 } from '../api/client'
 import { makeRequestId, failureMessage } from '../utils/chatRequest'
 import { parseSlashCommand } from '../api/specialistRegistry'
+import { isSampleWeekMessage, SAMPLE_WEEK_DISPLAY_TEXT } from '../utils/tourSample'
 import ChatHistoryDrawer from './chat/ChatHistoryDrawer'
 import ShareModal from './ShareModal'
 import ChatChatMessageList from './chat/ChatMessageList'
@@ -226,8 +227,11 @@ export default function ChatPanel({
     let targetMessageContent = extraMeta?.targetMessageContent || null
     let continueMessageId = extraMeta?.continueMessageId || extraMeta?.continue_message_id || null
 
+    let displayText = extraMeta?.displayText || null
+
     if (textToSend && typeof textToSend === 'object') {
       text = (textToSend.text || '').trim()
+      displayText = textToSend.displayText || displayText
       targetMessageId = textToSend.targetMessageId || targetMessageId
       targetMessageContent = textToSend.targetMessageContent || targetMessageContent
       continueMessageId = textToSend.continue_message_id || textToSend.continueMessageId || continueMessageId
@@ -268,7 +272,9 @@ export default function ChatPanel({
     const userMsgText = `${specPrefix}${text}`
 
     if (!isRetry && !continueMessageId) {
-      setMessages(prev => [...prev, { role: 'user', text: userMsgText }])
+      setMessages(prev => [...prev, displayText
+        ? { role: 'user', text: userMsgText, displayText: `${specPrefix}${displayText}` }
+        : { role: 'user', text: userMsgText }])
     }
     setIsStreaming(true)
     setStreamingText('')
@@ -460,7 +466,9 @@ export default function ChatPanel({
     if (initialPrompt && initialPrompt.trim()) {
       const promptToRun = initialPrompt.trim()
       if (onClearInitialPrompt) onClearInitialPrompt()
-      handleSendRef.current(promptToRun)
+      handleSendRef.current(isSampleWeekMessage(promptToRun)
+        ? { text: promptToRun, displayText: SAMPLE_WEEK_DISPLAY_TEXT }
+        : promptToRun)
     }
   }, [initialPrompt, onClearInitialPrompt])
 

@@ -13,6 +13,8 @@ import {
   buildSampleWeekMessage,
   formatIsoDate,
   isTourRequested,
+  isSampleWeekMessage,
+  SAMPLE_WEEK_DISPLAY_TEXT,
 } from '../src/utils/tourSample.js'
 
 const read = (p) => fs.readFileSync(new URL(`../src/${p}`, import.meta.url), 'utf8').split('\r\n').join('\n')
@@ -110,6 +112,19 @@ test('steps 2 and 3 send exactly their button text', () => {
   assert.equal(TOUR_STEP_LOAD_LABEL, '1. Load a sample week')
   assert.equal(TOUR_STEP_FEASIBILITY_LABEL, `2. ${TOUR_FEASIBILITY_TEXT}`)
   assert.equal(TOUR_STEP_INTERNSHIPS_LABEL, `3. ${TOUR_INTERNSHIPS_TEXT}`)
+})
+
+test('step 1 bubble shows friendly text while the full table is still sent', () => {
+  assert.equal(SAMPLE_WEEK_DISPLAY_TEXT, 'Load a sample week')
+  assert.equal(isSampleWeekMessage(buildSampleWeekMessage(PINNED_NOW)), true)
+  assert.equal(isSampleWeekMessage(TOUR_FEASIBILITY_TEXT), false)
+  assert.equal(isSampleWeekMessage(undefined), false)
+  const panel = read('components/ChatPanel.jsx')
+  assert.ok(panel.includes('{ text: promptToRun, displayText: SAMPLE_WEEK_DISPLAY_TEXT }'))
+  assert.ok(panel.includes('displayText: `${specPrefix}${displayText}`'))
+  // the backend call still receives the unchanged text
+  assert.ok(panel.includes('streamQueryFromAssistant(text, conversationId'))
+  assert.ok(read('components/chat/ChatMessageList.jsx').includes('msg.displayText || msg.text'))
 })
 
 test('?tour=1 detection', () => {
