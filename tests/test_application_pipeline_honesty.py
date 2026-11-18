@@ -521,3 +521,31 @@ async def test_profile_put_accepts_valid_values(client: AsyncClient):
         json={"academic_year": 3, "grad_year": 2027, "cgpa": 8.5, "cgpa_scale": 10},
     )
     assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_mark_applied_replaces_the_automatic_apply_by_date_with_the_followup(client: AsyncClient):
+    """Prepare sets an apply-by date automatically; once applied, the 14-day follow-up replaces it."""
+    headers = _user_headers()
+    _, app_id = await _ready_app(client, headers)
+    before = await client.get(f"/api/career/applications/{app_id}", headers=headers)
+    assert before.json()["target_deadline"], "prepare sets an automatic apply-by date"
+
+    mark = await client.post(f"/api/career/applications/{app_id}/mark-applied", headers=headers)
+
+    expected = (datetime.now(timezone.utc).date() + timedelta(days=14)).isoformat()
+    assert mark.json()["target_deadline"] == expected
+
+
+@pytest.mark.asyncio
+async def test_mark_applied_keeps_a_short_deadline_the_user_chose(client: AsyncClient):
+    headers = _user_headers()
+    _, app_id = await _ready_app(client, headers)
+    mine = (date.today() + timedelta(days=3)).isoformat()  # sooner than the 14-day follow-up
+    assert (await client.patch(
+        f"/api/career/applications/{app_id}", headers=headers, json={"target_deadline": mine}
+    )).status_code == 200
+
+    mark = await client.post(f"/api/career/applications/{app_id}/mark-applied", headers=headers)
+
+    assert mark.json()["target_deadline"] == mine

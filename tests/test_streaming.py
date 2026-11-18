@@ -238,7 +238,8 @@ async def test_streaming_conversational_chunks(client: AsyncClient, monkeypatch,
     monkeypatch.setattr("backend.services.chat_stream.openai.AsyncOpenAI", lambda **kwargs: mock_client)
 
     events = []
-    payload = {"message": "Hello Compass"}
+    # Not a plain greeting: a bare "Hello" is answered instantly without calling the model.
+    payload = {"message": "Tell me something interesting about dogs"}
     async with client.stream("POST", "/api/chat/stream", json=payload, headers=signed_guest_headers, timeout=15.0) as resp:
         assert resp.status_code == 200
         async for line in resp.aiter_lines():

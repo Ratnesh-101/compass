@@ -54,9 +54,9 @@ export function canAttemptMint(now, blockedUntil) {
 export function mapHealthPayload(data) {
   if (data && data.db_connected === false) return DB_WAKING_STATUS
   if (data && (data.db_connected || data.status === 'ok' || data.database === 'connected')) {
-    return 'Live • Neon Connected'
+    return 'Live • Connected'
   }
-  return 'Live • Edge Connected'
+  return 'Live • Connected'
 }
 
 /** True only when the backend (including its database) is ready. */

@@ -42,7 +42,9 @@ async def _cleanup(conn, owners):
 
 
 @pytest.mark.asyncio
-async def test_guest_add_task_does_not_see_or_shift_other_users_tasks():
+async def test_guest_add_task_does_not_see_or_shift_other_users_tasks(monkeypatch):
+    # The shift-existing behaviour is on the direct-save path; with the preview step on, nothing is saved yet.
+    monkeypatch.setattr("backend.orchestrator.SINGLE_TASK_PREVIEW", False)
     pool = await get_pool()
     owner = f"owner-{uuid.uuid4().hex[:8]}"
     guest = f"guest-{uuid.uuid4().hex[:8]}"

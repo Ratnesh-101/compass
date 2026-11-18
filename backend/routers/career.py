@@ -1264,14 +1264,22 @@ async def mark_application_applied_endpoint(app_id: int, request: Request):
     _ensure_can_mark_submitted(app)
 
     now = datetime.now(timezone.utc)
-    # Keep a deadline the user already set; only fill the follow-up reminder when empty.
-    follow_up = app.target_deadline or now.date() + timedelta(days=14)
+    # Keep a deadline the user set themselves. An apply-by date that Compass filled in automatically when
+    # the application was prepared is replaced by the follow-up reminder: once applied, it is no longer useful.
+    answers = dict(app.form_answers or {})
+    auto_deadline = answers.get("auto_deadline")
+    deadline_is_automatic = bool(auto_deadline) and app.target_deadline is not None and str(app.target_deadline) == str(auto_deadline)
+    follow_up = (None if deadline_is_automatic else app.target_deadline) or now.date() + timedelta(days=14)
 
-    updated = await update_career_application(app_id, user_id, {
+    changes = {
         "status": CareerApplicationStatus.SUBMITTED.value,
         "submitted_at": now,
         "target_deadline": follow_up,
-    })
+    }
+    if deadline_is_automatic:
+        answers.pop("auto_deadline", None)
+        changes["form_answers"] = answers
+    updated = await update_career_application(app_id, user_id, changes)
     await log_application_event(app.id, "applied_confirmed_by_user", {
         "submitted_at": now.isoformat(),
         "follow_up_reminder": str(follow_up),

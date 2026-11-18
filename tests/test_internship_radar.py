@@ -500,7 +500,7 @@ def test_eligibility_nubank_phd_excluded_for_btech():
     assert classification == EligibilityClassification.INELIGIBLE
     failed_reasons = [r for r in reasons if r["status"] == "fail"]
     assert any(r["field"] == "degree" for r in failed_reasons)
-    assert "degree" in explanation.lower() or "academic" in explanation.lower()
+    assert "phd" in explanation.lower() and "skip it" in explanation.lower()  # plain sentence naming the requirement
 
 
 @pytest.mark.asyncio

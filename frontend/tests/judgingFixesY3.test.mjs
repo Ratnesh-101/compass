@@ -95,3 +95,12 @@ test('the sidebar section is called "My areas", not "Context Domains"', () => {
   assert.ok(src.includes('My areas'))
   assert.ok(!src.includes('Context Domains'))
 })
+
+test('first-time visitors see no cost counter or database name in the sidebar footer', () => {
+  const sidebar = read('components/Sidebar.jsx')
+  const firstRun = read('utils/firstRun.js')
+  assert.match(sidebar, /const SHOW_SIDEBAR_USAGE_BADGE = false/)
+  assert.ok(sidebar.includes('SHOW_SIDEBAR_USAGE_BADGE && usageBadge'))
+  assert.ok(!firstRun.includes('Neon Connected'))
+  assert.ok(firstRun.includes("'Live • Connected'"))
+})

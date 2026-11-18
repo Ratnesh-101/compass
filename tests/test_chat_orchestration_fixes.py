@@ -81,16 +81,17 @@ async def test_stream_passes_its_conv_id_to_orchestrator_and_persists_under_it()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("tone", ["brief", "balanced"])
-async def test_capped_tones_get_one_finishing_call_not_full_continuation(tone):
+@pytest.mark.parametrize("tone", ["brief", "balanced", "detailed"])
+async def test_every_tone_gets_the_same_bounded_continuation(tone):
     client = _mock_client(lambda: _Stream([_chunk("partial text", "length")]))
     request = MagicMock()
     request.is_disconnected = AsyncMock(return_value=False)
     with patch("backend.services.chat_stream.openai.AsyncOpenAI", lambda **kw: client), \
          patch("backend.services.chat_stream._schedule_stream_persistence", MagicMock()):
         await _collect(StreamChatRequest(message="tell me about dogs", tone=tone), request)
-    # initial call + exactly one short finishing call (no multi-round continuation)
-    assert client.chat.completions.create.await_count == 2
+    # Tone is a style instruction only (T-003): no tone is capped, so every tone gets the initial call plus
+    # the same bounded number of "continue exactly where you left off" passes.
+    assert client.chat.completions.create.await_count == 3
 
 
 @pytest.mark.asyncio

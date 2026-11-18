@@ -4,6 +4,10 @@ import CreateDomainModal from './timeline/CreateDomainModal'
 import Logo from './Logo'
 import { parseUsageBadge } from '../utils/usageBadgeParser'
 
+// Call counts and dollar amounts are for judges, not for first-time visitors: they live in
+// "About / for judges" (Telemetry). Keep them out of the sidebar footer.
+const SHOW_SIDEBAR_USAGE_BADGE = false
+
 // Re-export for convenience
 export { parseUsageBadge } from '../utils/usageBadgeParser'
 
@@ -761,7 +765,7 @@ export default function Sidebar({
           <div style={{ fontSize: '12px', color: 'var(--sidebar-text)', opacity: 0.8, paddingLeft: '15px' }}>
             {backendStatus}
           </div>
-          {usageBadge && (() => {
+          {SHOW_SIDEBAR_USAGE_BADGE && usageBadge && (() => {
             const parsed = parseUsageBadge(usageBadge)
             const fullText = parsed?.isUsage ? parsed.fullText : usageBadge
             const titleTooltip = `Nebius Telemetry: ${fullText} (Click to open telemetry inspection)`

@@ -51,6 +51,7 @@ from backend.services.career_tailor_changes import attach_changes
 logger = logging.getLogger("compass.services.career_flow")
 
 DETAILS_TIMEOUT_SECONDS = 20.0
+AUTO_DEADLINE_KEY = "auto_deadline"  # form_answers key: the apply-by date Compass set automatically
 DEFAULT_APPLY_WITHIN_DAYS = 7
 MAX_LINK_CHARS = 2000
 TOP_MATCH_LIMIT = 3
@@ -322,7 +323,11 @@ async def prepare_application_for_user(
 
     if app.target_deadline is None:
         due, kind = apply_by_date(opp.confirmed_close_date)
-        updated = await update_career_application(app.id, user_id, {"target_deadline": due})
+        # Remember that Compass chose this date, so "Mark as applied" can replace it with the follow-up
+        # reminder while still keeping a deadline the user set themselves.
+        answers = dict(app.form_answers or {})
+        answers[AUTO_DEADLINE_KEY] = due.isoformat()
+        updated = await update_career_application(app.id, user_id, {"target_deadline": due, "form_answers": answers})
         app = updated or app
         await create_deadline_task(user_id, opp, due, kind)
 

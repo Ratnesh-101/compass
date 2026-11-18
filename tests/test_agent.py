@@ -440,6 +440,7 @@ async def test_run_state_survives_disconnect_reconnect(monkeypatch):
         max_steps=4,
         enable_critic=False,
         run_id=run_id,
+        user_id="recon-user",  # a run must belong to someone: no ownerless tasks
         wait_for_confirmation=False,
     ):
         pass
@@ -460,6 +461,7 @@ async def test_run_state_survives_disconnect_reconnect(monkeypatch):
         max_steps=4,
         enable_critic=False,
         run_id=run_id,
+        user_id="recon-user",
         action="approve",
     ):
         turn2_steps.append(step)
