@@ -61,3 +61,26 @@ def test_ranking_counts_skills_from_labelled_entries():
     match = recommendation_rank_key(_opp(["Python", "React", "Rust"]), profile, "India")
     other = recommendation_rank_key(_opp(["Photoshop", "Premiere Pro"]), profile, "India")
     assert match < other  # three real overlaps sort ahead of none
+
+
+def _titled(title):
+    opp = _opp([])
+    opp.role_title = title
+    return opp
+
+
+def test_non_engineering_roles_rank_after_engineering_for_a_technical_candidate():
+    profile = SimpleNamespace(skills=LABELLED, preferred_roles=[], country="India")
+
+    def key(title):
+        return recommendation_rank_key(_titled(title), profile, "India")
+
+    assert key("Software Engineering Intern") < key("Video Editor Intern")
+    assert key("Software Engineering Intern") < key("Intern - Creative & Communications, People Team")
+
+
+def test_a_candidate_who_prefers_the_role_is_not_demoted():
+    profile = SimpleNamespace(skills=LABELLED, preferred_roles=["video"], country="India")
+    video = recommendation_rank_key(_titled("Video Editor Intern"), profile, "India")
+    swe = recommendation_rank_key(_titled("Software Engineering Intern"), profile, "India")
+    assert video <= swe
