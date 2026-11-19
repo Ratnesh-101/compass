@@ -6,6 +6,7 @@ import { shouldShowNoDeadlineNote } from '../../utils/radarFreshness'
 export default function RadarOverviewCards({
   stats,
   profile,
+  hasProfile = true,
   onOpenProfile,
   onNavigateToResumeStudio = null,
   onSelectTab,
@@ -14,7 +15,8 @@ export default function RadarOverviewCards({
   opportunities = null,
 }) {
   const banner = getProfileBannerInfo(profile)
-  const hasIncompleteProfile = banner.show
+  // Before any resume or profile exists the page already asks for the resume; do not also nag about the year.
+  const hasIncompleteProfile = banner.show && hasProfile
   const goToResumeStudio = onNavigateToResumeStudio || onOpenProfile
   const buttonStyle = {
     padding: '6px 14px',

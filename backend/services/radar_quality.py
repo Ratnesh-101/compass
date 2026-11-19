@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from datetime import timezone
+from functools import lru_cache
 from typing import Dict, Iterable, List, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -19,6 +20,7 @@ from backend.models_radar import (
     OpportunitySourceOut,
     OpportunityStatus,
 )
+from backend.services.career_job_match import build_skill_index, skill_in_index
 from backend.services.radar_eligibility import countries_named_in_location
 
 # ---------------------------------------------------------------------------
@@ -312,6 +314,12 @@ def refine_listings(
     return out
 
 
+@lru_cache(maxsize=256)
+def _profile_skill_index(skills: tuple) -> Dict[str, str]:
+    """Skill index for a profile's saved skills (labelled lists like 'Languages: Python, Java' are split)."""
+    return build_skill_index([s for s in skills if isinstance(s, str)])
+
+
 def recommendation_rank_key(o: OpportunityOut, profile, profile_country: str) -> tuple:
     """Sort key for recommendations. Lower sorts first.
 
@@ -343,9 +351,9 @@ def recommendation_rank_key(o: OpportunityOut, profile, profile_country: str) ->
 
     skill_bonus = 0
     if profile and profile.skills and o.requirements and o.requirements.required_skills:
-        user_s = {s.strip().lower() for s in profile.skills if s.strip()}
+        index = _profile_skill_index(tuple(profile.skills))
         req_s = {s.strip().lower() for s in o.requirements.required_skills if s.strip()}
-        skill_bonus = -len(user_s & req_s)
+        skill_bonus = -sum(1 for r in req_s if skill_in_index(r, index))
 
     deadline_weight = o.confirmed_close_date.toordinal() if o.confirmed_close_date else 9999999
     return (country_rank(o, profile_country), status_weight, eligibility_weight, role_bonus, skill_bonus, deadline_weight)

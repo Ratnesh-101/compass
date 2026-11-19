@@ -360,6 +360,7 @@ export default function InternshipRadar({
         stats={displayStats}
         opportunities={loading ? null : opportunities}
         profile={profile}
+        hasProfile={hasCandidateProfile || hasResume}
         onOpenProfile={handleOpenCandidateProfile}
         onNavigateToResumeStudio={handleGoToResumeStudio}
         onSelectTab={setActiveTab}

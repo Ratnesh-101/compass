@@ -23,6 +23,7 @@ from backend.models_career import (
     ResumeValidationStatus,
 )
 from backend.models_radar import OpportunityOut, UserOpportunityProfileIn
+from backend.services.career_job_match import build_skill_index, skill_in_index
 from backend.services.career_resume_parse_fixes import (
     education_line_parts,
     extract_grade,
@@ -124,11 +125,13 @@ def validate_resume_against_master(
 
     # 3. Factual integrity check on skills
     master_skills_norm: Set[str] = {s.strip().lower() for s in master.skills}
+    # A saved entry such as 'Frameworks: React, FastAPI' or 'C/C++' supports each skill it names.
+    master_skill_index = build_skill_index(list(master.skills))
     tailored_skills_norm: Set[str] = {s.strip().lower() for s in tailored.skills}
 
     for skill in tailored.skills:
         s_norm = skill.strip().lower()
-        if s_norm not in master_skills_norm:
+        if s_norm not in master_skills_norm and not skill_in_index(skill, master_skill_index):
             unsupported.append(f"Skill '{skill}' is not in verified master profile.")
         else:
             if opportunity and opportunity.requirements:
@@ -148,7 +151,7 @@ def validate_resume_against_master(
         else:
             # Check technologies in project
             for tech in proj.technologies:
-                if tech.strip().lower() not in master_skills_norm:
+                if tech.strip().lower() not in master_skills_norm and not skill_in_index(tech, master_skill_index):
                     warnings.append(f"Project technology '{tech}' in '{proj.title}' is not explicitly listed in master skills.")
 
     if not tailored.projects:
