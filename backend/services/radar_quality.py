@@ -21,6 +21,7 @@ from backend.models_radar import (
     OpportunityStatus,
 )
 from backend.services.career_job_match import build_skill_index, skill_in_index
+from backend.services.career_resume import _is_non_engineering_role
 from backend.services.radar_eligibility import countries_named_in_location
 
 # ---------------------------------------------------------------------------
@@ -355,5 +356,11 @@ def recommendation_rank_key(o: OpportunityOut, profile, profile_country: str) ->
         req_s = {s.strip().lower() for s in o.requirements.required_skills if s.strip()}
         skill_bonus = -sum(1 for r in req_s if skill_in_index(r, index))
 
+    # A candidate with saved (technical) skills sees non-engineering roles (video editor, communications...)
+    # after the rest, unless their own role preference names it.
+    fit_weight = 0
+    if profile and profile.skills and role_bonus == 0 and _is_non_engineering_role(o.role_title or ""):
+        fit_weight = 1
+
     deadline_weight = o.confirmed_close_date.toordinal() if o.confirmed_close_date else 9999999
-    return (country_rank(o, profile_country), status_weight, eligibility_weight, role_bonus, skill_bonus, deadline_weight)
+    return (country_rank(o, profile_country), status_weight, eligibility_weight, fit_weight, role_bonus, skill_bonus, deadline_weight)

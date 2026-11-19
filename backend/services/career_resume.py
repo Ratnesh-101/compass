@@ -1188,6 +1188,7 @@ def analyze_extraction_diagnostics(content: ResumeContent, raw_text: str) -> Dic
 _NON_ENGINEERING_ROLE_WORDS = (
     "product", "design", "marketing", "business", "operations", "sales", "finance",
     "writer", "content", "hr", "people", "program manager",
+    "video", "editor", "creative", "communications", "graphic", "social media", "recruit",
 )
 _ENGINEERING_ROLE_WORDS = (
     "engineer", "developer", "software", "devops", "backend", "frontend", "full stack", "full-stack",
