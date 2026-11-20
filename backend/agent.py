@@ -395,6 +395,8 @@ async def run_agent(
                     action_key = (func_name, json.dumps(tool_args, sort_keys=True))
                     if action_key not in confirmed_set:
                         step_num += 1
+                        from backend.agent_pending import describe_task_action
+                        task_summary = await describe_task_action(pool, user_id, func_name, tool_args)
                         confirm_step = AgentStep(
                             type="confirm_request",
                             content=f"Agent wants to execute: {func_name}({json.dumps(tool_args)}). This will modify your data. Please confirm.",
@@ -405,6 +407,7 @@ async def run_agent(
                             run_id=run_id,
                             model_tier="Human Authorization Gate",
                             step_cost_usd=0.0,
+                            metadata={"summary": task_summary} if task_summary else None,
                         )
                         yield confirm_step
                         accumulated_steps.append(confirm_step)
@@ -415,11 +418,7 @@ async def run_agent(
                                 pool, run_id, user_id or "default_user", func_name, tool_args, confirm_timeout_seconds
                             )
                         pending_item: Dict[str, Any] = {"action_id": act_id, "tool": func_name, "args": tool_args}
-                        from backend.agent_pending import describe_task_action
-                        task_summary = await describe_task_action(pool, user_id, func_name, tool_args)
-                        if task_summary:
-                            pending_item["summary"] = task_summary
-                        pending_confirmations.append(pending_item)
+                        pending_confirmations.append({**pending_item, "summary": task_summary} if task_summary else pending_item)
 
                         asst_payload: Dict[str, Any] = {
                             "role": "assistant",

@@ -57,3 +57,8 @@ test('the approval card describes a batch schedule and an untitled event in plai
   assert.equal(formatActionDescription({ tool: 'schedule_event', args: { title: 'Demo prep' } }), 'Reserve calendar time slot for "Demo prep"')
   assert.equal(formatActionDescription({ tool: 'edit_task', args: { task_id: 5 }, summary: 'Update task: "Lab report"' }), 'Update task: "Lab report"')
 })
+
+test('the live approval card takes its plain-language summary from the confirm_request event', () => {
+  const panel = read('../src/components/AgentPanel.jsx')
+  assert.ok(panel.includes('summary: event.metadata?.summary'), 'AgentPanel must pass the summary the backend sends')
+})
