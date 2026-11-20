@@ -37,7 +37,7 @@ test('a large backlog catches up fast', () => {
   assert.ok(next - 0 > 20, `step ${next} should be well above 20`)
 })
 
-test('a large backlog is cleared in well under a second', () => {
+test('a large backlog is cleared in about a second and a half at most', () => {
   let shown = 0
   let ms = 0
   while (shown < 2000 && ms < 5000) {
@@ -45,7 +45,7 @@ test('a large backlog is cleared in well under a second', () => {
     ms += 16
   }
   assert.equal(shown, 2000)
-  assert.ok(ms <= 600, `took ${ms}ms`)
+  assert.ok(ms <= 1500, `took ${ms}ms`)
 })
 
 test('dtMs is clamped between 0 and 100', () => {
@@ -94,4 +94,38 @@ test('isContinuation is false when the text was replaced', () => {
   assert.equal(isContinuation('Hello world', 'Hello'), false)
   assert.equal(isContinuation('Hello', 'Goodbye'), false)
   assert.equal(isContinuation('Hello', undefined), false)
+})
+
+function clearTime(total) {
+  let shown = 0
+  let ms = 0
+  while (shown < total && ms < 20000) {
+    shown = nextRevealLength({ shown, target: total, dtMs: 16 })
+    ms += 16
+  }
+  return ms
+}
+
+test('a 500-character answer types out steadily, not in a flash', () => {
+  const ms = clearTime(500)
+  assert.ok(ms >= 700 && ms <= 1200, `took ${ms}ms`)
+})
+
+test('no answer length waits more than about a second and a half', () => {
+  for (const n of [60, 400, 1000, 2000, 5000, 20000]) {
+    assert.ok(clearTime(n) <= 1500, `${n} chars took ${clearTime(n)}ms`)
+  }
+})
+
+test('the displayed text never trails the received text by more than 1000 characters', () => {
+  let shown = 0
+  for (let i = 0; i < 40; i++) {
+    shown = nextRevealLength({ shown, target: 50000, dtMs: 16 })
+    assert.ok(50000 - shown <= 1000 + 800, `backlog ${50000 - shown} at step ${i}`)
+  }
+})
+
+test('the per-frame step respects the pace cap for a short backlog', () => {
+  const next = nextRevealLength({ shown: 0, target: 200, dtMs: 16 })
+  assert.ok(next <= 9, `step ${next} exceeds about 500 chars/second`)
 })

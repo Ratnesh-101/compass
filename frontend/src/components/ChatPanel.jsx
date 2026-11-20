@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
+import useRevealHold from '../hooks/useRevealHold'
+import { mergeContinuation, buildAssistantMessage } from '../utils/chatMessages'
 import {
   streamQueryFromAssistant,
   fetchConversations,
@@ -107,6 +109,7 @@ export default function ChatPanel({
   const isSendingRef = useRef(false)
   const activeAbortControllerRef = useRef(null)
   const activeRequestIdRef = useRef(0)
+  const { streamDone, holdFinal, flushPendingFinal, cancelRevealHold } = useRevealHold(activeRequestIdRef)
   const autoReopenedRef = useRef(false)
 
   // Load past conversations and memory overview on mount & drawer open
@@ -314,48 +317,23 @@ export default function ChatPanel({
         onComplete: async (doneData) => {
           if (requestId !== activeRequestIdRef.current) return
           const finalText = (doneData?.response || receivedTokens || '').trim()
-          setIsStreaming(false)
-          setStreamingText('')
-          setStreamingThought('')
           setStreamingStatus(null)
-          isSendingRef.current = false
-          if (continueMessageId) {
-            setContinuingMessageId(null)
-            const addedText = (doneData?.response || receivedTokens || '').trim()
-            setMessages(prev => prev.map(m => {
-              if (m.id === continueMessageId || (!m.id && m.role === 'assistant' && m === prev[prev.length - 1])) {
-                const combined = (m.text && addedText.startsWith(m.text))
-                  ? addedText
-                  : (m.text ? `${m.text}\n${addedText}` : addedText)
-                return {
-                  ...m,
-                  text: combined,
-                  isTruncated: Boolean(doneData?.is_truncated),
-                  is_truncated: Boolean(doneData?.is_truncated),
-                  evidence: doneData?.evidence || m.evidence,
-                  tasks: Array.isArray(doneData?.tasks) ? doneData.tasks : m.tasks,
-                }
-              }
-              return m
-            }))
-          } else if (finalText) {
-            setMessages(prev => [...prev, {
-              role: 'assistant',
-              text: finalText,
-              thought: receivedThought || null,
-              tasks: Array.isArray(doneData?.tasks) ? doneData.tasks : null,
-              evidence: doneData?.evidence || null,
-              isTruncated: Boolean(doneData?.is_truncated),
-              is_truncated: Boolean(doneData?.is_truncated),
-              verifiable: doneData?.verifiable,
-              pending_action: doneData?.pending_action || doneData?.data?.pending_action,
-              can_undo: Boolean(doneData?.can_undo || doneData?.data?.can_undo),
-              data: doneData?.data || {
-                pending_action: doneData?.pending_action,
-                can_undo: doneData?.can_undo,
-              },
-            }])
+          // Swap the streaming bubble for the finished message (immediately, or once the eased-in text caught up).
+          const finish = () => {
+            setIsStreaming(false)
+            setStreamingText('')
+            setStreamingThought('')
+            isSendingRef.current = false
+            if (continueMessageId) {
+              setContinuingMessageId(null)
+              const addedText = (doneData?.response || receivedTokens || '').trim()
+              setMessages(prev => mergeContinuation(prev, continueMessageId, addedText, doneData))
+            } else if (finalText) {
+              setMessages(prev => [...prev, buildAssistantMessage(finalText, receivedThought, doneData)])
+            }
+            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
           }
+          // Keep the conversation id and the parent refresh outside the hold so a quick switch cannot lose them.
           // A completed stream with an empty reply is a normal outcome: never re-send the prompt
           if (doneData?.conversation_id && setConversationId) {
             setConversationId(doneData.conversation_id)
@@ -363,7 +341,11 @@ export default function ChatPanel({
           if (onChatComplete) {
             onChatComplete()
           }
-          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+          if (receivedTokens && finalText) {
+            holdFinal(requestId, finish)
+          } else {
+            finish()
+          }
         },
         onError: async (err) => {
           if (requestId !== activeRequestIdRef.current) return
@@ -479,6 +461,7 @@ export default function ChatPanel({
       activeAbortControllerRef.current = null
     }
     clearStreamTimer()
+    cancelRevealHold()
     setIsStreaming(false); setStreamingText(''); setStreamingThought(''); setStreamingStatus(null); isSendingRef.current = false; setConvMode(null)
     setMessages([{ role: 'assistant', text: "New conversation started! How can I help you plan today?" }])
     if (setConversationId) setConversationId(null)
@@ -493,6 +476,7 @@ export default function ChatPanel({
       activeAbortControllerRef.current = null
     }
     clearStreamTimer()
+    cancelRevealHold()
     setIsStreaming(false); setStreamingText(''); setStreamingThought(''); setStreamingStatus(null); isSendingRef.current = false; setConvMode(null)
     try {
       if (setConversationId) setConversationId(pastConvId)
@@ -628,6 +612,8 @@ export default function ChatPanel({
             streamingText={streamingText}
             streamingThought={streamingThought}
             streamingStatus={streamingStatus}
+            streamDone={streamDone}
+            onRevealDone={flushPendingFinal}
             isTyping={isTyping}
             messagesEndRef={messagesEndRef}
             profileFacts={profileFacts}

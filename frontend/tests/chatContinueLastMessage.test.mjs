@@ -16,7 +16,9 @@ test('Continue on a message without a database id asks the server to continue th
 
 test('the panel merges a continuation into the newest id-less assistant bubble', () => {
   const panel = read('../src/components/ChatPanel.jsx')
-  assert.ok(panel.includes("(!m.id && m.role === 'assistant' && m === prev[prev.length - 1])"))
+  const helpers = read('../src/utils/chatMessages.js')
+  assert.ok(panel.includes('mergeContinuation(prev, continueMessageId'))
+  assert.ok(helpers.includes("(!m.id && m.role === 'assistant' && m === prev[prev.length - 1])"))
 })
 
 test('moving an application to Applied uses the confirmation endpoint, not a plain status update', () => {
