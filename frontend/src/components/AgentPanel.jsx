@@ -215,7 +215,7 @@ export default function AgentPanel({ onTaskMutated, conversationId }) {
 
           if (event.type === 'confirm_request') {
             sawTerminal = true
-            setPendingActions(prev => [...prev, { tool: event.tool, args: event.args }])
+            setPendingActions(prev => [...prev, { tool: event.tool, args: event.args, summary: event.metadata?.summary }])
           } else if (event.type === 'done') {
             sawTerminal = true
             if (event.metadata?.triage_plan) {
