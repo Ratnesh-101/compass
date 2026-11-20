@@ -45,8 +45,12 @@ export function formatActionDescription(action) {
     const status = args.status || 'done'
     return `Mark task #${args.task_id || ''} as ${status === 'done' ? 'completed' : status}`
   }
+  if (tool === 'commit_schedule' && Array.isArray(args.assignments) && args.assignments.length > 0) {
+    const n = args.assignments.length
+    return `Schedule ${n} task${n === 1 ? '' : 's'} on your calendar`
+  }
   if (tool === 'schedule_event' || tool === 'commit_schedule') {
-    return `Reserve calendar time slot for "${args.title || 'event'}"`
+    return args.title ? `Reserve calendar time slot for "${args.title}"` : 'Add an event to your calendar'
   }
   if (tool === 'apply_triage_plan') {
     return 'Rebalance task deadlines to prevent cognitive burnout'

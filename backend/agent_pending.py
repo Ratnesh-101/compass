@@ -33,6 +33,48 @@ def compute_args_hash(args: Dict[str, Any]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+_TASK_ACTION_TOOLS = ("edit_task", "delete_task", "update_task_status")
+
+
+async def describe_task_action(
+    pool: Any, user_id: Optional[str], tool: str, args: Dict[str, Any]
+) -> Optional[str]:
+    """A human-readable summary for a pending edit/delete/status change, using the task's real name.
+
+    The model only supplies a task_id, so the approval card would read "Task #2197". The title is looked up
+    here, and only for a task that belongs to the caller. Any problem returns None (the card keeps its fallback).
+    """
+    if not pool or tool not in _TASK_ACTION_TOOLS or not isinstance(args, dict):
+        return None
+    try:
+        task_id = int(args.get("task_id"))
+    except (TypeError, ValueError):
+        return None
+    try:
+        from backend.memory import structured
+
+        async with pool.acquire() as conn:
+            task = await structured.get_task(conn, task_id)
+    except Exception:
+        logger.debug("Could not look up task %s for the approval summary", task_id, exc_info=True)
+        return None
+    if not task or not user_id or str(task.get("user_id")) != str(user_id):
+        return None
+    title = str(task.get("title") or "").strip()
+    if not title:
+        return None
+    if tool == "delete_task":
+        return f'Permanently remove task "{title}"'
+    if tool == "update_task_status":
+        status = str(args.get("status") or "done")
+        return f'Mark "{title}" as {"completed" if status == "done" else status}'
+    new_due = args.get("due_date")
+    old_due = task.get("due_date")
+    if new_due and str(new_due)[:10] != str(old_due or "")[:10]:
+        return f'Update task: "{title}" (due {str(old_due)[:10] if old_due else "not set"} to {str(new_due)[:10]})'
+    return f'Update task: "{title}"'
+
+
 async def register_pending_action(
     pool: Any,
     run_id: str,
