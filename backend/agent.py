@@ -414,7 +414,12 @@ async def run_agent(
                             act_id = await register_pending_action(
                                 pool, run_id, user_id or "default_user", func_name, tool_args, confirm_timeout_seconds
                             )
-                        pending_confirmations.append({"action_id": act_id, "tool": func_name, "args": tool_args})
+                        pending_item: Dict[str, Any] = {"action_id": act_id, "tool": func_name, "args": tool_args}
+                        from backend.agent_pending import describe_task_action
+                        task_summary = await describe_task_action(pool, user_id, func_name, tool_args)
+                        if task_summary:
+                            pending_item["summary"] = task_summary
+                        pending_confirmations.append(pending_item)
 
                         asst_payload: Dict[str, Any] = {
                             "role": "assistant",

@@ -103,17 +103,20 @@ export default function AboutJudgesModal({
           }}
         >
           <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-secondary)', marginBottom: '8px' }}>
-            System Architecture (NVIDIA & Nebius MoE)
+            System Architecture (NVIDIA Nemotron on Nebius Token Factory)
           </div>
           <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
             <li>
-              <strong>Router & Fast Classifier:</strong> Nemotron-3 8B MoE for intent classification and low-latency planning.
+              <strong>Router &amp; Fast Chat:</strong> Nemotron-3 Nano 30B (A3B) routes each message and calls tools with native function calling.
             </li>
             <li>
-              <strong>Specialist & Synthesis:</strong> Llama-3.1-70B / 405B MoE via Nebius Token Factory for complex multi-domain reasoning.
+              <strong>Reasoning &amp; Planning:</strong> Nemotron-3 Super 120B runs the agent steps, the plan critic and feasibility planning.
             </li>
             <li>
-              <strong>Hybrid Memory:</strong> PostgreSQL 16 with pgvector HNSW indexing (768-dim embeddings) for cross-session semantic recall.
+              <strong>Synthesis:</strong> Nemotron-3 Ultra 550B writes the final long answers and summaries, and plays the Realist in triage.
+            </li>
+            <li>
+              <strong>Hybrid Memory:</strong> PostgreSQL 16 with a pgvector HNSW index (768-dim Qwen3-Embedding-8B vectors) for cross-session semantic recall.
             </li>
           </ul>
         </div>

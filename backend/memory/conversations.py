@@ -147,6 +147,19 @@ async def get_or_create_conversation(
 
 
 
+# The 60-second tour sends a pasted task table as its first message. A chat list that shows
+# "Add these 8 tasks to my deadlines: | Task | Do..." looks broken, so such chats get a plain title.
+_TOUR_SAMPLE_PREFIX = "Add these 8 tasks to my deadlines:"
+_TOUR_SAMPLE_TITLE = "Load a sample week"
+
+
+def friendly_title(text: str) -> str:
+    """A readable chat title for a first message (the tour's raw task table becomes 'Load a sample week')."""
+    if text and text.lstrip().startswith(_TOUR_SAMPLE_PREFIX):
+        return _TOUR_SAMPLE_TITLE
+    return text
+
+
 async def add_message(
     conn: DbConn,
     conversation_id: str,
@@ -200,7 +213,7 @@ async def add_message(
     # Set conversation title if it's the first user message
     if role == "user":
         try:
-            clean_title = strip_modes_marker(content).strip().replace("\n", " ")
+            clean_title = friendly_title(strip_modes_marker(content).strip().replace("\n", " "))
             if len(clean_title) > 60:
                 clean_title = clean_title[:57] + "..."
             await conn.execute(
@@ -340,7 +353,7 @@ async def list_conversations(
         rows = await conn.fetch(query, user_id, guest_id, include_archived, limit)
         conversations_list = []
         for r in rows:
-            title = r.get("title") or r.get("first_user_msg") or "Chat Session"
+            title = friendly_title(r.get("title") or r.get("first_user_msg") or "Chat Session")
             if len(title) > 60:
                 title = title[:57] + "..."
             stored_st = str(r["share_token"]) if r.get("share_token") else None

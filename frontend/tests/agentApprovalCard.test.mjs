@@ -45,3 +45,15 @@ test('observe step with raw JSON shows one plain line and never user_id', () => 
 test('StepCard routes observe content through formatObserveContent', () => {
   assert.match(read('../src/components/agent/StepCard.jsx'), /formatObserveContent\(step\.content\)/)
 })
+
+test('the approval card describes a batch schedule and an untitled event in plain words', async () => {
+  const { formatActionDescription } = await import('../src/components/agent/actionText.js')
+  assert.equal(
+    formatActionDescription({ tool: 'commit_schedule', args: { assignments: [{ task_id: 1 }, { task_id: 2 }, { task_id: 3 }] } }),
+    'Schedule 3 tasks on your calendar',
+  )
+  assert.equal(formatActionDescription({ tool: 'commit_schedule', args: { assignments: [{ task_id: 1 }] } }), 'Schedule 1 task on your calendar')
+  assert.equal(formatActionDescription({ tool: 'schedule_event', args: {} }), 'Add an event to your calendar')
+  assert.equal(formatActionDescription({ tool: 'schedule_event', args: { title: 'Demo prep' } }), 'Reserve calendar time slot for "Demo prep"')
+  assert.equal(formatActionDescription({ tool: 'edit_task', args: { task_id: 5 }, summary: 'Update task: "Lab report"' }), 'Update task: "Lab report"')
+})
