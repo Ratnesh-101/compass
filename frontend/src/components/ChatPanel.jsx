@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
+import useRevealHold from '../hooks/useRevealHold'
+import { mergeContinuation, buildAssistantMessage } from '../utils/chatMessages'
 import {
   streamQueryFromAssistant,
   fetchConversations,
@@ -27,9 +29,6 @@ import ProfileFactsShelf from './chat/ProfileFactsShelf'
 
 const CONNECT_ERROR = "That took too long and the connection dropped. Your question is saved. Try again?"
 
-// After the answer has fully arrived, keep the streaming bubble until the eased-in text catches up (bounded).
-const REVEAL_HOLD_MAX_MS = 2000
-
 export default function ChatPanel({
   messages, setMessages, conversationId, setConversationId, isTyping, onChatComplete,
   tasks = [], backendStatus = '', initialPrompt = null, onClearInitialPrompt = null,
@@ -39,7 +38,6 @@ export default function ChatPanel({
   const [activeSpecialist, setActiveSpecialist] = useState(null)
   const [streamingText, setStreamingText] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
-  const [streamDone, setStreamDone] = useState(false)
   const [continuingMessageId, setContinuingMessageId] = useState(null)
   const [showContext, setShowContext] = useState(false)
   const [showHistoryDrawer, setShowHistoryDrawer] = useState(false)
@@ -111,8 +109,7 @@ export default function ChatPanel({
   const isSendingRef = useRef(false)
   const activeAbortControllerRef = useRef(null)
   const activeRequestIdRef = useRef(0)
-  const pendingFinalRef = useRef(null)
-  const holdTimerRef = useRef(null)
+  const { streamDone, holdFinal, flushPendingFinal, cancelRevealHold } = useRevealHold(activeRequestIdRef)
   const autoReopenedRef = useRef(false)
 
   // Load past conversations and memory overview on mount & drawer open
@@ -192,11 +189,6 @@ export default function ChatPanel({
       if (toastTimerRef.current) {
         clearTimeout(toastTimerRef.current)
       }
-      if (holdTimerRef.current) {
-        clearTimeout(holdTimerRef.current)
-        holdTimerRef.current = null
-      }
-      pendingFinalRef.current = null
     }
   }, [])
 
@@ -205,28 +197,6 @@ export default function ChatPanel({
       clearInterval(streamTimerRef.current)
       streamTimerRef.current = null
     }
-  }
-
-  // Drops a pending end-of-answer hold (new chat, other conversation selected): its message is discarded.
-  const cancelRevealHold = () => {
-    if (holdTimerRef.current) {
-      clearTimeout(holdTimerRef.current)
-      holdTimerRef.current = null
-    }
-    pendingFinalRef.current = null
-    setStreamDone(false)
-  }
-
-  // Swaps the streaming bubble for the finished message. Runs once, when the reveal caught up or the hold timed out.
-  const flushPendingFinal = () => {
-    if (holdTimerRef.current) {
-      clearTimeout(holdTimerRef.current)
-      holdTimerRef.current = null
-    }
-    const pending = pendingFinalRef.current
-    pendingFinalRef.current = null
-    setStreamDone(false)
-    if (pending && pending.requestId === activeRequestIdRef.current) pending.finish()
   }
 
   const handleRecap = async () => {
@@ -357,39 +327,9 @@ export default function ChatPanel({
             if (continueMessageId) {
               setContinuingMessageId(null)
               const addedText = (doneData?.response || receivedTokens || '').trim()
-              setMessages(prev => prev.map(m => {
-                if (m.id === continueMessageId || (!m.id && m.role === 'assistant' && m === prev[prev.length - 1])) {
-                  const combined = (m.text && addedText.startsWith(m.text))
-                    ? addedText
-                    : (m.text ? `${m.text}\n${addedText}` : addedText)
-                  return {
-                    ...m,
-                    text: combined,
-                    isTruncated: Boolean(doneData?.is_truncated),
-                    is_truncated: Boolean(doneData?.is_truncated),
-                    evidence: doneData?.evidence || m.evidence,
-                    tasks: Array.isArray(doneData?.tasks) ? doneData.tasks : m.tasks,
-                  }
-                }
-                return m
-              }))
+              setMessages(prev => mergeContinuation(prev, continueMessageId, addedText, doneData))
             } else if (finalText) {
-              setMessages(prev => [...prev, {
-                role: 'assistant',
-                text: finalText,
-                thought: receivedThought || null,
-                tasks: Array.isArray(doneData?.tasks) ? doneData.tasks : null,
-                evidence: doneData?.evidence || null,
-                isTruncated: Boolean(doneData?.is_truncated),
-                is_truncated: Boolean(doneData?.is_truncated),
-                verifiable: doneData?.verifiable,
-                pending_action: doneData?.pending_action || doneData?.data?.pending_action,
-                can_undo: Boolean(doneData?.can_undo || doneData?.data?.can_undo),
-                data: doneData?.data || {
-                  pending_action: doneData?.pending_action,
-                  can_undo: doneData?.can_undo,
-                },
-              }])
+              setMessages(prev => [...prev, buildAssistantMessage(finalText, receivedThought, doneData)])
             }
             messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
           }
@@ -402,9 +342,7 @@ export default function ChatPanel({
             onChatComplete()
           }
           if (receivedTokens && finalText) {
-            pendingFinalRef.current = { requestId, finish }
-            setStreamDone(true)
-            holdTimerRef.current = setTimeout(flushPendingFinal, REVEAL_HOLD_MAX_MS)
+            holdFinal(requestId, finish)
           } else {
             finish()
           }
