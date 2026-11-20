@@ -912,12 +912,27 @@ textarea {
 .streaming-caret {
   display: inline-block;
   width: 2px;
-  height: 14px;
+  height: 1.1em;
   background-color: var(--text-primary);
   margin-left: 2px;
-  vertical-align: middle;
+  vertical-align: text-bottom;
   border-radius: 1px;
-  animation: blink 0.75s infinite;
+  animation: caret-pulse 1s ease-in-out infinite;
+}
+
+@keyframes caret-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* A new assistant bubble eases in instead of popping. */
+.chat-reveal-in {
+  animation: chat-reveal-in 160ms ease-out both;
+}
+
+@keyframes chat-reveal-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 
@@ -935,6 +950,9 @@ textarea {
   .streaming-caret {
     animation: none;
     opacity: 1;
+  }
+  .chat-reveal-in {
+    animation: none;
   }
 }
 

@@ -6,6 +6,7 @@ import ChatTaskCard from './ChatTaskCard'
 import IntakePreviewCard from './IntakePreviewCard'
 import { fetchPersonaPhrases } from '../../api/chatApi'
 import Logo from '../Logo'
+import useSmoothedText from '../../hooks/useSmoothedText'
 import { generateFollowUpSuggestions, formatSuggestionText } from '../../utils/suggestionGenerator'
 import { isMessageEligibleForVerification } from '../../utils/verificationEligibility'
 import {
@@ -65,6 +66,9 @@ export default function ChatMessageList({
   }, [isReturning, userName, startingPhrases, returningPhrases])
 
   const showEmptyState = messages.length === 0 && !isStreaming
+
+  // Streamed tokens arrive in network-sized bursts; ease them in like the Claude app does.
+  const smoothStreamingText = useSmoothedText(streamingText, Boolean(isStreaming))
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', padding: '24px 28px', minWidth: 0 }}>
@@ -196,7 +200,7 @@ export default function ChatMessageList({
 
                         return (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                            {displayText ? <MarkdownRenderer content={displayText + (isContinuationTarget && streamingText ? ('\n' + streamingText) : '')} /> : null}
+                            {displayText ? <MarkdownRenderer content={displayText + (isContinuationTarget && smoothStreamingText ? ('\n' + smoothStreamingText) : '')} /> : null}
                             {isContinuationTarget && <span className="streaming-caret" style={{ background: 'var(--coursework)' }} />}
                             {isLatest && !isStreaming && messages.length === 1 && msg.role === 'assistant' && (
                               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>
@@ -613,7 +617,7 @@ export default function ChatMessageList({
                 }}>
                   <Logo size={20} alt="Compass logo" />
                 </div>
-                <div className="chat-msg-bubble" style={{
+                <div className="chat-msg-bubble chat-reveal-in" style={{
                   maxWidth: 'min(85%, 820px)',
                   padding: '13px 17px',
                   borderRadius: 'var(--radius-card, 8px)',
@@ -628,7 +632,7 @@ export default function ChatMessageList({
                   )}
                   {streamingText ? (
                     <>
-                      <MarkdownRenderer content={streamingText} />
+                      <MarkdownRenderer content={smoothStreamingText} />
                       <span className="streaming-caret" style={{ background: 'var(--coursework)' }} />
                     </>
                   ) : null}
