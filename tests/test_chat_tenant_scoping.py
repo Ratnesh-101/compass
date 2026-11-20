@@ -63,7 +63,7 @@ async def test_guest_add_task_does_not_see_or_shift_other_users_tasks(monkeypatc
         assert "already exists" not in res["response"]
 
         res2 = await handle_message(
-            message="add task",
+            message="move that task's deadline to 2031-02-02",
             guest_id=guest,
             pre_routed_skill="add_task",
             pre_routed_args={"title": title, "due_date": "2031-02-02", "shift_existing": True},

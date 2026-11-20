@@ -741,6 +741,11 @@ async def handle_add_task(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
 
     notes = args.get("notes")
     shift_existing = bool(args.get("shift_existing", False))
+    if shift_existing and args.get("user_message"):
+        # With a user message attached, the model may not overwrite an existing deadline unless that message asks to move it.
+        from backend.services.task_intent import user_asked_to_shift
+        if not user_asked_to_shift(str(args.get("user_message"))):
+            shift_existing = False
     allow_different_thing = bool(args.get("allow_different_thing", False))
     allow_duplicate = bool(args.get("allow_duplicate", False))
 

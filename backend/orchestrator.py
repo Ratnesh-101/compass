@@ -697,6 +697,11 @@ async def _handle_message_core(
 
         task_record: Optional[Dict[str, Any]] = None
         shift_existing = bool(args.get("shift_existing", False))
+        if shift_existing:
+            # The model may not overwrite an existing deadline on its own: the user's message must ask to move it.
+            from backend.services.task_intent import user_asked_to_shift
+            if not user_asked_to_shift(message):
+                shift_existing = False
         allow_different_thing = bool(args.get("allow_different_thing", False))
         allow_duplicate = bool(args.get("allow_duplicate", False))
         try:
