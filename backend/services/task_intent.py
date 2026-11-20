@@ -364,3 +364,36 @@ def is_intake_intent(message: str) -> bool:
         or parse_task_list(message) is not None
         or looks_like_prose_task_list(message)
     )
+
+
+# Verbs that only make sense for an existing deadline.
+_SHIFT_STRONG_RE = re.compile(
+    r"\b(?:shift|reschedul\w*|postpon\w*|delay\w*|extend\w*|"
+    r"push(?:ed|ing)?\s+(?:it\s+|that\s+|the\s+\w+\s+)?(?:back|out|forward)|"
+    r"bring(?:ing)?\s+(?:it\s+)?forward|pull(?:ing)?\s+(?:it\s+)?(?:in|forward))\b",
+    re.IGNORECASE,
+)
+# Everyday verbs that also start new tasks ("set up the demo", "update my resume"): they count only
+# when the message also talks about a deadline, due date or date.
+_SHIFT_WEAK_RE = re.compile(
+    r"\b(?:move|moved|moving|change|changed|update|edit|set)\b[^.?!\n]{0,40}\b(?:deadline|due(?:\s+date)?|date)\b",
+    re.IGNORECASE,
+)
+
+# "move the lab report to Friday" / "move it to next week" / "move it to the 25th"
+_SHIFT_MOVE_TO_RE = re.compile(
+    r"\b(?:move|moved|moving)\b[^.?!\n]{0,40}\bto\s+(?:the\s+)?(?:mon|tues?|wed(?:nes)?|thu(?:rs)?|fri|sat(?:ur)?|sun)\w*|"
+    r"\b(?:move|moved|moving)\b[^.?!\n]{0,40}\bto\s+(?:tomorrow|today|next\s+\w+|this\s+\w+|the\s+\d{1,2}|\d{1,2}[/-]\d{1,2}|\d{4}-\d{2}-\d{2})",
+    re.IGNORECASE,
+)
+
+
+def user_asked_to_shift(message: Optional[str]) -> bool:
+    """True when the user's own words ask to move or change an existing deadline.
+
+    Adding a task whose name matches an existing one must ask first. The model is not allowed to decide
+    on its own to overwrite the existing deadline: only a message like "move my lab report to Friday"
+    or "reschedule it" lets shift_existing take effect.
+    """
+    return bool(message and (_SHIFT_STRONG_RE.search(message) or _SHIFT_WEAK_RE.search(message) or _SHIFT_MOVE_TO_RE.search(message)))
+
