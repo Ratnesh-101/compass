@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react'
+import React, { useMemo, useState, useEffect, useRef } from 'react'
 import EvidenceCard from './EvidenceCard'
 import ThinkingBlock from './ThinkingBlock'
 import MarkdownRenderer from './MarkdownRenderer'
@@ -24,6 +24,8 @@ export default function ChatMessageList({
   streamingText,
   streamingThought = '',
   streamingStatus = null,
+  streamDone = false,
+  onRevealDone = null,
   isTyping,
   messagesEndRef,
   profileFacts = {},
@@ -69,6 +71,19 @@ export default function ChatMessageList({
 
   // Streamed tokens arrive in network-sized bursts; ease them in like the Claude app does.
   const smoothStreamingText = useSmoothedText(streamingText, Boolean(isStreaming))
+
+  // Once the answer has fully arrived, tell the parent when the eased-in text has caught up so it can swap bubbles
+  // without the unrevealed tail appearing in one jump.
+  const onRevealDoneRef = useRef(onRevealDone)
+  onRevealDoneRef.current = onRevealDone
+  const revealCaughtUp = smoothStreamingText.length >= (streamingText || '').length
+  useEffect(() => {
+    if (isStreaming && streamDone && revealCaughtUp) onRevealDoneRef.current?.()
+  }, [isStreaming, streamDone, revealCaughtUp])
+  // The held tail grows below the fold unless we keep following it.
+  useEffect(() => {
+    if (isStreaming) messagesEndRef?.current?.scrollIntoView({ block: 'end' })
+  }, [smoothStreamingText.length, isStreaming, messagesEndRef])
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', padding: '24px 28px', minWidth: 0 }}>
