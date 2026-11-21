@@ -108,7 +108,15 @@ test('f: Google Fonts link uses non-blocking preload and onload swap with noscri
   const strippedHtml = html.replace(/<noscript>[\s\S]*?<\/noscript>/g, '');
   const remainingStylesheets = strippedHtml.match(/<link[^>]*rel="stylesheet"[^>]*>/g) || [];
   for (const link of remainingStylesheets) {
-    assert.ok(!link.includes('fonts.googleapis.com'), `Found blocking stylesheet link for fonts outside noscript: ${link}`);
+    // Compare the parsed host, not a substring of the whole tag.
+    const href = (link.match(/href="([^"]+)"/) || [])[1] || '';
+    let host = '';
+    try {
+      host = new URL(href).hostname;
+    } catch {
+      host = '';
+    }
+    assert.notEqual(host, 'fonts.googleapis.com', `Found blocking stylesheet link for fonts outside noscript: ${link}`);
   }
 });
 
