@@ -61,6 +61,21 @@ async def _insert_task(
     )
 
 
+
+def _considered_titles(data: Dict[str, Any]) -> set:
+    """Titles the proposer took into account: scheduled, unassigned, or reported as a deadline conflict.
+
+    A task due on a day with no working hours (a Sunday, when the suite runs on a Saturday) cannot be scheduled
+    before its deadline, so the proposer reports it under `conflicts`; it is still considered.
+    """
+    return {
+        t["title"]
+        for key in ("scheduled", "unassigned", "conflicts")
+        for t in (data.get(key) or [])
+        if isinstance(t, dict) and t.get("title")
+    }
+
+
 async def _seed_tasks(conn: Any, user_id: str) -> Dict[str, Any]:
     tomorrow = date.today() + timedelta(days=1)
     day_after = date.today() + timedelta(days=2)
@@ -137,13 +152,13 @@ async def test_calendar_skill_propose_schedule_without_task_ids():
         # include_demo=False
         res_false = await handle_propose_schedule({"user_id": user, "include_demo": False}, pool)
         data_false = res_false.get("data") or {}
-        considered_false = {t["title"] for t in (data_false.get("scheduled") or []) + (data_false.get("unassigned") or [])}
+        considered_false = _considered_titles(data_false)
         assert not (seeded["demo_titles"] & considered_false), "Demo tasks must not be proposed with include_demo=False"
 
         # include_demo=True
         res_true = await handle_propose_schedule({"user_id": user, "include_demo": True}, pool)
         data_true = res_true.get("data") or {}
-        considered_true = {t["title"] for t in (data_true.get("scheduled") or []) + (data_true.get("unassigned") or [])}
+        considered_true = _considered_titles(data_true)
         assert seeded["demo_titles"].issubset(considered_true), "Demo tasks must be proposed with include_demo=True"
     finally:
         await _cleanup(pool, user)
@@ -164,7 +179,7 @@ async def test_calendar_skill_propose_schedule_with_task_ids():
             {"user_id": user, "task_ids": all_task_ids, "include_demo": False}, pool
         )
         data_false = res_false.get("data") or {}
-        considered_false = {t["title"] for t in (data_false.get("scheduled") or []) + (data_false.get("unassigned") or [])}
+        considered_false = _considered_titles(data_false)
         assert not (seeded["demo_titles"] & considered_false), "Demo tasks must not be proposed when include_demo=False"
 
         # With task_ids and include_demo=True
@@ -172,7 +187,7 @@ async def test_calendar_skill_propose_schedule_with_task_ids():
             {"user_id": user, "task_ids": all_task_ids, "include_demo": True}, pool
         )
         data_true = res_true.get("data") or {}
-        considered_true = {t["title"] for t in (data_true.get("scheduled") or []) + (data_true.get("unassigned") or [])}
+        considered_true = _considered_titles(data_true)
         assert seeded["demo_titles"].issubset(considered_true), "Demo tasks must be proposed when include_demo=True"
     finally:
         await _cleanup(pool, user)
@@ -250,14 +265,14 @@ async def test_calendar_router_propose_schedule_endpoint():
         body_false = ProposeScheduleBody(include_demo=False)
         resp_false = await propose_schedule_endpoint(body_false, ident=ident)
         data_false = resp_false.get("data") or {}
-        considered_false = {t["title"] for t in (data_false.get("scheduled") or []) + (data_false.get("unassigned") or [])}
+        considered_false = _considered_titles(data_false)
         assert not (seeded["demo_titles"] & considered_false), "Demo tasks must be absent when include_demo=False"
 
         # 2. include_demo=True
         body_true = ProposeScheduleBody(include_demo=True)
         resp_true = await propose_schedule_endpoint(body_true, ident=ident)
         data_true = resp_true.get("data") or {}
-        considered_true = {t["title"] for t in (data_true.get("scheduled") or []) + (data_true.get("unassigned") or [])}
+        considered_true = _considered_titles(data_true)
         assert seeded["demo_titles"].issubset(considered_true), "Demo tasks must be present when include_demo=True"
     finally:
         await _cleanup(pool, user)
