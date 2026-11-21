@@ -79,8 +79,16 @@ def check_desktop(browser, args):
         throttle(context, page, args.latency_ms, args.down_kbps)
         page.goto(args.url, wait_until="commit")
         try:
-            page.wait_for_function("window.__fcp !== null", timeout=10000)
-            fcp = page.evaluate("window.__fcp")
+            # Poll instead of wait_for_function: that helper evaluates a string, which a strict CSP
+            # (script-src without 'unsafe-eval', as on the live site) blocks.
+            fcp = None
+            for _ in range(100):
+                fcp = page.evaluate("() => window.__fcp")
+                if fcp is not None:
+                    break
+                page.wait_for_timeout(100)
+            if fcp is None:
+                raise TimeoutError("no first-contentful-paint entry within 10 s")
             ok = bool(fcp and (fcp["skeleton"] or fcp["app"]))
             report("throttled_first_paint", ok, f"blank first paint: {fcp}")
             if ok:
