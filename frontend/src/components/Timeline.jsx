@@ -7,6 +7,7 @@ import {
 import AboutJudgesModal from './AboutJudgesModal'
 import { getDomainMeta } from './timeline/domainMeta'
 import TaskCard from './timeline/TaskCard'
+import { TimelineSkeleton } from './Skeleton'
 import TaskDetailModal from './timeline/TaskDetailModal'
 import AddDeadlineModal from './timeline/AddDeadlineModal'
 import TimelineHeader from './timeline/TimelineHeader'
@@ -23,6 +24,7 @@ export { getDomainMeta } from './timeline/domainMeta'
 export default function Timeline({
   tasks = [],
   allTasks = [],
+  tasksLoading = false,
   activeDomain,
   onSelectDomain,
   onTasksUpdated,
@@ -263,7 +265,9 @@ export default function Timeline({
 
       {/* Task Stream Feed */}
       <div className="timeline-feed">
-        {filtered.length === 0 ? (
+        {tasksLoading && filtered.length === 0 && (allTasks || []).length === 0 ? (
+          <TimelineSkeleton />
+        ) : filtered.length === 0 ? (
           <div style={{
             padding: '48px 20px',
             textAlign: 'center',

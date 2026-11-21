@@ -3,6 +3,7 @@ import { X, BookOpen } from 'lucide-react'
 import DarkModeToggle from './DarkModeToggle'
 import { getDomainMeta } from './timeline/domainMeta'
 import AddDeadlineModal from './timeline/AddDeadlineModal'
+import { DashboardSkeleton } from './Skeleton'
 import AboutJudgesModal from './AboutJudgesModal'
 import TourCard from './TourCard'
 import { updateTask } from '../api/client'
@@ -90,6 +91,7 @@ function formatActivityTimestamp(ts) {
 export default function Dashboard({
 
   tasks = [],
+  tasksLoading = false,
   backendStatus = 'Waking up the server…',
   usageStats = null,
   currentUser = null,
@@ -149,6 +151,8 @@ export default function Dashboard({
         return t
       })
   }, [tasks, optimisticOverrides])
+
+  const showTasksSkeleton = isOnline && tasksLoading && cleanTasks.length === 0
 
   // Apply domain filter
   const domainFilteredTasks = useMemo(() => {
@@ -987,7 +991,8 @@ export default function Dashboard({
       )}
 
       {/* DOMAIN FILTER BAR AND STATS (Only render once connected or when tasks exist - N-012) */}
-      {(isOnline || cleanTasks.length > 0) && (
+      {showTasksSkeleton && <DashboardSkeleton />}
+      {!showTasksSkeleton && (isOnline || cleanTasks.length > 0) && (
       <>
       {/* DOMAIN FILTER BAR */}
       <div className="dashboard-filter-bar" role="tablist" aria-label="Filter dashboard by context domain">
