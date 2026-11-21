@@ -49,6 +49,7 @@ export default function CareerStartPanel({ onResumeSaved }) {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [showFullReview, setShowFullReview] = useState(false)
+  const [savedTarget, setSavedTarget] = useState('master')
 
   const extracted = result?.extracted_content || null
   const lines = summarizeResumeImport(extracted)
@@ -78,11 +79,12 @@ export default function CareerStartPanel({ onResumeSaved }) {
     }
   }
 
-  const commit = async (content, docId) => {
+  const commit = async (content, docId, target = 'master') => {
     setPhase('saving')
     setError(null)
     try {
-      await commitExtractedResume(content, docId ?? result?.original_document_id ?? null, 'master')
+      await commitExtractedResume(content, docId ?? result?.original_document_id ?? null, target)
+      setSavedTarget(target)
       setShowFullReview(false)
       setPhase('saved')
       if (onResumeSaved) onResumeSaved()
@@ -101,7 +103,7 @@ export default function CareerStartPanel({ onResumeSaved }) {
     return (
       <div role="status" aria-live="polite" data-testid="career-start-saved" style={{ ...card, display: 'flex', alignItems: 'center', gap: '10px' }}>
         <CheckCircle2 size={20} color="#16a34a" aria-hidden="true" />
-        <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{SAVED_RESUME_MESSAGE}</span>
+        <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{savedTarget === 'draft' ? 'Saved as a separate draft. Your main resume has not changed.' : SAVED_RESUME_MESSAGE}</span>
       </div>
     )
   }
@@ -164,7 +166,7 @@ export default function CareerStartPanel({ onResumeSaved }) {
           show
           onClose={() => setShowFullReview(false)}
           parseResult={result}
-          onCommit={(content, docId) => commit(content, docId)}
+          onCommit={(content, docId, target) => commit(content, docId, target || 'master')}
           committing={phase === 'saving'}
         />
       )}
