@@ -5,6 +5,7 @@ import RadarFilters from './radar/RadarFilters'
 import RadarOpportunityCard from './radar/RadarOpportunityCard'
 import RadarDetailModal from './radar/RadarDetailModal'
 import { radarHeadingText } from './radar/radarDisplay'
+import { RadarCardsSkeleton } from './Skeleton'
 
 const ApplicationWorkspaceModal = React.lazy(() => import('./career/ApplicationWorkspaceModal'))
 import {
@@ -422,20 +423,7 @@ export default function InternshipRadar({
 
       {/* 3. Opportunities List Content */}
       {loading ? (
-        <div
-          style={{
-            padding: '48px 24px',
-            textAlign: 'center',
-            color: 'var(--text-muted)',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: '12px',
-          }}
-        >
-          <Loader2 size={32} strokeWidth={1.8} className="spin" color="var(--brand)" />
-          <div style={{ fontSize: '15px', fontWeight: 600 }}>Loading verified opportunities…</div>
-        </div>
+        <RadarCardsSkeleton count={4} />
       ) : error ? (
         <div
           style={{
