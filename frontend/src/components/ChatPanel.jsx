@@ -47,7 +47,7 @@ export default function ChatPanel({
   const [profileFacts, setProfileFacts] = useState({})
   const [parkedThoughts, setParkedThoughts] = useState([])
   const [showParkedShelf, setShowParkedShelf] = useState(false)
-  const [_loadingHistory, setLoadingHistory] = useState(false)
+  const [loadingHistory, setLoadingHistory] = useState(false)
   const [guestMigrationCount, setGuestMigrationCount] = useState(0)
   const [toast, setToast] = useState(null)
   const toastTimerRef = useRef(null)
@@ -565,6 +565,7 @@ export default function ChatPanel({
           pastConversations={pastConversations}
           setPastConversations={setPastConversations}
           pastPlans={pastPlans}
+          loadingHistory={loadingHistory}
           conversationId={conversationId}
           guestMigrationCount={guestMigrationCount}
           onOpenMigration={onOpenMigration}

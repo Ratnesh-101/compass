@@ -15,6 +15,7 @@ import {
   Package
 } from 'lucide-react'
 import Dialog from '../Dialog'
+import { ChatHistorySkeleton } from '../Skeleton'
 
 export default function ChatHistoryDrawer({
   isOpen,
@@ -31,6 +32,7 @@ export default function ChatHistoryDrawer({
   onShareChat,
   onCheckScheduleClashes,
   showToast,
+  loadingHistory = false,
   tasks = [],
 }) {
   const [historyTab, setHistoryTab] = useState('chats') // 'chats' | 'plans' | 'memory'
@@ -295,7 +297,7 @@ export default function ChatHistoryDrawer({
                 )}
               </div>
 
-              {visibleConversations.length === 0 ? (
+              {loadingHistory && !showArchived && visibleConversations.length === 0 ? (<ChatHistorySkeleton rows={6} />) : visibleConversations.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '30px 12px', color: 'var(--text-muted)', fontSize: '12px' }}>
                   <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '8px', color: 'var(--text-muted)' }}>
                     {showArchived ? <Archive size={24} /> : <MessageSquare size={24} />}
