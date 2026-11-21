@@ -342,7 +342,7 @@ export default function CareerCopilot({ isDarkMode, onToggleDarkMode }) {
         )}
         {activeSubTab === 'resumes' && (
           <React.Suspense fallback={<div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading My resume…</div>}>
-            <ResumeStudio />
+            <ResumeStudio onSaved={handleResumeSaved} />
           </React.Suspense>
         )}
         {activeSubTab === 'applications' && (

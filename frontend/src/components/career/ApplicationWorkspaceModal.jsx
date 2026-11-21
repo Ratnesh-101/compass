@@ -758,9 +758,17 @@ export default function ApplicationWorkspaceModal({
     setSavingStatus(true)
     setError(null)
     try {
+      // Save the notes and personal deadline first (no status change); mark-applied takes no body.
+      await updateApplication(application.id, {
+        private_notes: privateNotes || null,
+        ...buildDeadlinePayload(targetDeadline),
+      })
       const updated = await markApplied(application.id)
       setApplication(updated)
       setAppStatus(String(updated.status || 'submitted').toLowerCase())
+      // The server replaces the automatic apply-by date with a follow-up date, so show what it stored.
+      setPrivateNotes(updated.private_notes || '')
+      setTargetDeadline(updated.target_deadline || '')
       clearWorkspaceDraft(opportunity.id)
       if (onApplicationUpdated) onApplicationUpdated(updated)
       showNotification(`Saved. This application is now in the "${stageLabel(stageOfStatus(updated.status))}" stage.`)
@@ -786,6 +794,8 @@ export default function ApplicationWorkspaceModal({
       })
       setApplication(updated)
       setAppStatus(String(updated.status || newStatus).toLowerCase())
+      setPrivateNotes(updated.private_notes || '')
+      setTargetDeadline(updated.target_deadline || '')
       clearWorkspaceDraft(opportunity.id)
       if (onApplicationUpdated) onApplicationUpdated(updated)
       showNotification(`Saved. This application is now in the "${stageLabel(stageOfStatus(updated.status))}" stage.`)
@@ -848,7 +858,7 @@ export default function ApplicationWorkspaceModal({
 
   // Handle External Submission Confirmation
   const handleConfirmExternalSubmission = async () => {
-    const success = await handleUpdateApplicationRecord('submitted')
+    const success = await handleMarkAppliedRecord()
     if (!success) return
     setChecklist(prev => ({ ...prev, submittedExternally: true }))
     showNotification('You marked this as submitted. Compass cannot verify submissions on employer portals.')

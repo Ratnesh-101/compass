@@ -108,7 +108,7 @@ from backend.services.career_resume import (
 )
 from backend.routers.career_flow import router as career_flow_router
 from backend.services.career_cover_letter import compose_cover_letter
-from backend.services.career_flow import prepare_application_for_user, prepare_top_matches
+from backend.services.career_flow import DEADLINE_CLEARED_KEY, prepare_application_for_user, prepare_top_matches
 from backend.services.career_profile_derive import enrich_radar_profile_from_resume
 from backend.services.career_tailor_changes import attach_changes
 from backend.services.career_submission import (
@@ -1079,9 +1079,26 @@ async def update_application_endpoint(app_id: int, body: UpdateApplicationStatus
 
     if body.submission_method:
         updates["submission_method"] = body.submission_method.value
+    clearing_deadline = body.clear_target_deadline and body.target_deadline is None
+    answers: Optional[Dict[str, Any]] = None
     if body.form_answers is not None:
-        updates["form_answers"] = body.form_answers
-    if body.clear_target_deadline and body.target_deadline is None:
+        answers = dict(body.form_answers)
+        # The client-sent answers replace the stored ones, but the user's earlier "cleared" decision is not theirs to drop.
+        if (existing_app.form_answers or {}).get(DEADLINE_CLEARED_KEY):
+            answers[DEADLINE_CLEARED_KEY] = True
+    if clearing_deadline or body.target_deadline is not None:
+        stored = dict(existing_app.form_answers or {}) if answers is None else answers
+        if clearing_deadline:
+            # Remember the explicit clear so reopening the workspace (prepare) does not bring the date back.
+            stored[DEADLINE_CLEARED_KEY] = True
+            stored.pop("auto_deadline", None)
+        else:
+            stored.pop(DEADLINE_CLEARED_KEY, None)  # the user chose a date again
+        if answers is not None or stored != (existing_app.form_answers or {}):
+            answers = stored
+    if answers is not None:
+        updates["form_answers"] = answers
+    if clearing_deadline:
         updates["target_deadline"] = None
     elif body.target_deadline is not None:
         updates["target_deadline"] = body.target_deadline
