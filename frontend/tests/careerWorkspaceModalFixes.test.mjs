@@ -53,7 +53,12 @@ test('Item 3: external submission confirmation guards success state and avoids f
   const confirmFn = code.match(/const\s+handleConfirmExternalSubmission\s*=\s*async\s*\(\s*\)\s*=>\s*\{([\s\S]*?)\}/)
   assert.ok(confirmFn, 'handleConfirmExternalSubmission must be defined')
   const confirmBody = confirmFn[1]
-  assert.match(confirmBody, /const\s+([$\w]+)\s*=\s*await\s+handleUpdateApplicationRecord\(\s*['"]submitted['"]\s*\)/, 'handleConfirmExternalSubmission must await handleUpdateApplicationRecord and store result')
+  // "I submitted this externally" now goes through mark-applied (event + follow-up reminder), not a plain status PATCH.
+  assert.match(confirmBody, /const\s+([$\w]+)\s*=\s*await\s+handleMarkAppliedRecord\(\s*\)/, 'handleConfirmExternalSubmission must await handleMarkAppliedRecord and store result')
+  const markFn = code.match(/const\s+handleMarkAppliedRecord\s*=\s*async\s*[\s\S]*?finally\s*\{[\s\S]*?\}/)
+  assert.ok(markFn, 'handleMarkAppliedRecord must be defined')
+  assert.match(markFn[0], /return\s+true/, 'handleMarkAppliedRecord must return true on success')
+  assert.match(markFn[0], /return\s+false/, 'handleMarkAppliedRecord must return false on error')
   assert.match(confirmBody, /if\s*\(\s*!\s*[$\w]+\s*\)\s*return/, 'handleConfirmExternalSubmission must guard checklist and toast behind successful status update')
 })
 
