@@ -81,166 +81,166 @@
       })();
     </script>
     <style id="boot-skeleton-css">
-      :root {
-        --boot-bg: #f7f5ef;
-        --boot-card: #ffffff;
-        --boot-soft: #f2eee6;
-        --boot-line: #e6e1d6;
-        --boot-side: #14161d;
-        --boot-side-line: #232733;
-      }
-      html[data-theme="dark"] {
-        --boot-bg: #151513;
-        --boot-card: #1e1e1b;
-        --boot-soft: #262522;
-        --boot-line: #33312c;
-      }
-      @media (prefers-color-scheme: dark) {
-        html:not([data-theme]) {
-          --boot-bg: #151513;
-          --boot-card: #1e1e1b;
-          --boot-soft: #262522;
-          --boot-line: #33312c;
-        }
-      }
-      html, body {
-        margin: 0;
-        background: var(--boot-bg);
-      }
-      .boot {
-        display: flex;
-        height: 100vh;
-        height: 100dvh;
-        overflow: hidden;
-        background: var(--boot-bg);
-      }
-      .boot-side {
-        width: 260px;
-        flex-shrink: 0;
-        background: var(--boot-side);
-        border-right: 1px solid var(--boot-side-line);
-        box-sizing: border-box;
-        padding: 18px 14px;
-        overflow: hidden;
-      }
-      html[data-sidebar="collapsed"] .boot-side {
-        width: 68px;
-        padding: 18px 8px;
-      }
-      .boot-side .boot-block {
-        background: rgba(255, 255, 255, 0.08);
-      }
-      .boot-main {
-        flex: 1;
-        min-width: 0;
-        padding: 28px 32px;
-        box-sizing: border-box;
-        overflow: hidden;
-      }
-      .boot-top,
-      .boot-bottom {
-        display: none;
-      }
-      .boot-card {
-        background: var(--boot-card);
-        border: 1px solid var(--boot-line);
-        border-radius: 8px;
-        box-sizing: border-box;
-      }
-      .boot-cards {
-        display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 12px;
-        margin: 20px 0;
-      }
-      .boot-row {
-        display: flex;
-        gap: 12px;
-        align-items: center;
-        padding: 14px;
-        margin-bottom: 10px;
-      }
-      .boot-block {
-        display: block;
-        border-radius: 6px;
-        background: linear-gradient(90deg, var(--boot-soft) 25%, var(--boot-line) 50%, var(--boot-soft) 75%);
-        background-size: 200% 100%;
-        animation: boot-shimmer 1.6s ease-in-out infinite;
-      }
-      @keyframes boot-shimmer {
-        from { background-position: 200% 0; }
-        to { background-position: -200% 0; }
-      }
-      @media (prefers-reduced-motion: reduce) {
-        .boot-block {
-          animation: none;
-        }
-      }
-      @media (max-width: 767px) {
-        .boot {
-          flex-direction: column;
-        }
-        .boot-side {
-          display: none;
-        }
-        .boot-main {
-          padding: 16px 16px 74px;
-        }
-        .boot-top {
-          display: flex;
-          height: 56px;
-          align-items: center;
-          justify-content: space-between;
-          padding: 0 12px;
-          background: var(--boot-card);
-          border-bottom: 1px solid var(--boot-line);
-          box-sizing: border-box;
-        }
-        .boot-bottom {
-          display: flex;
-          position: fixed;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          height: 58px;
-          justify-content: space-around;
-          align-items: center;
-          background: var(--boot-card);
-          border-top: 1px solid var(--boot-line);
-          box-sizing: border-box;
-        }
-        .boot-cards {
-          grid-template-columns: 1fr 1fr;
-        }
-      }
-      .boot-sr {
-        position: absolute !important;
-        width: 1px;
-        height: 1px;
-        padding: 0;
-        margin: -1px;
-        overflow: hidden;
-        clip: rect(0, 0, 0, 0);
-        white-space: nowrap;
-        border: 0;
-      }
-      .boot-slow {
-        margin: 16px 0;
-        font: 14px system-ui, sans-serif;
-        color: #5f5a52;
-      }
-      html[data-theme="dark"] .boot-slow {
-        color: #a6a095;
-      }
-      @media (prefers-color-scheme: dark) {
-        html:not([data-theme]) .boot-slow {
-          color: #a6a095;
-        }
-      }
-      .boot-slow a {
-        color: inherit;
-      }
-    </style>
+:root {
+--boot-bg: #f7f5ef;
+--boot-card: #ffffff;
+--boot-soft: #f2eee6;
+--boot-line: #e6e1d6;
+--boot-side: #14161d;
+--boot-side-line: #232733;
+}
+html[data-theme="dark"] {
+--boot-bg: #151513;
+--boot-card: #1e1e1b;
+--boot-soft: #262522;
+--boot-line: #33312c;
+}
+@media (prefers-color-scheme: dark) {
+html:not([data-theme]) {
+--boot-bg: #151513;
+--boot-card: #1e1e1b;
+--boot-soft: #262522;
+--boot-line: #33312c;
+}
+}
+html, body {
+margin: 0;
+background: var(--boot-bg);
+}
+.boot {
+display: flex;
+height: 100vh;
+height: 100dvh;
+overflow: hidden;
+background: var(--boot-bg);
+}
+.boot-side {
+width: 260px;
+flex-shrink: 0;
+background: var(--boot-side);
+border-right: 1px solid var(--boot-side-line);
+box-sizing: border-box;
+padding: 18px 14px;
+overflow: hidden;
+}
+html[data-sidebar="collapsed"] .boot-side {
+width: 68px;
+padding: 18px 8px;
+}
+.boot-side .boot-block {
+background: rgba(255, 255, 255, 0.08);
+}
+.boot-main {
+flex: 1;
+min-width: 0;
+padding: 28px 32px;
+box-sizing: border-box;
+overflow: hidden;
+}
+.boot-top,
+.boot-bottom {
+display: none;
+}
+.boot-card {
+background: var(--boot-card);
+border: 1px solid var(--boot-line);
+border-radius: 8px;
+box-sizing: border-box;
+}
+.boot-cards {
+display: grid;
+grid-template-columns: repeat(4, 1fr);
+gap: 12px;
+margin: 20px 0;
+}
+.boot-row {
+display: flex;
+gap: 12px;
+align-items: center;
+padding: 14px;
+margin-bottom: 10px;
+}
+.boot-block {
+display: block;
+border-radius: 6px;
+background: linear-gradient(90deg, var(--boot-soft) 25%, var(--boot-line) 50%, var(--boot-soft) 75%);
+background-size: 200% 100%;
+animation: boot-shimmer 1.6s ease-in-out infinite;
+}
+@keyframes boot-shimmer {
+from { background-position: 200% 0; }
+to { background-position: -200% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+.boot-block {
+animation: none;
+}
+}
+@media (max-width: 767px) {
+.boot {
+flex-direction: column;
+}
+.boot-side {
+display: none;
+}
+.boot-main {
+padding: 16px 16px 74px;
+}
+.boot-top {
+display: flex;
+height: 56px;
+align-items: center;
+justify-content: space-between;
+padding: 0 12px;
+background: var(--boot-card);
+border-bottom: 1px solid var(--boot-line);
+box-sizing: border-box;
+}
+.boot-bottom {
+display: flex;
+position: fixed;
+left: 0;
+right: 0;
+bottom: 0;
+height: 58px;
+justify-content: space-around;
+align-items: center;
+background: var(--boot-card);
+border-top: 1px solid var(--boot-line);
+box-sizing: border-box;
+}
+.boot-cards {
+grid-template-columns: 1fr 1fr;
+}
+}
+.boot-sr {
+position: absolute !important;
+width: 1px;
+height: 1px;
+padding: 0;
+margin: -1px;
+overflow: hidden;
+clip: rect(0, 0, 0, 0);
+white-space: nowrap;
+border: 0;
+}
+.boot-slow {
+margin: 16px 0;
+font: 14px system-ui, sans-serif;
+color: #5f5a52;
+}
+html[data-theme="dark"] .boot-slow {
+color: #a6a095;
+}
+@media (prefers-color-scheme: dark) {
+html:not([data-theme]) .boot-slow {
+color: #a6a095;
+}
+}
+.boot-slow a {
+color: inherit;
+}
+</style>
     <noscript><style>#boot-skeleton{display:none!important}#boot-seo{position:static!important;width:auto!important;height:auto!important;margin:0!important;overflow:visible!important;clip:auto!important;white-space:normal!important}#root{height:auto!important;overflow:visible!important}</style></noscript>
   </head>
   <body>
