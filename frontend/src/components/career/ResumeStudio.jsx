@@ -22,7 +22,7 @@ import { getResumeKindLabel, copyTextSafely } from '../../utils/careerUiHelpers'
 
 const GitHubIntelligenceModal = React.lazy(() => import('./GitHubIntelligenceModal'))
 
-export default function ResumeStudio() {
+export default function ResumeStudio({ onSaved = () => {} } = {}) {
   const [masterResume, setMasterResume] = useState(null)
   const [resumesList, setResumesList] = useState([])
   const [selectedResume, setSelectedResume] = useState(null)
@@ -30,6 +30,7 @@ export default function ResumeStudio() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
+  const [saveKind, setSaveKind] = useState('master')
   const [error, setError] = useState(null)
   const [exportingType, setExportingType] = useState(null) // 'print' | 'docx' | null
   const [exportToast, setExportToast] = useState(null) // { message: string, type: 'error' | 'success' } | null
@@ -146,10 +147,16 @@ export default function ResumeStudio() {
     try {
       const saved = await commitExtractedResume(editedContent, docId, target)
       setShowExtractionModal(false)
+      const isMaster = !target || target === 'master'
+      setSaveKind(isMaster ? 'master' : 'tailored')
       setSaveSuccess(true)
       await loadData()
       if (saved) {
         handleSelectResume(saved)
+        setSaveSuccess(true)
+      }
+      if (isMaster) {
+        onSaved?.()
       }
     } catch (err) {
       setError(err.message || 'Failed to commit extracted resume data')
@@ -187,7 +194,9 @@ export default function ResumeStudio() {
       }
       const list = await fetchResumes()
       setResumesList(list)
+      setSaveKind('master')
       setSaveSuccess(true)
+      onSaved?.()
       setExportToast({ message: `Repository "${repo.repo_name}" imported into Master Profile projects.`, type: 'success' })
     } catch (err) {
       setError(err.message || 'Failed to import repository')
@@ -211,7 +220,9 @@ export default function ResumeStudio() {
       }
       const list = await fetchResumes()
       setResumesList(list)
+      setSaveKind('master')
       setSaveSuccess(true)
+      onSaved?.()
       setExportToast({ message: `Added ${skills.length} verified technologies to Master Profile.`, type: 'success' })
     } catch (err) {
       setError(err.message || 'Failed to import skills')
@@ -255,7 +266,8 @@ export default function ResumeStudio() {
         skills: skillsArray,
       }
 
-      if (selectedResume?.is_master) {
+      const isMaster = Boolean(selectedResume?.is_master)
+      if (isMaster) {
         const updated = await updateMasterResume(updatedContent)
         setMasterResume(updated)
         setSelectedResume(updated)
@@ -275,7 +287,11 @@ export default function ResumeStudio() {
         }
       }
 
+      setSaveKind(isMaster ? 'master' : 'tailored')
       setSaveSuccess(true)
+      if (isMaster) {
+        onSaved?.()
+      }
       const list = await fetchResumes()
       setResumesList(list)
     } catch (err) {
@@ -459,7 +475,9 @@ export default function ResumeStudio() {
 
       {saveSuccess && (
         <div role="status" aria-live="polite" style={{ background: '#dcfce7', color: '#166534', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', fontSize: '13px', fontWeight: 600 }}>
-          ✅ Saved. Your resume and your internship profile are up to date.
+          {saveKind === 'master'
+            ? '✅ Saved. Your resume and your internship profile are up to date.'
+            : '✅ Saved.'}
         </div>
       )}
 
