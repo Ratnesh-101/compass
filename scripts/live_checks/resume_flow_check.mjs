@@ -25,7 +25,7 @@ console.log('enabled prepare buttons:', await cards.count())
 if (await cards.count()) { await cards.first().scrollIntoViewIfNeeded(); await cards.first().click(); await p.waitForTimeout(60000); await p.screenshot({ path: `${out}/3-prepared.png` })
   t = await body(); { const k=t.indexOf('Verified Matching'); console.log('SKILLS:', t.slice(Math.max(0,k-5), k+260).split(String.fromCharCode(10)).join(' | ')) } console.log('cover letter shown:', /cover letter/i.test(t), '| mark as applied count:', await p.getByText(/Mark as applied/i).count(), '| raw error:', /Traceback|\[object|Internal Server/.test(t))
   const sub = p.getByText(/I submitted this externally/i)
-  for (const tab of ['Checklist', 'Submit', 'Submission', 'Apply']) { if (await sub.count()) break; const tb = p.getByRole('tab', { name: new RegExp(tab, 'i') }).or(p.locator('button', { hasText: new RegExp('^\s*' + tab, 'i') })).first(); if (await tb.count()) { await tb.click().catch(()=>{}); await p.waitForTimeout(1500) } }
+  for (const tab of ['Checklist', 'Official Submission']) { if (await sub.count()) break; const tb = p.getByRole('tab', { name: new RegExp(tab, 'i') }).or(p.locator('button', { hasText: new RegExp('^\\s*' + tab, 'i') })).first(); if (await tb.count()) { await tb.click().catch(()=>{}); await p.waitForTimeout(1500) } }
   console.log('submitted-externally button found:', await sub.count())
   if (await sub.count()) { await sub.first().scrollIntoViewIfNeeded(); await sub.first().click(); await p.waitForTimeout(5000); await p.screenshot({ path: `${out}/4-submitted.png` }); const tt = await body(); console.log('marked submitted:', /You marked this as submitted/.test(tt)) }
 }
