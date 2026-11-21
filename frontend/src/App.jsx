@@ -13,6 +13,7 @@ import Timeline from './components/Timeline'
 import CalendarView from './components/CalendarView'
 import CompassPanel from './components/CompassPanel'
 import TourStrip from './components/TourStrip'
+import { TabSkeleton } from './components/Skeleton'
 import { fetchDemoStatusResult, clearDemoPersona, setChatIncludeDemo } from './api/chatApi'
 
 import MigrationModal from './components/MigrationModal'
@@ -50,6 +51,7 @@ const INITIAL_MESSAGES = [
 export default function App() {
   const [tasks, setTasks] = useState([])
   const [allTasks, setAllTasks] = useState([])
+  const [tasksSettled, setTasksSettled] = useState(false)
   const [customDomains, setCustomDomains] = useState(() => getCustomDomains())
   const initialNav = useMemo(() => parseLocation(), [])
   const [tourStripOpen, setTourStripOpen] = useState(() => isTourRequested(window.location.search))
@@ -127,6 +129,19 @@ export default function App() {
       return () => mediaQuery.removeEventListener('change', handler)
     }
   }, [])
+
+  useEffect(() => {
+    // absolute cap: never show the task skeleton for more than 60 s
+    const t = setTimeout(() => setTasksSettled(true), 60000)
+    return () => clearTimeout(t)
+  }, [])
+
+  useEffect(() => {
+    // once the backend is online, give the first fetch 20 s at most
+    if (tasksSettled || !isBackendOnline(backendStatus)) return undefined
+    const t = setTimeout(() => setTasksSettled(true), 20000)
+    return () => clearTimeout(t)
+  }, [backendStatus, tasksSettled])
 
   const toggleTheme = useCallback(() => {
     setTheme(prev => (prev === 'dark' ? 'light' : 'dark'))
@@ -206,7 +221,12 @@ export default function App() {
       const demoActive = overrideDemoActive !== undefined ? overrideDemoActive : isDemoActiveRef.current
       const incomingTasks = await fetchTasks(domain, { include_demo: demoActive })
       // null signals a failed fetch: keep the current view. Stale responses are ignored.
-      if (!Array.isArray(incomingTasks) || requestSeq !== loadSeqRef.current) return
+      if (!Array.isArray(incomingTasks)) {
+        if (isBackendOnline(backendStatusRef.current)) setTasksSettled(true)
+        return
+      }
+      if (requestSeq !== loadSeqRef.current) return
+      setTasksSettled(true)
 
       // Client-side filter to guarantee zero dummy data on reload even if backend delete is in flight
       const activeTasks = demoActive
@@ -230,6 +250,7 @@ export default function App() {
       }
     } catch {
       // Silently preserve current view during transient connection blips
+      if (isBackendOnline(backendStatusRef.current)) setTasksSettled(true)
     }
   }, [])
 
@@ -780,6 +801,7 @@ export default function App() {
             {isDemoActive && <DemoDataBanner onReset={handleResetDemo} resetting={resettingDemo} />}
             <Dashboard
             tasks={allTasks.length > 0 ? allTasks : tasks}
+            tasksLoading={!tasksSettled}
             backendStatus={backendStatus}
             usageStats={usageStats}
             currentUser={currentUser}
@@ -803,6 +825,7 @@ export default function App() {
           <Timeline
             tasks={tasks}
             allTasks={allTasks}
+            tasksLoading={!tasksSettled}
             activeDomain={selectedDomain}
             onSelectDomain={handleSelectDomain}
             customDomains={customDomains}
@@ -822,7 +845,7 @@ export default function App() {
           />
         ) : (activeTab === 'career' || activeTab === 'radar') ? (
           <TabErrorBoundary resetKey={activeTab} onRetry={() => setCareerAttempt((n) => n + 1)}>
-            <React.Suspense fallback={<div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading Career Copilot…</div>}>
+            <React.Suspense fallback={<TabSkeleton variant="career" />}>
               <CareerCopilot
                 isDarkMode={theme === 'dark'}
                 onToggleDarkMode={toggleTheme}
