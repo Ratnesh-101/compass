@@ -50,7 +50,7 @@ export default function JobLinkInput({ onPrepared }) {
       </label>
       <input
         id="job-link-input"
-        type="url"
+        type="text"
         inputMode="url"
         autoComplete="off"
         placeholder="https://company.com/careers/software-intern"

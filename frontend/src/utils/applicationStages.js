@@ -105,9 +105,23 @@ const FIELD_WORDS = {
   'technical projects': 'your projects',
 }
 
+// The backend sends whole sentences ("Education section cannot be empty."), so match by keyword too.
+const FIELD_PATTERNS = [
+  [/full name/i, 'your full name'],
+  [/e-?mail/i, 'your email address'],
+  [/phone/i, 'your phone number'],
+  [/education/i, 'your education'],
+  [/skills?\b/i, 'your skills'],
+  [/projects?\b/i, 'your projects'],
+]
+
 function plainField(raw) {
   const text = String(raw || '').replace(/\(.*?\)/g, '').trim()
-  return FIELD_WORDS[text.toLowerCase()] || text.toLowerCase()
+  const known = FIELD_WORDS[text.toLowerCase()]
+  if (known) return known
+  const hit = FIELD_PATTERNS.find(([pattern]) => pattern.test(text))
+  if (hit) return hit[1]
+  return text.replace(/\.+$/, '').toLowerCase()
 }
 
 function joinWords(items) {
