@@ -52,6 +52,7 @@ logger = logging.getLogger("compass.services.career_flow")
 
 DETAILS_TIMEOUT_SECONDS = 20.0
 AUTO_DEADLINE_KEY = "auto_deadline"  # form_answers key: the apply-by date Compass set automatically
+DEADLINE_CLEARED_KEY = "deadline_cleared_by_user"  # form_answers key: the user emptied the deadline on purpose
 DEFAULT_APPLY_WITHIN_DAYS = 7
 MAX_LINK_CHARS = 2000
 TOP_MATCH_LIMIT = 3
@@ -321,7 +322,8 @@ async def prepare_application_for_user(
         letter_source = letter["source"]
         app = await update_career_application(app.id, user_id, {"cover_letter": letter["content"]}) or app
 
-    if app.target_deadline is None:
+    # A deadline the user cleared on purpose stays cleared: no automatic date and no Timeline task.
+    if app.target_deadline is None and not (app.form_answers or {}).get(DEADLINE_CLEARED_KEY):
         due, kind = apply_by_date(opp.confirmed_close_date)
         # Remember that Compass chose this date, so "Mark as applied" can replace it with the follow-up
         # reminder while still keeping a deadline the user set themselves.

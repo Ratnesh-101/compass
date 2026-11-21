@@ -591,18 +591,39 @@ async def list_career_applications(user_id: str, status: Optional[str] = None) -
         return [_parse_app_row(dict(r), is_persisted=True) for r in rows]
 
 
+# Compass's own bookkeeping inside form_answers. Changing it is not a change to the content the user reviewed,
+# so it must not knock an approved application back to review.
+INTERNAL_ANSWER_KEYS = frozenset({"deadline_cleared_by_user", "auto_deadline"})
+
+
+def reviewed_answers(answers: Any) -> Dict[str, Any]:
+    """The part of form_answers the user actually reviews (everything except Compass's internal markers)."""
+    if isinstance(answers, str):
+        try:
+            answers = json.loads(answers)
+        except ValueError:
+            answers = {}
+    if not isinstance(answers, dict):
+        return {}
+    return {k: v for k, v in answers.items() if k not in INTERNAL_ANSWER_KEYS}
+
+
 async def update_career_application(app_id: int, user_id: str, updates: Dict[str, Any]) -> Optional[CareerApplicationOut]:
     pool = await get_pool()
 
     # Material modification detection: if reviewed content is modified, invalidate previous approval
-    material_content_keys = {"cover_letter", "form_answers", "resume_id"}
+    material_content_keys = {"cover_letter", "resume_id"}
     content_modified = any(k in updates for k in material_content_keys)
+    answers_touched = "form_answers" in updates
 
     if not pool:
         record = _in_memory_applications.get(app_id)
         if record and record["user_id"] == user_id:
             # If application was approved and content is modified, reset status to READY_FOR_REVIEW
-            if content_modified and record.get("status") == CareerApplicationStatus.APPROVED_FOR_SUBMISSION.value:
+            memory_modified = content_modified or (
+                answers_touched and reviewed_answers(record.get("form_answers")) != reviewed_answers(updates["form_answers"])
+            )
+            if memory_modified and record.get("status") == CareerApplicationStatus.APPROVED_FOR_SUBMISSION.value:
                 if "status" not in updates:
                     updates["status"] = CareerApplicationStatus.READY_FOR_REVIEW.value
                 updates["approved_at"] = None
@@ -622,13 +643,17 @@ async def update_career_application(app_id: int, user_id: str, updates: Dict[str
 
     async with pool.acquire() as conn:
         # Check current status if content modified
-        if content_modified:
+        if content_modified or answers_touched:
             curr = await conn.fetchrow(
-                "SELECT status, batch_id FROM career_applications WHERE id = $1 AND user_id = $2",
+                "SELECT status, batch_id, form_answers FROM career_applications WHERE id = $1 AND user_id = $2",
                 app_id,
                 user_id,
             )
-            if curr and curr["status"] == CareerApplicationStatus.APPROVED_FOR_SUBMISSION.value:
+            db_modified = content_modified or (
+                answers_touched and curr is not None
+                and reviewed_answers(curr["form_answers"]) != reviewed_answers(updates["form_answers"])
+            )
+            if curr and db_modified and curr["status"] == CareerApplicationStatus.APPROVED_FOR_SUBMISSION.value:
                 if "status" not in updates:
                     updates["status"] = CareerApplicationStatus.READY_FOR_REVIEW.value
                 updates["approved_at"] = None
