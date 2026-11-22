@@ -64,6 +64,7 @@ export async function fetchRecommendedOpportunities(limit = 20, employer_type = 
 export async function fetchOpenOpportunities(filters = {}) {
   await ensureSession()
   const params = new URLSearchParams()
+  params.set('limit', '300')
   if (filters.category) params.set('category', filters.category)
   if (filters.employer_type) params.set('employer_type', filters.employer_type)
   if (filters.work_arrangement) params.set('work_arrangement', filters.work_arrangement)

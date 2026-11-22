@@ -183,7 +183,7 @@ async def list_opportunities_endpoint(
 @router.get("/recommended", response_model=List[OpportunityOut])
 async def get_recommended_opportunities(
     request: Request,
-    limit: int = Query(20, ge=1, le=50),
+    limit: int = Query(30, ge=1, le=300),
     employer_type: Optional[str] = Query(None),
     eligible_only: bool = Query(False, description="When true, strictly returns only confirmed ELIGIBLE opportunities"),
     india_only: bool = Query(True),
@@ -232,6 +232,7 @@ async def recommended_for_user(
 @router.get("/open", response_model=List[OpportunityOut])
 async def get_open_confirmed_opportunities(
     request: Request,
+    limit: int = Query(300, ge=1, le=500),
     category: Optional[str] = Query(None),
     employer_type: Optional[str] = Query(None),
     work_arrangement: Optional[str] = Query(None),
@@ -249,7 +250,7 @@ async def get_open_confirmed_opportunities(
         work_arrangement=work_arrangement,
         india_only=india_only,
         page=1,
-        page_size=100,
+        page_size=limit,
     )
     profile_country = profile_country_of(profile)
     refined = refine_listings(raw_items, profile_country, country_filter=india_only)
@@ -278,12 +279,10 @@ async def get_radar_analytics_endpoint(request: Request):
     user_id = _get_or_create_user_id(request)
     stats_dict = await get_radar_overview_stats(user_id)
     try:
-        # The heading counters describe the list the user actually sees, not raw database rows.
+        # Retain DB-wide verified_open_count and stale_open_count from get_radar_overview_stats,
+        # but compute strong_matches_count personalized to the user's recommended list.
         profile = await get_user_opportunity_profile(user_id)
         shown = await recommended_for_user(user_id, profile)
-        open_now = [o for o in shown if o.current_status == OpportunityStatus.OPEN_CONFIRMED]
-        stats_dict["verified_open_count"] = sum(1 for o in open_now if not o.needs_recheck)
-        stats_dict["stale_open_count"] = sum(1 for o in open_now if o.needs_recheck)
         stats_dict["strong_matches_count"] = sum(
             1 for o in shown if o.eligibility_classification == EligibilityClassification.ELIGIBLE
         )
