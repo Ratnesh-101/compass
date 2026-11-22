@@ -391,7 +391,12 @@ def normalize_jobspy_opportunity(row: Dict[str, Any]) -> Optional[Dict[str, Any]
         "recency_tier": recency_meta["recency_tier"],
         "is_verified_within_24h": is_verified_24h,
         "timestamp_precision": recency_meta["timestamp_precision"],
-        "posted_at": recency_meta.get("posting_datetime_utc"),
+        # Date-only sources keep their calendar date (midnight UTC, precision "date_only")
+        # so the 24h tab can still surface them. They are never marked verified.
+        "posted_at": recency_meta.get("posting_datetime_utc") or (
+            datetime(posted_date.year, posted_date.month, posted_date.day, tzinfo=timezone.utc).isoformat()
+            if posted_date and precision_val == "date_only" else None
+        ),
         "posted_at_precision": precision_val,
         "posting_datetime_utc": recency_meta.get("posting_datetime_utc"),
         "posting_age_hours": recency_meta.get("age_hours"),

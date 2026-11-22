@@ -1219,10 +1219,20 @@ def _fallback_route(
         return "query_internship_radar", {"query": message, "category": category, "status": status, "india_only": True}, ""
 
     if any(term in msg_lower for term in ("feasibility", "can i finish", "what to drop", "what should i drop", "what i drop", "triage", "overloaded", "overcommit", "adversarial")):
-        days_match = re.search(r"\b([0-9]{1,4})\s*days?\b", msg_lower)
-        hours_match = re.search(r"\b([0-9]{1,4}(?:\.[0-9]{1,2})?)\s*hours?\b", msg_lower)
+        # "2 hours a day" / "2 hrs per day" / "2h/day" is the daily budget; check it first so a
+        # "for 9 days" or "30 hours of work" elsewhere in the sentence is not mistaken for it.
+        per_day_match = re.search(
+            r"(?<![\d.])([0-9]{1,2}(?:\.[0-9]{1,2})?)\s*(?:hours?|hrs?|h)\s*(?:a|an|per|each|every|/)\s*day\b",
+            msg_lower,
+        )
+        # Decimal days ("2.5 days") must not match as "5 days": the number may not follow a digit or dot.
+        days_match = re.search(r"(?<![\d.])([0-9]{1,4})\s*days?\b", msg_lower)
+        hours_match = re.search(r"(?<![\d.])([0-9]{1,4}(?:\.[0-9]{1,2})?)\s*(?:hours?|hrs?)\b", msg_lower)
         f_days = int(days_match.group(1)) if days_match else 5
-        f_hours = float(hours_match.group(1)) if hours_match else 4.0
+        if per_day_match:
+            f_hours = float(per_day_match.group(1))
+        else:
+            f_hours = float(hours_match.group(1)) if hours_match else 4.0
         return "assess_feasibility", {"days": f_days, "hours_per_day": f_hours}, ""
     if is_pending_action_confirm(message):
         return "pending_action_confirm", {"message": message}, ""

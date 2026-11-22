@@ -74,7 +74,7 @@ export async function logoutUser() {
 
 export async function checkGoogleOAuthStatus() {
   try {
-    const res = await fetch(`${API_BASE}/api/calendar/connect?redirect=false`, {
+    const res = await fetch(`${API_BASE}/api/calendar/connect?redirect=false&probe=true`, {
       headers: getAuthHeaders(),
     })
     if (!res.ok) return { configured: false, status: 'error' }

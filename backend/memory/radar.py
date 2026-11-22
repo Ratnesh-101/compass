@@ -634,7 +634,7 @@ async def get_all_opportunities(
             for i in items:
                 p_at = i.get("posted_at")
                 p_prec = (i.get("posted_at_precision") or "").strip().lower()
-                if p_at and p_prec in ("exact", "exact_timestamp"):
+                if p_at and p_prec in ("exact", "exact_timestamp", "date_only"):
                     if isinstance(p_at, str):
                         try:
                             p_at = datetime.fromisoformat(p_at)
@@ -643,7 +643,11 @@ async def get_all_opportunities(
                     if p_at.tzinfo is None:
                         p_at = p_at.replace(tzinfo=timezone.utc)
                     age = now_utc - p_at
-                    if 0 <= age.total_seconds() <= 86400:
+                    if p_prec == "date_only":
+                        # Calendar date only: accept today and yesterday (UTC)
+                        if age.total_seconds() >= 0 and p_at.date() >= now_utc.date() - timedelta(days=1):
+                            filtered_24h.append(i)
+                    elif 0 <= age.total_seconds() <= 86400:
                         filtered_24h.append(i)
             items = filtered_24h
 
@@ -703,7 +707,12 @@ async def get_all_opportunities(
         args.append(f"%{search.strip().lower()}%")
         conditions.append(f"(LOWER(o.company_name) LIKE ${len(args)} OR LOWER(o.role_title) LIKE ${len(args)})")
     if recent_24h:
-        conditions.append("(o.posted_at IS NOT NULL AND LOWER(o.posted_at_precision) IN ('exact', 'exact_timestamp') AND o.posted_at <= now() AND o.posted_at >= now() - INTERVAL '24 hours')")
+        conditions.append(
+            "(o.posted_at IS NOT NULL AND o.posted_at <= now() AND ("
+            "(LOWER(o.posted_at_precision) IN ('exact', 'exact_timestamp') AND o.posted_at >= now() - INTERVAL '24 hours')"
+            " OR (LOWER(o.posted_at_precision) = 'date_only' AND o.posted_at >= (now() AT TIME ZONE 'UTC')::date - 1)"
+            "))"
+        )
 
     where_sql = " AND ".join(conditions)
 

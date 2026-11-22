@@ -542,9 +542,14 @@ async def calendar_connect(
     request: Request,
     redirect: bool = Query(False, description="Redirect directly to Google consent screen"),
     login_hint: Optional[str] = Query(None),
+    probe: bool = Query(False, description="Only report whether OAuth is configured; issues no state or nonce cookie"),
 ):
     """Generate Google OAuth 2.0 authorization URL or redirect directly."""
     configured = oauth.is_google_oauth_configured()
+    if probe and configured:
+        # A status probe must never mint a nonce cookie: it would overwrite the one bound to a
+        # sign-in already in flight and the callback would fail with "could not be verified".
+        return {"status": "ok", "configured": True}
     if not configured:
         frontend_origin = _resolve_frontend_origin(request)
         if redirect:
