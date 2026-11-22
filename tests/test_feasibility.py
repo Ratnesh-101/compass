@@ -396,3 +396,12 @@ def test_artifact_markdown_renders_all_buckets():
     assert "## Drop (1)" in md
     assert "- **Nice to have feature** [hackathon] · 3.0h — dropped" in md
     assert "_Negotiation rounds: 2_" in md
+
+
+def test_fallback_route_reads_hours_per_day_and_days():
+    from backend.router_helpers import _fallback_route
+
+    assert _fallback_route("Can I finish all of this in 2 hours a day?")[1] == {"days": 5, "hours_per_day": 2.0}
+    assert _fallback_route("feasibility: 2 hrs a day for 9 days")[1] == {"days": 9, "hours_per_day": 2.0}
+    # "2.5 days" must not be read as "5 days"
+    assert _fallback_route("can i finish this in 2.5 days")[1]["days"] == 5  # falls back to the default
