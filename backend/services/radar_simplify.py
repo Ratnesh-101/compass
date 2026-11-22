@@ -118,12 +118,26 @@ async def fetch_simplify_opportunities(limit: int = MAX_LISTINGS_PER_SYNC) -> Li
 
 async def verify_candidates(
     opps: List[Dict[str, Any]],
-    max_checks: int = 300,
-    concurrency: int = 8,
-    budget_seconds: float = 120.0,
+    max_checks: int = 700,
+    concurrency: int = 16,
+    budget_seconds: float = 240.0,
 ) -> int:
     """Run the real verifier on listings; promote only what it confirms. Returns the OPEN_CONFIRMED count."""
-    from backend.services.radar_verifier import verify_opportunity_status
+    from backend.services.radar_verifier import is_specific_ats_job_url, verify_opportunity_status
+
+    def _is_ats(opp: Any) -> bool:
+        try:
+            url = (
+                opp.get("official_application_url")
+                if isinstance(opp, dict)
+                else getattr(opp, "official_application_url", None)
+            )
+            return bool(is_specific_ats_job_url(str(url or "")))
+        except Exception:
+            return False
+
+    ordered = sorted(opps, key=lambda opp: 0 if _is_ats(opp) else 1)
+    to_check = ordered[:max_checks]
 
     deadline = time.monotonic() + budget_seconds
     sem = asyncio.Semaphore(concurrency)
@@ -131,23 +145,38 @@ async def verify_candidates(
 
     async def _one(opp: Dict[str, Any]) -> None:
         nonlocal confirmed
-        if time.monotonic() > deadline:
-            return
-        async with sem:
-            try:
-                status, evidence, checked_at = await asyncio.wait_for(
-                    verify_opportunity_status(opp["official_application_url"], opp["current_status"]), timeout=25
-                )
-            except Exception as exc:  # network failure leaves the listing untouched
-                logger.debug("verify failed for %s: %s", opp.get("role_title"), exc)
+        try:
+            if time.monotonic() > deadline:
                 return
-        if status in (OpportunityStatus.OPEN_CONFIRMED, OpportunityStatus.CLOSED_CONFIRMED):
-            opp["current_status"] = status
-            opp["verification_evidence"] = evidence
-            opp["application_url_checked"] = True
-            opp["last_verified_at"] = checked_at
-            if status == OpportunityStatus.OPEN_CONFIRMED:
-                confirmed += 1
+            async with sem:
+                try:
+                    url = (
+                        opp.get("official_application_url", "")
+                        if isinstance(opp, dict)
+                        else getattr(opp, "official_application_url", "")
+                    )
+                    curr_status = (
+                        opp.get("current_status", OpportunityStatus.NEEDS_VERIFICATION)
+                        if isinstance(opp, dict)
+                        else getattr(opp, "current_status", OpportunityStatus.NEEDS_VERIFICATION)
+                    )
+                    status, evidence, checked_at = await asyncio.wait_for(
+                        verify_opportunity_status(str(url or ""), curr_status), timeout=25
+                    )
+                except Exception as exc:  # network failure leaves the listing untouched
+                    title = opp.get("role_title") if isinstance(opp, dict) else getattr(opp, "role_title", "unknown")
+                    logger.debug("verify failed for %s: %s", title, exc)
+                    return
+            if status in (OpportunityStatus.OPEN_CONFIRMED, OpportunityStatus.CLOSED_CONFIRMED):
+                opp["current_status"] = status
+                opp["verification_evidence"] = evidence
+                opp["application_url_checked"] = True
+                opp["last_verified_at"] = checked_at
+                if status == OpportunityStatus.OPEN_CONFIRMED:
+                    confirmed += 1
+        except Exception as exc:
+            title = opp.get("role_title") if isinstance(opp, dict) else getattr(opp, "role_title", "unknown")
+            logger.debug("candidate processing failed for %s: %s", title, exc)
 
-    await asyncio.gather(*[_one(o) for o in opps[:max_checks]])
+    await asyncio.gather(*[_one(o) for o in to_check], return_exceptions=True)
     return confirmed
