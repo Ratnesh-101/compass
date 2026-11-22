@@ -60,6 +60,7 @@ export default function InternshipRadar({
   const [selectedDetailOpp, setSelectedDetailOpp] = useState(null)
   const [activeWorkspaceOpp, setActiveWorkspaceOpp] = useState(null)
   const [bannerDismissed, setBannerDismissed] = useState(false)
+  const [worldwideNotice, setWorldwideNotice] = useState(false)
 
   const hasCandidateProfile = hasSavedProfile(profile)
 
@@ -98,15 +99,16 @@ export default function InternshipRadar({
       setIsLoadingMore(true)
     }
     setError(null)
+    if (!isAppending) setWorldwideNotice(false)
 
     try {
       let items = []
       let serverHasMore = false
 
       if (activeTab === 'recommended') {
-        items = await fetchRecommendedOpportunities(30, selectedEmployerType, indiaOnly)
+        items = await fetchRecommendedOpportunities(200, selectedEmployerType, indiaOnly)
       } else if (activeTab === 'recent_24h') {
-        const res = await fetchOpportunities({
+        const recentQuery = {
           category: selectedCategory,
           employer_type: selectedEmployerType,
           work_arrangement: workArrangement,
@@ -115,7 +117,15 @@ export default function InternshipRadar({
           recent_24h: true,
           page: targetPage,
           pageSize: 24,
-        })
+        }
+        let res = await fetchOpportunities(recentQuery)
+        if (indiaOnly && targetPage === 1 && !(res.opportunities || []).length) {
+          const worldwide = await fetchOpportunities({ ...recentQuery, india_only: false })
+          if ((worldwide.opportunities || []).length) {
+            res = worldwide
+            setWorldwideNotice(true)
+          }
+        }
         items = res.opportunities || []
         serverHasMore = Boolean(res.has_more)
       } else if (activeTab === 'open') {
@@ -660,6 +670,28 @@ export default function InternshipRadar({
         )
       ) : (
         <>
+          {activeTab === 'recent_24h' && worldwideNotice && (
+            <div
+              role="status"
+              id="radar-worldwide-fallback-notice"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '12px 16px',
+                marginBottom: '16px',
+                background: 'var(--bg-card-soft, #f2eee6)',
+                border: '1px solid var(--border, #e6e1d6)',
+                borderRadius: 'var(--radius-btn, 6px)',
+                fontSize: '13px',
+                color: 'var(--text-primary)',
+              }}
+            >
+              <Info size={16} strokeWidth={1.8} style={{ color: 'var(--brand, #f5a623)', flexShrink: 0 }} />
+              <span>No India-based listings in the last 24 hours. Showing worldwide listings.</span>
+            </div>
+          )}
+
           {/* Top Dismissible Candidate Profile Banner (replaces repeating per-card boxes) */}
           {!hasCandidateProfile && !bannerDismissed && (
             <div

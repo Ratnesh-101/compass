@@ -39,7 +39,7 @@ test('InternshipRadar component integrates stats into newestRefreshDate and pass
   )
   assert.ok(source.includes('newestRefreshDate(opportunities, stats)'))
   assert.ok(source.includes('recent_24h: true'))
-  assert.ok(source.includes('fetchRecommendedOpportunities(30, selectedEmployerType, indiaOnly)'))
+  assert.ok(source.includes('fetchRecommendedOpportunities(200, selectedEmployerType, indiaOnly)'))
   assert.ok(source.includes('is_india_eligible !== false'))
 })
 
