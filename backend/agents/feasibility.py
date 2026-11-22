@@ -454,19 +454,13 @@ def _sse(step_type: str, content: str, *, step: int, t0: float,
 async def _fetch_open_tasks(
     pool, domain: Optional[str], user_id: Optional[str] = None, include_demo: bool = False
 ) -> List[Dict[str, Any]]:
-    # Admin ("admin"/blank) is unscoped everywhere else (routers/tasks.py); filtering on the
-    # literal owner "admin" matched nothing and made the review report "No open tasks".
+    # "admin" is unscoped (as in routers/tasks.py); a missing owner stays fail-closed.
     from backend.services.ownership import has_caller, scope_owner
     owner = scope_owner(user_id)
     async with pool.acquire() as conn:
-        rows = await structured.list_tasks(
-            conn, domain=domain, user_id=owner, include_demo=include_demo,
-            # Only an explicit admin caller is unscoped; a missing owner stays fail-closed (no rows).
-            all_tenants=owner is None and has_caller(user_id),
-        )
-    # Work that is still to be done = open or in progress (status="open" alone skipped in-progress tasks).
-    pending = [dict(r) for r in rows if dict(r).get("status") in ("open", "in_progress")]
-    return pending[:MAX_TASKS_CONSIDERED]
+        rows = await structured.list_tasks(conn, domain=domain, user_id=owner, include_demo=include_demo,
+                                           all_tenants=owner is None and has_caller(user_id))
+    return [dict(r) for r in rows if r.get("status") in ("open", "in_progress")][:MAX_TASKS_CONSIDERED]
 
 
 def _describe(tasks: List[Dict[str, Any]]) -> str:
