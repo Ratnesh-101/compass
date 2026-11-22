@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -26,6 +27,7 @@ from backend.memory.radar import (
     upsert_opportunity_cycle,
     upsert_opportunity_requirements,
 )
+from backend.memory.radar_close import close_opportunities_by_canonical_urls
 from backend.models_radar import EmployerType, OpportunityStatus
 from backend.services.radar_ats_adapters import (
     fetch_all_public_ats_opportunities,
@@ -42,7 +44,7 @@ from backend.services.radar_sources import (
 )
 from backend.services.radar_jobspy import discover_jobspy_opportunities
 from backend.services.radar_reverify import reverify_stale_opportunities
-from backend.services.radar_simplify import fetch_simplify_opportunities, verify_candidates
+from backend.services.radar_simplify import fetch_simplify_dataset, verify_candidates
 from backend.services.radar_verifier import verify_opportunity_status
 from backend.services.tavily import search as tavily_search, tavily_available
 
@@ -415,16 +417,47 @@ async def run_radar_sync(source_filter: Optional[str] = None, dry_run: bool = Fa
             if not source_filter or source_filter in {"all", "simplify"}:
                 try:
                     if dry_run:
-                        simplify_opps = await fetch_simplify_opportunities()
+                        simplify_opps, inactive_urls = await fetch_simplify_dataset()
                         records_discovered += len(simplify_opps)
+                        active_canonicals = {
+                            o["canonical_url"] for o in simplify_opps if o.get("canonical_url")
+                        }
+                        to_close_count = len(inactive_urls - active_canonicals)
                         logger.info(
-                            f"[DRY-RUN] Simplify adapter fetched {len(simplify_opps)} listings; 0 persisted to DB."
+                            f"[DRY-RUN] Simplify adapter fetched {len(simplify_opps)} active listings, "
+                            f"{to_close_count} inactive candidates to close; 0 persisted to DB."
                         )
                     else:
-                        simplify_opps = await fetch_simplify_opportunities()
+                        simplify_opps, inactive_urls = await fetch_simplify_dataset()
                         await verify_candidates(simplify_opps)
-                        for s_opp in simplify_opps:
-                            await _ingest_opportunity(s_opp, source_label="Simplify")
+                        sem = asyncio.Semaphore(6)
+                        ingest_deadline = time.monotonic() + 200.0
+                        skipped_count = 0
+
+                        async def _ingest_one(s_opp: Dict[str, Any]) -> None:
+                            nonlocal skipped_count
+                            async with sem:
+                                if time.monotonic() > ingest_deadline:
+                                    skipped_count += 1
+                                    return
+                                await _ingest_opportunity(s_opp, source_label="Simplify")
+
+                        await asyncio.gather(*[_ingest_one(s_opp) for s_opp in simplify_opps])
+                        if skipped_count > 0:
+                            logger.info(
+                                f"Simplify ingest hit 200s deadline; skipped {skipped_count} listings so they are picked up next night."
+                            )
+                        active_canonicals = {
+                            o["canonical_url"] for o in simplify_opps if o.get("canonical_url")
+                        }
+                        closed_count = await close_opportunities_by_canonical_urls(
+                            inactive_urls - active_canonicals,
+                            "simplify_listings",
+                            "No longer listed as active in SimplifyJobs/Summer2027-Internships",
+                        )
+                        logger.info(
+                            f"Simplify sync closed {closed_count} inactive listings."
+                        )
                 except Exception as simp_all_err:
                     failures += 1
                     logger.warning(f"Simplify synchronization encountered an issue: {simp_all_err}")

@@ -16,7 +16,7 @@ import asyncio
 import logging
 import time
 from datetime import date, datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import httpx
 
@@ -30,7 +30,7 @@ SIMPLIFY_LISTINGS_URL = (
 )
 SOURCE_NAME = "SimplifyJobs/Summer2027-Internships"
 MAX_DOWNLOAD_BYTES = 40 * 1024 * 1024
-MAX_LISTINGS_PER_SYNC = 1500
+MAX_LISTINGS_PER_SYNC = 2000
 # Computer-science related categories. Product, quant and other tracks are left out on purpose.
 CSE_CATEGORIES = {
     "software", "software engineering", "ai/ml/data", "data science, ai & machine learning", "hardware",
@@ -91,36 +91,73 @@ def normalize_simplify_listing(item: Dict[str, Any]) -> Optional[Dict[str, Any]]
     }
 
 
-async def fetch_simplify_opportunities(limit: int = MAX_LISTINGS_PER_SYNC) -> List[Dict[str, Any]]:
-    """Download the dataset and return up to ``limit`` newest CSE listings, de-duplicated by URL."""
+def split_simplify_dataset(
+    rows: Any,
+    limit: int = MAX_LISTINGS_PER_SYNC,
+) -> Tuple[List[Dict[str, Any]], Set[str]]:
+    """
+    Split Simplify dataset rows into active opportunities and inactive canonical URLs.
+    - active_opps: CSE categories, newest first, deduped, limited to ``limit``.
+    - inactive_canonical_urls: set of canonical URLs of CSE-category rows whose active is false or is_visible is false.
+    """
+    if not isinstance(rows, list):
+        return [], set()
+
+    dict_rows = [r for r in rows if isinstance(r, dict)]
+    dict_rows.sort(key=lambda r: r.get("date_updated") or r.get("date_posted") or 0, reverse=True)
+
+    active_opps: List[Dict[str, Any]] = []
+    seen: Set[str] = set()
+    inactive_canonical_urls: Set[str] = set()
+
+    for r in dict_rows:
+        cat = str(r.get("category") or "").strip().lower()
+        if cat not in CSE_CATEGORIES:
+            continue
+
+        if not r.get("active") or r.get("is_visible") is False:
+            url = str(r.get("url") or "").strip()
+            title = str(r.get("title") or "").strip()
+            if url.startswith("http"):
+                canon = canonicalize_url(url, role_title=title) or url
+                if canon:
+                    inactive_canonical_urls.add(canon)
+            continue
+
+        if len(active_opps) < limit:
+            norm = normalize_simplify_listing(r)
+            if not norm or norm["canonical_url"] in seen:
+                continue
+            seen.add(norm["canonical_url"])
+            active_opps.append(norm)
+
+    return active_opps, inactive_canonical_urls
+
+
+async def fetch_simplify_dataset(
+    limit: int = MAX_LISTINGS_PER_SYNC,
+) -> Tuple[List[Dict[str, Any]], Set[str]]:
+    """Download the dataset and return (active_opps, inactive_canonical_urls)."""
     async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
         resp = await client.get(SIMPLIFY_LISTINGS_URL)
         resp.raise_for_status()
         if len(resp.content) > MAX_DOWNLOAD_BYTES:
             raise ValueError("Simplify listings file is larger than expected; refusing to parse it")
         rows = resp.json()
-    if not isinstance(rows, list):
-        return []
-    rows = [r for r in rows if isinstance(r, dict)]
-    rows.sort(key=lambda r: r.get("date_updated") or r.get("date_posted") or 0, reverse=True)
-    out: List[Dict[str, Any]] = []
-    seen: set = set()
-    for r in rows:
-        norm = normalize_simplify_listing(r)
-        if not norm or norm["canonical_url"] in seen:
-            continue
-        seen.add(norm["canonical_url"])
-        out.append(norm)
-        if len(out) >= limit:
-            break
-    return out
+    return split_simplify_dataset(rows, limit)
+
+
+async def fetch_simplify_opportunities(limit: int = MAX_LISTINGS_PER_SYNC) -> List[Dict[str, Any]]:
+    """Download the dataset and return up to ``limit`` newest CSE listings, de-duplicated by URL."""
+    active_opps, _ = await fetch_simplify_dataset(limit=limit)
+    return active_opps
 
 
 async def verify_candidates(
     opps: List[Dict[str, Any]],
     max_checks: int = 700,
     concurrency: int = 16,
-    budget_seconds: float = 240.0,
+    budget_seconds: float = 150.0,
 ) -> int:
     """Run the real verifier on listings; promote only what it confirms. Returns the OPEN_CONFIRMED count."""
     from backend.services.radar_verifier import is_specific_ats_job_url, verify_opportunity_status
