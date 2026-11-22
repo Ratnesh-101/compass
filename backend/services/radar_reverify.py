@@ -11,12 +11,14 @@ Honesty rules:
 2. On any error (network failure, timeout, parsing error), leave the row untouched.
    Do not bump its last_verified_at timestamp.
 3. Never invent or infer close dates.
+4. An aggregator page cannot establish a vacancy is open; downgrade to NEEDS_VERIFICATION without calling verify.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
+import urllib.parse
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional
 
@@ -35,6 +37,32 @@ DEFAULT_BATCH_SIZE: int = 100
 PER_CALL_TIMEOUT_SECONDS: float = 20.0
 # Overall cap so a slow night cannot push the nightly job past its request timeout; unchecked rows wait for the next run.
 TOTAL_BUDGET_SECONDS: float = 150.0
+
+UNVERIFIABLE_AGGREGATOR_HOSTS = ("glassdoor.com", "linkedin.com", "indeed.com")
+
+
+def is_unverifiable_aggregator(url: str) -> bool:
+    """Return True when the URL's hostname equals or is a subdomain of an unverifiable aggregator host."""
+    if not url or not isinstance(url, str):
+        return False
+    cleaned = url.strip()
+    if not cleaned:
+        return False
+    try:
+        parsed = urllib.parse.urlparse(cleaned)
+        hostname = parsed.hostname
+        if not hostname:
+            parsed = urllib.parse.urlparse(f"//{cleaned}")
+            hostname = parsed.hostname
+        if not hostname:
+            return False
+        hostname = hostname.rstrip(".").lower()
+        return any(
+            hostname == host or hostname.endswith(f".{host}")
+            for host in UNVERIFIABLE_AGGREGATOR_HOSTS
+        )
+    except Exception:
+        return False
 
 
 def _parse_datetime(val: Any) -> Optional[datetime]:
@@ -219,6 +247,16 @@ async def reverify_stale_opportunities(
                 or ""
             ).strip()
             curr_status = row.get("current_status") or OpportunityStatus.OPEN_CONFIRMED
+
+            if is_unverifiable_aggregator(app_url):
+                if not dry_run:
+                    await radar_memory.update_opportunity_status(
+                        opp_id,
+                        OpportunityStatus.NEEDS_VERIFICATION,
+                        _parse_datetime(row.get("last_verified_at")),
+                    )
+                downgraded += 1
+                continue
 
             try:
                 # Flexible invocation to support mocks with 1 or 2 arguments
