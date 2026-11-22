@@ -340,9 +340,9 @@ async def run_radar_sync(source_filter: Optional[str] = None, dry_run: bool = Fa
                                     continue
 
                                 posting_dt = None
-                                if j_opp.get("posting_datetime_utc"):
+                                if j_opp.get("posted_at") or j_opp.get("posting_datetime_utc"):
                                     try:
-                                        posting_dt = datetime.fromisoformat(j_opp["posting_datetime_utc"])
+                                        posting_dt = datetime.fromisoformat(j_opp.get("posted_at") or j_opp["posting_datetime_utc"])
                                     except Exception:
                                         posting_dt = None
 
@@ -369,7 +369,7 @@ async def run_radar_sync(source_filter: Optional[str] = None, dry_run: bool = Fa
                                     official_source_confirmed=j_opp.get("official_source_confirmed", False),
                                     application_url_checked=j_opp.get("application_url_checked", False),
                                     posted_at=posting_dt,
-                                    posted_at_precision=j_opp.get("posted_at_precision") or ("exact" if posting_dt else "unknown"),
+                                    posted_at_precision=j_opp.get("posted_at_precision") or ("exact" if j_opp.get("posting_datetime_utc") else "unknown"),
                                 )
 
                                 reqs = j_opp.get("requirements")

@@ -150,3 +150,15 @@ async def test_oauth_callback_with_different_nonce_cookie_rejected():
                 for h in set_cookie_headers
             )
             assert deleted_cookie or "oauth_nonce" not in cb_resp.cookies
+
+
+@pytest.mark.asyncio
+async def test_connect_probe_does_not_mint_nonce_cookie():
+    """The frontend status probe must not overwrite the nonce bound to an in-flight sign-in."""
+    transport = ASGITransport(app=app)
+    with patch("backend.services.oauth.is_google_oauth_configured", return_value=True):
+        async with AsyncClient(transport=transport, base_url="https://compass-farmlytics.vercel.app") as client:
+            resp = await client.get("/api/calendar/connect?redirect=false&probe=true")
+            assert resp.status_code == 200
+            assert resp.json() == {"status": "ok", "configured": True}
+            assert "oauth_nonce" not in client.cookies
