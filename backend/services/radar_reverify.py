@@ -3,7 +3,7 @@ Compass — Internship Radar Nightly Re-verification Service.
 
 Re-verifies stale open (OPEN_CONFIRMED) internship opportunities.
 Ensures listings that were previously verified as OPEN_CONFIRMED but have not been
-re-confirmed within RECHECK_AFTER_DAYS (default: 14 days) are re-checked against
+re-confirmed within RECHECK_AFTER_DAYS (default: 3 days) are re-checked against
 their authoritative live application URLs.
 
 Honesty rules:
@@ -30,8 +30,8 @@ from backend.services.radar_verifier import (
 
 logger = logging.getLogger("compass.radar.reverify")
 
-RECHECK_AFTER_DAYS: int = 14
-DEFAULT_BATCH_SIZE: int = 25
+RECHECK_AFTER_DAYS: int = 3
+DEFAULT_BATCH_SIZE: int = 100
 PER_CALL_TIMEOUT_SECONDS: float = 20.0
 # Overall cap so a slow night cannot push the nightly job past its request timeout; unchecked rows wait for the next run.
 TOTAL_BUDGET_SECONDS: float = 150.0
