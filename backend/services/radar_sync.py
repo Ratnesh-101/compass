@@ -42,6 +42,7 @@ from backend.services.radar_sources import (
 )
 from backend.services.radar_jobspy import discover_jobspy_opportunities
 from backend.services.radar_reverify import reverify_stale_opportunities
+from backend.services.radar_simplify import fetch_simplify_opportunities, verify_candidates
 from backend.services.radar_verifier import verify_opportunity_status
 from backend.services.tavily import search as tavily_search, tavily_available
 
@@ -98,6 +99,79 @@ async def run_radar_sync(source_filter: Optional[str] = None, dry_run: bool = Fa
         }
         if dry_run:
             logger.info(f"[DRY-RUN] Radar sync initiated (source_filter={source_filter}). No DB writes will occur.")
+
+        async def _ingest_opportunity(opp: Dict[str, Any], source_label: str) -> None:
+            nonlocal records_discovered, records_skipped, records_updated, failures
+            try:
+                records_discovered += 1
+                canonical = opp.get("canonical_url")
+                if not canonical:
+                    records_skipped += 1
+                    return
+
+                posting_dt = None
+                raw_posted = opp.get("posted_at") or opp.get("posting_datetime_utc")
+                if raw_posted:
+                    try:
+                        posting_dt = (
+                            raw_posted
+                            if isinstance(raw_posted, datetime)
+                            else datetime.fromisoformat(str(raw_posted))
+                        )
+                    except Exception:
+                        posting_dt = None
+
+                last_verified = opp.get("last_verified_at") or (
+                    datetime.now(timezone.utc) if opp.get("application_url_checked") else None
+                )
+
+                is_verified = (
+                    opp.get("current_status") == OpportunityStatus.OPEN_CONFIRMED
+                    or bool(opp.get("official_source_confirmed"))
+                )
+
+                opp_id = await upsert_opportunity(
+                    company_name=opp["company_name"],
+                    role_title=opp["role_title"],
+                    canonical_url=canonical,
+                    official_application_url=opp["official_application_url"],
+                    current_status=opp["current_status"],
+                    opportunity_type=opp["opportunity_type"],
+                    employer_type=opp.get("employer_type") or EmployerType.ENTERPRISE,
+                    category=opp["category"],
+                    location=opp.get("location"),
+                    work_arrangement=opp.get("work_arrangement", "unknown"),
+                    country=opp.get("country", "Global"),
+                    is_india_eligible=opp.get("is_india_eligible", True),
+                    compensation=opp.get("compensation"),
+                    confirmed_open_date=opp.get("confirmed_open_date"),
+                    description=opp.get("description"),
+                    last_verified_at=last_verified,
+                    verification_evidence=opp.get("verification_evidence"),
+                    employer_identity_verified=opp.get("employer_identity_verified", False),
+                    official_source_confirmed=opp.get("official_source_confirmed", False),
+                    application_url_checked=opp.get("application_url_checked", False),
+                    posted_at=posting_dt,
+                    posted_at_precision=opp.get("posted_at_precision")
+                    or ("exact" if opp.get("posting_datetime_utc") else "unknown"),
+                )
+
+                reqs = opp.get("requirements")
+                if reqs:
+                    await upsert_opportunity_requirements(opp_id, reqs)
+
+                await add_opportunity_source(
+                    opportunity_id=opp_id,
+                    source_name=opp["source_name"],
+                    source_type=opp["source_type"],
+                    source_url=opp["source_url"],
+                    source_authority=opp.get("source_authority", "tier_2"),
+                    verification_result="verified" if is_verified else "discovered",
+                )
+                records_updated += 1
+            except Exception as err:
+                failures += 1
+                logger.warning(f"Failed to ingest {source_label} opportunity {opp.get('role_title')}: {err}")
 
         try:
             # 1. Ingest Curated Opportunities across all 6 Sectors
@@ -332,69 +406,30 @@ async def run_radar_sync(source_filter: Optional[str] = None, dry_run: bool = Fa
                         jobspy_summary = await discover_jobspy_opportunities(hours_old=24, results_wanted=10)
                         jobspy_opps = jobspy_summary.get("opportunities", [])
                         for j_opp in jobspy_opps:
-                            try:
-                                records_discovered += 1
-                                canonical = j_opp.get("canonical_url")
-                                if not canonical:
-                                    records_skipped += 1
-                                    continue
-
-                                posting_dt = None
-                                if j_opp.get("posted_at") or j_opp.get("posting_datetime_utc"):
-                                    try:
-                                        posting_dt = datetime.fromisoformat(j_opp.get("posted_at") or j_opp["posting_datetime_utc"])
-                                    except Exception:
-                                        posting_dt = None
-
-                                opp_id = await upsert_opportunity(
-                                    company_name=j_opp["company_name"],
-                                    role_title=j_opp["role_title"],
-                                    canonical_url=canonical,
-                                    official_application_url=j_opp["official_application_url"],
-                                    current_status=j_opp["current_status"],
-                                    opportunity_type=j_opp["opportunity_type"],
-                                    employer_type=j_opp.get("employer_type") or EmployerType.ENTERPRISE,
-                                    category=j_opp["category"],
-                                    location=j_opp.get("location"),
-                                    work_arrangement=j_opp.get("work_arrangement", "unknown"),
-                                    country=j_opp.get("country", "Global"),
-                                    is_india_eligible=j_opp.get("is_india_eligible", True),
-                                    compensation=j_opp.get("compensation"),
-                                    confirmed_open_date=j_opp.get("confirmed_open_date"),
-                                    description=j_opp.get("description"),
-                                    # Discovery on an aggregator is not a verification of the posting.
-                                    last_verified_at=datetime.now(timezone.utc) if j_opp.get("application_url_checked") else None,
-                                    verification_evidence=j_opp.get("verification_evidence"),
-                                    employer_identity_verified=j_opp.get("employer_identity_verified", False),
-                                    official_source_confirmed=j_opp.get("official_source_confirmed", False),
-                                    application_url_checked=j_opp.get("application_url_checked", False),
-                                    posted_at=posting_dt,
-                                    posted_at_precision=j_opp.get("posted_at_precision") or ("exact" if j_opp.get("posting_datetime_utc") else "unknown"),
-                                )
-
-                                reqs = j_opp.get("requirements")
-                                if reqs:
-                                    await upsert_opportunity_requirements(opp_id, reqs)
-
-                                await add_opportunity_source(
-                                    opportunity_id=opp_id,
-                                    source_name=j_opp["source_name"],
-                                    source_type=j_opp["source_type"],
-                                    source_url=j_opp["source_url"],
-                                    source_authority=j_opp.get("source_authority", "tier_2"),
-                                    verification_result=(
-                                        "verified" if j_opp.get("official_source_confirmed") else "discovered"
-                                    ),
-                                )
-                                records_updated += 1
-                            except Exception as j_err:
-                                failures += 1
-                                logger.warning(f"Failed to ingest JobSpy opportunity {j_opp.get('role_title')}: {j_err}")
+                            await _ingest_opportunity(j_opp, source_label="JobSpy")
                 except Exception as jobspy_all_err:
                     failures += 1
                     logger.warning(f"JobSpy synchronization encountered an issue: {jobspy_all_err}")
 
-            # 6. Re-verify stale open listings
+            # 6. Ingest SimplifyJobs Student Internships
+            if not source_filter or source_filter in {"all", "simplify"}:
+                try:
+                    if dry_run:
+                        simplify_opps = await fetch_simplify_opportunities()
+                        records_discovered += len(simplify_opps)
+                        logger.info(
+                            f"[DRY-RUN] Simplify adapter fetched {len(simplify_opps)} listings; 0 persisted to DB."
+                        )
+                    else:
+                        simplify_opps = await fetch_simplify_opportunities()
+                        await verify_candidates(simplify_opps)
+                        for s_opp in simplify_opps:
+                            await _ingest_opportunity(s_opp, source_label="Simplify")
+                except Exception as simp_all_err:
+                    failures += 1
+                    logger.warning(f"Simplify synchronization encountered an issue: {simp_all_err}")
+
+            # 7. Re-verify stale open listings
             try:
                 reverify_summary = await reverify_stale_opportunities(dry_run=dry_run)
             except Exception as rev_err:
