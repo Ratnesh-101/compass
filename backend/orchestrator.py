@@ -1117,6 +1117,11 @@ async def _handle_message_core(
                 "nothing was changed."
             )
 
+    from backend.services.action_claim_guard import guard_unbacked_action_claims
+    text_reply, was_replaced = guard_unbacked_action_claims(text_reply, False)
+    if was_replaced:
+        logger.warning("Blocked an unbacked action claim in a plain-text reply")
+
     return await format_chat_response(
         conv_id=conv_id,
         message=message,
