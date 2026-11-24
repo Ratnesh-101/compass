@@ -30,7 +30,8 @@ def _as_int_ids(raw: Any) -> list:
 
 
 async def _run_scoped_review(pool: Any, *, days: int, hours: float, domain: Optional[str],
-                             user_id: str, include_demo: bool):
+                             user_id: str, include_demo: bool,
+                             workload_hours: Optional[float] = None):
     """Non-streaming wrapper that, unlike agents.feasibility.assess_feasibility,
     passes the owner through to the task query."""
     from backend.agents.feasibility import run_feasibility_review, TriagePlan
@@ -38,6 +39,7 @@ async def _run_scoped_review(pool: Any, *, days: int, hours: float, domain: Opti
     async for ev in run_feasibility_review(
         pool, days=days, hours_per_day=hours, domain=domain,
         user_id=user_id, include_demo=include_demo,
+        workload_hours=workload_hours,
     ):
         if ev["type"] == "done":
             final = ev
@@ -66,10 +68,23 @@ async def handle_assess_feasibility(args: Dict[str, Any], pool: Any) -> Dict[str
     if domain not in ("hackathon", "coursework", "code", "general"):
         domain = None
 
+    raw_workload = args.get("workload_hours")
+    workload_hours: Optional[float] = None
+    if raw_workload is not None:
+        try:
+            val = float(raw_workload)
+            workload_hours = min(max(val, 0.0), 2000.0)
+        except (TypeError, ValueError):
+            workload_hours = None
+
+    raw_days_stated = args.get("days_stated")
+    days_stated = raw_days_stated is True or str(raw_days_stated).lower() == "true"
+
     try:
         plan = await _run_scoped_review(
             pool, days=days, hours=hours, domain=domain,
             user_id=str(user_id), include_demo=bool(args.get("include_demo", False)),
+            workload_hours=workload_hours,
         )
     except Exception as e:
         logger.error("Feasibility review failed: %s", e, exc_info=True)
@@ -77,6 +92,16 @@ async def handle_assess_feasibility(args: Dict[str, Any], pool: Any) -> Dict[str
                 "error": "Could not complete the feasibility review."}
 
     v = plan.verdict
+    verdict_text = "Nothing to assess yet" if v.demand_hours == 0 else v.verdict
+    summary = (
+        f"{verdict_text}: {v.demand_hours}h of work against {v.capacity_hours}h "
+        f"available ({v.utilisation_pct}% utilisation). "
+        f"Keeping {len(plan.keep)}, deferring {len(plan.defer)}, "
+        f"dropping {len(plan.drop)}. {plan.narrative}"
+    )
+    if not days_stated:
+        summary += f" (I assumed the next {days} days at {hours:g} hours a day.)"
+
     return {
         "success": True,
         "data": {
@@ -85,12 +110,7 @@ async def handle_assess_feasibility(args: Dict[str, Any], pool: Any) -> Dict[str
             "rounds_used": plan.rounds_used,
             "degraded": plan.degraded,
         },
-        "summary": (
-            f"{v.verdict}: {v.demand_hours}h of work against {v.capacity_hours}h "
-            f"available ({v.utilisation_pct}% utilisation). "
-            f"Keeping {len(plan.keep)}, deferring {len(plan.defer)}, "
-            f"dropping {len(plan.drop)}. {plan.narrative}"
-        ),
+        "summary": summary,
         "error": None,
     }
 

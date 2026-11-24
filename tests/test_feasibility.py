@@ -336,7 +336,9 @@ async def test_no_open_tasks_returns_empty_plan(monkeypatch):
     assert plan.drop == []
     assert plan.verdict.demand_hours == 0.0
     assert plan.verdict.verdict == "FEASIBLE"
-    assert "No open tasks" in plan.narrative
+    assert plan.rounds_used == 0
+    assert plan.narrative.startswith("You have no open tasks in Compass yet")
+    assert "At 4 hours a day for 5 days you would have 20 hours" in plan.narrative
 
 
 # ---------------------------------------------------------------------------
@@ -401,7 +403,13 @@ def test_artifact_markdown_renders_all_buckets():
 def test_fallback_route_reads_hours_per_day_and_days():
     from backend.router_helpers import _fallback_route
 
-    assert _fallback_route("Can I finish all of this in 2 hours a day?")[1] == {"days": 5, "hours_per_day": 2.0}
-    assert _fallback_route("feasibility: 2 hrs a day for 9 days")[1] == {"days": 9, "hours_per_day": 2.0}
+    assert _fallback_route("Can I finish all of this in 2 hours a day?")[1] == {
+        "days": 5, "hours_per_day": 2.0, "days_stated": False,
+    }
+    assert _fallback_route("feasibility: 2 hrs a day for 9 days")[1] == {
+        "days": 9, "hours_per_day": 2.0, "days_stated": True,
+    }
     # "2.5 days" must not be read as "5 days"
-    assert _fallback_route("can i finish this in 2.5 days")[1]["days"] == 5  # falls back to the default
+    args = _fallback_route("can i finish this in 2.5 days")[1]
+    assert args["days"] == 5  # falls back to the default
+    assert args["days_stated"] is False
