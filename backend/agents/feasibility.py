@@ -1,24 +1,9 @@
 """
 The Realist — adversarial feasibility agent for Compass.
 
-Two agents with opposing objectives negotiate over the user's actual workload:
-
-    Planner  (Nemotron-3 Super, 120B) — optimistic; estimates effort, orders work,
-                                        wants to fit everything in.
-    Realist  (Nemotron-3 Ultra, 550B) — adversarial; independently computes capacity
-                                        against demand and rejects infeasible plans
-                                        with explicit arithmetic.
-
-They negotiate for at most MAX_ROUNDS. The output is a TriagePlan: keep / defer / drop,
-with a defensible arithmetic justification.
-
-Design guarantees (these matter during a live demo):
-  * Every model call is individually wrapped; a failure degrades, never crashes.
-  * If Nebius is unreachable entirely, a pure-Python deterministic fallback still
-    produces a real, arithmetically-correct verdict.
-  * The negotiation is hard-capped — no unbounded loops, no runaway credit spend.
-  * Nothing in this module mutates the database. Applying a TriagePlan goes through
-    the existing confirm-gate (see apply_triage_plan in §4).
+Two agents negotiate over actual workload: Planner (optimistic) and Realist (adversarial).
+Output is a TriagePlan (keep/defer/drop) with explicit arithmetic justification.
+Guarantees: wrapped model calls, deterministic fallback, hard-capped negotiation.
 """
 
 from __future__ import annotations
@@ -128,10 +113,11 @@ class TriagePlan(BaseModel):
     def as_markdown(self) -> str:
         """Copy-pasteable artifact — this is what the user keeps."""
         v = self.verdict
+        verdict_text = "Nothing to assess yet" if v.demand_hours == 0 else v.verdict
         lines = [
             "# Compass — Feasibility Triage",
             "",
-            f"**Verdict:** {v.verdict}",
+            f"**Verdict:** {verdict_text}",
             f"**Demand:** {v.demand_hours}h  |  **Capacity:** {v.capacity_hours}h  "
             f"|  **Utilisation:** {v.utilisation_pct}%",
         ]
@@ -481,14 +467,9 @@ async def run_feasibility_review(
     domain: Optional[str] = None,
     user_id: Optional[str] = None,
     include_demo: bool = False,
+    workload_hours: Optional[float] = None,
 ) -> AsyncGenerator[Dict[str, Any], None]:
-    """
-    Stream the Planner ↔ Realist negotiation as SSE-shaped dicts.
-
-    The terminal event is always type="done" carrying the TriagePlan, even when
-    every model call failed — in that case the plan is produced arithmetically
-    and flagged degraded=True.
-    """
+    """Stream the Planner ↔ Realist negotiation as SSE-shaped dicts."""
     t0 = time.perf_counter()
     step = 0
     settings = get_settings()
@@ -512,13 +493,27 @@ async def run_feasibility_review(
 
     if not tasks:
         step += 1
+        if workload_hours is not None and workload_hours > 0:
+            verdict = _arithmetic_verdict(workload_hours, capacity)
+            verdict_wording = verdict.verdict.lower().replace("_", " ")
+            narrative = (
+                f"You told me about {workload_hours:g} hours of work; "
+                f"with {capacity:g} hours available that is {verdict_wording}."
+            )
+        else:
+            verdict = _arithmetic_verdict(0.0, capacity)
+            narrative = (
+                f"You have no open tasks in Compass yet, so there is nothing to fit into your time. "
+                f"At {hours_per_day:g} hours a day for {days} days you would have {capacity:g} hours "
+                f"of focused time. Tell me your tasks, or add them in the Timeline, and I will check whether they fit."
+            )
         empty = TriagePlan(
             keep=[], defer=[], drop=[],
-            verdict=_arithmetic_verdict(0.0, capacity),
+            verdict=verdict,
             rounds_used=0,
-            narrative="No open tasks — nothing to triage.",
+            narrative=narrative,
         )
-        yield _sse("done", "No open tasks to assess.", step=step, t0=t0,
+        yield _sse("done", narrative if workload_hours else "No open tasks to assess.", step=step, t0=t0,
                    triage_plan=empty.model_dump(), artifact_markdown=empty.as_markdown())
         return
 
@@ -684,11 +679,13 @@ async def assess_feasibility(
     days: int = 5,
     hours_per_day: float = DEFAULT_HOURS_PER_DAY,
     domain: Optional[str] = None,
+    workload_hours: Optional[float] = None,
 ) -> TriagePlan:
     """Non-streaming wrapper. Always returns a TriagePlan or raises RuntimeError."""
     final: Optional[Dict[str, Any]] = None
     async for ev in run_feasibility_review(
-        pool, days=days, hours_per_day=hours_per_day, domain=domain
+        pool, days=days, hours_per_day=hours_per_day, domain=domain,
+        workload_hours=workload_hours,
     ):
         if ev["type"] == "done":
             final = ev
