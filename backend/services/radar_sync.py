@@ -240,11 +240,13 @@ async def run_radar_sync(source_filter: Optional[str] = None, dry_run: bool = Fa
                                 duration=item.get("duration"),
                                 confirmed_open_date=item.get("confirmed_open_date"),
                                 description=item.get("description"),
-                                last_verified_at=datetime.now(timezone.utc),
+                                # Curated ingestion does not check the live URL: pass None so existing
+                                # verification timestamp is preserved via COALESCE and new rows get NULL for re-check.
+                                last_verified_at=None,
                                 verification_evidence=item.get("verification_evidence"),
                                 employer_identity_verified=item.get("employer_identity_verified", True),
                                 official_source_confirmed=item.get("official_source_confirmed", True),
-                                application_url_checked=item.get("application_url_checked", True),
+                                application_url_checked=False,
                             )
                             records_discovered += 1
 

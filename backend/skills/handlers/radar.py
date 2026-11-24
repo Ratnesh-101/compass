@@ -237,9 +237,9 @@ async def handle_query_internship_radar(args: Dict[str, Any], pool: Any = None) 
     if widened_to_worldwide:
         prefix = "I did not find India-based matches, so these are roles open to applicants worldwide or remote:\n\n"
         if kw_fallback:
-            prefix += f"I did not find roles that mention {kw_str}; here are the top open internships instead:\n\n"
+            prefix += f"I did not find roles that mention {kw_str}; here are the top open internships from Compass Internship Radar instead:\n\n"
     elif kw_fallback:
-        prefix = f"I did not find roles that mention {kw_str}; here are the top open internships instead:\n\n"
+        prefix = f"I did not find roles that mention {kw_str}; here are the top open internships from Compass Internship Radar instead:\n\n"
     else:
         prefix = f"Here are your top {len(results)} internship matches from Compass Internship Radar:\n\n"
 
