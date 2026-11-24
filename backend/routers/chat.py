@@ -292,12 +292,14 @@ async def list_past_conversations(
     include_archived: bool = Query(False),
 ):
     """List previous chat conversations with titles, timestamps, and message counts."""
+    ident = _get_current_identity(request)
+    if not ident or not ident.id or not str(ident.id).strip():
+        return {"conversations": [], "total": 0}
     pool = await get_pool()
     if not pool:
         return {"conversations": [], "total": 0}
-    ident = _get_current_identity(request)
-    user_id = ident.id if ident and not ident.is_guest else None
-    guest_id = ident.id if ident and ident.is_guest else None
+    user_id = ident.id if not ident.is_guest else None
+    guest_id = ident.id if ident.is_guest else None
     try:
         async with pool.acquire() as conn:
             convs = await conversations.list_conversations(

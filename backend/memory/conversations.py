@@ -318,6 +318,10 @@ async def list_conversations(
     """Retrieve list of previous conversations with metadata, pinned state, and last message preview.
     Strictly isolates authenticated user chats from anonymous guest chats.
     """
+    clean_user = user_id.strip() if isinstance(user_id, str) and user_id.strip() else None
+    clean_guest = guest_id.strip() if isinstance(guest_id, str) and guest_id.strip() else None
+    if not clean_user and not clean_guest:
+        return []
     try:
         await ensure_conversation_columns(conn)
         query = """
@@ -343,14 +347,13 @@ async def list_conversations(
             WHERE (
                 ($1::text IS NOT NULL AND c.user_id = $1)
                 OR ($2::text IS NOT NULL AND c.guest_id = $2 AND c.user_id IS NULL)
-                OR ($1::text IS NULL AND $2::text IS NULL AND c.user_id IS NULL AND (c.guest_id IS NULL OR c.guest_id = ''))
             )
             AND ($3::boolean = TRUE OR c.is_archived = FALSE OR c.is_archived IS NULL)
             GROUP BY c.id, c.started_at, c.last_active_at, c.title, c.is_pinned, c.is_archived, c.is_shared, c.share_token
             ORDER BY COALESCE(c.is_pinned, FALSE) DESC, c.last_active_at DESC
             LIMIT $4
         """
-        rows = await conn.fetch(query, user_id, guest_id, include_archived, limit)
+        rows = await conn.fetch(query, clean_user, clean_guest, include_archived, limit)
         conversations_list = []
         for r in rows:
             title = friendly_title(r.get("title") or r.get("first_user_msg") or "Chat Session")
@@ -529,6 +532,8 @@ async def check_conversation_access(
     elif conv_guest:
         if not guest_id or guest_id != conv_guest:
             return False, "Forbidden: You do not have permission to access this conversation."
+    else:
+        return False, "Forbidden: You do not have permission to access this conversation."
 
     return True, None
 

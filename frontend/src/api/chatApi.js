@@ -3,6 +3,8 @@
 import {
   API_BASE,
   getAuthHeaders,
+  getGuestToken,
+  initGuestSession,
   fetchWithTimeout,
 } from './baseClient.js'
 import { chatRequestFields, makeRequestId } from '../utils/chatRequest.js'
@@ -294,11 +296,27 @@ export async function streamQueryFromAssistant(prompt, conversationId, { onToken
 }
 
 
+async function ensureSession() {
+  const hasAuthToken = typeof localStorage !== 'undefined' && Boolean(localStorage.getItem('compass_auth_token'))
+  const hasAuthEmail = typeof localStorage !== 'undefined' && Boolean(localStorage.getItem('compass_user_email'))
+  if (hasAuthToken || hasAuthEmail) {
+    return
+  }
+  if (!getGuestToken()) {
+    try {
+      await initGuestSession()
+    } catch {
+      /* ignore storage access error */
+    }
+  }
+}
+
 /**
  * Fetch previous chat conversations list.
  */
 export async function fetchConversations(limit = 30, includeArchived = false) {
   try {
+    await ensureSession()
     const res = await fetch(`${API_BASE}/api/conversations?limit=${limit}&include_archived=${includeArchived}`, {
       headers: getAuthHeaders(),
     })
@@ -309,6 +327,8 @@ export async function fetchConversations(limit = 30, includeArchived = false) {
     return []
   }
 }
+
+export const listConversations = fetchConversations
 
 /**
  * Fetch all messages from a specific previous conversation.
