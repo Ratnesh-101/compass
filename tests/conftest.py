@@ -212,3 +212,21 @@ def pytest_sessionfinish(session, exitstatus):
 
 
 
+
+# Reset career_github module-level state so tests don't leak rate-limit/cache state.
+@pytest.fixture(autouse=True)
+def _reset_github_intel_module_state():
+    def _reset():
+        try:
+            import backend.services.career_github as cg
+        except ImportError:
+            return
+        if hasattr(cg, "_RATE_LIMIT_RESET_AT"):
+            cg._RATE_LIMIT_RESET_AT = 0.0
+        cache = getattr(cg, "_ANALYSIS_CACHE", None)
+        if cache is not None:
+            cache.clear()
+
+    _reset()
+    yield
+    _reset()
