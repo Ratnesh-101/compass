@@ -30,6 +30,7 @@ from backend.services.career_resume_parse_fixes import (
     is_description_line,
     merge_split_education_items,
 )
+from backend.services.radar_profile_parse import parse_academic_year
 
 
 def identity_fields_from_user_id(user_id: Optional[str]) -> tuple[str, str]:
@@ -350,7 +351,7 @@ def generate_resume_html(
         end = html.escape(str(e.end_year or "Present"))
         dates = f"{start} - {end}" if (e.start_year or e.end_year) else ""
         grade = f" | CGPA/Grade: {html.escape(str(e.cgpa_or_grade))}" if e.cgpa_or_grade else ""
-        field = f" in {html.escape(e.field_of_study)}" if e.field_of_study else ""
+        field = f" in {html.escape(e.field_of_study)}" if e.field_of_study and e.field_of_study.lower() not in (e.degree or "").lower() else ""
         inst = html.escape(e.institution or "")
         deg = html.escape(e.degree or "")
         edu_items += f"""
@@ -493,39 +494,33 @@ def generate_resume_html(
 """
 
 
-
 SKILL_CATEGORY_HEADERS = {
-    "languages", "programming languages", "core cs", "core computer science",
-    "databases", "database", "database management", "dbms",
-    "backend", "frontend", "full stack", "fullstack", "web development",
-    "ai & automation", "ai / automation", "ai and automation", "artificial intelligence",
-    "machine learning", "data science", "cloud", "cloud & devops", "devops",
-    "tools", "developer tools", "tools & technologies", "technologies",
-    "frameworks", "libraries", "frameworks & libraries", "platforms",
-    "software & tools", "technical proficiencies", "competencies", "skills",
-    "technical skills", "core competencies"
+    "languages", "programming languages", "core cs", "core computer science", "databases", "database",
+    "database management", "dbms", "backend", "frontend", "full stack", "fullstack", "web development",
+    "ai & automation", "ai / automation", "ai and automation", "artificial intelligence", "machine learning",
+    "data science", "cloud", "cloud & devops", "devops", "tools", "developer tools", "tools & technologies",
+    "technologies", "frameworks", "libraries", "frameworks & libraries", "platforms", "software & tools",
+    "technical proficiencies", "competencies", "skills", "technical skills", "core competencies",
 }
 
 ACTION_VERBS = {
-    "built", "developed", "implemented", "designed", "led", "created", "engineered",
-    "contributed", "architected", "formulated", "automated", "integrated", "deployed",
-    "optimized", "maintained", "utilized", "programmed", "researched", "authored",
-    "managed", "configured", "orchestrated", "trained", "spearheaded", "conducted",
-    "scaled", "established", "directed", "supervised", "achieved", "executed"
+    "built", "developed", "implemented", "designed", "led", "created", "engineered", "contributed",
+    "architected", "formulated", "automated", "integrated", "deployed", "optimized", "maintained",
+    "utilized", "programmed", "researched", "authored", "managed", "configured", "orchestrated",
+    "trained", "spearheaded", "conducted", "scaled", "established", "directed", "supervised", "achieved", "executed",
 }
 
 COMMON_RESUME_TECHS = [
-    "Python", "FastAPI", "React", "Node.js", "Express.js", "Express", "Docker", "SQL",
-    "PostgreSQL", "PyTorch", "MongoDB", "TypeScript", "JavaScript", "HTML", "CSS",
-    "AWS", "Supabase", "Next.js", "Tailwind", "Java", "C++", "C", "Go", "Git", "GitHub",
-    "Vercel", "REST APIs", "REST", "OpenAI API", "Gemini API", "n8n", "GraphQL", "Redis",
-    "Kubernetes", "Linux", "Flask", "Django", "Vue", "Angular"
+    "Python", "FastAPI", "React", "Node.js", "Express.js", "Express", "Docker", "SQL", "PostgreSQL",
+    "PyTorch", "MongoDB", "TypeScript", "JavaScript", "HTML", "CSS", "AWS", "Supabase", "Next.js",
+    "Tailwind", "Java", "C++", "C", "Go", "Git", "GitHub", "Vercel", "REST APIs", "REST", "OpenAI API",
+    "Gemini API", "n8n", "GraphQL", "Redis", "Kubernetes", "Linux", "Flask", "Django", "Vue", "Angular",
 ]
 
 ROLE_KEYWORDS = {
-    "developer", "engineer", "intern", "internship", "manager", "lead", "architect",
-    "consultant", "analyst", "founder", "freelance", "designer", "administrator",
-    "associate", "officer", "specialist", "technician", "assistant", "director", "head"
+    "developer", "engineer", "intern", "internship", "manager", "lead", "architect", "consultant",
+    "analyst", "founder", "freelance", "designer", "administrator", "associate", "officer", "specialist",
+    "technician", "assistant", "director", "head",
 }
 
 
@@ -721,16 +716,34 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
 
     # 2. Multi-Section Parsing
     skills: List[str] = []
+    seen_skills_lower: Set[str] = set()
+
+    def _add_skill(tok: str) -> None:
+        c = tok.strip(" \t*•-–—·:*")
+        if c and 1 < len(c) < 50 and c.lower() not in seen_skills_lower:
+            seen_skills_lower.add(c.lower())
+            skills.append(c)
+
+    def _ingest_skill_line(line_txt: str) -> None:
+        raw_skill = re.sub(r"(?:\| ){2,}", "| ", line_txt).strip("| ")
+        cl = re.sub(r"[ \t]+", " ", raw_skill)[:2000].strip()
+        cl = re.sub(r"^[\s*•\-–—+·\u2022\u25cf\u25cb\u25aa\u25ab]+", "", cl).strip()
+        if not cl:
+            return
+        if ":" in cl:
+            pfx, _, rem = cl.partition(":")
+            clean_pfx = pfx.strip(" \t*•-–—+·")
+            if 0 < len(clean_pfx) <= 24 and re.fullmatch(r"[A-Za-z/ &]+", clean_pfx):
+                cl = rem.strip()
+        for tok in re.split(r"[,;•|·\u2022\u25cf\u25cb\u25aa\u25ab]+", cl):
+            _add_skill(tok)
+
     edu_list: List[ResumeEducationItem] = []
     projects: List[ResumeProjectItem] = []
     experience: List[ResumeExperienceItem] = []
     internships: List[ResumeExperienceItem] = []
-    certifications: List[str] = []
-    awards: List[str] = []
-    hackathons: List[str] = []
-    leadership_and_volunteering: List[str] = []
-    publications: List[str] = []
-    summary_lines: List[str] = []
+    certifications, awards, hackathons = [], [], []
+    leadership_and_volunteering, publications, summary_lines = [], [], []
     education_notes: Dict[str, str] = {}
 
     current_section = None
@@ -754,10 +767,8 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
         )):
             current_section = "skills"
             in_skill_subgroup = False
-            for tok in line_clean.partition(":")[2].replace("•", ",").replace(";", ",").replace("|", ",").split(","):
-                clean_tok = _clean_bullet(tok).strip(" -:*•")
-                if clean_tok and 1 < len(clean_tok) < 40 and clean_tok not in skills:
-                    skills.append(clean_tok)
+            if ":" in line_clean:
+                _ingest_skill_line(line_clean.partition(":")[2])
             continue
         elif any(line_low == h or line_low.startswith(f"{h}:") or line_low.startswith(f"{h} ") for h in (
             "education", "academic background", "academics", "qualifications"
@@ -821,12 +832,7 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
         # Check for skill subcategories (e.g. Core CS, Databases, Tools)
         if _is_skill_category_header(line_clean):
             if ":" in line_clean:
-                parts = line_clean.split(":", 1)
-                tokens = re.split(r"[,•|;/]+", parts[1])
-                for tok in tokens:
-                    c_tok = _clean_bullet(tok).strip(" -:*•")
-                    if c_tok and 1 < len(c_tok) < 45 and c_tok not in skills and not _is_skill_category_header(c_tok):
-                        skills.append(c_tok)
+                _ingest_skill_line(line_clean.partition(":")[2])
             in_skill_subgroup = True
             continue
 
@@ -834,11 +840,7 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
             if any(k in line_low for k in ["finalist", "winner", "hackathon", "member", "club", "vit ", "certified", "bits and bytes"]):
                 in_skill_subgroup = False
             else:
-                tokens = re.split(r"[,•|;/]+", line_clean)
-                clean_tokens = [_clean_bullet(t).strip(" -:*•") for t in tokens if _clean_bullet(t).strip(" -:*•")]
-                for tok in clean_tokens:
-                    if tok and 1 < len(tok) < 45 and tok not in skills and not _is_skill_category_header(tok):
-                        skills.append(tok)
+                _ingest_skill_line(line_clean)
                 continue
 
         # Content ingestion per section
@@ -847,25 +849,32 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
                 summary_lines.append(_clean_bullet(line_clean))
 
         elif current_section == "skills":
-            tokens = re.split(r"[,•|\n;]+", line_clean)
-            for tok in tokens:
-                clean_tok = _clean_bullet(tok).strip(" -:*•")
-                if clean_tok and 1 < len(clean_tok) < 40 and clean_tok not in skills and not _is_skill_category_header(clean_tok):
-                    skills.append(clean_tok)
+            _ingest_skill_line(line_clean)
 
         elif current_section == "education":
-            if any(term in line_low for term in ("b.tech", "b.e.", "bs", "bachelor", "master", "m.tech", "ph.d", "university", "institute", "college", "school")):
-                # A note like "(currently in 3rd year)" is kept as a note, never glued to the college name.
-                split_line, edu_note, _stated_year = education_line_parts(line_clean)
+            raw_edu = re.sub(r"(?:\| ){2,}", "| ", line_clean).strip("| ")
+            cl_line = re.sub(r"[ \t]+", " ", raw_edu)[:2000]
+            is_edu_header = any(term in line_low for term in ("b.tech", "b.e.", "bs", "bachelor", "master", "m.tech", "ph.d", "university", "institute", "college", "school"))
+            rng_m = re.search(r"\b((?:19|20)\d\d)\s{0,5}[-–—~]\s{0,5}((?:19|20)\d\d)\b", cl_line)
+            cue_m = re.search(r"\b(?:expected\s+graduation|graduating|class\s+of|expected)[\s:]*(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\s,]*)?(20\d\d)\b", cl_line, re.IGNORECASE)
+            yr_matches = re.findall(r"\b(20\d\d)\b", cl_line)
+            start_yr = int(rng_m.group(1)) if rng_m else (int(yr_matches[0]) if len(yr_matches) > 1 else None)
+            end_yr = int(rng_m.group(2)) if rng_m else (int(cue_m.group(1)) if cue_m else (int(yr_matches[-1]) if yr_matches else None))
+
+            cgpa = extract_grade(cl_line)
+            if not cgpa:
+                pct_m = re.search(r"\bpercentage[\s:]*([0-9.]+%?)", cl_line, re.IGNORECASE) or re.search(r"\b([0-9.]+)%", cl_line)
+                if pct_m:
+                    cgpa = pct_m.group(1) if "%" in pct_m.group(1) else f"{pct_m.group(1)}%"
+
+            stated_yr = parse_academic_year(cl_line, start_yr, end_yr)
+
+            if is_edu_header:
+                split_line, edu_note, note_yr = education_line_parts(cl_line)
                 inst, deg = _split_education_line(split_line)
-                if edu_note:
-                    education_notes[f"education_note_{len(edu_list) + 1}"] = edu_note
-
-                year_match = re.findall(r"\b(20\d\d)\b", line_clean)
-                start_yr = int(year_match[0]) if len(year_match) > 1 else None
-                end_yr = int(year_match[-1]) if year_match else None
-
-                cgpa = extract_grade(line_clean)
+                active_note = edu_note or (f"{stated_yr or note_yr} year" if (stated_yr or note_yr) else None)
+                if active_note:
+                    education_notes[f"education_note_{len(edu_list) + 1}"] = active_note
 
                 edu_list.append(
                     ResumeEducationItem(
@@ -878,6 +887,16 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
                         evidence_classification="SOURCE_DOCUMENT",
                     )
                 )
+            elif edu_list:
+                curr = edu_list[-1]
+                if start_yr and not curr.start_year:
+                    curr.start_year = start_yr
+                if end_yr and not curr.end_year:
+                    curr.end_year = end_yr
+                if cgpa and not curr.cgpa_or_grade:
+                    curr.cgpa_or_grade = cgpa
+                if stated_yr:
+                    education_notes[f"education_note_{len(edu_list)}"] = f"{stated_yr} year"
 
         elif current_section in ("experience", "internships"):
             is_intern = current_section == "internships" or "intern" in line_low
@@ -1079,7 +1098,8 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
     if not skills:
         common_tech = ["Python", "JavaScript", "React", "Node.js", "PostgreSQL", "FastAPI", "PyTorch", "Docker", "Git", "SQL", "C++", "Java"]
         for tech in common_tech:
-            if re.search(r"\b" + re.escape(tech) + r"\b", raw_text, re.IGNORECASE):
+            if tech.lower() not in seen_skills_lower and re.search(r"\b" + re.escape(tech) + r"\b", raw_text, re.IGNORECASE):
+                seen_skills_lower.add(tech.lower())
                 skills.append(tech)
 
     edu_list = merge_split_education_items(edu_list)
@@ -1419,7 +1439,7 @@ def generate_resume_docx(
             years = f" ({edu.start_year or ''} - {edu.end_year or 'Present'})" if (edu.start_year or edu.end_year) else ""
             p.add_run(years)
             grade = f" | CGPA: {edu.cgpa_or_grade}" if edu.cgpa_or_grade else ""
-            spec = f" in {edu.field_of_study}" if edu.field_of_study else ""
+            spec = f" in {edu.field_of_study}" if edu.field_of_study and edu.field_of_study.lower() not in (edu.degree or "").lower() else ""
             p_sub = doc.add_paragraph(f"{edu.degree}{spec}{grade}")
             p_sub.paragraph_format.space_after = Pt(4)
 
