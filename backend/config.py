@@ -100,6 +100,8 @@ class Settings(BaseSettings):
 
     # --- Tavily Search API ---
     TAVILY_API_KEY: str = ""
+    # Optional read-only GitHub token for the GitHub Intelligence feature (raises the API limit from 60 to 5000 per hour); never logged or returned.
+    GITHUB_TOKEN: str = ""
     TAVILY_ENABLED: bool = False  # Disabled pending explicit team sign-off
     TAVILY_ABSTAIN_FIRST: bool = True
     TAVILY_SEARCH_DEPTH: str = "basic"  # ultra-fast | fast | basic | advanced

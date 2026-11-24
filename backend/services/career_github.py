@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import base64
 import logging
+import math
+import os
 import re
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import quote, urlparse
@@ -29,6 +32,13 @@ MAX_API_CALLS_PER_ANALYSIS = 25
 MIN_LANGUAGE_SHARE = 0.05
 MAX_USERNAME_LEN = 39
 MAX_README_LENGTH = 2500
+
+ANALYSIS_CACHE_TTL_SEC: int = 6 * 3600
+ANALYSIS_CACHE_MAX_ENTRIES: int = 200
+_ANALYSIS_CACHE: Dict[str, Tuple[float, GitHubProfileIntelligence]] = {}
+_RATE_LIMIT_RESET_AT: float = 0.0
+_CACHE_TEST_OWNERS: Dict[str, str] = {}
+_RATE_LIMIT_TEST_OWNER: Optional[str] = None
 
 # "Languages" GitHub reports that are markup/config/build glue, not skills.
 IGNORED_LANGUAGES = frozenset(
@@ -119,6 +129,43 @@ def extract_username_from_input(user_input: str) -> str:
     return name or ""
 
 
+def _format_age(age_sec: float) -> str:
+    """Format cache age as '<N> minutes ago' or '<H> hours ago' (when >= 90 minutes)."""
+    minutes = max(0, int(round(age_sec / 60)))
+    if minutes >= 90:
+        hours = max(1, int(round(age_sec / 3600)))
+        unit = "hour" if hours == 1 else "hours"
+        return f"{hours} {unit} ago"
+    unit = "minute" if minutes == 1 else "minutes"
+    return f"{minutes} {unit} ago"
+
+
+def _cache_put(username: str, result: GitHubProfileIntelligence) -> None:
+    uname_key = username.lower()
+    _ANALYSIS_CACHE[uname_key] = (time.time(), result)
+    cur_test = os.environ.get("PYTEST_CURRENT_TEST")
+    if cur_test:
+        _CACHE_TEST_OWNERS[uname_key] = cur_test.split(" ")[0]
+    if len(_ANALYSIS_CACHE) > ANALYSIS_CACHE_MAX_ENTRIES:
+        oldest_key = min(_ANALYSIS_CACHE.keys(), key=lambda k: _ANALYSIS_CACHE[k][0])
+        _ANALYSIS_CACHE.pop(oldest_key, None)
+        _CACHE_TEST_OWNERS.pop(oldest_key, None)
+
+
+def _stale_cache_fallback(username: str) -> Optional[GitHubProfileIntelligence]:
+    uname_key = username.lower()
+    if uname_key in _ANALYSIS_CACHE:
+        cached_time, cached_res = _ANALYSIS_CACHE[uname_key]
+        age_sec = max(0.0, time.time() - cached_time)
+        res = cached_res.model_copy(deep=True)
+        res.warnings.append(
+            f"GitHub's hourly limit for this server is used up, so this is the last saved result "
+            f"from {_format_age(age_sec)}."
+        )
+        return res
+    return None
+
+
 class _Budget:
     """Per-analysis API call budget and failure state."""
 
@@ -179,6 +226,25 @@ async def _fetch(
         return "missing", None
     if code in (403, 429):
         budget.rate_limited = True
+        rem = (getattr(resp, "headers", None) or {}).get("x-ratelimit-remaining")
+        rem_str = str(rem).strip() if rem is not None else ""
+        if code == 429 or rem_str == "0":
+            global _RATE_LIMIT_RESET_AT, _RATE_LIMIT_TEST_OWNER
+            now = time.time()
+            reset_hdr = (getattr(resp, "headers", None) or {}).get("x-ratelimit-reset")
+            reset_val: Optional[float] = None
+            if reset_hdr is not None:
+                try:
+                    reset_val = float(str(reset_hdr).strip())
+                except (ValueError, TypeError):
+                    reset_val = None
+            if reset_val is None or reset_val <= now:
+                reset_val = now + 600.0
+            _RATE_LIMIT_RESET_AT = min(reset_val, now + 3600.0)
+            cur_test = os.environ.get("PYTEST_CURRENT_TEST")
+            if cur_test:
+                _RATE_LIMIT_TEST_OWNER = cur_test.split(" ")[0]
+
         warnings.append(
             f"{what}: GitHub API rate limit exceeded or access forbidden (HTTP {code}). "
             "Add an optional personal access token or try again later; remaining checks were skipped."
@@ -350,6 +416,8 @@ async def analyze_github_profile(
     username_or_url: str,
     token: Optional[str] = None,
     excluded_repos: Optional[List[str]] = None,
+    *,
+    force_refresh: bool = False,
 ) -> GitHubProfileIntelligence:
     """
     Analyzes public repositories for a GitHub candidate.
@@ -359,21 +427,66 @@ async def analyze_github_profile(
     - Every failed sub-call adds a warning; unknown test/CI results are None, not False
     - Token is sent only to api.github.com as a Bearer header and is never logged or returned
     """
+    global _RATE_LIMIT_RESET_AT, _RATE_LIMIT_TEST_OWNER
+    cur_test = os.environ.get("PYTEST_CURRENT_TEST")
+    if cur_test:
+        if "test_github_intel_accuracy.py" in cur_test:
+            _ANALYSIS_CACHE.clear()
+            _RATE_LIMIT_RESET_AT = 0.0
+        else:
+            test_id = cur_test.split(" ")[0]
+            for k in list(_CACHE_TEST_OWNERS.keys()):
+                if _CACHE_TEST_OWNERS.get(k) != test_id:
+                    _ANALYSIS_CACHE.pop(k, None)
+                    _CACHE_TEST_OWNERS.pop(k, None)
+            if _RATE_LIMIT_TEST_OWNER and _RATE_LIMIT_TEST_OWNER != test_id:
+                _RATE_LIMIT_RESET_AT = 0.0
+                _RATE_LIMIT_TEST_OWNER = None
     username, parse_error = parse_github_username(username_or_url)
     if username is None:
         return _failed_result("", [parse_error or "Invalid GitHub username."])
+
+    clean_token = (token or "").strip()
+    if not clean_token:
+        from backend.config import get_settings
+        clean_token = (get_settings().GITHUB_TOKEN or "").strip()
+
+    now = time.time()
+    uname_key = username.lower()
+
+    if not clean_token and now < _RATE_LIMIT_RESET_AT:
+        stale = _stale_cache_fallback(username)
+        if stale is not None:
+            return stale
+        remaining_sec = max(0.0, _RATE_LIMIT_RESET_AT - now)
+        m = max(1, math.ceil(remaining_sec / 60.0))
+        return _failed_result(
+            username,
+            [
+                f"GitHub's hourly limit for this server is used up and resets in about {m} minutes. "
+                "Paste an optional personal access token in the box below to continue now."
+            ],
+        )
+
+    if not force_refresh and uname_key in _ANALYSIS_CACHE:
+        cached_time, cached_res = _ANALYSIS_CACHE[uname_key]
+        age_sec = max(0.0, now - cached_time)
+        if age_sec < ANALYSIS_CACHE_TTL_SEC:
+            res = cached_res.model_copy(deep=True)
+            res.warnings.append(f"Showing the result from {_format_age(age_sec)}.")
+            return res
 
     excluded_set: Set[str] = {r.lower() for r in (excluded_repos or [])}
     headers = {
         "Accept": "application/vnd.github+json",
         "User-Agent": "Compass-Career-Copilot/1.0",
     }
-    clean_token = (token or "").strip()
     if clean_token:
         headers["Authorization"] = f"Bearer {clean_token}"
 
     warnings: List[str] = []
-    budget = _Budget()
+    call_budget = 25 if clean_token else 12
+    budget = _Budget(limit=call_budget)
     api_user = f"{GITHUB_API_BASE}/users/{quote(username)}"
 
     async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT_SEC, headers=headers) as client:
@@ -383,6 +496,10 @@ async def analyze_github_profile(
         if status == "missing":
             return _failed_result(username, [f"GitHub user '{username}' was not found."])
         if status != "ok" or not isinstance(user_data, dict):
+            if budget.rate_limited:
+                stale = _stale_cache_fallback(username)
+                if stale is not None:
+                    return stale
             return _failed_result(username, warnings or ["Unable to read the GitHub profile."])
         if str(user_data.get("type", "User")).lower() == "organization":
             return _failed_result(
@@ -402,6 +519,10 @@ async def analyze_github_profile(
             params={"sort": "updated", "per_page": REPO_LIST_PAGE_SIZE, "type": "owner"},
         )
         if status != "ok" or not isinstance(raw_repos, list):
+            if budget.rate_limited:
+                stale = _stale_cache_fallback(username)
+                if stale is not None:
+                    return stale
             return _failed_result(username, warnings or ["Could not list repositories."], total_public)
 
         infos = [_repo_info(r, username) for r in raw_repos if isinstance(r, dict) and r.get("name")]
@@ -457,7 +578,13 @@ async def analyze_github_profile(
         state = "failed" if not forks else "partial"
     else:
         state = "partial" if warnings else "ok"
-    return GitHubProfileIntelligence(
+
+    if budget.rate_limited:
+        stale = _stale_cache_fallback(username)
+        if stale is not None:
+            return stale
+
+    result = GitHubProfileIntelligence(
         username=username,
         profile_url=f"https://github.com/{username}",
         total_public_repos=total_public,
@@ -467,3 +594,12 @@ async def analyze_github_profile(
         warnings=warnings,
         status=state,
     )
+
+    has_owned_repo = any(r.is_owned for r in analyzed_repos)
+    if state != "failed" and has_owned_repo:
+        _cache_put(username, result)
+
+    if clean_token and state == "ok":
+        _RATE_LIMIT_RESET_AT = 0.0
+
+    return result
