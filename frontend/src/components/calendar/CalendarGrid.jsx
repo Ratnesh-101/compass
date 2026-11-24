@@ -1,5 +1,21 @@
 import React from 'react'
 import { ChevronLeft, ChevronRight, Zap, RefreshCw, Calendar, Check, Clock } from 'lucide-react'
+import { formatLocalTime, localDateKey, minutesSinceLocalMidnight, parseApiInstant } from '../../utils/localTime'
+
+function getLocalEventPosition(startIso, endIso) {
+  try {
+    const startMinutes = minutesSinceLocalMidnight(startIso)
+    const endMinutes = minutesSinceLocalMidnight(endIso)
+    const gridStart = 8 * 60
+    const gridEnd = 20 * 60
+    const totalMinutes = gridEnd - gridStart
+    const top = Math.max(0, ((startMinutes - gridStart) / totalMinutes) * 100)
+    const height = Math.max(4, ((endMinutes - startMinutes) / totalMinutes) * 100)
+    return { top: `${top}%`, height: `${height}%` }
+  } catch {
+    return { top: '0%', height: '10%' }
+  }
+}
 
 const iconBtnStyle = {
   background: 'var(--bg-card)',
@@ -154,7 +170,7 @@ export function CalendarGrid({
                   ))}
 
                   {dayBusy.map(ev => {
-                    const pos = getEventPosition(ev.start, ev.end)
+                    const pos = (ev.start && ev.end) ? getLocalEventPosition(ev.start, ev.end) : getEventPosition(ev.start, ev.end)
                     const isSimulated = !isLive || ev.is_simulated || ev.source === 'google_calendar_simulated' || (ev.title && (ev.title.includes('(demo simulation)') || ev.title.includes('demo')))
                     return (
                       <div key={ev.id} style={{
@@ -178,7 +194,7 @@ export function CalendarGrid({
                   })}
 
                   {dayEvents.map(t => {
-                    const pos = getEventPosition(t.scheduled_start, t.scheduled_end)
+                    const pos = (t.scheduled_start && t.scheduled_end) ? getLocalEventPosition(t.scheduled_start, t.scheduled_end) : getEventPosition(t.scheduled_start, t.scheduled_end)
                     const s = getCalendarDomainStyle(t.domain)
                     return (
                       <div key={t.id} style={{
@@ -193,7 +209,7 @@ export function CalendarGrid({
                           </span>
                         </div>
                         <div style={{ fontSize: '10px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '1px' }}>
-                          <span>{t.scheduled_start.slice(11, 16)}</span>
+                          <span>{formatLocalTime(t.scheduled_start)}</span>
                           {isLive ? <Check size={10} strokeWidth={1.8} /> : <Clock size={10} strokeWidth={1.8} />}
                         </div>
                       </div>
@@ -204,7 +220,7 @@ export function CalendarGrid({
             })}
           </div>
 
-          {allScheduledTasks.filter(t => weekDays.some(d => toIso(d) === t.scheduled_start.split('T')[0])).length === 0 && (
+          {allScheduledTasks.filter(t => weekDays.some(d => toIso(d) === localDateKey(t.scheduled_start))).length === 0 && (
             <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)' }}>
               <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '8px' }}>
                 <Calendar size={28} strokeWidth={1.8} style={{ color: 'var(--text-muted)' }} />
@@ -224,15 +240,19 @@ export function CalendarGrid({
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {allScheduledTasks
                 .slice()
-                .sort((a, b) => new Date(a.scheduled_start) - new Date(b.scheduled_start))
+                .sort((a, b) => {
+                  const ta = parseApiInstant(a.scheduled_start)?.getTime() || 0
+                  const tb = parseApiInstant(b.scheduled_start)?.getTime() || 0
+                  return ta - tb
+                })
                 .map(t => {
                   const s = getCalendarDomainStyle(t.domain)
-                  const start = new Date(t.scheduled_start)
+                  const start = parseApiInstant(t.scheduled_start)
                   return (
                     <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: '14px', padding: '12px 14px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-card, 8px)' }}>
                       <div style={{ width: '70px', flexShrink: 0, textAlign: 'center' }}>
-                        <div style={{ fontSize: '12px', color: 'var(--text-primary)', fontWeight: '600' }}>{start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div>
-                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{t.scheduled_start.slice(11, 16)} UTC</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-primary)', fontWeight: '600' }}>{start ? start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ''}</div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{formatLocalTime(t.scheduled_start)}</div>
                       </div>
                       <span className="domain-swatch" style={{ background: s.accent }} />
                       <div style={{ flex: 1, minWidth: 0 }}>
