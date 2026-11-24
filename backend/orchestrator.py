@@ -204,7 +204,7 @@ async def _handle_message_core(
         from backend.skills.registry import SKILL_REGISTRY
         allowed_tools = frozenset(SKILL_REGISTRY.keys()) | {
             "add_task", "undo", "agent",
-            "pending_action_confirm", "pending_action_cancel", "chat_delete_task",
+            "pending_action_confirm", "pending_action_cancel", "chat_delete_task", "chat_task_action",
         }
         import inspect
         sig = inspect.signature(route_message)
@@ -262,6 +262,10 @@ async def _handle_message_core(
             memory_context=memory_context if memory_context else None,
             **route_kwargs,
         )
+    from backend.services.chat_task_actions import parse_task_action_intent
+    _task_intent = parse_task_action_intent(message)
+    if _task_intent:
+        skill_name, args, text_reply = "chat_task_action", _task_intent, ""
     effective_user_id = user_id or guest_id
     if effective_user_id and isinstance(args, dict):
         args["user_id"] = effective_user_id
@@ -335,6 +339,9 @@ async def _handle_message_core(
                                     deleted = await soft_delete_tasks(conn, [selected_id], owner_identity)
                             if not claimed:
                                 active_action = None
+                    elif act_type and ("complete_task" in act_type or "reschedule_task" in act_type):
+                        from backend.services.chat_task_actions import execute_pending_task_action
+                        intake_result = await execute_pending_task_action(conn, active_action, owner_identity, message)
 
         if intake_result is not None:
             resp_msg, ret_data, success = intake_result
@@ -545,6 +552,15 @@ async def _handle_message_core(
             "verifiable": False,
             "routing_latency_ms": int((time.perf_counter() - start_time) * 1000),
         }
+
+    # 2cc. Skill Execution: chat_task_action
+    if skill_name == "chat_task_action":
+        from backend.services.chat_task_actions import handle_chat_task_action
+        return await handle_chat_task_action(
+            args=args if isinstance(args, dict) else {}, message=message, conv_id=conv_id,
+            owner_identity=owner_identity, pool=active_pool, persist=persist, start_time=start_time,
+            user_id=user_id, guest_id=guest_id, include_demo=include_demo,
+        )
 
     # 2d. Skill Execution: undo
     if skill_name == "undo":
