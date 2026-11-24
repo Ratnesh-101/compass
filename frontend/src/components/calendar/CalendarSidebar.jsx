@@ -1,5 +1,6 @@
 import React from 'react'
 import { ChevronLeft, ChevronRight, Clock } from 'lucide-react'
+import { formatLocalTimeRange, getLocalTimeZone } from '../../utils/localTime'
 
 const iconBtnStyle = {
   background: 'none',
@@ -144,13 +145,16 @@ export function CalendarSidebar({
 
       {/* Selected day panel */}
       <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-card, 8px)', padding: '14px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
           <div style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-muted)', letterSpacing: '0.06em' }}>
             {selectedDateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase()}
           </div>
           <div style={{ fontSize: '11px', fontWeight: '500', color: 'var(--text-secondary)', background: 'var(--bg-card-soft)', border: '1px solid var(--border)', padding: '2px 8px', borderRadius: 'var(--radius-btn, 6px)' }}>
             {scheduledForDay(selectedDate).length} event{scheduledForDay(selectedDate).length === 1 ? '' : 's'}
           </div>
+        </div>
+        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '10px' }}>
+          Times shown in your local time ({getLocalTimeZone()})
         </div>
         {scheduledForDay(selectedDate).length === 0 ? (
           <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>No scheduled tasks this day.</div>
@@ -166,7 +170,7 @@ export function CalendarSidebar({
                   </div>
                   <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
                     <Clock size={11} strokeWidth={1.8} />
-                    <span>{t.scheduled_start.slice(11, 16)} - {t.scheduled_end.slice(11, 16)} UTC · {t.duration_minutes || 60}m</span>
+                    <span>{formatLocalTimeRange(t.scheduled_start, t.scheduled_end)} · {t.duration_minutes || 60}m</span>
                   </div>
                 </div>
               )

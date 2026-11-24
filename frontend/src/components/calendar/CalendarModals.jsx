@@ -3,11 +3,13 @@ import { getCalendarExportUrl, quickConnectUser, fetchCalendarStatus, downloadAu
 
 import { Zap, X, Check, Calendar, Download, ExternalLink } from 'lucide-react'
 import { planCommitState } from '../../utils/scheduleHonesty'
+import { localDateKey, formatLocalTime, getLocalTimeZone } from '../../utils/localTime'
 import Dialog from '../Dialog'
 
 export function ProposedPlanModal({ proposedPlan, onClose, onCommit, committing }) {
   if (!proposedPlan) return null
   const { canCommit, reasons } = planCommitState(proposedPlan)
+  const localTz = getLocalTimeZone()
 
   return (
     <Dialog onClose={onClose} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(27, 26, 23, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(3px)' }}>
@@ -22,6 +24,9 @@ export function ProposedPlanModal({ proposedPlan, onClose, onCommit, committing 
           </button>
         </div>
         <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.5', margin: 0 }}>{proposedPlan.summary}</p>
+        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+          Times shown in your local time ({localTz})
+        </div>
         <div style={{ maxHeight: '260px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', background: 'var(--bg-card-soft)', padding: '12px', borderRadius: 'var(--radius-card, 8px)', border: '1px solid var(--border)' }}>
           {proposedPlan.scheduled && proposedPlan.scheduled.map(s => (
             <div key={s.task_id} style={{ padding: '8px 12px', borderRadius: 'var(--radius-btn, 6px)', background: 'var(--bg-card)', border: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -30,7 +35,7 @@ export function ProposedPlanModal({ proposedPlan, onClose, onCommit, committing 
                 <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>Domain: {s.domain} · Duration: {s.duration_minutes}m</div>
               </div>
               <span style={{ fontSize: '12px', color: 'var(--accent)', fontWeight: '600' }}>
-                {s.scheduled_start.slice(0, 10)} {s.scheduled_start.slice(11, 16)} → {s.scheduled_end.slice(11, 16)}
+                {localDateKey(s.scheduled_start)} {formatLocalTime(s.scheduled_start)} → {formatLocalTime(s.scheduled_end)}
               </span>
             </div>
           ))}
