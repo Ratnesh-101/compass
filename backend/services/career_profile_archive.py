@@ -30,12 +30,12 @@ except ImportError:
     def sanitize_external_text(text: Optional[str], max_len: int = 2500) -> str:
         if not text:
             return ""
-        clean = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", text)
+        clean = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", text[:200000])
         return clean[:max_len].strip()
 
 logger = logging.getLogger("compass.services.career_profile_archive")
 
-_YEAR_RANGE_RE = re.compile(r"\b(19\d\d|20\d\d)\b(?:\s*[-–—]\s*\b(19\d\d|20\d\d)\b)?", re.IGNORECASE)
+_YEAR_RANGE_RE = re.compile(r"\b(19\d\d|20\d\d)\b(?:[ \t]{0,5}[-–—][ \t]{0,5}\b(19\d\d|20\d\d)\b)?", re.IGNORECASE)
 _MAX_SKILLS = 40
 _ALLOWED_ARCHIVE_BASENAMES = {
     "profile.csv", "positions.csv", "education.csv", "skills.csv", "certifications.csv",
@@ -82,7 +82,8 @@ def _build_import_summary(content: ResumeContent) -> str:
 
 
 def _read_csv_dict_rows(text: str, expected_col_keywords: List[str]) -> List[Dict[str, str]]:
-    lines = text.splitlines()
+    text = text[:200000]
+    lines = [line[:2000] for line in text.splitlines()]
     header_idx = -1
     for i, line in enumerate(lines):
         if any(kw in line.lower() for kw in expected_col_keywords):
@@ -100,6 +101,7 @@ def _read_csv_dict_rows(text: str, expected_col_keywords: List[str]) -> List[Dic
 
 
 def _populate_content_from_csv(bname: str, text: str, content: ResumeContent) -> None:
+    text = text[:200000]
     if bname == "profile.csv":
         rows = _read_csv_dict_rows(text, ["first name", "headline", "summary"])
         if rows:
@@ -111,7 +113,7 @@ def _populate_content_from_csv(bname: str, text: str, content: ResumeContent) ->
             content.summary = f"{hl.rstrip('.')}. {sm}" if hl and sm else (hl or sm or content.summary)
             if r.get("geo location", ""):
                 content.location = r.get("geo location", "")
-            for u in re.findall(r"https?://[^\s,;]+", r.get("websites", "")):
+            for u in re.findall(r"https?://[^\s,;]+", (r.get("websites", "") or "")[:2000]):
                 safe = safe_http_url(u)
                 if safe:
                     if ("github" in safe.lower() or "portfolio" in safe.lower()) and not content.github_or_portfolio:
@@ -133,7 +135,9 @@ def _populate_content_from_csv(bname: str, text: str, content: ResumeContent) ->
             deg, field = r.get("degree name", ""), None
             if deg and "," in deg:
                 deg, _, field = deg.partition(",")
-            ym_s, ym_e = _YEAR_RANGE_RE.search(r.get("start date", "")), _YEAR_RANGE_RE.search(r.get("end date", ""))
+            st_date = (r.get("start date", "") or "")[:2000]
+            end_date = (r.get("end date", "") or "")[:2000]
+            ym_s, ym_e = _YEAR_RANGE_RE.search(st_date), _YEAR_RANGE_RE.search(end_date)
             content.education.append(ResumeEducationItem(
                 institution=sanitize_external_text(r.get("school name", "")), degree=sanitize_external_text(deg.strip()),
                 field_of_study=sanitize_external_text(field.strip()) if field else None,
@@ -219,6 +223,7 @@ def parse_linkedin_archive_zip(data: bytes) -> Tuple[ResumeContent, List[str]]:
 
 
 def _detect_csv_type(header_line: str) -> Optional[str]:
+    header_line = header_line[:2000]
     h = header_line.lower().replace('"', '').replace("'", "")
     for kw, fname in (
         ("company name", "positions.csv"), ("school name", "education.csv"),
@@ -237,6 +242,7 @@ def _detect_csv_type(header_line: str) -> Optional[str]:
 
 def _parse_linkedin_export_csv(raw_content: str) -> ResumeContent:
     """Parse a single or multi-part concatenated LinkedIn CSV export."""
+    raw_content = raw_content[:200000]
     content = ResumeContent(evidence_classifications={"source": ExternalProfileSource.LINKEDIN_DATA_EXPORT.value})
     lines = raw_content.splitlines()
     header_indices: List[Tuple[int, str]] = []

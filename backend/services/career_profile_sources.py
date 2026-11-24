@@ -37,7 +37,7 @@ except ImportError:
     def sanitize_external_text(text: Optional[str], max_len: int = 2500) -> str:
         if not text:
             return ""
-        clean = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", text)
+        clean = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", text[:200000])
         return clean[:max_len].strip()
 
 try:
@@ -58,29 +58,29 @@ except ImportError:
 
 logger = logging.getLogger("compass.services.career_profile_sources")
 
-_MONTHS = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?"
+_MONTHS = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]{0,10}\.?"
 _DATE_OR_DURATION_RE = re.compile(
-    rf"\b{_MONTHS}\s+(?:19|20)\d\d\b|\b(?:19|20)\d\d\s*[-–—]\s*(?:(?:19|20)\d\d|present)\b"
-    r"|\b\d+\s*(?:yrs?|mos?|years?|months?)\b",
+    rf"\b{_MONTHS}[ \t]+(?:19|20)\d\d\b|\b(?:19|20)\d\d[ \t]{0,5}[-–—][ \t]{0,5}(?:(?:19|20)\d\d|present)\b"
+    r"|\b\d{1,4}[ \t]{0,5}(?:yrs?|mos?|years?|months?)\b",
     re.IGNORECASE,
 )
 _DATE_RANGE_RE = re.compile(
-    rf"\b({_MONTHS}\s+(?:19|20)\d\d|(?:19|20)\d\d)\s*[-–—]\s*({_MONTHS}\s+(?:19|20)\d\d|(?:19|20)\d\d|[Pp]resent)\b",
+    rf"\b({_MONTHS}[ \t]{1,5}(?:19|20)\d\d|(?:19|20)\d\d)[ \t]{0,5}[-–—][ \t]{0,5}({_MONTHS}[ \t]{1,5}(?:19|20)\d\d|(?:19|20)\d\d|[Pp]resent)\b",
     re.IGNORECASE,
 )
-_YEAR_RANGE_RE = re.compile(r"\b(19\d\d|20\d\d)\b(?:\s*[-–—]\s*\b(19\d\d|20\d\d)\b)?", re.IGNORECASE)
-_EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
-_PHONE_LABEL_RE = re.compile(r"\s*\((?:Mobile|Home|Work|Direct)\)", re.IGNORECASE)
+_YEAR_RANGE_RE = re.compile(r"\b(19\d\d|20\d\d)\b(?:[ \t]{0,5}[-–—][ \t]{0,5}\b(19\d\d|20\d\d)\b)?", re.IGNORECASE)
+_EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,255}\.[A-Za-z]{2,63}\b")
+_PHONE_LABEL_RE = re.compile(r"\((?:Mobile|Home|Work|Direct)\)", re.IGNORECASE)
 _PHONE_RE = re.compile(
-    r"(?:(?:\+|00)\d{1,3}[\s.-]?)?(?:\(?\d{2,5}\)?[\s.-]?)?\d{3,5}[\s.-]?\d{3,5}(?:\s*\((?:Mobile|Home|Work|Direct)\))?",
+    r"(?:(?:\+|00)\d{1,3}[\s.-]?)?(?:\(?\d{2,5}\)?[\s.-]?)?\d{3,5}[\s.-]?\d{3,5}(?:[ \t]?\((?:Mobile|Home|Work|Direct)\))?",
     re.IGNORECASE,
 )
-_LINKEDIN_URL_RE = re.compile(r"(?:https?://)?(?:[a-z]{2,3}\.)?linkedin\.com/in/([a-zA-Z0-9_\-%]+)", re.IGNORECASE)
-_GITHUB_URL_RE = re.compile(r"(?:https?://)?(?:www\.)?github\.com/([a-zA-Z0-9_\-]+)", re.IGNORECASE)
+_LINKEDIN_URL_RE = re.compile(r"(?:https?://)?(?:[a-z]{2,3}\.)?linkedin\.com/in/([a-zA-Z0-9_\-%]{1,100})", re.IGNORECASE)
+_GITHUB_URL_RE = re.compile(r"(?:https?://)?(?:www\.)?github\.com/([a-zA-Z0-9_\-]{1,100})", re.IGNORECASE)
 _PORTFOLIO_LABELS_RE = re.compile(r"\((?:Portfolio|Personal Website|Blog|Website)\)", re.IGNORECASE)
-_FOOTER_RE = re.compile(r"^(?:page\s+\d+\s+of\s+\d+|\d+\s*/\s*\d+)$", re.IGNORECASE)
+_FOOTER_RE = re.compile(r"^(?:page[ \t]{1,5}\d{1,5}[ \t]{1,5}of[ \t]{1,5}\d{1,5}|\d{1,5}[ \t]{0,5}/[ \t]{0,5}\d{1,5})$", re.IGNORECASE)
 _LANG_PROFICIENCY_RE = re.compile(
-    r"\((?:Native(?:\s+or\s+Bilingual)?|Full Professional|Professional Working|Limited Working|Elementary)\)",
+    r"\((?:Native(?:[ \t]{1,5}or[ \t]{1,5}Bilingual)?|Full Professional|Professional Working|Limited Working|Elementary)\)",
     re.IGNORECASE,
 )
 _PROFICIENCY_WORDS = {
@@ -91,7 +91,7 @@ _PARTICLES = {"de", "van", "von", "bin", "al", "del", "da", "di", "la", "le", "d
 _CERT_KEYWORDS = {"practitioner", "certified", "certificate", "certification", "credential", "license"}
 _COUNTRY_ENDINGS = ("india", "usa", "united states", "uk", "canada", "germany", "singapore")
 _URL_LIKE_RE = re.compile(
-    r"(?:https?://|www\.|\b[a-z0-9_\-]+\.(?:com|org|net|edu|gov|io|ai|co|dev|me|info|app|so|tech)\b|[a-z0-9_\-]+\.[a-z]{2,}/)",
+    r"(?:https?://|www\.|\b[a-z0-9_\-]{1,63}\.(?:com|org|net|edu|gov|io|ai|co|dev|me|info|app|so|tech)\b|\b[a-z0-9_\-]{1,63}\.[a-z]{2,63}/)",
     re.IGNORECASE,
 )
 
@@ -122,10 +122,12 @@ _MAX_TITLE_LENGTH, _MAX_SKILL_LENGTH, _MAX_SKILLS = 70, 35, 40
 
 
 def _is_date_or_duration_line(line: str) -> bool:
+    line = line[:2000]
     return bool(_DATE_OR_DURATION_RE.search(line))
 
 
 def _extract_dates_from_line(line: str) -> Tuple[Optional[str], Optional[str], bool]:
+    line = line[:2000]
     m = _DATE_RANGE_RE.search(line)
     if m:
         s, e = m.group(1).strip(), m.group(2).strip()
@@ -145,6 +147,7 @@ def _words(line: str) -> Set[str]:
 
 
 def _split_skill_tokens(text: str) -> List[str]:
+    text = text[:2000]
     cleaned = [tok.strip(" -:*•") for tok in re.split(r"[,•|]+", text)]
     return [c for c in cleaned if c and 1 < len(c) < _MAX_SKILL_LENGTH]
 
@@ -162,6 +165,7 @@ def _split_role_company(line: str) -> Tuple[str, str]:
 
 
 def _is_proficiency_line(line: str) -> bool:
+    line = line[:2000]
     clean = line.strip().lower()
     if not clean:
         return False
@@ -233,19 +237,21 @@ def _looks_like_location(line: str) -> bool:
 
 
 def _is_footer_line(line: str, full_name: str = "") -> bool:
+    line = line[:2000]
     clean = line.strip()
     if not clean or _FOOTER_RE.match(clean):
         return True
-    if re.search(r"\bpage\s+\d+\s+(?:of\s+\d+|\d+)\b", clean, re.IGNORECASE):
+    if re.search(r"\bpage[ \t]{1,5}\d{1,5}[ \t]{1,5}(?:of[ \t]{1,5}\d{1,5}|\d{1,5})\b", clean, re.IGNORECASE):
         return True
     if full_name and clean.lower() == full_name.lower():
         return True
-    return bool(full_name and re.match(rf"^{re.escape(full_name)}\s*[-–—|]?\s*page\s+\d+", clean, re.IGNORECASE))
+    return bool(full_name and re.match(rf"^{re.escape(full_name)}[ \t]{0,5}(?:[-–—|][ \t]{0,5})?page[ \t]{1,5}\d{1,5}", clean, re.IGNORECASE))
 
 
 def _extract_phone_from_text(text: str) -> Optional[str]:
+    text = text[:200000]
     for line in text.splitlines():
-        clean = line.strip()
+        clean = line.strip()[:2000]
         if not clean or _is_date_or_duration_line(clean):
             continue
         m = _PHONE_RE.search(clean)
@@ -259,6 +265,7 @@ def _extract_phone_from_text(text: str) -> Optional[str]:
 
 
 def _extract_linkedin_url_from_text(text: str) -> Optional[str]:
+    text = text[:200000]
     m = _LINKEDIN_URL_RE.search(text)
     if m:
         slug = m.group(1).rstrip("/").removesuffix("(LinkedIn)").strip()
@@ -268,10 +275,11 @@ def _extract_linkedin_url_from_text(text: str) -> Optional[str]:
 
 
 def _extract_links_from_text(text: str) -> Tuple[Optional[str], List[str]]:
+    text = text[:200000]
     github_or_portfolio: Optional[str] = None
     relevant_links: List[str] = []
     for raw_line in text.splitlines():
-        line = raw_line.strip()
+        line = raw_line.strip()[:2000]
         if not line:
             continue
         gm = _GITHUB_URL_RE.search(line)
@@ -300,6 +308,7 @@ def _extract_links_from_text(text: str) -> Tuple[Optional[str], List[str]]:
 
 
 def _parse_education_line(line: str, education: List[ResumeEducationItem]) -> None:
+    line = line[:2000]
     if _is_footer_line(line):
         return
     ym = _YEAR_RANGE_RE.search(line)
@@ -344,8 +353,9 @@ def parse_pasted_linkedin_text(raw_text: str) -> Tuple[ResumeContent, List[str]]
     Extracts structured Experience, Internships, Education, Skills, Projects, Certifications,
     Awards, Publications, Volunteering, Summary, Contact details, and URLs.
     """
+    raw_text = raw_text[:200000]
     notes: List[str] = ["Source: User-pasted LinkedIn profile data"]
-    lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+    lines = [line.strip()[:2000] for line in raw_text.splitlines() if line.strip()]
     full_name, headline, location = "", "", ""
     name_line_indices: Set[int] = set()
     summary_lines: List[str] = []
@@ -661,7 +671,8 @@ def ingest_external_profile(request: ExternalProfileImportRequest) -> Tuple[Resu
         except csv.Error:
             return parse_pasted_linkedin_text(request.raw_content)
     if request.source_type == ExternalProfileSource.PORTFOLIO_SITE:
-        urls = [u for u in (safe_http_url(f) for f in re.findall(r"https?://[^\s]+", request.raw_content)) if u]
+        content_text = (request.raw_content or "")[:200000]
+        urls = [u for u in (safe_http_url(f) for f in re.findall(r"https?://[^\s]+", content_text)) if u]
         content = ResumeContent(
             github_or_portfolio=safe_http_url(request.source_url) or (urls[0] if urls else None),
             relevant_links=urls,
