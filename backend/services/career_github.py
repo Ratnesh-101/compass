@@ -169,10 +169,12 @@ def _stale_cache_fallback(username: str) -> Optional[GitHubProfileIntelligence]:
 class _Budget:
     """Per-analysis API call budget and failure state."""
 
-    def __init__(self, limit: int = MAX_API_CALLS_PER_ANALYSIS):
+    def __init__(self, limit: int = MAX_API_CALLS_PER_ANALYSIS, has_token: bool = False):
         self.limit = limit
+        self.has_token = has_token
         self.calls = 0
         self.rate_limited = False
+        self.rate_limit_warned = False
         self.exhausted_warned = False
         self.remaining_header: Optional[int] = None
 
@@ -226,40 +228,58 @@ async def _fetch(
         return "missing", None
     if code in (403, 429):
         budget.rate_limited = True
+        now = time.time()
+        reset_hdr = (getattr(resp, "headers", None) or {}).get("x-ratelimit-reset")
+        reset_val: Optional[float] = None
+        if reset_hdr is not None:
+            try:
+                reset_val = float(str(reset_hdr).strip())
+            except (ValueError, TypeError):
+                reset_val = None
+
         rem = (getattr(resp, "headers", None) or {}).get("x-ratelimit-remaining")
         rem_str = str(rem).strip() if rem is not None else ""
         if code == 429 or rem_str == "0":
             global _RATE_LIMIT_RESET_AT, _RATE_LIMIT_TEST_OWNER
-            now = time.time()
-            reset_hdr = (getattr(resp, "headers", None) or {}).get("x-ratelimit-reset")
-            reset_val: Optional[float] = None
-            if reset_hdr is not None:
-                try:
-                    reset_val = float(str(reset_hdr).strip())
-                except (ValueError, TypeError):
-                    reset_val = None
-            if reset_val is None or reset_val <= now:
-                reset_val = now + 600.0
-            _RATE_LIMIT_RESET_AT = min(reset_val, now + 3600.0)
+            cooldown_val = reset_val if (reset_val is not None and reset_val > now) else (now + 600.0)
+            _RATE_LIMIT_RESET_AT = min(cooldown_val, now + 3600.0)
             cur_test = os.environ.get("PYTEST_CURRENT_TEST")
             if cur_test:
                 _RATE_LIMIT_TEST_OWNER = cur_test.split(" ")[0]
 
-        warnings.append(
-            f"{what}: GitHub API rate limit exceeded or access forbidden (HTTP {code}). "
-            "Add an optional personal access token or try again later; remaining checks were skipped."
-        )
+        if not budget.rate_limit_warned:
+            budget.rate_limit_warned = True
+            n_minutes: Optional[int] = None
+            if reset_val is not None and reset_val > now:
+                n_minutes = max(1, math.ceil((reset_val - now) / 60.0))
+            reset_phrase = f"in about {n_minutes} minutes" if n_minutes is not None else "in under an hour"
+            if budget.has_token:
+                warnings.append(
+                    f"Your token's hourly limit was reached part-way, so some repositories were not checked. "
+                    f"It resets {reset_phrase}."
+                )
+            else:
+                warnings.append(
+                    f"GitHub's hourly limit for this server was reached part-way, so some repositories were not checked. "
+                    f"It resets {reset_phrase}. Paste an optional personal access token in the box below to continue now."
+                )
         return "failed", None
     warnings.append(f"{what}: GitHub API returned error status {code}.")
     return "failed", None
 
 
 def _failed_result(username: str, warnings: List[str], total: int = 0) -> GitHubProfileIntelligence:
+    deduped: List[str] = []
+    seen: Set[str] = set()
+    for w in warnings:
+        if w not in seen:
+            seen.add(w)
+            deduped.append(w)
     return GitHubProfileIntelligence(
         username=username or "unknown",
         profile_url=f"https://github.com/{username}" if username else "https://github.com",
         total_public_repos=total,
-        warnings=warnings,
+        warnings=deduped,
         evidence_summary="No repositories could be analyzed.",
         status="failed",
     )
@@ -486,7 +506,7 @@ async def analyze_github_profile(
 
     warnings: List[str] = []
     call_budget = 25 if clean_token else 12
-    budget = _Budget(limit=call_budget)
+    budget = _Budget(limit=call_budget, has_token=bool(clean_token))
     api_user = f"{GITHUB_API_BASE}/users/{quote(username)}"
 
     async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT_SEC, headers=headers) as client:
@@ -583,6 +603,14 @@ async def analyze_github_profile(
         stale = _stale_cache_fallback(username)
         if stale is not None:
             return stale
+
+    deduped_warnings: List[str] = []
+    seen_warnings: Set[str] = set()
+    for w in warnings:
+        if w not in seen_warnings:
+            seen_warnings.add(w)
+            deduped_warnings.append(w)
+    warnings = deduped_warnings
 
     result = GitHubProfileIntelligence(
         username=username,

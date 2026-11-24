@@ -87,6 +87,55 @@ class ClaimVerificationReport(BaseModel):
     notice: str = ""
 
 
+UNVERIFIABLE_LINK_DOMAINS = (
+    "linkedin.com",
+    "facebook.com",
+    "instagram.com",
+    "x.com",
+    "twitter.com",
+)
+
+
+def _is_unverifiable_link_host(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        return any(host == d or host.endswith("." + d) for d in UNVERIFIABLE_LINK_DOMAINS)
+    except Exception:
+        return False
+
+
+def _cap_word_boundary(text: str, max_len: int = 120) -> str:
+    if len(text) <= max_len:
+        return text
+    cutoff = text[:max_len]
+    if text[max_len].isspace():
+        return cutoff.strip()
+    last_space = cutoff.rfind(" ")
+    if last_space > 0:
+        return cutoff[:last_space].strip()
+    return cutoff.strip()
+
+
+def _clean_claim_text(text: str) -> str:
+    if not text or not isinstance(text, str):
+        return ""
+    s = text.strip()
+    if s.count("(") > s.count(")"):
+        s = s[: s.rfind("(")].strip()
+    if s.count("[") > s.count("]"):
+        s = s[: s.rfind("[")].strip()
+    s = s.rstrip(" ,;:-.")
+    if len(s) > 120:
+        s = _cap_word_boundary(s, 120)
+        if s.count("(") > s.count(")"):
+            s = s[: s.rfind("(")].strip()
+        if s.count("[") > s.count("]"):
+            s = s[: s.rfind("[")].strip()
+        s = s.rstrip(" ,;:-.")
+    return s.strip()
+
+
 def _is_placeholder(val: Optional[str]) -> bool:
     if not val or not isinstance(val, str):
         return True
@@ -117,7 +166,9 @@ def extract_claims(content: ResumeContent) -> list[dict]:
     ) -> bool:
         if len(claims) >= 12:
             return False
-        clean_entity = entity_val.strip().strip('"').strip("'")
+        clean_text = _clean_claim_text(text_val) if kind != "link" else text_val.strip()[:120]
+        clean_entity = _clean_claim_text(entity_val) if kind != "link" else entity_val.strip().strip('"').strip("'")
+        clean_entity = clean_entity.strip('"').strip("'")
         if _is_placeholder(clean_entity):
             return True
         dedup_key = clean_entity.lower()
@@ -127,7 +178,7 @@ def extract_claims(content: ResumeContent) -> list[dict]:
 
         claim_item: Dict[str, Any] = {
             "kind": kind,
-            "text": text_val.strip()[:120],
+            "text": clean_text,
             "entity": clean_entity,
             "query": query_val,
         }
@@ -141,11 +192,12 @@ def extract_claims(content: ResumeContent) -> list[dict]:
     # 1. Education institutions
     for edu in getattr(content, "education", []) or []:
         inst = getattr(edu, "institution", "") or ""
-        if inst and not add_claim(
+        cleaned_inst = _clean_claim_text(inst)
+        if cleaned_inst and not add_claim(
             "education",
-            inst,
-            inst,
-            f'"{inst.strip()}" university OR college',
+            cleaned_inst,
+            cleaned_inst,
+            f'"{cleaned_inst}" university OR college',
             getattr(edu, "degree", None),
         ):
             return claims[:12]
@@ -154,28 +206,32 @@ def extract_claims(content: ResumeContent) -> list[dict]:
     for exp in (getattr(content, "experience", []) or []) + (getattr(content, "internships", []) or []):
         comp = getattr(exp, "company", "") or ""
         role = getattr(exp, "role_title", "") or ""
-        if comp and not add_claim(
+        cleaned_comp = _clean_claim_text(comp)
+        if cleaned_comp and not add_claim(
             "employer",
-            comp,
-            comp,
-            f'"{comp.strip()}" company',
+            cleaned_comp,
+            cleaned_comp,
+            f'"{cleaned_comp}" company',
             role.strip() if role else None,
         ):
             return claims[:12]
 
     # 3. Certifications
     for cert in getattr(content, "certifications", []) or []:
-        if cert and not add_claim("certification", cert, cert, f'"{cert.strip()}" certification'):
+        cleaned_cert = _clean_claim_text(cert) if isinstance(cert, str) else ""
+        if cleaned_cert and not add_claim("certification", cleaned_cert, cleaned_cert, f'"{cleaned_cert}" certification'):
             return claims[:12]
 
     # 4. Awards & Hackathons
     for award in (getattr(content, "awards", []) or []) + (getattr(content, "hackathons", []) or []):
-        if award and not add_claim("award", award, award, f'"{award.strip()}"'):
+        cleaned_award = _clean_claim_text(award) if isinstance(award, str) else ""
+        if cleaned_award and not add_claim("award", cleaned_award, cleaned_award, f'"{cleaned_award}"'):
             return claims[:12]
 
     # 5. Publications
     for pub in getattr(content, "publications", []) or []:
-        if pub and not add_claim("publication", pub, pub, f'"{pub.strip()}"'):
+        cleaned_pub = _clean_claim_text(pub) if isinstance(pub, str) else ""
+        if cleaned_pub and not add_claim("publication", cleaned_pub, cleaned_pub, f'"{cleaned_pub}"'):
             return claims[:12]
 
     # 6. Links
@@ -316,6 +372,13 @@ async def check_link_reachability(
     valid_url = safe_http_url(url)
     if not valid_url:
         return ("cannot_check", [], "Invalid link URL.")
+
+    if _is_unverifiable_link_host(valid_url):
+        return (
+            "cannot_check",
+            [],
+            "This site blocks automated checks, so it cannot confirm the page exists. Open the link yourself to confirm.",
+        )
 
     if fetch is not None:
         try:
