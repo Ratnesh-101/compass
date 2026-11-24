@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -24,6 +25,8 @@ from backend.memory import radar as radar_memory
 from backend.memory.radar import update_opportunity_verification
 from backend.memory.radar_close import select_delisted_for_check
 from backend.models_radar import EmployerType, OpportunityStatus
+from backend.services.radar_ats_adapters import is_india_location
+from backend.services.radar_profile_parse import derive_country
 from backend.services.radar_sources import canonicalize_url, infer_category, infer_employer_type
 from backend.services.radar_verifier import is_fetch_failure, verify_opportunity_status
 
@@ -49,6 +52,28 @@ SETTLE_BUDGET_SECONDS = 60.0
 CSE_CATEGORIES = {
     "software", "software engineering", "ai/ml/data", "data science, ai & machine learning", "hardware",
 }
+
+NON_US_COUNTRY_CUES: Dict[str, str] = {
+    "united kingdom": "UK",
+    "uk": "UK",
+    "canada": "Canada",
+    "germany": "Germany",
+    "ireland": "Ireland",
+    "singapore": "Singapore",
+}
+
+_NON_US_CUES_RE = re.compile(
+    r"\b(" + "|".join(re.escape(k) for k in sorted(NON_US_COUNTRY_CUES, key=len, reverse=True)) + r")\b",
+    re.IGNORECASE,
+)
+
+
+def _match_non_us_country(text: str) -> Optional[str]:
+    """Map explicit non-US country cues using whole-word matching."""
+    if not text:
+        return None
+    match = _NON_US_CUES_RE.search(text)
+    return NON_US_COUNTRY_CUES.get(match.group(1).lower()) if match else None
 
 
 def assess_dataset(
@@ -82,7 +107,7 @@ def plan_demotion(
 
 
 def _is_india(locations: List[str]) -> bool:
-    return any("india" in (loc or "").lower() for loc in locations)
+    return any(is_india_location(str(loc or "")) for loc in locations)
 
 
 def normalize_simplify_listing(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -113,7 +138,7 @@ def normalize_simplify_listing(item: Dict[str, Any]) -> Optional[Dict[str, Any]]
         "category": cat,
         "location": location,
         "work_arrangement": "remote" if "remote" in low else ("hybrid" if "hybrid" in low else "onsite"),
-        "country": "India" if _is_india(locations) else ("USA" if "usa" in low or ", " in location else "Global"),
+        "country": "India" if _is_india(locations) else (derive_country(location) or _match_non_us_country(location) or "Global"),
         "is_india_eligible": _is_india(locations),
         "official_application_url": url,
         "canonical_url": canonicalize_url(url, role_title=title) or url,
