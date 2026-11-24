@@ -198,6 +198,32 @@ export async function fetchSchedulingPreferences() {
   }
 }
 
+export async function updateSchedulingPreferences(body) {
+  const res = await fetch(`${API_BASE}/api/calendar/preferences`, {
+    method: 'PUT',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    let message = `Failed to update schedule preferences (HTTP ${res.status})`
+    try {
+      const err = await res.json()
+      if (typeof err?.detail === 'string') {
+        message = err.detail
+      } else if (Array.isArray(err?.detail) && err.detail.length > 0) {
+        const first = err.detail[0]
+        message = typeof first === 'string' ? first : (first?.msg || first?.message || String(first))
+      } else if (typeof err?.message === 'string') {
+        message = err.message
+      }
+    } catch {
+      // keep default friendly message
+    }
+    throw new Error(message)
+  }
+  return await res.json()
+}
+
 export function getCalendarExportUrl(domain) {
   const params = new URLSearchParams()
   if (domain && domain !== 'all') params.append('domain', domain)

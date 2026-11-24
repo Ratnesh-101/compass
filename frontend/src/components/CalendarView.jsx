@@ -28,12 +28,13 @@ import {
   AlertCircle,
   Trash2,
   Clock,
-  Settings,
   X,
 } from 'lucide-react'
 import { CalendarGrid } from './calendar/CalendarGrid'
 import { CalendarSidebar } from './calendar/CalendarSidebar'
-import { PLANNING_HOURS_TEXT } from './calendar/planningHours'
+import { formatPlanningHours } from './calendar/planningHours'
+import { SchedulePreferencesCard } from './calendar/SchedulePreferencesCard'
+import { fetchSchedulingPreferences } from '../api/calendarApi'
 import { ProposedPlanModal, QuickConnectModal, IcsExportModal } from './calendar/CalendarModals'
 import DarkModeToggle from './DarkModeToggle'
 import { syncResultBanner, syncErrorBanner, commitResultBanner, reactiveResultBanner, availabilityNote } from '../utils/scheduleHonesty'
@@ -147,6 +148,7 @@ export default function CalendarView({
   const userTimeZone = useMemo(() => getUserTimeZone(), [])
   const [checkingReactive, setCheckingReactive] = useState(false)
   const [syncingCalendar, setSyncingCalendar] = useState(false)
+  const [schedulePrefs, setSchedulePrefs] = useState(null)
   const [quickEmailInput, setQuickEmailInput] = useState('')
   const [showQuickModal, setShowQuickModal] = useState(false)
   const [showIcsModal, setShowIcsModal] = useState(false)
@@ -203,6 +205,9 @@ export default function CalendarView({
 
     fetchCalendarStatus().then(status => {
       if (status) setCalendarStatus(status)
+    })
+    fetchSchedulingPreferences().then(prefs => {
+      if (prefs) setSchedulePrefs(prefs)
     })
   }, [])
 
@@ -447,7 +452,7 @@ export default function CalendarView({
 
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', marginTop: '8px' }}>
           <p className="calendar-policy-subtext" style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>
-            {PLANNING_HOURS_TEXT} · 15m focus breaks
+            {formatPlanningHours(schedulePrefs)} · {schedulePrefs?.buffer_minutes ? `${schedulePrefs.buffer_minutes}m focus breaks` : 'no break'}
           </p>
 
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -765,21 +770,10 @@ export default function CalendarView({
               )}
             </div>
 
-            <div style={{ marginTop: 'auto', padding: '14px', borderRadius: 'var(--radius-card, 8px)', background: 'var(--bg-card-soft)', border: '1px solid var(--border)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                <h4 style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <Settings size={14} strokeWidth={1.8} />
-                  <span>Study Schedule Preferences</span>
-                </h4>
-              </div>
-
-              <ul style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.6', paddingLeft: '16px', margin: 0 }}>
-                <li>{PLANNING_HOURS_TEXT}</li>
-                <li>Break between tasks: 15 minutes</li>
-                <li>Automatic focus time allocator</li>
-                <li>Export to calendar (.ics format)</li>
-              </ul>
-            </div>
+            <SchedulePreferencesCard
+              prefs={schedulePrefs}
+              onSaved={setSchedulePrefs}
+            />
           </section>
         </main>
       </div>
