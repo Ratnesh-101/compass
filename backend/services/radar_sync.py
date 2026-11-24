@@ -48,6 +48,10 @@ from backend.services.radar_sources import (
     infer_employer_type,
     normalize_company_name,
 )
+from backend.services.radar_curated_verify import (
+    fix_simplify_india_flags,
+    verify_curated_listings,
+)
 from backend.services.radar_jobspy import discover_jobspy_opportunities
 from backend.services.radar_reverify import (
     promote_upcoming_opportunities,
@@ -117,6 +121,7 @@ async def run_radar_sync(source_filter: Optional[str] = None, dry_run: bool = Fa
             "errors": 0,
             "dry_run": dry_run,
         }
+        curated_verify: Optional[Dict[str, Any]] = None
         promote_upcoming_summary: Dict[str, Any] = {
             "checked": 0,
             "promoted": 0,
@@ -281,6 +286,12 @@ async def run_radar_sync(source_filter: Optional[str] = None, dry_run: bool = Fa
                         except Exception as ex:
                             failures += 1
                             logger.warning(f"Failed to upsert curated opportunity {item.get('company_name')}: {ex}")
+
+                    try:
+                        curated_verify = await verify_curated_listings(CURATED_INDIAN_OPPORTUNITIES)
+                    except Exception as cur_err:
+                        failures += 1
+                        logger.warning(f"Curated listings verification encountered an issue: {cur_err}")
 
             # 2. Ingest Public ATS Feeds (Greenhouse, Lever, Ashby)
             if not source_filter or source_filter in {"all", "ats"}:
@@ -556,6 +567,10 @@ async def run_radar_sync(source_filter: Optional[str] = None, dry_run: bool = Fa
                                 f"{settle['unchanged']} unchanged, {settle['errors']} errors."
                             )
                             simplify_summary["settle"] = settle
+
+                            india_fixed = await fix_simplify_india_flags()
+                            logger.info(f"Simplify India flags fixed: {india_fixed} listings updated.")
+                            simplify_summary["india_flags_fixed"] = india_fixed
                 except Exception as simp_all_err:
                     failures += 1
                     logger.warning(f"Simplify synchronization encountered an issue: {simp_all_err}")
@@ -614,6 +629,7 @@ async def run_radar_sync(source_filter: Optional[str] = None, dry_run: bool = Fa
             "records_skipped": records_skipped,
             "failures": failures,
             "error_summary": error_summary,
+            "curated_verify": curated_verify,
             "simplify": simplify_summary,
             "reverify": reverify_summary,
             "promote_upcoming": promote_upcoming_summary,
