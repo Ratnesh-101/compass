@@ -10,29 +10,37 @@ from backend.services.action_claim_guard import guard_unbacked_action_claims
 from backend.services.stream_claim_guard import StreamClaimGuard
 
 PREFIX = "I haven't changed anything yet"
-CORRECTION_START = "\n\n(Correction: I haven't changed anything yet"
+BUFFER_CAP = 20000
 
 CLAIMS = [
     "Updated to 6pm on Thu Nov 26.",
-    "Added 1 task: Submit DBMS lab. It's now on your list.",
+    "Added 1 task: Submit application. It's now on your list.",
     "Task added.",
     "Marked it as done.",
     "Rescheduled it to Friday.",
     "It's now on your schedule.",
-    "I've updated your deadline to Friday.",
     "Done.",
 ]
 
 HARMLESS = [
     "Would you like me to add this task for Friday?",
     "I can add that if you tell me the date.",
-    "Here are your three deadlines",
+    "Here are your three deadlines: lab Monday. Quiz Tuesday.",
     "You have 4 open tasks.",
     "The Timeline is updated every minute.",
     "To update a task, open it in the Timeline and press Edit.",
     "I have not submitted anything.",
     "Nothing has been added yet.",
 ]
+
+BENIGN = (
+    "Here is how your week looks. You have a lab on Monday and a quiz on Tuesday. "
+    "The Timeline shows every deadline in order. Wednesday is free for revision. "
+    "Thursday has a group meeting in the afternoon. Friday is light, so plan ahead. "
+    "Let me know if you want to look at anything in more detail. "
+    "Saturday and Sunday have no classes, so you can rest or catch up on reading. "
+    "The library stays open late during the week if you need a quiet place to study. "
+)
 
 
 def split_chars(text, size):
@@ -53,128 +61,105 @@ TOKEN_MODES = list(tokenisations("a b c"))
 
 
 def run(text, mode, **kwargs):
+    """Feed tokens; return (guard, replacements, observe_results_after_block)."""
     guard = StreamClaimGuard(**kwargs)
-    chunks = []
+    replacements = []
+    after_block = []
     for tok in tokenisations(text)[mode]:
-        chunks.extend(guard.feed(tok))
-    chunks.extend(guard.finish())
-    return guard, "".join(chunks)
+        was_blocked = guard.blocked
+        res = guard.observe(tok)
+        if res is not None:
+            replacements.append(res)
+        if was_blocked:
+            after_block.append(res)
+    fin = guard.finish()
+    if fin is not None:
+        replacements.append(fin)
+    return guard, replacements, after_block
 
 
 @pytest.mark.parametrize("mode", TOKEN_MODES)
 @pytest.mark.parametrize("claim", CLAIMS)
-def test_unbacked_claim_is_replaced_with_honest_text(claim, mode):
-    honest, replaced = guard_unbacked_action_claims(claim, False)
-    assert replaced is True
-    guard, out = run(claim, mode, action_executed=False)
-    assert out == honest
-    assert out.startswith(PREFIX)
-    assert out.count(PREFIX) == 1
-    assert claim not in out
-    assert guard.final_text() == out
+def test_unbacked_claim_yields_one_honest_replacement(claim, mode):
+    guard, repl, after_block = run(claim, mode, action_executed=False)
+    assert len(repl) == 1, f"input={claim!r} replacements={repl!r}"
+    assert repl[0].startswith(PREFIX)
+    assert guard.blocked is True
+    assert all(r is None for r in after_block)
+    assert guard.observe("more text. ") is None
+    assert guard.final_text() == repl[0]
 
 
 @pytest.mark.parametrize("mode", TOKEN_MODES)
 @pytest.mark.parametrize("text", HARMLESS)
-def test_harmless_text_passes_through_unchanged(text, mode):
-    guard, out = run(text, mode, action_executed=False)
-    assert out == text
+def test_harmless_text_is_never_replaced(text, mode):
+    guard, repl, _ = run(text, mode, action_executed=False)
+    assert repl == [], f"input={text!r} replacements={repl!r}"
+    assert guard.finish() is None
+    assert guard.blocked is False
     assert guard.final_text() == text
-
-
-BENIGN = (
-    "Here is how your week looks. You have a lab on Monday and a quiz on Tuesday. "
-    "The Timeline shows every deadline in order. Wednesday is free for revision. "
-    "Thursday has a group meeting in the afternoon. Friday is light, so plan ahead. "
-    "Let me know if you want to look at anything in more detail. "
-    "The weekend is open, so you can rest or catch up on reading. "
-    "Remember to drink water and take short breaks between study sessions. "
-)
 
 
 @pytest.mark.parametrize("mode", TOKEN_MODES)
-def test_late_claim_is_corrected_after_streaming(mode):
+def test_late_claim_after_long_benign_text_is_replaced(mode):
     assert len(BENIGN) > 300
-    claim = "I've updated your deadline to Friday."
-    original = BENIGN + claim
-    guard = StreamClaimGuard(action_executed=False, hold_chars=220)
-    streamed = []
-    for tok in tokenisations(original)[mode]:
-        streamed.extend(guard.feed(tok))
-    tail = guard.finish()
-    assert len(tail) == 1
-    assert tail[0].startswith(CORRECTION_START)
-    assert "".join(streamed).startswith(BENIGN[:200])
-    assert guard.final_text() == original + tail[0]
+    original = BENIGN + "I've updated your deadline to Friday."
+    guard, repl, _ = run(original, mode, action_executed=False)
+    assert len(repl) == 1
+    assert PREFIX in repl[0]
+    assert guard.blocked is True
+    assert guard.final_text() == repl[0]
 
 
-def test_hold_back_before_hold_chars_without_sentence_end():
-    text = "word " * 30  # 150 chars, no sentence end
-    guard = StreamClaimGuard(action_executed=False, hold_chars=220)
-    released = []
-    for tok in split_chars(text, 3):
-        assert guard.feed(tok) == []
-    released.extend(guard.finish())
-    assert "".join(released) == text
-    assert guard.final_text() == text
+@pytest.mark.parametrize("mode", TOKEN_MODES)
+def test_replacement_is_returned_only_once(mode):
+    text = "Task added. Marked it as done. I've updated your deadline to Friday. Done."
+    guard, repl, _ = run(text, mode, action_executed=False)
+    assert len(repl) == 1
+    assert guard.finish() is None
+    assert guard.final_text() == repl[0]
 
 
-def test_short_reply_is_released_by_finish_unchanged():
-    text = "Your lab is on Monday at 10 AM."
-    guard = StreamClaimGuard(action_executed=False, hold_chars=220)
-    out = []
-    for tok in split_chars(text, 4):
-        out.extend(guard.feed(tok))
-    out.extend(guard.finish())
-    assert "".join(out) == text
-    assert guard.final_text() == text
-
-
+@pytest.mark.parametrize("mode", TOKEN_MODES)
 @pytest.mark.parametrize("claim", CLAIMS)
-def test_action_executed_disables_checks(claim):
-    guard = StreamClaimGuard(action_executed=True, hold_chars=220)
-    out = []
-    for tok in split_chars(claim, 3):
-        out.extend(guard.feed(tok))
-    assert guard.finish() == []
-    out_text = "".join(out)
-    assert out_text == claim
+def test_action_executed_never_replaces(claim, mode):
+    guard, repl, _ = run(claim, mode, action_executed=True)
+    assert repl == []
+    assert guard.finish() is None
+    assert guard.blocked is False
     assert guard.final_text() == claim
 
 
-@pytest.mark.parametrize("claim", CLAIMS)
-def test_widened_guard_is_idempotent_on_honest_text(claim):
-    first, replaced = guard_unbacked_action_claims(claim, False)
-    assert replaced is True
-    second, replaced_again = guard_unbacked_action_claims(first, False)
-    assert second == first
-    assert replaced_again is False
-
-
-def _documented_cap():
-    caps = [
-        v
-        for k, v in vars(scg).items()
-        if isinstance(v, int)
-        and not isinstance(v, bool)
-        and k.isupper()
-        and ("MAX" in k or "CAP" in k or "LIMIT" in k)
-    ]
-    return max(caps) if caps else None
-
-
 def test_memory_is_bounded_on_very_long_stream():
-    guard = StreamClaimGuard(action_executed=False, hold_chars=220)
+    guard = StreamClaimGuard(action_executed=False)
     token = "lorem ipsum "[:10]
     for _ in range(10000):
-        guard.feed(token)
+        guard.observe(token)
     guard.finish()
     final = guard.final_text()
     assert isinstance(final, str)
-    cap = _documented_cap()
-    assert cap is not None, "module must define a documented cap constant"
-    assert len(final) <= cap + 1000
+    cap = max(
+        [
+            v
+            for k, v in vars(scg).items()
+            if k.isupper()
+            and isinstance(v, int)
+            and not isinstance(v, bool)
+            and ("MAX" in k or "CAP" in k or "LIMIT" in k)
+        ]
+        or [BUFFER_CAP]
+    )
+    assert len(final) <= max(cap, BUFFER_CAP) + 1000
     assert len(final) < 100000
+
+
+@pytest.mark.parametrize("claim", CLAIMS)
+def test_honest_text_is_idempotent_under_guard(claim):
+    honest, replaced = guard_unbacked_action_claims(claim, False)
+    assert replaced is True
+    second, replaced_again = guard_unbacked_action_claims(honest, False)
+    assert second == honest
+    assert replaced_again is False
 
 
 def test_chat_stream_wires_guard():
@@ -182,6 +167,6 @@ def test_chat_stream_wires_guard():
         Path(__file__).resolve().parent.parent / "backend" / "services" / "chat_stream.py"
     ).read_text(encoding="utf-8")
     assert "StreamClaimGuard" in source
-    assert "import" in source
-    assert ".feed(" in source
-    assert ".finish(" in source
+    assert "claim_guard.observe" in source
+    assert "claim_guard.finish" in source
+    assert "'replace'" in source

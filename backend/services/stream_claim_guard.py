@@ -1,136 +1,99 @@
 """Stream Claim Guard.
 
 Guards SSE token streaming against unbacked action completion claims.
-Buffers early tokens to detect unbacked claims before emitting to the client,
-or appends a late correction if a claim appears later in the stream.
+Observes tokens as they are streamed and replaces the output with an
+honest confirmation request if an unbacked action claim is detected.
 """
 
 from __future__ import annotations
 
-from typing import List
+from typing import Optional
 
 from backend.services.action_claim_guard import guard_unbacked_action_claims
 
-LATE_CORRECTION = (
-    "\n\n(Correction: I haven't changed anything yet. "
-    "Tell me exactly what you want and I'll show a confirmation card first.)"
-)
-MAX_FULL_TEXT_LEN = 20000
+MAX_BUFFER_LEN = 20000
 
 
 class StreamClaimGuard:
     """Stream-aware claim guard for assistant responses."""
 
-    def __init__(self, action_executed: bool = False, hold_chars: int = 220) -> None:
+    def __init__(
+        self, action_executed: bool = False, check_every_chars: int = 40
+    ) -> None:
         self.action_executed = action_executed
-        self.hold_chars = hold_chars
-        self._state = "PASS" if action_executed else "HOLD"
+        self.check_every_chars = check_every_chars
+        self._blocked = False
         self._buffer = ""
-        self._full_text = ""
-        self._honest_text = ""
-        self._replaced = False
-        self._late_correction = ""
+        self._honest_text: Optional[str] = None
+        self._last_checked_pos = 0
+        self._seen_sentence_end = False
 
     @property
-    def replaced(self) -> bool:
-        """Whether a claim was detected and replaced/corrected."""
-        return self._replaced
+    def blocked(self) -> bool:
+        """True after a replacement: the caller must stop emitting tokens."""
+        return self._blocked
 
-    def feed(self, token: str) -> List[str]:
-        """Feed a token into the guard and return chunks allowed to be emitted now."""
+    def observe(self, token: str) -> Optional[str]:
+        """Observe a streamed token and return honest replacement text if a claim is found."""
         if not token:
-            return []
+            return None
 
-        # Bounded memory: keep a running copy of the full text up to 20000 chars
-        if len(self._full_text) < MAX_FULL_TEXT_LEN:
-            self._full_text += token[: MAX_FULL_TEXT_LEN - len(self._full_text)]
+        if len(self._buffer) < MAX_BUFFER_LEN:
+            self._buffer += token[: MAX_BUFFER_LEN - len(self._buffer)]
 
-        if self.action_executed:
-            return [token]
+        if self.action_executed or self._blocked:
+            return None
 
-        if self._state == "BLOCKED":
-            # Swallow every later token
-            return []
-
-        if self._state == "PASS":
-            # Later tokens are returned unchanged
-            return [token]
-
-        # HOLD state
-        self._buffer += token
-        has_sentence_end = (
-            ". " in self._buffer
-            or "! " in self._buffer
-            or "? " in self._buffer
-            or "\n" in self._buffer
+        has_new_sentence_end = (
+            token.endswith((".", "!", "?"))
+            or any(
+                sep in self._buffer[self._last_checked_pos :]
+                for sep in (". ", "! ", "? ", "\n")
+            )
         )
 
-        if len(self._buffer) < self.hold_chars and not has_sentence_end:
-            return []
+        should_check = False
+        if has_new_sentence_end:
+            self._seen_sentence_end = True
+            should_check = True
+        elif (
+            len(self._buffer) - self._last_checked_pos >= self.check_every_chars
+            and not self._seen_sentence_end
+            and len(self._buffer) <= 200
+        ):
+            should_check = True
 
-        # Released from hold
+        if not should_check:
+            return None
+
+        self._last_checked_pos = len(self._buffer)
         guarded_text, was_replaced = guard_unbacked_action_claims(
-            self._buffer, self.action_executed
+            self._buffer, False
         )
         if was_replaced:
-            self._state = "BLOCKED"
-            self._replaced = True
+            self._blocked = True
             self._honest_text = guarded_text
-            self._buffer = ""
-            return [guarded_text]
+            return guarded_text
+        return None
 
-        self._state = "PASS"
-        out = [self._buffer]
-        self._buffer = ""
-        return out
+    def finish(self) -> Optional[str]:
+        """Finalize the stream and check full buffer if not already blocked."""
+        if self._blocked or self.action_executed:
+            return None
+        if not self._buffer:
+            return None
+        self._last_checked_pos = len(self._buffer)
+        guarded_text, was_replaced = guard_unbacked_action_claims(
+            self._buffer, False
+        )
+        if was_replaced:
+            self._blocked = True
+            self._honest_text = guarded_text
+            return guarded_text
+        return None
 
-    def finish(self) -> List[str]:
-        """Finalize the stream and return any remaining chunks."""
-        if self.action_executed:
-            return []
-
-        if self._state == "HOLD":
-            if not self._buffer:
-                return []
-            guarded_text, was_replaced = guard_unbacked_action_claims(
-                self._buffer, self.action_executed
-            )
-            if was_replaced:
-                self._state = "BLOCKED"
-                self._replaced = True
-                self._honest_text = guarded_text
-                self._buffer = ""
-                return [guarded_text]
-            self._state = "PASS"
-            out = [self._buffer]
-            self._buffer = ""
-            return out
-
-        if self._state == "PASS":
-            if self._late_correction:
-                return []
-            # Run the guard on the FULL text once
-            _, was_replaced = guard_unbacked_action_claims(
-                self._full_text, self.action_executed
-            )
-            if was_replaced:
-                self._replaced = True
-                self._late_correction = LATE_CORRECTION
-                return [LATE_CORRECTION]
-            return []
-
-        # If BLOCKED, honest_text was already emitted, nothing more to return
-        return []
-
-    def final_text(self) -> str:
-        """Return what the user actually saw (for persistence)."""
-        if self.action_executed:
-            return self._full_text
-
-        if self._state == "BLOCKED":
+    def final_text(self, raw_fallback: str = "") -> str:
+        """Return the honest text when blocked, else the accumulated text or fallback."""
+        if self._blocked and self._honest_text is not None:
             return self._honest_text
-
-        if self._late_correction:
-            return self._full_text + self._late_correction
-
-        return self._full_text
+        return self._buffer if self._buffer else raw_fallback
