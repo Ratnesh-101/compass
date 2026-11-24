@@ -172,6 +172,98 @@ def is_generic_careers_or_homepage(url: str) -> bool:
         return False
 
 
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+_HEX_ID_RE = re.compile(r"^[0-9a-f]{24,32}$", re.IGNORECASE)
+_ERROR_PATH_SUBSTRINGS = ("/error", "/not-found", "/404", "/job-not-found")
+_REDIRECT_GENERIC_PATHS = {
+    "",
+    "/",
+    "/careers",
+    "/jobs",
+    "/careers/",
+    "/jobs/",
+    "/en/careers",
+    "/en/careers/",
+    "/openings",
+    "/openings/",
+}
+
+
+def _is_numeric_or_uuid(seg: str) -> bool:
+    s = seg.strip()
+    if s.isdigit():
+        return True
+    if _UUID_RE.match(s) or _HEX_ID_RE.match(s):
+        return True
+    return False
+
+
+def _normalize_host(netloc: str) -> str:
+    host = netloc.lower().split(":")[0].rstrip(".")
+    if host.startswith("www."):
+        host = host[4:]
+    return host
+
+
+def redirect_signals_closed(original_url: str, final_url: str) -> Optional[Tuple[str, str]]:
+    """Inspect redirect outcomes to detect closed postings or generic landing redirects.
+
+    Returns:
+        (status, evidence) if redirect indicates closed or unconfirmed status, or None if unchanged.
+    """
+    if not original_url or not final_url:
+        return None
+
+    try:
+        parsed_orig = urllib.parse.urlparse(original_url.strip())
+        parsed_final = urllib.parse.urlparse(final_url.strip())
+    except Exception:
+        return None
+
+    final_query = parsed_final.query.lower()
+    final_path = parsed_final.path.lower()
+
+    # Rule 1: Redirect to error page or Greenhouse removed-job query
+    if "error=true" in final_query or any(err in final_path for err in _ERROR_PATH_SUBSTRINGS):
+        return (
+            OpportunityStatus.CLOSED_CONFIRMED,
+            "The employer's page redirects to an error page, so this posting appears to be removed.",
+        )
+
+    orig_parts = [p for p in parsed_orig.path.split("/") if p]
+    final_parts = [p for p in parsed_final.path.split("/") if p]
+
+    # Rule 3 check: if same URL / trivial change (scheme, www, query/fragment added, trailing slash)
+    orig_host = _normalize_host(parsed_orig.netloc)
+    final_host = _normalize_host(parsed_final.netloc)
+    orig_path_norm = parsed_orig.path.rstrip("/").lower()
+    final_path_norm = parsed_final.path.rstrip("/").lower()
+
+    if orig_host == final_host and orig_path_norm == final_path_norm:
+        return None
+
+    # Rule 2: Specific posting redirected to general careers page or board root
+    if len(orig_parts) >= 2:
+        is_generic_path = (
+            final_path in _REDIRECT_GENERIC_PATHS
+            or final_path_norm in {"", "/careers", "/jobs", "/en/careers", "/openings"}
+        )
+        fewer_segments_no_id = (
+            len(final_parts) < len(orig_parts)
+            and not any(_is_numeric_or_uuid(seg) for seg in final_parts)
+        )
+        if is_generic_path or fewer_segments_no_id:
+            return (
+                OpportunityStatus.NEEDS_VERIFICATION,
+                "The posting link redirects to a general careers page, so it cannot be confirmed as open.",
+            )
+
+    return None
+
+
 async def verify_opportunity_status(
     application_url: str,
     current_status: str = OpportunityStatus.NEEDS_VERIFICATION,
@@ -273,6 +365,11 @@ async def verify_opportunity_status(
             )
         content_text = body
         verification_method = "http_direct"
+
+        redirect_signal = redirect_signals_closed(application_url, fetch_url)
+        if redirect_signal is not None:
+            sig_status, sig_evidence = redirect_signal
+            return (sig_status, sig_evidence, now)
 
     # Step 3: Sanitize and fence untrusted text
     safe_content = fence_web_content([{"url": application_url, "content": content_text[:4000]}])
