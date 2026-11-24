@@ -5,7 +5,7 @@ Provides CRUD operations and fuzzy project matching for PostgreSQL.
 Used by the router skills and API endpoints.
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, time as dt_time
 import logging
 from typing import Optional, Union, Any
 import asyncpg
@@ -416,14 +416,34 @@ async def get_scheduling_preferences(conn: DbConn, user_id: str = "default_user"
     }
 
 
-async def update_scheduling_preferences(
-    conn: DbConn,
-    user_id: str = "default_user",
-    **kwargs: Any
-) -> dict:
+def _to_time(value: Any) -> dt_time:
+    if isinstance(value, dt_time):
+        return value
+    if isinstance(value, datetime):
+        return value.time()
+    if isinstance(value, str) and (s := value.strip()):
+        return dt_time.fromisoformat(f"0{s}" if s.find(":") == 1 else s)
+    raise ValueError(f"Invalid time: {value!r}")
+
+
+async def update_scheduling_preferences(conn: DbConn, user_id: str = "default_user", **kwargs: Any) -> dict:
     """Update or insert scheduling preferences for a user."""
     allowed = {"work_start_time", "work_end_time", "work_days", "buffer_minutes", "preferred_focus"}
     updates = {k: v for k, v in kwargs.items() if k in allowed}
+    for k in ("work_start_time", "work_end_time"):
+        if k in updates:
+            updates[k] = _to_time(updates[k])
+    if "work_days" in updates:
+        wd = updates["work_days"]
+        if (not isinstance(wd, (list, tuple)) or isinstance(wd, (str, bytes))
+                or any(isinstance(x, bool) or not isinstance(x, int) for x in wd)):
+            raise ValueError("work_days must be a list of integers")
+        updates["work_days"] = [int(x) for x in wd]
+    if "buffer_minutes" in updates:
+        bm = updates["buffer_minutes"]
+        if isinstance(bm, bool) or not isinstance(bm, int):
+            raise ValueError("buffer_minutes must be an integer")
+        updates["buffer_minutes"] = int(bm)
 
     # Ensure row exists
     await conn.execute(
@@ -448,18 +468,12 @@ async def update_scheduling_preferences(
         WHERE user_id = $1
     """
     await conn.execute(
-        query,
-        user_id,
-        "work_start_time" in updates,
-        updates.get("work_start_time"),
-        "work_end_time" in updates,
-        updates.get("work_end_time"),
-        "work_days" in updates,
-        updates.get("work_days"),
-        "buffer_minutes" in updates,
-        updates.get("buffer_minutes"),
-        "preferred_focus" in updates,
-        updates.get("preferred_focus"),
+        query, user_id,
+        "work_start_time" in updates, updates.get("work_start_time"),
+        "work_end_time" in updates, updates.get("work_end_time"),
+        "work_days" in updates, updates.get("work_days"),
+        "buffer_minutes" in updates, updates.get("buffer_minutes"),
+        "preferred_focus" in updates, updates.get("preferred_focus"),
     )
     return await get_scheduling_preferences(conn, user_id)
 

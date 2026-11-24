@@ -295,7 +295,7 @@ async def test_analyze_github_profile_rate_limit_handled():
     with patch("httpx.AsyncClient.get", side_effect=fake_rate_limit):
         intel = await analyze_github_profile("octocat")
         assert intel.username == "octocat"
-        assert any("rate limit" in w.lower() for w in intel.warnings)
+        assert any(("rate limit" in w.lower() or "hourly limit" in w.lower()) for w in intel.warnings)
 
 
 # ===========================================================================

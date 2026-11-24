@@ -91,16 +91,29 @@ async def handle_assess_feasibility(args: Dict[str, Any], pool: Any) -> Dict[str
         return {"success": False, "data": {}, "summary": "",
                 "error": "Could not complete the feasibility review."}
 
-    v = plan.verdict
-    verdict_text = "Nothing to assess yet" if v.demand_hours == 0 else v.verdict
-    summary = (
-        f"{verdict_text}: {v.demand_hours}h of work against {v.capacity_hours}h "
-        f"available ({v.utilisation_pct}% utilisation). "
-        f"Keeping {len(plan.keep)}, deferring {len(plan.defer)}, "
-        f"dropping {len(plan.drop)}. {plan.narrative}"
+    retried_all_domains = False
+    if domain is not None and not (plan.keep or plan.defer or plan.drop) and not workload_hours:
+        try:
+            fallback_plan = await _run_scoped_review(
+                pool, days=days, hours=hours, domain=None,
+                user_id=str(user_id), include_demo=bool(args.get("include_demo", False)),
+                workload_hours=workload_hours,
+            )
+            if fallback_plan.keep or fallback_plan.defer or fallback_plan.drop:
+                plan = fallback_plan
+                retried_all_domains = True
+        except Exception as e:
+            logger.warning("Retry without domain filter failed: %s", e)
+
+    from backend.agents.feasibility_format import format_feasibility_summary
+    summary = format_feasibility_summary(
+        plan,
+        days=days,
+        hours_per_day=hours,
+        days_stated=days_stated,
+        retried_all_domains=retried_all_domains,
+        workload_hours=workload_hours,
     )
-    if not days_stated:
-        summary += f" (I assumed the next {days} days at {hours:g} hours a day.)"
 
     return {
         "success": True,
