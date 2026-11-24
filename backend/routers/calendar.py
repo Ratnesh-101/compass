@@ -167,6 +167,11 @@ async def update_calendar_preferences_endpoint(body: UpdatePreferencesBody, iden
         return {"status": "error", "message": "Database not available"}
     async with pool.acquire() as conn:
         updates = {k: v for k, v in body.model_dump().items() if v is not None}
+        current = await structured.get_scheduling_preferences(conn, user_id=ident.id) or {}
+        merged = {**current, **updates}
+        start, end = merged.get("work_start_time"), merged.get("work_end_time")
+        if start is not None and end is not None and str(end)[:8] <= str(start)[:8]:
+            raise HTTPException(status_code=422, detail="End time must be after start time.")
         prefs = await structured.update_scheduling_preferences(conn, user_id=ident.id, **updates)
         return {"status": "ok", "preferences": prefs}
 

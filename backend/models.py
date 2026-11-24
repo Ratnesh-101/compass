@@ -4,9 +4,10 @@ Compass — Pydantic API Models.
 Shared request and response schemas matching docs/api_contract.md.
 """
 
+import re
 from datetime import date
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ChatRequest(BaseModel):
@@ -321,11 +322,55 @@ class CommitScheduleBody(BaseModel):
     include_demo: bool = False
 
 
+_PREF_TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$")
+
+
 class UpdatePreferencesBody(BaseModel):
     work_start_time: Optional[str] = None
     work_end_time: Optional[str] = None
     work_days: Optional[List[int]] = None
     buffer_minutes: Optional[int] = None
+
+    # Decision: hours must be two digits ("09:00", not "9:00"), matching what
+    # <input type="time"> emits. Values are normalised to "HH:MM:SS".
+
+    @field_validator("work_start_time", "work_end_time", mode="before")
+    @classmethod
+    def _validate_time(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        if not isinstance(v, str):
+            raise ValueError("Time must be a string in HH:MM or HH:MM:SS format.")
+        m = _PREF_TIME_RE.match(v.strip())
+        if not m:
+            raise ValueError("Time must be in 24-hour HH:MM or HH:MM:SS format.")
+        return f"{m.group(1)}:{m.group(2)}:{m.group(3) or '00'}"
+
+    @field_validator("work_days", mode="before")
+    @classmethod
+    def _validate_work_days(cls, v: Any) -> Optional[List[int]]:
+        if v is None:
+            return None
+        if not isinstance(v, (list, tuple)) or not v:
+            raise ValueError("work_days must be a non-empty list of weekday numbers.")
+        if any(isinstance(d, bool) or not isinstance(d, int) for d in v):
+            raise ValueError("work_days must contain only integers.")
+        if any(d < 1 or d > 7 for d in v):
+            raise ValueError("work_days values must be between 1 (Mon) and 7 (Sun).")
+        if len(set(v)) != len(v):
+            raise ValueError("work_days must not contain duplicates.")
+        return sorted(v)
+
+    @field_validator("buffer_minutes", mode="before")
+    @classmethod
+    def _validate_buffer(cls, v: Any) -> Optional[int]:
+        if v is None:
+            return None
+        if isinstance(v, bool) or not isinstance(v, int):
+            raise ValueError("buffer_minutes must be an integer.")
+        if v < 0 or v > 120:
+            raise ValueError("buffer_minutes must be between 0 and 120.")
+        return v
 
 
 class SelectAccountBody(BaseModel):
