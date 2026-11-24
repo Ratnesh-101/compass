@@ -68,7 +68,7 @@
       "destination": "https://compass-backend-qryu-vcfv.onrender.com/api/:path*"
     },
     {
-      "source": "/((?!api/|chat|health|robots\\.txt|sitemap\\.xml|google[a-zA-Z0-9_-]+\\.html).*)",
+      "source": "/((?!api/|chat|health|assets/|.*\\.[a-zA-Z0-9]+$).*)",
       "destination": "/index.html"
     }
   ]
