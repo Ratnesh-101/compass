@@ -244,6 +244,25 @@ export async function ingestExternalProfile(sourceType, rawContent, sourceUrl = 
   return res.json()
 }
 
+export async function ingestExternalProfileFile(file) {
+  await ensureSession()
+  const formData = new FormData()
+  formData.append('file', file)
+  const headers = getAuthHeaders()
+  delete headers['Content-Type']
+  const res = await fetch(`${API_BASE}/intelligence/external-profile-file`, {
+    method: 'POST',
+    headers,
+    credentials: 'include',
+    body: formData,
+  })
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}))
+    throw new Error(errData.detail || `Failed to ingest profile file: ${res.statusText}`)
+  }
+  return res.json()
+}
+
 export async function fetchJobAnalysis(opportunityId, customDesc = null) {
   await ensureSession()
   const req = buildJobAnalysisRequest(API_BASE, opportunityId, customDesc)

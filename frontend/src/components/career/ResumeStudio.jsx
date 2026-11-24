@@ -995,14 +995,14 @@ export default function ResumeStudio({ onSaved = () => {} } = {}) {
         show={showExternalProfileModal}
         onClose={() => setShowExternalProfileModal(false)}
         onProfileIngested={(content, source) => {
+          const extracted = content?.extracted_content || content
+          const summary = extracted?.evidence_notes?.import_summary || content?.evidence_notes?.import_summary
+          if (summary) setExportToast({ message: summary, type: 'success' })
           setParseResult({
+            ...(content && typeof content === 'object' ? content : {}),
             success: true,
             filename: `External Source (${source})`,
-            file_type: 'profile_import',
-            extracted_content: content?.extracted_content || content,
-            ...(Array.isArray(content?.missing_fields) ? { missing_fields: content.missing_fields } : {}),
-            ...(content?.field_confidence ? { field_confidence: content.field_confidence } : {}),
-            ...(content?.overall_confidence !== undefined ? { overall_confidence: content.overall_confidence } : {}),
+            file_type: 'profile_import', extracted_content: extracted,
           })
           setShowExtractionModal(true)
         }}
