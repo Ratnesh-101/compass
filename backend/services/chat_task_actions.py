@@ -34,6 +34,13 @@ logger = logging.getLogger("compass.services.chat_task_actions")
 
 STOP_WORDS = frozenset({"the", "a", "an", "and", "or", "to", "for", "of", "in", "on", "at", "by", "with", "is", "it", "my", "this", "that"})
 QUESTION_STARTERS = ("what ", "which ", "why ", "how ", "when ", "where ", "who ", "should i ", "can you ", "could you ", "would you ", "will you ", "is it ", "are there ")
+POSITIONAL_OR_PRONOUN_WORDS = frozenset({
+    "it", "this", "that", "these", "those", "them", "one", "ones",
+    "first", "second", "third", "last", "next", "previous", "other", "another",
+    "1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
+    "1st", "2nd", "3rd", "4th", "5th",
+    "all", "everything", "task", "tasks", "thing", "things", "the",
+})
 
 PATTERNS_COMPLETE = [
     re.compile(r"^mark\s+(?P<target>.+?)\s+as\s+(?:done|complete|completed|finished)$", re.IGNORECASE),
@@ -53,12 +60,13 @@ PATTERNS_COMPLETE = [
 
 PATTERNS_RESCHEDULE = [
     re.compile(r"^change(?:\s+the)?\s+(?:due\s+date|deadline)\s+(?:of|for)\s+(?P<target>.+?)\s+to\s+(?P<due>.+)$", re.IGNORECASE),
+    re.compile(r"^change\s+(?P<target>.+?)(?:'s|s')\s+(?:due\s+date|deadline)\s+to\s+(?P<due>.+)$", re.IGNORECASE),
     re.compile(r"^move\s+(?P<target>.+?)\s+to\s+(?P<due>.+)$", re.IGNORECASE),
     re.compile(r"^push(?:\s+back)?\s+(?P<target>.+?)\s+to\s+(?P<due>.+)$", re.IGNORECASE),
-    re.compile(r"^reschedule\s+(?P<target>.+?)\s+(?:to|for)\s+(?P<due>.+)$", re.IGNORECASE),
-    re.compile(r"^set\s+(?P<target>.+?)\s+due(?:\s+on|\s+to|\s+date\s+to)?\s+(?P<due>.+)$", re.IGNORECASE),
-    re.compile(r"^make\s+(?P<target>.+?)\s+due(?:\s+on|\s+to)?\s+(?P<due>.+)$", re.IGNORECASE),
     re.compile(r"^postpone\s+(?P<target>.+?)\s+(?:to|until)\s+(?P<due>.+)$", re.IGNORECASE),
+    re.compile(r"^reschedule\s+(?P<target>.+?)\s+(?:to|for)\s+(?P<due>.+)$", re.IGNORECASE),
+    re.compile(r"^set\s+(?P<target>.+?)\s+due(?:\s+on|\s+to|\s+date\s+to|\s+for)?\s+(?P<due>.+)$", re.IGNORECASE),
+    re.compile(r"^make\s+(?P<target>.+?)\s+due(?:\s+on|\s+to)?\s+(?P<due>.+)$", re.IGNORECASE),
 ]
 
 _ORDINAL_INDEX = {
@@ -68,6 +76,40 @@ _ORDINAL_INDEX = {
     "4": 3, "fourth": 3, "fourth one": 3, "the fourth one": 3, "4th": 3,
     "5": 4, "fifth": 4, "fifth one": 4, "the fifth one": 4, "5th": 4,
 }
+
+
+def _is_positional_or_pronoun_target(target: str) -> bool:
+    """Reject empty targets or those consisting solely of positional/pronoun/ordinal words."""
+    if not target or not target.strip():
+        return True
+    words = re.findall(r"\w+", target.lower())
+    return not words or all(w in POSITIONAL_OR_PRONOUN_WORDS for w in words)
+
+
+def _is_date_like(phrase: str) -> bool:
+    """Check if phrase resembles a date, time, day, or calendar interval."""
+    if not phrase or not phrase.strip():
+        return False
+    p = phrase.lower().strip().rstrip(".!")
+    try:
+        r = resolve_due(p, "UTC")
+        if r and (r.due_date is not None or r.due_at is not None):
+            return True
+    except Exception:
+        pass
+    if any(term in p for term in ("end of day", "eod", "next week", "next month", "noon", "midnight")):
+        return True
+    date_keywords = (
+        "today", "tomorrow", "tonight", "yesterday", "monday", "tuesday", "wednesday",
+        "thursday", "friday", "saturday", "sunday", "mon", "tue", "wed", "thu", "fri", "sat", "sun",
+        "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
+        "january", "february", "march", "april", "june", "july", "august", "september",
+        "october", "november", "december",
+    )
+    tokens = set(re.findall(r"\w+", p))
+    if any(k in tokens for k in date_keywords):
+        return True
+    return bool(re.search(r"\b202[4-9]\b|\b203[0-9]\b|\b\d{1,2}(?:st|nd|rd|th)?\b|\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b", p))
 
 
 def _clean_target(raw: str) -> str:
@@ -104,7 +146,8 @@ def parse_task_action_intent(message: str) -> Optional[dict]:
     """Detect complete or reschedule intents.
 
     Returns dict with keys: action ('complete' | 'reschedule'), target (str), new_due (str | None).
-    Returns None for non-intents, questions, delete-intent collisions, or vague non-task talk.
+    Returns None for non-intents, questions, delete-intent collisions, positional/pronoun targets,
+    number/ordinal replies, delete verbs, task-creation statements, or vague non-task talk.
     """
     if not message or not isinstance(message, str):
         return None
@@ -114,6 +157,15 @@ def parse_task_action_intent(message: str) -> Optional[dict]:
 
     low = raw.lower()
     if any(low.startswith(q) for q in QUESTION_STARTERS):
+        return None
+
+    # Number/ordinal replies or delete verbs
+    raw_words = re.findall(r"\w+", low)
+    if not raw_words or all(w in POSITIONAL_OR_PRONOUN_WORDS for w in raw_words):
+        return None
+    if low in _ORDINAL_INDEX or low in ORDINAL_REPLIES or low.isdigit():
+        return None
+    if re.match(r"^(?:delete|remove|drop|clear)\b", low):
         return None
 
     # Do not collide with chat delete intent
@@ -131,6 +183,10 @@ def parse_task_action_intent(message: str) -> Optional[dict]:
             low = raw.lower()
             break
 
+    # Reject ordinary task-creation sentences (remind, add, create, schedule, new task, set a reminder)
+    if re.match(r"^(?:remind|add|create|schedule|new\s+task|set\s+a\s+reminder|set\s+reminder)\b", low):
+        return None
+
     # Strip trailing polite tags
     for tail in (" please", " for me"):
         if low.endswith(tail):
@@ -143,7 +199,7 @@ def parse_task_action_intent(message: str) -> Optional[dict]:
         m = pat.match(raw)
         if m:
             tgt = _clean_target(m.group("target"))
-            if tgt and tgt.lower() not in ("this", "it", "that", "all", "everything"):
+            if tgt and not _is_positional_or_pronoun_target(tgt):
                 return {"action": "complete", "target": tgt, "new_due": None}
 
     # 2. Reschedule patterns
@@ -152,10 +208,38 @@ def parse_task_action_intent(message: str) -> Optional[dict]:
         if m:
             tgt = _clean_target(m.group("target"))
             due = m.group("due").strip().rstrip(".!")
-            if tgt and tgt.lower() not in ("this", "it", "that", "all", "everything") and due:
+            if tgt and not _is_positional_or_pronoun_target(tgt) and due and _is_date_like(due):
                 return {"action": "reschedule", "target": tgt, "new_due": due}
 
     return None
+
+
+async def check_chat_task_action_intent(
+    message: str,
+    pre_routed_skill: Optional[str],
+    skill_name: Optional[str],
+    pool: Any,
+    owner_identity: str,
+    conv_id: str,
+) -> Optional[dict]:
+    """Check task action intent with caller pre-route and pending-action safety guards."""
+    if pre_routed_skill is not None or skill_name in ("pending_action_confirm", "pending_action_cancel"):
+        return None
+    chk_pool = pool
+    if chk_pool is None:
+        try:
+            chk_pool = await get_pool()
+        except Exception:
+            chk_pool = None
+    if chk_pool:
+        try:
+            async with chk_pool.acquire() as conn:
+                from backend.memory.chat_pending import get_active_chat_pending_action
+                if await get_active_chat_pending_action(conn, owner_identity, conv_id):
+                    return None
+        except Exception:
+            pass
+    return parse_task_action_intent(message)
 
 
 def compute_match_score(target: str, title: str) -> float:

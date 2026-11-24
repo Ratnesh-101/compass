@@ -118,3 +118,61 @@ def test_results_capped_at_five():
 def test_case_and_filler_words_are_ignored(target):
     result = match_open_task(target, TASKS)
     assert [t["id"] for t in result] == [4]
+
+
+# --- Regression tests: positional replies and task-creation sentences must not parse as task actions ---
+
+@pytest.mark.parametrize("message", [
+    "1",
+    "first one",
+    "the first one",
+    "delete the first one",
+    "complete the first one",
+    "it",
+    "that one",
+    "the last task",
+    "everything",
+    "2nd one",
+    "mark the first one as done",
+    "move the second one to Friday",
+])
+def test_positional_and_pronoun_replies_are_not_task_actions(message):
+    assert parse_task_action_intent(message) is None, message
+
+
+@pytest.mark.parametrize("message", [
+    "remind me to submit my lab report by next Wednesday",
+    "add task",
+    "add task finish OS assignment by Friday",
+    "create a task to move the server to AWS",
+    "schedule a meeting with my mentor on Friday",
+    "set a reminder for the quiz on Monday",
+])
+def test_task_creation_sentences_are_not_task_actions(message):
+    assert parse_task_action_intent(message) is None, message
+
+
+@pytest.mark.parametrize("message,action,target_word", [
+    ("Mark the Operating Systems assignment as done", "complete", "operating systems"),
+    ("I've completed the hackathon proposal", "complete", "hackathon"),
+    ("I\u2019ve finished the DBMS lab", "complete", "dbms"),
+    ("Change the due date of the Hackathon project proposal to December 5", "reschedule", "hackathon"),
+    ("move the DBMS lab to Friday", "reschedule", "dbms"),
+])
+def test_real_task_actions_still_parse(message, action, target_word):
+    result = parse_task_action_intent(message)
+    assert result is not None, message
+    assert result["action"] == action
+    assert target_word in result["target"].lower()
+
+
+def test_orchestrator_chat_task_action_route_respects_explicit_route_and_pending_action():
+    """Source guard: the chat_task_action routing condition must not override an explicit pre_routed_skill."""
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parent.parent / "backend" / "orchestrator.py").read_text(encoding="utf-8")
+    lines = source.splitlines()
+    first = next(i for i, line in enumerate(lines) if "chat_task_action" in line)
+    window = "\n".join(lines[max(0, first - 12):first + 1])
+    assert "pre_routed_skill" in window, window
+    assert "pending" in window.lower(), window

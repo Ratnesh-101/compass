@@ -262,8 +262,10 @@ async def _handle_message_core(
             memory_context=memory_context if memory_context else None,
             **route_kwargs,
         )
-    from backend.services.chat_task_actions import parse_task_action_intent
-    _task_intent = parse_task_action_intent(message)
+    from backend.services.chat_task_actions import check_chat_task_action_intent
+    _task_intent = await check_chat_task_action_intent(
+        message, pre_routed_skill, skill_name, active_pool, user_id or guest_id or "default_user", conv_id,
+    )
     if _task_intent:
         skill_name, args, text_reply = "chat_task_action", _task_intent, ""
     effective_user_id = user_id or guest_id
