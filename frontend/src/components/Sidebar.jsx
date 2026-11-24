@@ -3,6 +3,7 @@ import { X, Zap } from 'lucide-react'
 import CreateDomainModal from './timeline/CreateDomainModal'
 import Logo from './Logo'
 import { parseUsageBadge } from '../utils/usageBadgeParser'
+import SidebarStatusCard from './sidebar/SidebarStatusCard'
 
 // Call counts and dollar amounts are for judges, not for first-time visitors: they live in
 // "About / for judges" (Telemetry). Keep them out of the sidebar footer.
@@ -667,206 +668,116 @@ export default function Sidebar({
         )}
       </div>
 
-      {/* Live status card: 8px radius, 1px border */}
-      {effectivelyCollapsed ? (
-        <div
-          id="sidebar-specs-card"
-          onClick={() => {
-            if (!isOnline && onRetryConnection) {
-              onRetryConnection()
-            } else if (onOpenTelemetry) {
-              onOpenTelemetry()
-            }
-          }}
-          title={isOnline ? `${totalActive} tasks synced: ${backendStatus} (Click for telemetry)` : `Reconnecting: ${backendStatus} (Click to wake up)`}
-          aria-label={isOnline ? `${totalActive} tasks synced: ${backendStatus}` : `Reconnecting: ${backendStatus}`}
-          style={{
-            width: '44px',
-            height: '44px',
-            minWidth: '44px',
-            minHeight: '44px',
-            margin: '12px auto 6px',
-            borderRadius: '6px',
-            background: 'transparent',
-            border: '1px solid var(--sidebar-divider)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: (!isOnline && onRetryConnection) || onOpenTelemetry ? 'pointer' : 'default',
-            position: 'relative',
-            transition: 'all 0.15s ease',
-            flexShrink: 0,
-            color: 'var(--sidebar-text)',
-          }}
-          onMouseEnter={e => e.currentTarget.style.background = 'var(--sidebar-hover)'}
-          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-        >
-          <div style={{
-            width: '6px',
-            height: '6px',
-            borderRadius: '50%',
-            background: isOnline ? '#1c8a62' : '#f5a623',
-            position: 'absolute',
-            top: '6px',
-            right: '6px',
-          }} />
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-          </svg>
-        </div>
-      ) : (
-        <div style={{
-          padding: '12px 14px',
-          borderRadius: '8px',
-          background: 'transparent',
-          border: '1px solid var(--sidebar-divider)',
-          marginTop: '16px'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{
-                width: '7px',
-                height: '7px',
-                borderRadius: '50%',
-                background: isOnline ? '#1c8a62' : '#f5a623',
-                flexShrink: 0
-              }} />
-              <span style={{ fontSize: '12.5px', fontWeight: '600', color: '#ffffff' }}>
-                {isOnline ? `${totalActive} ${totalActive === 1 ? 'task' : 'tasks'} synced` : 'Reconnecting'}
-              </span>
-            </div>
-            {!isOnline && onRetryConnection && (
-              <button
-                id="sidebar-retry-connection-button"
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onRetryConnection()
-                }}
-                title="Ping backend to wake up now"
-                style={{
-                  fontSize: '12px',
-                  fontWeight: '600',
-                  padding: '2px 8px',
-                  borderRadius: '6px',
-                  background: 'var(--accent)',
-                  border: '1px solid transparent',
-                  color: 'var(--accent-text)',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease'
-                }}
-                onMouseEnter={e => e.currentTarget.style.opacity = '0.9'}
-                onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-              >
-                Wake up
-              </button>
-            )}
-          </div>
-          <div style={{ fontSize: '12px', color: 'var(--sidebar-text)', opacity: 0.8, paddingLeft: '15px' }}>
-            {backendStatus}
-          </div>
-          {SHOW_SIDEBAR_USAGE_BADGE && usageBadge && (() => {
-            const parsed = parseUsageBadge(usageBadge)
-            const fullText = parsed?.isUsage ? parsed.fullText : usageBadge
-            const titleTooltip = `Nebius Telemetry: ${fullText} (Click to open telemetry inspection)`
-            const ariaLabel = `Nebius Telemetry: ${fullText}. Click to view details.`
+      {/* Live status card */}
+      <SidebarStatusCard
+        collapsed={effectivelyCollapsed}
+        isOnline={isOnline}
+        totalActive={totalActive}
+        backendStatus={backendStatus}
+        onRetryConnection={onRetryConnection}
+        onOpenTelemetry={onOpenTelemetry}
+      >
+        {SHOW_SIDEBAR_USAGE_BADGE && usageBadge && (() => {
+          const parsed = parseUsageBadge(usageBadge)
+          const fullText = parsed?.isUsage ? parsed.fullText : usageBadge
+          const titleTooltip = `Nebius Telemetry: ${fullText} (Click to open telemetry inspection)`
+          const ariaLabel = `Nebius Telemetry: ${fullText}. Click to view details.`
 
-            return (
-              <div
-                id="sidebar-usage-badge"
-                className="mono"
-                role="button"
-                tabIndex={0}
-                onClick={() => onOpenTelemetry && onOpenTelemetry()}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    onOpenTelemetry && onOpenTelemetry()
-                  }
-                }}
-                title={titleTooltip}
-                aria-label={ariaLabel}
-                style={{
-                  fontFamily: 'var(--font-mono, "JetBrains Mono", monospace)',
-                  fontVariantNumeric: 'tabular-nums',
-                  fontSize: '12px',
-                  lineHeight: '1.4',
-                  color: 'var(--sidebar-text)',
-                  padding: '6px 8px',
-                  marginTop: '8px',
-                  borderRadius: '6px',
-                  background: 'var(--sidebar-hover)',
-                  border: '1px solid var(--sidebar-divider)',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: '8px',
-                  transition: 'all 0.15s ease',
-                  width: '100%',
-                  boxSizing: 'border-box',
-                }}
-                onMouseEnter={e => e.currentTarget.style.color = '#ffffff'}
-                onMouseLeave={e => e.currentTarget.style.color = 'var(--sidebar-text)'}
-              >
-                {parsed?.isUsage ? (
-                  <div
+          return (
+            <div
+              id="sidebar-usage-badge"
+              className="mono"
+              role="button"
+              tabIndex={0}
+              onClick={() => onOpenTelemetry && onOpenTelemetry()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  onOpenTelemetry && onOpenTelemetry()
+                }
+              }}
+              title={titleTooltip}
+              aria-label={ariaLabel}
+              style={{
+                fontFamily: 'var(--font-mono, "JetBrains Mono", monospace)',
+                fontVariantNumeric: 'tabular-nums',
+                fontSize: '12px',
+                lineHeight: '1.4',
+                color: 'var(--sidebar-text)',
+                padding: '6px 8px',
+                marginTop: '8px',
+                borderRadius: '6px',
+                background: 'var(--sidebar-hover)',
+                border: '1px solid var(--sidebar-divider)',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '8px',
+                transition: 'all 0.15s ease',
+                width: '100%',
+                boxSizing: 'border-box',
+              }}
+              onMouseEnter={e => e.currentTarget.style.color = '#ffffff'}
+              onMouseLeave={e => e.currentTarget.style.color = 'var(--sidebar-text)'}
+            >
+              {parsed?.isUsage ? (
+                <div
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    alignItems: 'center',
+                    gap: '2px 8px',
+                    minWidth: 0,
+                    flex: 1,
+                  }}
+                >
+                  <span
                     style={{
-                      display: 'flex',
-                      flexWrap: 'wrap',
+                      display: 'inline-flex',
                       alignItems: 'center',
-                      gap: '2px 8px',
-                      minWidth: 0,
-                      flex: 1,
+                      gap: '4px',
+                      whiteSpace: 'nowrap',
                     }}
                   >
-                    <span
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      <Zap size={11} strokeWidth={1.8} style={{ color: 'var(--accent, #f5a623)' }} aria-hidden="true" />
-                      <span>{parsed.calls}</span>
-                    </span>
-                    <span
-                      style={{
-                        whiteSpace: 'nowrap',
-                        color: 'var(--sidebar-active-text, #ffffff)',
-                        fontWeight: '600',
-                      }}
-                    >
-                      {parsed.cost}
-                    </span>
-                  </div>
-                ) : (
-                  <span style={{ minWidth: 0, flex: 1, wordBreak: 'break-word' }}>
-                    {usageBadge}
+                    <Zap size={11} strokeWidth={1.8} style={{ color: 'var(--accent, #f5a623)' }} aria-hidden="true" />
+                    <span>{parsed.calls}</span>
                   </span>
-                )}
-                <svg
-                  style={{ flexShrink: 0, opacity: 0.85 }}
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M12 20V10" />
-                  <path d="M18 20V4" />
-                  <path d="M6 20v-4" />
-                </svg>
-              </div>
-            )
-          })()}
-        </div>
-      )}
+                  <span
+                    style={{
+                      whiteSpace: 'nowrap',
+                      color: 'var(--sidebar-active-text, #ffffff)',
+                      fontWeight: '600',
+                    }}
+                  >
+                    {parsed.cost}
+                  </span>
+                </div>
+              ) : (
+                <span style={{ minWidth: 0, flex: 1, wordBreak: 'break-word' }}>
+                  {usageBadge}
+                </span>
+              )}
+              <svg
+                style={{ flexShrink: 0, opacity: 0.85 }}
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M12 20V10" />
+                <path d="M18 20V4" />
+                <path d="M6 20v-4" />
+              </svg>
+            </div>
+          )
+        })()}
+      </SidebarStatusCard>
 
       {/* Account / Workspace Switcher: min 44px tap target */}
       {effectivelyCollapsed ? (
