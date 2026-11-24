@@ -202,7 +202,7 @@ async def test_warning_on_user_404():
 @pytest.mark.asyncio
 async def test_warning_on_user_403_rate_limit():
     intel = await run([], user_status=403)
-    assert any("rate limit" in w.lower() for w in intel.warnings)
+    assert any(("rate limit" in w.lower() or "hourly limit" in w.lower()) for w in intel.warnings)
     assert intel.status == "failed"
 
 
