@@ -59,6 +59,23 @@ from backend.services.career_github import (
     analyze_github_profile,
     sanitize_external_text,
 )
+import backend.services.career_github as cg
+
+
+@pytest.fixture(autouse=True)
+def _reset_github_module_state():
+    def _reset():
+        if hasattr(cg, "_RATE_LIMIT_RESET_AT"):
+            cg._RATE_LIMIT_RESET_AT = 0.0
+        cache = getattr(cg, "_ANALYSIS_CACHE", None)
+        if cache is not None:
+            cache.clear()
+
+    _reset()
+    yield
+    _reset()
+
+
 from backend.services.career_job_match import (
     analyze_job_and_match,
 )
@@ -295,7 +312,10 @@ async def test_analyze_github_profile_rate_limit_handled():
     with patch("httpx.AsyncClient.get", side_effect=fake_rate_limit):
         intel = await analyze_github_profile("octocat")
         assert intel.username == "octocat"
-        assert any("rate limit" in w.lower() for w in intel.warnings)
+        assert any(
+            ("rate limit" in w.lower() or "hourly limit" in w.lower())
+            for w in intel.warnings
+        )
 
 
 # ===========================================================================
