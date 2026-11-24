@@ -89,6 +89,7 @@ from backend.routers import (
     career_router,
 )
 from backend.routers.career_claims import router as career_claims_router
+from backend.routers.career_profile_import import router as career_profile_import_router
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -311,6 +312,7 @@ app.include_router(specialist_router)
 app.include_router(radar_router)
 app.include_router(career_router)
 app.include_router(career_claims_router)
+app.include_router(career_profile_import_router)
 
 from backend.services.rate_limiter import enforce_company_intel_guard
 

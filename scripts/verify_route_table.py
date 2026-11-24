@@ -114,6 +114,7 @@ KNOWN_ROUTE_METADATA = {
     ("/api/career/batches/{batch_id}/submit", "POST"): ("_get_current_identity", "Execute batch submission", "test_career_e2e_workflow.py"),
     ("/api/career/cover-letters/draft", "POST"): ("_get_current_identity", "Draft customized cover letter", "test_career_e2e_workflow.py"),
     ("/api/career/intelligence/external-profile", "POST"): ("_get_current_identity", "Ingest external profile data", "test_career_copilot.py"),
+    ("/api/career/intelligence/external-profile-file", "POST"): ("_get_current_identity", "Ingest external profile file", "test_career_profile_intelligence.py"),
     ("/api/career/intelligence/github", "POST"): ("_get_current_identity", "Analyze GitHub profile intelligence", "test_career_copilot.py"),
     ("/api/career/opportunities/{opportunity_id}/job-analysis", "GET"): ("_get_current_identity", "Analyze job requirements", "test_career_copilot.py"),
     ("/api/career/opportunities/{opportunity_id}/job-analysis", "POST"): ("_get_current_identity", "Analyze job requirements (POST, long descriptions)", "test_career_copilot.py"),
