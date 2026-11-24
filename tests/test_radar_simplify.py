@@ -114,7 +114,8 @@ async def test_fetch_dedupes_sorts_and_limits():
 @pytest.mark.asyncio
 async def test_fetch_rejects_non_list_payload():
     with patch("backend.services.radar_simplify.httpx.AsyncClient", _client_returning({"a": 1})):
-        assert await fetch_simplify_opportunities() == []
+        with pytest.raises(ValueError, match="unexpected Simplify file layout"):
+            await fetch_simplify_opportunities()
 
 
 # (3) verify_candidates
