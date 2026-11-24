@@ -13,48 +13,29 @@ import re
 from typing import Dict, List, Optional, Set, Tuple
 
 from backend.models_career import (
-    ExternalProfileImportRequest,
-    ExternalProfileSource,
-    ResumeContent,
-    ResumeEducationItem,
-    ResumeExperienceItem,
-    ResumeProjectItem,
-    safe_http_url,
+    ExternalProfileImportRequest, ExternalProfileSource, ResumeContent,
+    ResumeEducationItem, ResumeExperienceItem, ResumeProjectItem, safe_http_url,
 )
 from backend.services.career_profile_archive import (
-    _build_import_summary,
-    _detect_csv_type,
-    _parse_linkedin_export_csv,
-    _populate_content_from_csv,
-    _read_csv_dict_rows,
-    _route_experience_item,
-    parse_linkedin_archive_zip,
+    _build_import_summary, _detect_csv_type, _parse_linkedin_export_csv,
+    _populate_content_from_csv, _read_csv_dict_rows, _route_experience_item, parse_linkedin_archive_zip,
 )
 
 try:
     from backend.services.career_github import sanitize_external_text
 except ImportError:
     def sanitize_external_text(text: Optional[str], max_len: int = 2500) -> str:
-        if not text:
-            return ""
-        clean = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", text[:200000])
-        return clean[:max_len].strip()
+        return re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", text[:200000])[:max_len].strip() if text else ""
 
 try:
     from backend.services.career_file_parser import extract_resume_from_file_bytes
 except ImportError:
-    try:
-        from backend.services.career_resume import extract_resume_from_file_bytes
-    except ImportError:
-        extract_resume_from_file_bytes = None
+    from backend.services.career_resume import extract_resume_from_file_bytes  # type: ignore
 
 try:
     from backend.services.resume_merge import merge_resume_content
 except ImportError:
-    try:
-        from backend.services.career_resume import merge_resume_content
-    except ImportError:
-        merge_resume_content = None
+    from backend.services.career_resume import merge_resume_content  # type: ignore
 
 logger = logging.getLogger("compass.services.career_profile_sources")
 
@@ -205,7 +186,8 @@ def _is_name_candidate(line: str) -> bool:
 
 def _looks_like_name(line: str) -> bool:
     clean = line.strip()
-    if not clean or len(clean) > _MAX_NAME_LENGTH or len(clean.split()) > _MAX_NAME_WORDS:
+    words = clean.split()
+    if not clean or len(clean) > _MAX_NAME_LENGTH or not (2 <= len(words) <= _MAX_NAME_WORDS):
         return False
     lower = clean.lower()
     if lower in _SECTION_HEADERS or _section_for_line(clean)[0] is not None:
@@ -217,6 +199,19 @@ def _looks_like_name(line: str) -> bool:
     if any(ch.isdigit() or ch in "@|:·/\\=" for ch in clean):
         return False
     return True
+
+
+def _has_preamble(lines: List[str]) -> bool:
+    for line in lines[:5]:
+        if _is_footer_line(line):
+            continue
+        sec, _ = _section_for_line(line)
+        low = line.strip().lower()
+        if sec in ("contact", "languages") or low in ("top skills", "contact", "contact information", "languages"):
+            return True
+        if sec is not None or _is_name_candidate(line):
+            return False
+    return False
 
 
 def _looks_like_location(line: str) -> bool:
@@ -340,8 +335,7 @@ def _parse_education_line(line: str, education: List[ResumeEducationItem]) -> No
         deg, field_of_study = deg_part.strip(), field_part.strip()
     education.append(
         ResumeEducationItem(
-            institution=sanitize_external_text(inst),
-            degree=sanitize_external_text(deg),
+            institution=sanitize_external_text(inst), degree=sanitize_external_text(deg),
             field_of_study=sanitize_external_text(field_of_study) if field_of_study else None,
         )
     )
@@ -358,20 +352,22 @@ def parse_pasted_linkedin_text(raw_text: str) -> Tuple[ResumeContent, List[str]]
     lines = [line.strip()[:2000] for line in raw_text.splitlines() if line.strip()]
     full_name, headline, location = "", "", ""
     name_line_indices: Set[int] = set()
-    summary_lines: List[str] = []
-    skills: List[str] = []
+    summary_lines, skills, certifications, awards, publications, volunteering = [], [], [], [], [], []
     education: List[ResumeEducationItem] = []
     experience: List[ResumeExperienceItem] = []
     internships: List[ResumeExperienceItem] = []
     projects: List[ResumeProjectItem] = []
-    certifications: List[str] = []
-    awards: List[str] = []
-    publications: List[str] = []
-    volunteering: List[str] = []
     current_section: Optional[str] = None
+    has_preamble = _has_preamble(lines)
+    first_main_sec_idx = next(
+        (i for i, ln in enumerate(lines) if _section_for_line(ln)[0] is not None and (not has_preamble or _section_for_line(ln)[0] not in _LEFT_COLUMN_SECTIONS)),
+        len(lines),
+    )
+
     # Pass 1: Select full_name, headline, location
     chosen_idx = -1
-    for i, line in enumerate(lines):
+    for i in range(first_main_sec_idx):
+        line = lines[i]
         if not _is_name_candidate(line):
             continue
         has_sec = False
@@ -399,7 +395,8 @@ def parse_pasted_linkedin_text(raw_text: str) -> Tuple[ResumeContent, List[str]]
     # Fallback if none satisfies look-ahead conditions
     if chosen_idx == -1:
         curr_b: Optional[str] = None
-        for i, line in enumerate(lines):
+        for i in range(first_main_sec_idx):
+            line = lines[i]
             sec, _ = _section_for_line(line)
             if sec is not None:
                 curr_b = sec
@@ -440,6 +437,7 @@ def parse_pasted_linkedin_text(raw_text: str) -> Tuple[ResumeContent, List[str]]
     current_exp_item: Optional[ResumeExperienceItem] = None
     pending_exp_lines: List[str] = []
     expecting_exp_location = False
+    after_date_range = False
 
     def _flush_pending_exp() -> None:
         nonlocal current_exp_item
@@ -447,19 +445,36 @@ def parse_pasted_linkedin_text(raw_text: str) -> Tuple[ResumeContent, List[str]]
             return
         if len(pending_exp_lines) == 1:
             rp, cp = _split_role_company(pending_exp_lines[0])
-            it = ResumeExperienceItem(company=sanitize_external_text(cp), role_title=sanitize_external_text(rp))
         else:
             p1, p2 = pending_exp_lines[-1], pending_exp_lines[-2]
-            if " · " in p1:
-                it = ResumeExperienceItem(company=sanitize_external_text(p1.split("·")[0]), role_title=sanitize_external_text(p2))
-            elif any(sep in p1 for sep in _ROLE_COMPANY_SEPARATORS):
-                rp, cp = _split_role_company(p1)
-                it = ResumeExperienceItem(company=sanitize_external_text(cp), role_title=sanitize_external_text(rp))
-            else:
-                it = ResumeExperienceItem(company=sanitize_external_text(p2), role_title=sanitize_external_text(p1))
+            cp, rp = (p1.split("·")[0], p2) if " · " in p1 else (_split_role_company(p1)[1], _split_role_company(p1)[0]) if any(s in p1 for s in _ROLE_COMPANY_SEPARATORS) else (p2, p1)
+        it = ResumeExperienceItem(company=sanitize_external_text(cp), role_title=sanitize_external_text(rp))
         _route_experience_item(it, experience, internships)
         current_exp_item = it
         pending_exp_lines.clear()
+
+    def _is_new_job_start(idx: int) -> bool:
+        cur = lines[idx]
+        if _is_footer_line(cur, full_name):
+            return False
+        if _section_for_line(cur)[0] is not None:
+            return True
+        if cur.startswith(("-", "•", "*")) or _is_date_or_duration_line(cur):
+            return False
+        k1 = next((k for k in range(idx + 1, len(lines)) if not _is_footer_line(lines[k], full_name)), None)
+        if k1 is None or _section_for_line(lines[k1])[0] is not None:
+            return False
+        l1 = lines[k1]
+        if ((" · " in l1 or " • " in l1) and any(e in l1.lower() for e in _EMPLOYMENT_TYPES)) or (" · " in l1 and len(l1) <= 100 and not l1.startswith(("-", "•", "*"))):
+            return True
+        if any(sep in cur for sep in _ROLE_COMPANY_SEPARATORS) and _is_date_or_duration_line(l1):
+            return True
+        k2 = next((k for k in range(k1 + 1, len(lines)) if not _is_footer_line(lines[k], full_name)), None)
+        if k2 is not None and _section_for_line(lines[k2])[0] is None:
+            l2 = lines[k2]
+            if _is_date_or_duration_line(l2) and not _is_date_or_duration_line(l1) and not l1.startswith(("-", "•", "*")) and len(cur) <= 100 and len(l1) <= 100:
+                return True
+        return False
 
     # Pass 2: parse sections
     for i, line in enumerate(lines):
@@ -475,6 +490,7 @@ def parse_pasted_linkedin_text(raw_text: str) -> Tuple[ResumeContent, List[str]]
                 _flush_pending_exp()
             current_section = section
             expecting_exp_location = False
+            after_date_range = False
             if section == "skills" and remainder:
                 for tok in _split_skill_tokens(remainder):
                     if not _is_proficiency_line(tok) and tok not in skills and len(skills) < _MAX_SKILLS:
@@ -524,22 +540,31 @@ def parse_pasted_linkedin_text(raw_text: str) -> Tuple[ResumeContent, List[str]]
                 current_exp_item = item
                 pending_exp_lines.clear()
                 expecting_exp_location = True
+                after_date_range = True
                 continue
 
-            if line.startswith(("-", "•", "*")):
+            if expecting_exp_location:
                 expecting_exp_location = False
+                if _looks_like_location(line):
+                    if hasattr(current_exp_item, "location"):
+                        setattr(current_exp_item, "location", sanitize_external_text(line))
+                    continue
+
+            if line.startswith(("-", "•", "*")):
                 cl = sanitize_external_text(line.lstrip("-•* ").strip())
                 if current_exp_item and cl:
                     current_exp_item.highlights.append(cl)
                 continue
 
-            if expecting_exp_location and _looks_like_location(line):
-                expecting_exp_location = False
-                if hasattr(current_exp_item, "location"):
-                    setattr(current_exp_item, "location", sanitize_external_text(line))
-                continue
+            if after_date_range and current_exp_item is not None:
+                if not _is_new_job_start(i):
+                    cl = sanitize_external_text(line)
+                    if cl:
+                        current_exp_item.highlights.append(cl)
+                    continue
+                else:
+                    after_date_range = False
 
-            expecting_exp_location = False
             pending_exp_lines.append(line)
 
         elif current_section == "projects":
@@ -566,23 +591,12 @@ def parse_pasted_linkedin_text(raw_text: str) -> Tuple[ResumeContent, List[str]]
     gh, rel_links = _extract_links_from_text(raw_text)
 
     content = ResumeContent(
-        full_name=full_name,
-        email=email.group(0) if email else "",
-        phone=_extract_phone_from_text(raw_text),
-        location=location or None,
-        github_or_portfolio=gh,
-        linkedin_url=_extract_linkedin_url_from_text(raw_text),
-        summary=sanitize_external_text(summary, max_len=1200) if summary else None,
-        skills=skills,
-        education=education,
-        experience=experience,
-        internships=internships,
-        projects=projects,
-        certifications=certifications,
-        awards=awards,
-        publications=publications,
-        leadership_and_volunteering=volunteering,
-        relevant_links=rel_links,
+        full_name=full_name, email=email.group(0) if email else "", phone=_extract_phone_from_text(raw_text),
+        location=location or None, github_or_portfolio=gh, linkedin_url=_extract_linkedin_url_from_text(raw_text),
+        summary=sanitize_external_text(summary, max_len=1200) if summary else None, skills=skills,
+        education=education, experience=experience, internships=internships, projects=projects,
+        certifications=certifications, awards=awards, publications=publications,
+        leadership_and_volunteering=volunteering, relevant_links=rel_links,
         evidence_classifications={"source": ExternalProfileSource.LINKEDIN_PASTED_TEXT.value},
     )
     summary_note = _build_import_summary(content)
