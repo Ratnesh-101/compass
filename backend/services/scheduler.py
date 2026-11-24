@@ -194,6 +194,70 @@ def earliest_schedulable_start(requested_start: datetime | str, now: Optional[da
     return max(_ensure_utc(requested_start), floor)
 
 
+def _id_sort_key(tid: Any) -> Tuple[int, Any]:
+    if tid is None:
+        return (2, "")
+    try:
+        return (0, int(tid))
+    except (ValueError, TypeError):
+        return (1, str(tid))
+
+
+def normalize_task_deadline(due: Any, zone: Any = None) -> Optional[datetime]:
+    """Robustly parse task deadline to UTC datetime (date-only treated as end of day 23:59:59)."""
+    if due is None or due == "":
+        return None
+    if isinstance(due, datetime):
+        return _ensure_utc(due)
+    z = zone or timezone.utc
+    if isinstance(due, date):
+        return datetime.combine(due, time(23, 59, 59), tzinfo=z).astimezone(timezone.utc)
+    if isinstance(due, str):
+        s = due.strip()
+        if not s:
+            return None
+        if len(s) == 10 and s.count("-") == 2:
+            try:
+                return datetime.combine(date.fromisoformat(s), time(23, 59, 59), tzinfo=z).astimezone(timezone.utc)
+            except Exception:
+                return None
+        try:
+            clean_s = s.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(clean_s)
+            if dt.tzinfo is None and zone is not None:
+                dt = dt.replace(tzinfo=zone)
+            return _ensure_utc(dt)
+        except Exception:
+            try:
+                return _ensure_utc(s)
+            except Exception:
+                return None
+    return None
+
+
+def sort_tasks_for_scheduling(
+    tasks: Sequence[Dict[str, Any]],
+    now: Optional[datetime | str] = None,
+    tz_name: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Sort tasks for scheduling: earliest deadline first (overdue first), ties broken by priority, duration, id."""
+    if not tasks:
+        return []
+    zone = resolve_zone(tz_name)
+
+    def task_sort_key(t: Dict[str, Any]) -> Tuple[int, datetime, int, int, Tuple[int, Any]]:
+        raw_due = t.get("due_date") if t.get("due_date") is not None else t.get("deadline")
+        due_dt = normalize_task_deadline(raw_due, zone=zone)
+        has_dl = 0 if due_dt is not None else 1
+        dl_moment = due_dt if due_dt is not None else datetime.max.replace(tzinfo=timezone.utc)
+        prio = str(t.get("priority", "medium")).lower()
+        prio_rank = -PRIORITY_WEIGHTS.get(prio, 2)
+        duration = int(t.get("duration_minutes") or 60)
+        return (has_dl, dl_moment, prio_rank, duration, _id_sort_key(t.get("id")))
+
+    return sorted(tasks, key=task_sort_key)
+
+
 def allocate_task_slots(
     tasks: Sequence[Dict[str, Any]],
     available_windows: Sequence[TimeWindow],
@@ -214,9 +278,10 @@ def allocate_task_slots(
 
     Tasks are prioritized by:
       1. Topological dependency prerequisites (parents must finish before children start)
-      2. Priority weight (urgent > high > medium > low)
-      3. Due date (earlier deadlines first)
-      4. Duration (fitting tasks efficiently)
+      2. Earliest deadline first (overdue tasks first; no-deadline tasks last)
+      3. Priority weight (urgent > high > medium > low)
+      4. Duration (shorter tasks first)
+      5. ID ascending
     """
     zone = resolve_zone(tz_name)
     if not tasks:
@@ -243,22 +308,6 @@ def allocate_task_slots(
                 "scheduled_start": _ensure_utc(sched_data["scheduled_start"]),
                 "scheduled_end": _ensure_utc(sched_data["scheduled_end"]),
             }
-
-    def sort_key(t: Dict[str, Any]) -> Tuple[int, datetime, int]:
-        prio = str(t.get("priority", "medium")).lower()
-        prio_rank = -PRIORITY_WEIGHTS.get(prio, 2)
-
-        due = t.get("due_date")
-        if due:
-            if isinstance(due, (datetime, date)):
-                due_dt = _ensure_utc(due)
-            else:
-                due_dt = _ensure_utc(str(due))
-        else:
-            due_dt = datetime.max.replace(tzinfo=timezone.utc)
-
-        duration = int(t.get("duration_minutes") or 60)
-        return (prio_rank, due_dt, duration)
 
     candidate_ids = {int(t["id"]) for t in tasks if t.get("id") is not None}
     inactive_ids = {
@@ -306,22 +355,16 @@ def allocate_task_slots(
                 })
             break
 
-        task = min(ready_tasks, key=sort_key)
+        task = sort_tasks_for_scheduling(ready_tasks, now=floor, tz_name=tz_name)[0]
         remaining_tasks.remove(task)
 
         duration_min = int(task.get("duration_minutes") or 60)
         needed_delta = timedelta(minutes=duration_min)
 
-        due_limit: Optional[datetime] = None
-        if task.get("due_date"):
-            raw_due = task["due_date"]
-            if isinstance(raw_due, str):
-                d_obj = date.fromisoformat(raw_due[:10])
-                due_limit = datetime.combine(d_obj, time(23, 59, 59), tzinfo=zone).astimezone(timezone.utc)
-            elif isinstance(raw_due, date) and not isinstance(raw_due, datetime):
-                due_limit = datetime.combine(raw_due, time(23, 59, 59), tzinfo=zone).astimezone(timezone.utc)
-            elif isinstance(raw_due, datetime):
-                due_limit = _ensure_utc(raw_due)
+        due_limit = normalize_task_deadline(
+            task.get("due_date") if task.get("due_date") is not None else task.get("deadline"),
+            zone=zone,
+        )
 
         tid = task.get("id")
         prereqs = live_prereqs(tid)
@@ -331,6 +374,8 @@ def allocate_task_slots(
             earliest_allowed_start = datetime.min.replace(tzinfo=timezone.utc)
 
         placed = False
+        earliest_candidate_start: Optional[datetime] = None
+
         for i, block in enumerate(free_blocks):
             b_start, b_end = block[0], block[1]
             slot_start = max(b_start, earliest_allowed_start)
@@ -338,6 +383,9 @@ def allocate_task_slots(
 
             if slot_end > b_end:
                 continue
+
+            if earliest_candidate_start is None:
+                earliest_candidate_start = slot_start
 
             if due_limit and slot_end > due_limit:
                 conflicts.append({
@@ -377,19 +425,42 @@ def allocate_task_slots(
             placed = True
             break
 
-        if not placed and not any(c.get("task_id") == task.get("id") for c in conflicts):
-            unassigned.append({
-                "task_id": task.get("id"),
-                "title": task.get("title"),
-                "priority": task.get("priority", "medium"),
-                "duration_minutes": duration_min,
-                "due_date": str(task.get("due_date")) if task.get("due_date") else None,
-                "reason": "Insufficient free time windows within working hours or before deadline.",
-            })
+        if not placed:
+            if due_limit:
+                if not any(c.get("task_id") == task.get("id") for c in conflicts):
+                    conflicts.append({
+                        "task_id": task.get("id"),
+                        "title": task.get("title"),
+                        "due_date": str(task.get("due_date")),
+                        "earliest_available": earliest_candidate_start.isoformat() if earliest_candidate_start else None,
+                        "issue": "Cannot be scheduled before deadline with current calendar load.",
+                    })
+                unassigned.append({
+                    "task_id": task.get("id"),
+                    "title": task.get("title"),
+                    "priority": task.get("priority", "medium"),
+                    "duration_minutes": duration_min,
+                    "due_date": str(task.get("due_date")) if task.get("due_date") else None,
+                    "reason": "Cannot be scheduled before deadline with current calendar load.",
+                })
+            else:
+                unassigned.append({
+                    "task_id": task.get("id"),
+                    "title": task.get("title"),
+                    "priority": task.get("priority", "medium"),
+                    "duration_minutes": duration_min,
+                    "due_date": str(task.get("due_date")) if task.get("due_date") else None,
+                    "reason": "Insufficient free time windows within working hours or before deadline.",
+                })
 
+    deadline_summary = (
+        "1 task could not be placed before its deadline"
+        if len(conflicts) == 1
+        else f"{len(conflicts)} tasks could not be placed before their deadlines"
+    )
     summary_text = (
         f"Scheduled {len(scheduled)} tasks successfully ({len(unassigned)} unassigned, "
-        f"{len(conflicts)} deadline conflicts)."
+        f"{deadline_summary})."
     )
 
     return {
@@ -408,6 +479,7 @@ __all__ = [
     "merge_overlapping_intervals",
     "get_available_windows",
     "allocate_task_slots",
+    "sort_tasks_for_scheduling",
     "ceil_to_quarter_hour",
     "earliest_schedulable_start",
     "find_slipped_tasks",
