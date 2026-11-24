@@ -480,6 +480,14 @@ ASSESS_FEASIBILITY_TOOL: Dict[str, Any] = {
                     "enum": ["hackathon", "coursework", "code", "general"],
                     "description": "Optional: restrict to one domain",
                 },
+                "workload_hours": {
+                    "type": "number",
+                    "description": "Total hours of work the user says they have, when they give a number of hours instead of tasks",
+                },
+                "days_stated": {
+                    "type": "boolean",
+                    "description": "Whether the user explicitly stated the number of days",
+                },
             },
             "required": [],
         },
