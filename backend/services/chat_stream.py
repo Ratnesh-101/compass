@@ -45,6 +45,7 @@ from backend.services.task_intent import is_intake_intent
 from backend.services.task_time import local_today, pick_timezone
 from backend.services.token_budget import stream_token_budget
 from backend.services.usage import record_usage
+from backend.services.stream_claim_guard import StreamClaimGuard
 from backend.services.chat_stream_extras import (
     DIRECT_ANSWER_RULE,
     GENERIC_ERROR_MESSAGE,
@@ -689,6 +690,7 @@ async def _generate_chat_events(
         last_finish_reason: Optional[str] = None
         cont_failed = False
         think_filter = StreamingThinkFilter()
+        claim_guard = StreamClaimGuard()
         accumulated_tool_calls: Dict[int, Dict[str, str]] = {}
 
         try:
@@ -745,19 +747,27 @@ async def _generate_chat_events(
                     if token:
                         filtered_token = think_filter.process(token)
                         if filtered_token:
+                            if claim_guard.blocked:
+                                continue
                             if not emitted_text:
                                 yield f"data: {json.dumps({'type': 'status', 'stage': 'generating', 'label': 'Generating response…'})}\n\n"
                             full_text += filtered_token
                             emitted_text += filtered_token
                             yield f"data: {json.dumps({'type': 'token', 'value': filtered_token})}\n\n"
+                            if rep := claim_guard.observe(filtered_token):
+                                yield f"data: {json.dumps({'type': 'replace', 'value': rep})}\n\n"
+                                full_text = emitted_text = rep
 
             tail = "" if tool_call_detected else think_filter.flush()
-            if tail:
+            if tail and not claim_guard.blocked:
                 if not emitted_text:
                     yield status_event("generating", "Generating response…")
                 full_text += tail
                 emitted_text += tail
                 yield f"data: {json.dumps({'type': 'token', 'value': tail})}\n\n"
+            if not tool_call_detected and (rep := claim_guard.finish()):
+                yield f"data: {json.dumps({'type': 'replace', 'value': rep})}\n\n"
+                full_text = emitted_text = rep
 
             # Bounded continuation if output token limit was reached (same prompt for every tone).
             # Skipped when the first pass produced no visible text: there is nothing to continue.

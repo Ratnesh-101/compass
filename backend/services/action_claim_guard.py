@@ -8,7 +8,7 @@ requesting user confirmation.
 from __future__ import annotations
 
 import re
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 # Action verbs indicating completion or modification
 CLAIM_VERBS = (
@@ -33,13 +33,18 @@ OPENER_CLAIM_PATTERN = re.compile(
     r"(?:"
     r"(?:^|(?<=[.!?\n,]))\s*done\b(?:\s*[—–\-:])?|"
     r"\ball\s+set\b|"
-    r"\bupdated\s+the\s+task\b|"
-    r"\btask\s+updated\b|"
-    r"\btask\s+added\b|"
+    r"\bupdated\s+to\b|"
+    r"\bupdated\s+the\s+(?:task|deadline|due\s+date|reminder)\b|"
+    r"\badded\s+\d+\s+tasks?\b|"
     r"\badded\s+the\s+task\b|"
+    r"\badded\s*:|"
+    r"\btasks?\s+(?:created|added|updated|deleted|removed|completed|scheduled|saved)\b|"
+    r"\b(?:marked|moved|rescheduled|scheduled|deleted|removed|renamed|saved|submitted|applied|booked|exported|cancelled|canceled)\b[^\n.!?]{0,80}?\b(?:as\s+(?:done|complete)|to|for|on|in|from)\b|"
+    r"\b(?:it['’]?s|it\s+is|they['’]?re|they\s+are)\s+now\s+(?:on|in)\s+your\s+(?:list|schedule|calendar|timeline|watchlist)\b|"
+    r"\bnow\s+on\s+your\s+list\b|"
     r"\bi['’]ve\s+set\b|"
-    r"\byour\s+task\s+has\s+been\s+(?:\w+\s+){0,2}(?:added|updated|deleted|scheduled|rescheduled|submitted|saved)\b|"
-    r"\bhas\s+been\s+(?:\w+\s+){0,2}(?:added|updated|deleted|scheduled|rescheduled|submitted|saved)\b"
+    r"\byour\s+task\s+has\s+been\s+(?:\w+\s+){0,2}(?:added|updated|deleted|scheduled|rescheduled|submitted|saved|completed)\b|"
+    r"\bhas\s+been\s+(?:\w+\s+){0,2}(?:added|updated|deleted|scheduled|rescheduled|submitted|saved|completed)\b"
     r")",
     re.IGNORECASE,
 )
@@ -92,11 +97,17 @@ OFFER_PATTERN = re.compile(
 # Classification pattern for task add / update / schedule claims
 TASK_CLAIM_PATTERN = re.compile(
     r"\b(?:"
-    r"updated\s+the\s+task|"
+    r"updated\s+the\s+(?:task|deadline|due\s+date|reminder)|"
+    r"updated\s+to|"
+    r"added\s+\d+\s+tasks?|"
+    r"added\s*:|"
+    r"tasks?\s+(?:created|added|updated|deleted|removed|completed|scheduled|saved)|"
     r"task\s+updated|"
     r"task\s+added|"
     r"added\s+the\s+task|"
-    r"your\s+task\s+has\s+been\s+(?:added|updated|rescheduled|scheduled)|"
+    r"(?:it['’]?s|it\s+is|they['’]?re|they\s+are)\s+now\s+(?:on|in)\s+your\s+(?:list|schedule|calendar|timeline|watchlist)|"
+    r"now\s+on\s+your\s+list|"
+    r"your\s+task\s+has\s+been\s+(?:added|updated|rescheduled|scheduled|completed)|"
     r"(?:i(?:['’]ve|\s+have|\s+just|\s+went\s+ahead\s+and|['’]ll\s+have))(?:\s+\w+){0,3}\s+"
     r"(?:added|created|updated|changed|edited|moved|rescheduled|scheduled|set)"
     r")\b",
@@ -269,3 +280,47 @@ def guard_unbacked_action_claims(
         result_text = honest_text
 
     return result_text, True
+
+
+# State claims that cannot be backed by a tool in a plain reply
+STATE_CLAIM_PATTERNS = (
+    re.compile(
+        r"\b(?:the\s+[^\n.!?]{0,40}?\s+)?(?:you|you['’]ve|you\s+have)\s+saved\s+(?:it|this|that|the\b[^\n.!?]{0,40}?)?\s*earlier\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\byour\s+task\s+list\s+is\s+(?:currently\s+)?empty\b", re.IGNORECASE),
+    re.compile(r"\byou\s+have\s+no\s+(?:open\s+|active\s+)?tasks\b", re.IGNORECASE),
+)
+
+EMPTY_TASK_CLAIM_PATTERNS = (
+    re.compile(r"\byour\s+task\s+list\s+is\s+(?:currently\s+)?empty\b", re.IGNORECASE),
+    re.compile(r"\byou\s+have\s+no\s+(?:open\s+|active\s+)?tasks\b", re.IGNORECASE),
+)
+
+
+def guard_state_claims(
+    reply: str, known_task_count: Optional[int]
+) -> Tuple[str, bool]:
+    """Guard against plain-text replies claiming no tasks when tasks exist.
+
+    Args:
+        reply: Proposed assistant reply text.
+        known_task_count: Count of known active tasks, or None.
+
+    Returns:
+        tuple of (guarded_text, was_replaced).
+    """
+    if not reply or not reply.strip():
+        return reply, False
+
+    if known_task_count is None or known_task_count <= 0:
+        return reply, False
+
+    has_empty_claim = any(p.search(reply) for p in EMPTY_TASK_CLAIM_PATTERNS)
+    if not has_empty_claim:
+        return reply, False
+
+    plural = "s" if known_task_count != 1 else ""
+    replacement = f"You have {known_task_count} open task{plural}."
+    return replacement, True
+
