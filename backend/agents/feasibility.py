@@ -19,6 +19,7 @@ from typing import Any, AsyncGenerator, Dict, List, Literal, Optional
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field, field_validator
 
+from backend.agents.feasibility_format import describe_tasks, format_triage_markdown, task_duration_hours
 from backend.config import get_settings
 from backend.memory import structured
 from backend.services.usage import record_usage
@@ -112,39 +113,7 @@ class TriagePlan(BaseModel):
 
     def as_markdown(self) -> str:
         """Copy-pasteable artifact — this is what the user keeps."""
-        v = self.verdict
-        verdict_text = "Nothing to assess yet" if v.demand_hours == 0 else v.verdict
-        lines = [
-            "# Compass — Feasibility Triage",
-            "",
-            f"**Verdict:** {verdict_text}",
-            f"**Demand:** {v.demand_hours}h  |  **Capacity:** {v.capacity_hours}h  "
-            f"|  **Utilisation:** {v.utilisation_pct}%",
-        ]
-        if v.overcommit_hours > 0:
-            lines.append(f"**Overcommitted by:** {v.overcommit_hours}h")
-        lines += ["", f"_{self.narrative}_", ""]
-
-        for label, bucket in (("Keep", self.keep), ("Defer", self.defer), ("Drop", self.drop)):
-            lines.append(f"## {label} ({len(bucket)})")
-            if not bucket:
-                lines.append("_none_")
-            for t in bucket:
-                due = f" — due {t.due_date}" if t.due_date else ""
-                why = f" — {t.rationale}" if t.rationale else ""
-                lines.append(f"- **{t.title}** [{t.domain}] · {t.estimated_hours}h{due}{why}")
-            lines.append("")
-
-        if v.challenged_estimates:
-            lines.append("## Estimates the Realist challenged")
-            lines += [f"- {c}" for c in v.challenged_estimates]
-            lines.append("")
-
-        lines.append(f"_Negotiation rounds: {self.rounds_used}_")
-        if self.degraded:
-            lines.append("_Produced by the offline deterministic fallback "
-                         "(model provider unreachable)._")
-        return "\n".join(lines)
+        return format_triage_markdown(self)
 
 
 # ---------------------------------------------------------------------------
@@ -323,14 +292,6 @@ async def _call_model(
 # Deterministic fallbacks — these are why the demo cannot crash
 # ---------------------------------------------------------------------------
 
-def _heuristic_hours(task: Dict[str, Any]) -> float:
-    base = _PRIORITY_HOURS.get(str(task.get("priority") or "medium").lower(), 2.0)
-    mult = _DOMAIN_MULTIPLIER.get(str(task.get("domain") or "general").lower(), 1.0)
-    title_len = len(str(task.get("title") or ""))
-    size_bump = 1.0 if title_len < 60 else 1.3
-    return round(base * mult * size_bump, 2)
-
-
 def _heuristic_proposal(tasks: List[Dict[str, Any]]) -> PlannerProposal:
     loads: List[TaskLoad] = []
     for t in tasks:
@@ -341,8 +302,8 @@ def _heuristic_proposal(tasks: List[Dict[str, Any]]) -> PlannerProposal:
                 domain=str(t.get("domain") or "general"),
                 priority=str(t.get("priority") or "medium"),
                 due_date=_iso(t.get("due_date")),
-                estimated_hours=_heuristic_hours(t),
-                rationale="heuristic estimate (priority × domain weighting)",
+                estimated_hours=task_duration_hours(t),
+                rationale="stored duration estimate" if t.get("duration_minutes") else "default estimate (2.0h)",
             )
         )
     loads.sort(key=lambda x: (x.due_date or "9999-12-31",
@@ -449,16 +410,6 @@ async def _fetch_open_tasks(
     return [dict(r) for r in rows if r.get("status") in ("open", "in_progress")][:MAX_TASKS_CONSIDERED]
 
 
-def _describe(tasks: List[Dict[str, Any]]) -> str:
-    out = []
-    for t in tasks:
-        out.append(
-            f"- id={t.get('id')} | {t.get('title')} | domain={t.get('domain')} "
-            f"| priority={t.get('priority')} | due={_iso(t.get('due_date')) or 'none'}"
-        )
-    return "\n".join(out) if out else "(no open tasks)"
-
-
 async def run_feasibility_review(
     pool,
     *,
@@ -527,10 +478,12 @@ async def run_feasibility_review(
     yield _sse("think", "PLANNER (Nemotron-3 Super) is estimating effort per task.",
                step=step, t0=t0, agent="planner", model_tier="Nemotron-3 Super (120B)")
 
+    task_map = {int(t.get("id", 0) or 0): t for t in tasks}
+
     planner_raw = await _call_model(
         settings.SKILL_MODEL,
         PLANNER_SYSTEM,
-        f"Open tasks:\n{_describe(tasks)}\n\n"
+        f"Open tasks:\n{describe_tasks(tasks)}\n\n"
         f"Available capacity: {days} days at {hours_per_day}h/day = {capacity}h nominal.",
     )
 
@@ -540,6 +493,10 @@ async def run_feasibility_review(
             proposal = PlannerProposal.model_validate(planner_raw)
             if not proposal.loads:
                 raise ValueError("planner returned zero loads")
+            for load in proposal.loads:
+                orig = task_map.get(load.task_id)
+                if orig and orig.get("duration_minutes") is not None:
+                    load.estimated_hours = task_duration_hours(orig)
         except Exception as e:
             logger.warning("Planner output invalid (%s) — using heuristic", e)
             proposal = _heuristic_proposal(tasks)
@@ -636,6 +593,11 @@ async def run_feasibility_review(
                 narrative=str(replan_raw.get("narrative") or ""),
                 degraded=degraded,
             )
+            for bucket in (revised_plan.keep, revised_plan.defer, revised_plan.drop):
+                for load in bucket:
+                    orig = task_map.get(load.task_id)
+                    if orig and orig.get("duration_minutes") is not None:
+                        load.estimated_hours = task_duration_hours(orig)
             if not revised_plan.keep and not revised_plan.defer and not revised_plan.drop:
                 revised_plan = None
         except Exception as e:
@@ -648,15 +610,15 @@ async def run_feasibility_review(
         degraded = True
         revised_plan.degraded = True
 
-    # Final arithmetic check on the revised plan — the Realist's own rule.
-    final_verdict = _arithmetic_verdict(revised_plan.kept_hours(), capacity)
+    # Arithmetic verdict on the overall workload demand.
+    final_verdict = _arithmetic_verdict(demand, capacity)
     final_verdict.challenged_estimates = verdict.challenged_estimates
     revised_plan.verdict = final_verdict
 
     step += 1
     yield _sse("verdict",
-               f"REALIST re-check: revised plan is {final_verdict.verdict} at "
-               f"{revised_plan.kept_hours()}h kept against {capacity}h capacity.",
+               f"REALIST re-check: revised plan keeps {revised_plan.kept_hours()}h "
+               f"against {capacity}h capacity.",
                step=step, t0=t0, agent="realist",
                verdict=final_verdict.model_dump(),
                model_tier="Nemotron-3 Ultra (550B)")
