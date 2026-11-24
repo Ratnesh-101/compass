@@ -20,8 +20,12 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import httpx
 
+from backend.memory import radar as radar_memory
+from backend.memory.radar import update_opportunity_verification
+from backend.memory.radar_close import select_delisted_for_check
 from backend.models_radar import EmployerType, OpportunityStatus
 from backend.services.radar_sources import canonicalize_url, infer_category, infer_employer_type
+from backend.services.radar_verifier import is_fetch_failure, verify_opportunity_status
 
 logger = logging.getLogger("compass.radar.simplify")
 
@@ -31,10 +35,50 @@ SIMPLIFY_LISTINGS_URL = (
 SOURCE_NAME = "SimplifyJobs/Summer2027-Internships"
 MAX_DOWNLOAD_BYTES = 40 * 1024 * 1024
 MAX_LISTINGS_PER_SYNC = 2000
+
+SIMPLIFY_DELISTED_EVIDENCE = "Simplify no longer lists this as active; the employer page is being checked."
+LEGACY_CLOSE_EVIDENCE = "No longer listed as active in SimplifyJobs/Summer2027-Internships"
+MIN_DATASET_ROWS = 5000
+MIN_ACTIVE_CSE = 1000
+MAX_DEMOTE_FRACTION = 0.10
+MIN_DEMOTE_CAP = 50
+SETTLE_BATCH = 150
+SETTLE_BUDGET_SECONDS = 60.0
+
 # Computer-science related categories. Product, quant and other tracks are left out on purpose.
 CSE_CATEGORIES = {
     "software", "software engineering", "ai/ml/data", "data science, ai & machine learning", "hardware",
 }
+
+
+def assess_dataset(
+    total_rows: int,
+    active_count: int,
+    inactive_urls: set,
+    active_canonicals: set,
+) -> Tuple[bool, str]:
+    """Validate dataset sanity against row and active thresholds."""
+    if total_rows < MIN_DATASET_ROWS:
+        return (False, f"total_rows ({total_rows}) < MIN_DATASET_ROWS ({MIN_DATASET_ROWS})")
+    if active_count < MIN_ACTIVE_CSE:
+        return (False, f"active_count ({active_count}) < MIN_ACTIVE_CSE ({MIN_ACTIVE_CSE})")
+    if len(inactive_urls) == 0 and active_count == 0:
+        return (False, "inactive set is empty and active_count is 0")
+    return (True, "")
+
+
+def plan_demotion(
+    candidate_urls: set,
+    active_canonicals: set,
+    tracked_open: int,
+    matching_open: int,
+) -> Tuple[Set[str], str]:
+    """Calculate candidate demotions bounded by the safety cap."""
+    to_demote = candidate_urls - active_canonicals
+    cap = max(MIN_DEMOTE_CAP, int(tracked_open * MAX_DEMOTE_FRACTION))
+    if matching_open > cap:
+        return (set(), f"would demote {matching_open} listings, more than the safety cap of {cap}")
+    return (to_demote, "")
 
 
 def _is_india(locations: List[str]) -> bool:
@@ -134,17 +178,41 @@ def split_simplify_dataset(
     return active_opps, inactive_canonical_urls
 
 
-async def fetch_simplify_dataset(
+async def fetch_simplify_dataset_checked(
     limit: int = MAX_LISTINGS_PER_SYNC,
-) -> Tuple[List[Dict[str, Any]], Set[str]]:
-    """Download the dataset and return (active_opps, inactive_canonical_urls)."""
+) -> Tuple[List[Dict[str, Any]], Set[str], int]:
+    """Download the dataset, validate JSON shape, and return (active_opps, inactive_canonical_urls, total_rows)."""
     async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
         resp = await client.get(SIMPLIFY_LISTINGS_URL)
         resp.raise_for_status()
         if len(resp.content) > MAX_DOWNLOAD_BYTES:
             raise ValueError("Simplify listings file is larger than expected; refusing to parse it")
         rows = resp.json()
-    return split_simplify_dataset(rows, limit)
+
+    if not isinstance(rows, list):
+        raise ValueError("unexpected Simplify file layout")
+
+    total_rows = len(rows)
+    if total_rows == 0:
+        raise ValueError("unexpected Simplify file layout")
+
+    valid_dict_count = sum(
+        1 for r in rows
+        if isinstance(r, dict) and "url" in r and "company_name" in r and "title" in r
+    )
+    if (valid_dict_count / total_rows) < 0.90:
+        raise ValueError("unexpected Simplify file layout")
+
+    active_opps, inactive_urls = split_simplify_dataset(rows, limit=limit)
+    return active_opps, inactive_urls, total_rows
+
+
+async def fetch_simplify_dataset(
+    limit: int = MAX_LISTINGS_PER_SYNC,
+) -> Tuple[List[Dict[str, Any]], Set[str]]:
+    """Download the dataset and return (active_opps, inactive_canonical_urls)."""
+    active_opps, inactive_urls, _ = await fetch_simplify_dataset_checked(limit=limit)
+    return active_opps, inactive_urls
 
 
 async def fetch_simplify_opportunities(limit: int = MAX_LISTINGS_PER_SYNC) -> List[Dict[str, Any]]:
@@ -217,3 +285,97 @@ async def verify_candidates(
 
     await asyncio.gather(*[_one(o) for o in to_check], return_exceptions=True)
     return confirmed
+
+
+async def settle_delisted_listings(
+    limit: int = SETTLE_BATCH,
+    budget_seconds: float = SETTLE_BUDGET_SECONDS,
+    verify: Any = verify_opportunity_status,
+    dry_run: bool = False,
+) -> Dict[str, int]:
+    """Verify delisted listings against employer pages and settle their statuses.
+
+    Selects up to `limit` delisted rows in NEEDS_VERIFICATION.
+    Transitions CLOSED_CONFIRMED (HTTP 404/410/closed) or OPEN_CONFIRMED (still open).
+    Leaves fetch failures and exceptions untouched. Never raises.
+    """
+    summary = {
+        "checked": 0,
+        "closed": 0,
+        "reopened": 0,
+        "unchanged": 0,
+        "errors": 0,
+    }
+    deadline = time.monotonic() + budget_seconds
+    try:
+        rows = await select_delisted_for_check(
+            "simplify_listings",
+            (SIMPLIFY_DELISTED_EVIDENCE, "Simplify lists this as active again"),
+            limit,
+        )
+    except Exception as exc:
+        logger.warning("Failed to select delisted listings for settlement: %s", exc)
+        summary["errors"] += 1
+        return summary
+
+    for row in rows:
+        if time.monotonic() >= deadline:
+            break
+        app_url = row.get("application_url")
+        opp_id = row.get("id")
+        if not app_url or opp_id is None:
+            summary["unchanged"] += 1
+            continue
+
+        summary["checked"] += 1
+        time_left = deadline - time.monotonic()
+        if time_left <= 0:
+            break
+        call_timeout = min(20.0, time_left)
+
+        try:
+            status, evidence, verified_at = await asyncio.wait_for(
+                verify(str(app_url), "NEEDS_VERIFICATION"),
+                timeout=call_timeout,
+            )
+        except Exception as exc:
+            logger.debug("Settlement verification failed for %s (%s): %s", opp_id, app_url, exc)
+            summary["errors"] += 1
+            continue
+
+        if is_fetch_failure(evidence):
+            summary["unchanged"] += 1
+            continue
+
+        if status in (OpportunityStatus.CLOSED_CONFIRMED, "CLOSED_CONFIRMED"):
+            if not dry_run:
+                try:
+                    await radar_memory.update_opportunity_verification(
+                        opportunity_id=opp_id,
+                        current_status="CLOSED_CONFIRMED",
+                        verification_evidence=evidence,
+                        last_verified_at=verified_at,
+                    )
+                except Exception as db_exc:
+                    logger.warning("Failed to update closed verification for %s: %s", opp_id, db_exc)
+                    summary["errors"] += 1
+                    continue
+            summary["closed"] += 1
+        elif status in (OpportunityStatus.OPEN_CONFIRMED, "OPEN_CONFIRMED"):
+            if not dry_run:
+                try:
+                    await radar_memory.update_opportunity_verification(
+                        opportunity_id=opp_id,
+                        current_status="OPEN_CONFIRMED",
+                        verification_evidence=evidence,
+                        last_verified_at=verified_at,
+                    )
+                except Exception as db_exc:
+                    logger.warning("Failed to update reopened verification for %s: %s", opp_id, db_exc)
+                    summary["errors"] += 1
+                    continue
+            summary["reopened"] += 1
+        else:
+            summary["unchanged"] += 1
+
+    return summary

@@ -27,7 +27,13 @@ from backend.memory.radar import (
     upsert_opportunity_cycle,
     upsert_opportunity_requirements,
 )
-from backend.memory.radar_close import close_opportunities_by_canonical_urls
+from backend.memory.radar_close import (
+    close_opportunities_by_canonical_urls,
+    count_open_by_source,
+    count_open_matching,
+    demote_opportunities_by_canonical_urls,
+    reopen_wrongly_closed,
+)
 from backend.models_radar import EmployerType, OpportunityStatus
 from backend.services.radar_ats_adapters import (
     fetch_all_public_ats_opportunities,
@@ -47,7 +53,16 @@ from backend.services.radar_reverify import (
     promote_upcoming_opportunities,
     reverify_stale_opportunities,
 )
-from backend.services.radar_simplify import fetch_simplify_dataset, verify_candidates
+from backend.services.radar_simplify import (
+    LEGACY_CLOSE_EVIDENCE,
+    SIMPLIFY_DELISTED_EVIDENCE,
+    assess_dataset,
+    fetch_simplify_dataset,
+    fetch_simplify_dataset_checked,
+    plan_demotion,
+    settle_delisted_listings,
+    verify_candidates,
+)
 from backend.services.radar_verifier import verify_opportunity_status
 from backend.services.tavily import search as tavily_search, tavily_available
 
@@ -108,6 +123,21 @@ async def run_radar_sync(source_filter: Optional[str] = None, dry_run: bool = Fa
             "closed": 0,
             "errors": 0,
             "dry_run": dry_run,
+        }
+        simplify_summary: Dict[str, Any] = {
+            "fetched": 0,
+            "active": 0,
+            "inactive_candidates": 0,
+            "demoted": 0,
+            "reopened": 0,
+            "settle": {
+                "checked": 0,
+                "closed": 0,
+                "reopened": 0,
+                "unchanged": 0,
+                "errors": 0,
+            },
+            "skipped_reason": "",
         }
         if dry_run:
             logger.info(f"[DRY-RUN] Radar sync initiated (source_filter={source_filter}). No DB writes will occur.")
@@ -427,18 +457,41 @@ async def run_radar_sync(source_filter: Optional[str] = None, dry_run: bool = Fa
             if not source_filter or source_filter in {"all", "simplify"}:
                 try:
                     if dry_run:
-                        simplify_opps, inactive_urls = await fetch_simplify_dataset()
+                        simplify_opps, inactive_urls, total_rows = await fetch_simplify_dataset_checked()
                         records_discovered += len(simplify_opps)
                         active_canonicals = {
                             o["canonical_url"] for o in simplify_opps if o.get("canonical_url")
                         }
-                        to_close_count = len(inactive_urls - active_canonicals)
+                        inactive_candidates_count = len(inactive_urls - active_canonicals)
+                        simplify_summary["fetched"] = total_rows
+                        simplify_summary["active"] = len(simplify_opps)
+                        simplify_summary["inactive_candidates"] = inactive_candidates_count
+
+                        ok, reason = assess_dataset(total_rows, len(simplify_opps), inactive_urls, active_canonicals)
+                        if not ok:
+                            logger.warning(
+                                f"Simplify dataset failed sanity check: {reason}; no listings were demoted or reopened"
+                            )
+                            simplify_summary["skipped_reason"] = reason
+                        else:
+                            tracked = await count_open_by_source("simplify_listings")
+                            matching = await count_open_matching(inactive_urls - active_canonicals, "simplify_listings")
+                            to_demote, skip_reason = plan_demotion(inactive_urls, active_canonicals, tracked, matching)
+                            if skip_reason:
+                                logger.warning(f"Simplify demotion skipped: {skip_reason}")
+                                simplify_summary["skipped_reason"] = skip_reason
+                            else:
+                                logger.info(
+                                    f"[DRY-RUN] Simplify demotion planned for {len(to_demote)} URLs "
+                                    f"(matching open: {matching}, tracked open: {tracked})."
+                                )
+
                         logger.info(
                             f"[DRY-RUN] Simplify adapter fetched {len(simplify_opps)} active listings, "
-                            f"{to_close_count} inactive candidates to close; 0 persisted to DB."
+                            f"{inactive_candidates_count} inactive candidates to demote; 0 persisted to DB."
                         )
                     else:
-                        simplify_opps, inactive_urls = await fetch_simplify_dataset()
+                        simplify_opps, inactive_urls, total_rows = await fetch_simplify_dataset_checked()
                         await verify_candidates(simplify_opps)
                         sem = asyncio.Semaphore(6)
                         ingest_deadline = time.monotonic() + 200.0
@@ -460,14 +513,47 @@ async def run_radar_sync(source_filter: Optional[str] = None, dry_run: bool = Fa
                         active_canonicals = {
                             o["canonical_url"] for o in simplify_opps if o.get("canonical_url")
                         }
-                        closed_count = await close_opportunities_by_canonical_urls(
-                            inactive_urls - active_canonicals,
-                            "simplify_listings",
-                            "No longer listed as active in SimplifyJobs/Summer2027-Internships",
-                        )
-                        logger.info(
-                            f"Simplify sync closed {closed_count} inactive listings."
-                        )
+                        inactive_candidates_count = len(inactive_urls - active_canonicals)
+                        simplify_summary["fetched"] = total_rows
+                        simplify_summary["active"] = len(simplify_opps)
+                        simplify_summary["inactive_candidates"] = inactive_candidates_count
+
+                        ok, reason = assess_dataset(total_rows, len(simplify_opps), inactive_urls, active_canonicals)
+                        if not ok:
+                            logger.warning(
+                                f"Simplify dataset failed sanity check: {reason}; no listings were demoted or reopened"
+                            )
+                            simplify_summary["skipped_reason"] = reason
+                        else:
+                            tracked = await count_open_by_source("simplify_listings")
+                            matching = await count_open_matching(inactive_urls - active_canonicals, "simplify_listings")
+                            to_demote, skip_reason = plan_demotion(inactive_urls, active_canonicals, tracked, matching)
+                            demoted = 0
+                            if skip_reason:
+                                logger.warning(f"Simplify demotion skipped: {skip_reason}")
+                                simplify_summary["skipped_reason"] = skip_reason
+                            else:
+                                demoted = await demote_opportunities_by_canonical_urls(
+                                    to_demote, "simplify_listings", SIMPLIFY_DELISTED_EVIDENCE
+                                )
+                                logger.info(f"Simplify sync demoted {demoted} inactive listings.")
+                            simplify_summary["demoted"] = demoted
+
+                            reopened = await reopen_wrongly_closed(
+                                active_canonicals,
+                                "simplify_listings",
+                                (LEGACY_CLOSE_EVIDENCE, SIMPLIFY_DELISTED_EVIDENCE.split(";")[0]),
+                            )
+                            logger.info(f"Simplify sync reopened {reopened} wrongly closed listings.")
+                            simplify_summary["reopened"] = reopened
+
+                            settle = await settle_delisted_listings()
+                            logger.info(
+                                f"Simplify delisted settlement: {settle['checked']} checked, "
+                                f"{settle['closed']} closed, {settle['reopened']} reopened, "
+                                f"{settle['unchanged']} unchanged, {settle['errors']} errors."
+                            )
+                            simplify_summary["settle"] = settle
                 except Exception as simp_all_err:
                     failures += 1
                     logger.warning(f"Simplify synchronization encountered an issue: {simp_all_err}")
@@ -526,6 +612,7 @@ async def run_radar_sync(source_filter: Optional[str] = None, dry_run: bool = Fa
             "records_skipped": records_skipped,
             "failures": failures,
             "error_summary": error_summary,
+            "simplify": simplify_summary,
             "reverify": reverify_summary,
             "promote_upcoming": promote_upcoming_summary,
             "duration_seconds": (datetime.now(timezone.utc) - start_time).total_seconds(),
