@@ -1,4 +1,5 @@
 import React from 'react'
+import { shouldReloadForStaleChunk } from '../utils/chunkReload'
 
 /**
  * Contains render errors and lazy-chunk load failures to one tab so the sidebar and
@@ -17,6 +18,9 @@ export default class TabErrorBoundary extends React.Component {
 
   componentDidCatch(error, errorInfo) {
     console.error('[Compass TabErrorBoundary] Tab failed to render:', error, errorInfo)
+    if (shouldReloadForStaleChunk(error) && typeof window !== 'undefined') {
+      window.location.reload()
+    }
   }
 
   componentDidUpdate(prevProps) {
