@@ -41,6 +41,49 @@ TOTAL_BUDGET_SECONDS: float = 150.0
 UNVERIFIABLE_AGGREGATOR_HOSTS = ("glassdoor.com", "linkedin.com", "indeed.com")
 
 
+UPCOMING_PROMOTION_BUDGET_SECONDS: float = 60.0
+
+
+def _unpack_verify_result(res: Any) -> tuple[Optional[str], str, datetime]:
+    """Unpack verifier return value into (status, evidence, verified_at_dt)."""
+    if isinstance(res, (tuple, list)):
+        if len(res) >= 3:
+            new_status, evidence, verified_at = res[0], res[1], res[2]
+        elif len(res) == 2:
+            new_status, evidence = res[0], res[1]
+            verified_at = datetime.now(timezone.utc)
+        elif len(res) == 1:
+            new_status = res[0]
+            evidence = ""
+            verified_at = datetime.now(timezone.utc)
+        else:
+            new_status = OpportunityStatus.STATUS_UNKNOWN
+            evidence = str(res)
+            verified_at = datetime.now(timezone.utc)
+    elif isinstance(res, str):
+        new_status = res
+        evidence = ""
+        verified_at = datetime.now(timezone.utc)
+    else:
+        new_status = getattr(res, "status", None) or getattr(res, "current_status", None)
+        evidence = getattr(res, "evidence", "") or getattr(res, "verification_evidence", "")
+        verified_at = getattr(res, "verified_at", None) or getattr(res, "last_verified_at", None) or datetime.now(timezone.utc)
+
+    if verified_at is None:
+        verified_at = datetime.now(timezone.utc)
+    elif isinstance(verified_at, str):
+        parsed = _parse_datetime(verified_at)
+        verified_at = parsed or datetime.now(timezone.utc)
+    elif isinstance(verified_at, date) and not isinstance(verified_at, datetime):
+        verified_at = datetime.combine(verified_at, datetime.min.time(), tzinfo=timezone.utc)
+    elif isinstance(verified_at, datetime) and verified_at.tzinfo is None:
+        verified_at = verified_at.replace(tzinfo=timezone.utc)
+
+    status_str = str(new_status) if new_status is not None else None
+    evidence_str = str(evidence) if evidence is not None else ""
+    return status_str, evidence_str, verified_at
+
+
 def is_unverifiable_aggregator(url: str) -> bool:
     """Return True when the URL's hostname equals or is a subdomain of an unverifiable aggregator host."""
     if not url or not isinstance(url, str):
@@ -270,48 +313,16 @@ async def reverify_stale_opportunities(
                 else:
                     res = call_res
 
-                # Unpack (status, evidence, verified_at)
-                if isinstance(res, (tuple, list)):
-                    if len(res) >= 3:
-                        new_status, evidence, verified_at = res[0], res[1], res[2]
-                    elif len(res) == 2:
-                        new_status, evidence = res[0], res[1]
-                        verified_at = datetime.now(timezone.utc)
-                    elif len(res) == 1:
-                        new_status = res[0]
-                        evidence = ""
-                        verified_at = datetime.now(timezone.utc)
-                    else:
-                        new_status = OpportunityStatus.STATUS_UNKNOWN
-                        evidence = str(res)
-                        verified_at = datetime.now(timezone.utc)
-                elif isinstance(res, str):
-                    new_status = res
-                    evidence = ""
-                    verified_at = datetime.now(timezone.utc)
-                else:
-                    new_status = getattr(res, "status", None) or getattr(res, "current_status", None)
-                    evidence = getattr(res, "evidence", "") or getattr(res, "verification_evidence", "")
-                    verified_at = getattr(res, "verified_at", None) or getattr(res, "last_verified_at", None) or datetime.now(timezone.utc)
+                new_status, evidence, verified_at = _unpack_verify_result(res)
 
                 if not new_status:
                     logger.warning("Verifier returned empty status for opportunity %s; leaving untouched.", opp_id)
                     errors += 1
                     continue
 
-                if verified_at is None:
-                    verified_at = datetime.now(timezone.utc)
-                elif isinstance(verified_at, str):
-                    parsed = _parse_datetime(verified_at)
-                    verified_at = parsed or datetime.now(timezone.utc)
-                elif isinstance(verified_at, date) and not isinstance(verified_at, datetime):
-                    verified_at = datetime.combine(verified_at, datetime.min.time(), tzinfo=timezone.utc)
-                elif isinstance(verified_at, datetime) and verified_at.tzinfo is None:
-                    verified_at = verified_at.replace(tzinfo=timezone.utc)
-
                 # A failed fetch verified nothing: leave the timestamp alone, and demote a listing that has
                 # gone unverified for too long. Never write application_url_checked for a failed fetch.
-                if is_fetch_failure(str(evidence) if evidence is not None else ""):
+                if is_fetch_failure(evidence):
                     errors += 1
                     prior = row.get("last_verified_at")
                     prior_dt = _parse_datetime(prior)
@@ -327,7 +338,7 @@ async def reverify_stale_opportunities(
                     await radar_memory.update_opportunity_verification(
                         opportunity_id=opp_id,
                         current_status=str(new_status),
-                        verification_evidence=str(evidence) if evidence is not None else None,
+                        verification_evidence=evidence if evidence else None,
                         last_verified_at=verified_at,
                     )
 
@@ -352,6 +363,206 @@ async def reverify_stale_opportunities(
         "checked": checked,
         "still_open": still_open,
         "downgraded": downgraded,
+        "errors": errors,
+        "dry_run": dry_run,
+    }
+
+
+async def select_upcoming_opportunities(
+    limit: int = DEFAULT_BATCH_SIZE,
+) -> list[dict]:
+    """
+    Select UPCOMING_CONFIRMED and ANNOUNCED opportunity rows whose confirmed_open_date
+    is NULL or on/before today. Oldest last_verified_at first (NULLS FIRST), at most limit.
+    Each returned dict has id, current_status, last_verified_at, application_url.
+    Works with asyncpg database pool and in-memory fallback.
+    """
+    if limit is not None and limit <= 0:
+        return []
+
+    eff_limit = limit if limit is not None else DEFAULT_BATCH_SIZE
+
+    pool = await radar_memory.get_pool()
+    if pool is not None:
+        query = """
+        SELECT id, current_status, last_verified_at, official_application_url, canonical_url,
+               company_name, role_title
+        FROM opportunities
+        WHERE current_status IN ('UPCOMING_CONFIRMED', 'ANNOUNCED')
+          AND (confirmed_open_date IS NULL OR confirmed_open_date <= CURRENT_DATE)
+        ORDER BY last_verified_at ASC NULLS FIRST, id ASC
+        LIMIT $1
+        """
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(query, eff_limit)
+        results: list[dict] = []
+        for r in rows:
+            row_dict = dict(r)
+            official = (row_dict.get("official_application_url") or "").strip()
+            canonical = (row_dict.get("canonical_url") or "").strip()
+            row_dict["application_url"] = official or canonical
+            results.append(row_dict)
+        return results
+
+    # In-memory storage fallback
+    today = datetime.now(timezone.utc).date()
+    candidates: list[tuple[datetime, int, dict]] = []
+    for opp_id, opp in radar_memory._in_memory_opportunities.items():
+        st = opp.get("current_status") if isinstance(opp, dict) else getattr(opp, "current_status", None)
+        if st not in (
+            OpportunityStatus.UPCOMING_CONFIRMED,
+            OpportunityStatus.ANNOUNCED,
+            "UPCOMING_CONFIRMED",
+            "ANNOUNCED",
+        ):
+            continue
+
+        raw_open = opp.get("confirmed_open_date") if isinstance(opp, dict) else getattr(opp, "confirmed_open_date", None)
+        if raw_open is not None:
+            open_dt = _parse_datetime(raw_open)
+            if open_dt is not None and open_dt.date() > today:
+                continue
+
+        raw_dt = opp.get("last_verified_at") if isinstance(opp, dict) else getattr(opp, "last_verified_at", None)
+        parsed_dt = _parse_datetime(raw_dt)
+
+        sort_dt = parsed_dt if parsed_dt is not None else datetime.min.replace(tzinfo=timezone.utc)
+
+        eff_id = opp.get("id", opp_id) if isinstance(opp, dict) else getattr(opp, "id", opp_id)
+        official = (opp.get("official_application_url") if isinstance(opp, dict) else getattr(opp, "official_application_url", "")) or ""
+        canonical = (opp.get("canonical_url") if isinstance(opp, dict) else getattr(opp, "canonical_url", "")) or ""
+        official_str = str(official).strip()
+        canonical_str = str(canonical).strip()
+        app_url = official_str or canonical_str
+
+        row_dict: dict = {
+            "id": eff_id,
+            "current_status": st,
+            "last_verified_at": raw_dt,
+            "application_url": app_url,
+            "official_application_url": official,
+            "canonical_url": canonical,
+        }
+        if isinstance(opp, dict):
+            if "company_name" in opp:
+                row_dict["company_name"] = opp["company_name"]
+            if "role_title" in opp:
+                row_dict["role_title"] = opp["role_title"]
+
+        try:
+            num_id = int(eff_id)
+        except (ValueError, TypeError):
+            num_id = 0
+
+        candidates.append((sort_dt, num_id, row_dict))
+
+    candidates.sort(key=lambda x: (x[0], x[1]))
+    return [item[2] for item in candidates[:eff_limit]]
+
+
+async def promote_upcoming_opportunities(
+    limit: int = DEFAULT_BATCH_SIZE,
+    dry_run: bool = False,
+    verify: Callable[..., Any] = verify_opportunity_status,
+) -> dict:
+    """
+    Sequentially check UPCOMING_CONFIRMED/ANNOUNCED opportunities that may now be open.
+    Calls verify(application_url, current_status) with PER_CALL_TIMEOUT_SECONDS and a 60s total budget.
+    If OPEN_CONFIRMED: updates verification to OPEN_CONFIRMED (unless dry_run) and counts promoted.
+    If CLOSED_CONFIRMED: updates verification to CLOSED_CONFIRMED (unless dry_run) and counts closed.
+    Fetch failure, timeout, or exception leaves row untouched and counts errors.
+    Any other status leaves row untouched.
+    Never raises; returns {'checked', 'promoted', 'closed', 'errors', 'dry_run'}.
+    """
+    checked = 0
+    promoted = 0
+    closed = 0
+    errors = 0
+
+    try:
+        rows = await select_upcoming_opportunities(limit=limit)
+    except Exception as err:
+        logger.warning("Failed to select upcoming opportunities for promotion: %s", err)
+        return {
+            "checked": 0,
+            "promoted": 0,
+            "closed": 0,
+            "errors": 1,
+            "dry_run": dry_run,
+        }
+
+    started = time.monotonic()
+    try:
+        for row in rows:
+            if time.monotonic() - started >= UPCOMING_PROMOTION_BUDGET_SECONDS:
+                logger.info("Upcoming promotion time budget reached; remaining rows wait for the next run.")
+                break
+            checked += 1
+            opp_id = row.get("id")
+            app_url = (
+                row.get("application_url")
+                or row.get("official_application_url")
+                or row.get("canonical_url")
+                or ""
+            ).strip()
+            curr_status = row.get("current_status") or OpportunityStatus.UPCOMING_CONFIRMED
+
+            try:
+                try:
+                    call_res = verify(app_url, curr_status)
+                except TypeError:
+                    call_res = verify(app_url)
+
+                if asyncio.iscoroutine(call_res) or asyncio.isfuture(call_res):
+                    res = await asyncio.wait_for(call_res, timeout=PER_CALL_TIMEOUT_SECONDS)
+                else:
+                    res = call_res
+
+                new_status, evidence, verified_at = _unpack_verify_result(res)
+
+                if not new_status:
+                    logger.warning("Verifier returned empty status for opportunity %s; leaving untouched.", opp_id)
+                    errors += 1
+                    continue
+
+                if is_fetch_failure(evidence):
+                    errors += 1
+                    continue
+
+                if new_status == OpportunityStatus.OPEN_CONFIRMED:
+                    if not dry_run:
+                        await radar_memory.update_opportunity_verification(
+                            opportunity_id=opp_id,
+                            current_status="OPEN_CONFIRMED",
+                            verification_evidence=evidence if evidence else None,
+                            last_verified_at=verified_at,
+                        )
+                    promoted += 1
+                elif new_status == OpportunityStatus.CLOSED_CONFIRMED:
+                    if not dry_run:
+                        await radar_memory.update_opportunity_verification(
+                            opportunity_id=opp_id,
+                            current_status="CLOSED_CONFIRMED",
+                            verification_evidence=evidence if evidence else None,
+                            last_verified_at=verified_at,
+                        )
+                    closed += 1
+            except (asyncio.TimeoutError, Exception) as call_err:
+                logger.warning(
+                    "Upcoming promotion error/timeout for opportunity %s (%s): %s",
+                    opp_id,
+                    app_url,
+                    call_err,
+                )
+                errors += 1
+    except Exception as loop_err:
+        logger.error("Unexpected error in upcoming promotion loop: %s", loop_err, exc_info=True)
+        errors += 1
+
+    return {
+        "checked": checked,
+        "promoted": promoted,
+        "closed": closed,
         "errors": errors,
         "dry_run": dry_run,
     }

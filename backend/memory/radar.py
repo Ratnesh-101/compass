@@ -338,6 +338,7 @@ async def upsert_opportunity(
                     WHEN opportunities.current_status IN ('CLOSED_CONFIRMED', 'CANCELLED_CONFIRMED') THEN
                         CASE WHEN $12 IN ('CLOSED_CONFIRMED', 'CANCELLED_CONFIRMED') THEN $12 ELSE opportunities.current_status END
                     WHEN opportunities.current_status = 'OPEN_CONFIRMED' AND $12 IN ('DISCOVERED', 'NEEDS_VERIFICATION') THEN opportunities.current_status
+                    WHEN opportunities.current_status = 'OPEN_CONFIRMED' AND $12 IN ('UPCOMING_CONFIRMED','ANNOUNCED') THEN opportunities.current_status
                     WHEN opportunities.current_status = 'UPCOMING_CONFIRMED' AND $12 IN ('DISCOVERED', 'NEEDS_VERIFICATION') THEN opportunities.current_status
                     ELSE $12
                 END,
@@ -402,6 +403,7 @@ async def upsert_opportunity(
                 WHEN opportunities.current_status IN ('CLOSED_CONFIRMED', 'CANCELLED_CONFIRMED') THEN
                     CASE WHEN EXCLUDED.current_status IN ('CLOSED_CONFIRMED', 'CANCELLED_CONFIRMED') THEN EXCLUDED.current_status ELSE opportunities.current_status END
                 WHEN opportunities.current_status = 'OPEN_CONFIRMED' AND EXCLUDED.current_status IN ('DISCOVERED', 'NEEDS_VERIFICATION') THEN opportunities.current_status
+                WHEN opportunities.current_status = 'OPEN_CONFIRMED' AND EXCLUDED.current_status IN ('UPCOMING_CONFIRMED','ANNOUNCED') THEN opportunities.current_status
                 WHEN opportunities.current_status = 'UPCOMING_CONFIRMED' AND EXCLUDED.current_status IN ('DISCOVERED', 'NEEDS_VERIFICATION') THEN opportunities.current_status
                 ELSE EXCLUDED.current_status
             END,
