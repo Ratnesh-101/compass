@@ -272,9 +272,11 @@ async def test_analyze_github_profile_success():
         assert owned.has_ci_cd is False  # bare Dockerfile is not CI/CD
         assert owned.primary_language is not None
         assert "Go" in owned.primary_language
+
         # Forked repo verification
         forked = next(r for r in intel.analyzed_repos if r.repo_name == "forked-repo")
         assert forked.is_fork is True
+
         # Detected skills aggregation
         assert "Go" in intel.detected_skills
 
@@ -283,6 +285,7 @@ async def test_analyze_github_profile_success():
 async def test_analyze_github_profile_rate_limit_handled():
     class FakeRateLimitResponse:
         status_code = 403
+
         def json(self):
             return {"message": "API rate limit exceeded"}
 
@@ -292,8 +295,7 @@ async def test_analyze_github_profile_rate_limit_handled():
     with patch("httpx.AsyncClient.get", side_effect=fake_rate_limit):
         intel = await analyze_github_profile("octocat")
         assert intel.username == "octocat"
-        warns = " ".join(intel.warnings).lower()
-        assert "rate limit" in warns or "hourly limit" in warns
+        assert any(("rate limit" in w.lower() or "hourly limit" in w.lower()) for w in intel.warnings)
 
 
 # ===========================================================================
@@ -308,8 +310,8 @@ def test_ingest_linkedin_pasted_text():
 
     Experience
     Staff Platform Engineer
-    CloudCore Ãƒâ€šÃ‚Â· Full-time
-    Jan 2023 - Present Ãƒâ€šÃ‚Â· 2 yrs
+    CloudCore · Full-time
+    Jan 2023 - Present · 2 yrs
     Greater Seattle Area
     - Scaled Kubernetes clusters across 4 AWS regions.
     - Implemented gRPC microservices handling 100k QPS.
