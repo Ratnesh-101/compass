@@ -1,20 +1,14 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { FileText, GitCompare, PenLine } from 'lucide-react'
 import {
-  fetchMasterResume,
-  updateMasterResume,
-  fetchResumes,
-  updateResume,
-  validateResume,
-  getResumeExportUrl,
-  getResumeExportDocxUrl,
-  parseUploadResume,
-  commitExtractedResume,
-  draftCoverLetter,
+  fetchMasterResume, updateMasterResume, fetchResumes, updateResume,
+  validateResume, verifyResumeClaims, getResumeExportUrl, getResumeExportDocxUrl,
+  parseUploadResume, commitExtractedResume, draftCoverLetter,
 } from '../../api/careerApi'
 import { downloadAuthedFile, openAuthedHtml } from '../../api/baseClient.js'
 
 import ValidationReportCard from './ValidationReportCard'
+import ClaimVerificationCard from './ClaimVerificationCard'
 import ResumeImportModal from './ResumeImportModal'
 import ExtractionReviewModal from './ExtractionReviewModal'
 import ExternalProfileImportModal from './ExternalProfileImportModal'
@@ -23,42 +17,30 @@ import { getResumeKindLabel, copyTextSafely } from '../../utils/careerUiHelpers'
 const GitHubIntelligenceModal = React.lazy(() => import('./GitHubIntelligenceModal'))
 
 export default function ResumeStudio({ onSaved = () => {} } = {}) {
-  const [masterResume, setMasterResume] = useState(null)
-  const [resumesList, setResumesList] = useState([])
-  const [selectedResume, setSelectedResume] = useState(null)
-  const [validationReport, setValidationReport] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
+  const [masterResume, setMasterResume] = useState(null), [resumesList, setResumesList] = useState([])
+  const [selectedResume, setSelectedResume] = useState(null), [validationReport, setValidationReport] = useState(null)
+  const [claimReport, setClaimReport] = useState(null), [checkingClaims, setCheckingClaims] = useState(false)
+  const claimHeadingRef = useRef(null)
+  const [loading, setLoading] = useState(true), [saving, setSaving] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
   const [saveKind, setSaveKind] = useState('master')
-  const [error, setError] = useState(null)
-  const [exportingType, setExportingType] = useState(null) // 'print' | 'docx' | null
-  const [exportToast, setExportToast] = useState(null) // { message: string, type: 'error' | 'success' } | null
+  const [error, setError] = useState(null), [exportingType, setExportingType] = useState(null)
+  const [exportToast, setExportToast] = useState(null)
 
   // Form edit states
-  const [fullName, setFullName] = useState('')
-  const [email, setEmail] = useState('')
-  const [phone, setPhone] = useState('')
-  const [location, setLocation] = useState('')
-  const [summary, setSummary] = useState('')
-  const [skillsText, setSkillsText] = useState('')
+  const [fullName, setFullName] = useState(''), [email, setEmail] = useState('')
+  const [phone, setPhone] = useState(''), [location, setLocation] = useState('')
+  const [summary, setSummary] = useState(''), [skillsText, setSkillsText] = useState('')
 
   // Modals & Intelligence states
-  const [showImportModal, setShowImportModal] = useState(false)
-  const [showExtractionModal, setShowExtractionModal] = useState(false)
-  const [parseResult, setParseResult] = useState(null)
-  const [committingExtraction, setCommittingExtraction] = useState(false)
-  const [showGitHubModal, setShowGitHubModal] = useState(false)
-  const [showExternalProfileModal, setShowExternalProfileModal] = useState(false)
+  const [showImportModal, setShowImportModal] = useState(false), [showExtractionModal, setShowExtractionModal] = useState(false)
+  const [parseResult, setParseResult] = useState(null), [committingExtraction, setCommittingExtraction] = useState(false)
+  const [showGitHubModal, setShowGitHubModal] = useState(false), [showExternalProfileModal, setShowExternalProfileModal] = useState(false)
 
   // Review & Export customization
-  const [resumeTemplate, setResumeTemplate] = useState('ats_classic') // ats_classic | modern | minimal
-  const [viewMode, setViewMode] = useState('editor') // 'editor' | 'diff'
-  const [activeTab, setActiveTab] = useState('resume') // 'resume' | 'cover_letter'
-  const [coverLetterText, setCoverLetterText] = useState('')
-  const [draftingLetter, setDraftingLetter] = useState(false)
-  const [importText, setImportText] = useState('')
-  const [importing, setImporting] = useState(false)
+  const [resumeTemplate, setResumeTemplate] = useState('ats_classic'), [viewMode, setViewMode] = useState('editor')
+  const [activeTab, setActiveTab] = useState('resume'), [coverLetterText, setCoverLetterText] = useState('')
+  const [draftingLetter, setDraftingLetter] = useState(false), [importText, setImportText] = useState(''), [importing, setImporting] = useState(false)
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -100,6 +82,7 @@ export default function ResumeStudio({ onSaved = () => {} } = {}) {
     setSelectedResume(res)
     populateForm(res)
     setValidationReport(res.validation_report || null)
+    setClaimReport(null)
     setSaveSuccess(false)
     setViewMode('editor')
   }
@@ -302,12 +285,21 @@ export default function ResumeStudio({ onSaved = () => {} } = {}) {
   }
 
   const handleRunValidation = async () => {
-    if (!selectedResume) return
+    if (!selectedResume?.id || checkingClaims) return
+    setCheckingClaims(true)
+    setError(null)
     try {
-      const report = await validateResume(selectedResume.id)
-      setValidationReport(report)
+      const [claims, offline] = await Promise.all([verifyResumeClaims(selectedResume.id), validateResume(selectedResume.id)])
+      setClaimReport(claims)
+      if (offline) setValidationReport(offline)
+      setTimeout(() => {
+        claimHeadingRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+        claimHeadingRef.current?.focus?.()
+      }, 50)
     } catch (err) {
-      setError(err.message || 'Validation failed')
+      setError(err.message || 'Could not check your claims right now. Please try again.')
+    } finally {
+      setCheckingClaims(false)
     }
   }
 
@@ -575,6 +567,9 @@ export default function ResumeStudio({ onSaved = () => {} } = {}) {
               })}
             </div>
           </div>
+
+          {/* Claim Verification Card */}
+          <ClaimVerificationCard headingRef={claimHeadingRef} report={claimReport} loading={checkingClaims} onDismiss={() => setClaimReport(null)} />
 
           {/* Validation Report Card */}
           <ValidationReportCard validationReport={validationReport} />
@@ -852,33 +847,22 @@ export default function ResumeStudio({ onSaved = () => {} } = {}) {
                 <button
                   type="button"
                   onClick={handleRunValidation}
-                  style={{
-                    background: 'var(--bg-card)',
-                    border: '1px solid var(--border)',
-                    padding: '9px 16px',
-                    borderRadius: '8px',
-                    fontSize: '13px',
-                    fontWeight: '600',
-                    color: 'var(--text-primary)',
-                    cursor: 'pointer',
-                    boxShadow: '0 1px 2px rgba(15, 23, 42, 0.05)',
-                  }}
+                  disabled={checkingClaims}
+                  aria-busy={checkingClaims}
+                  title="Searches the web (Tavily) for the schools, employers, certifications and links on this resume"
+                  style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', padding: '9px 16px', borderRadius: '8px', fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)', cursor: checkingClaims ? 'not-allowed' : 'pointer', boxShadow: '0 1px 2px rgba(15, 23, 42, 0.05)', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
                 >
-                  🔍 Verify Factual Claims
+                  {checkingClaims ? (
+                    <><span aria-hidden="true" style={{ display: 'inline-block', width: '12px', height: '12px', border: '2px solid currentColor', borderRightColor: 'transparent', borderRadius: '50%', animation: 'spinClaims 0.8s linear infinite' }} /><style>{`@keyframes spinClaims{to{transform:rotate(360deg)}}`}</style>Checking claims online...</>
+                  ) : 'Verify factual claims'}
                 </button>
                 <button
                   type="submit"
                   disabled={saving}
                   style={{
-                    background: 'var(--primary, #2563eb)',
-                    color: '#ffffff',
-                    border: 'none',
-                    padding: '10px 24px',
-                    borderRadius: '8px',
-                    fontSize: '14px',
-                    fontWeight: '700',
-                    cursor: saving ? 'not-allowed' : 'pointer',
-                    boxShadow: '0 4px 14px rgba(37, 99, 235, 0.35)',
+                    background: 'var(--primary, #2563eb)', color: '#ffffff', border: 'none',
+                    padding: '10px 24px', borderRadius: '8px', fontSize: '14px', fontWeight: '700',
+                    cursor: saving ? 'not-allowed' : 'pointer', boxShadow: '0 4px 14px rgba(37, 99, 235, 0.35)',
                     transition: 'all 0.15s ease',
                   }}
                 >

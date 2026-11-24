@@ -131,6 +131,7 @@ KNOWN_ROUTE_METADATA = {
     ("/api/career/resumes/{resume_id}/export/docx", "GET"): ("_get_current_identity", "Export resume DOCX", "test_career_e2e_workflow.py"),
     ("/api/career/resumes/{resume_id}/export/html", "GET"): ("_get_current_identity", "Export resume HTML", "test_career_e2e_workflow.py"),
     ("/api/career/resumes/{resume_id}/validate", "POST"): ("_get_current_identity", "Validate resume schema", "test_career_e2e_workflow.py"),
+    ("/api/career/resumes/{resume_id}/verify-claims", "POST"): ("_get_current_identity", "Verify resume claims online with Tavily and reachability", "test_career_e2e_workflow.py"),
     ("/api/opportunities", "GET"): ("_get_current_identity", "Query discovery opportunities", "test_career_e2e_workflow.py"),
     ("/api/opportunities/analytics", "GET"): ("_get_current_identity", "Opportunity pipeline analytics", "test_career_e2e_workflow.py"),
     ("/api/opportunities/applications", "GET"): ("_get_current_identity", "List opportunity applications", "test_career_e2e_workflow.py"),
