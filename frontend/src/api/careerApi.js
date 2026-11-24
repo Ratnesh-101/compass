@@ -123,6 +123,21 @@ export async function validateResume(resumeId) {
   return res.json()
 }
 
+export async function verifyResumeClaims(resumeId) {
+  await ensureSession()
+  const res = await fetch(`${API_BASE}/resumes/${encodeURIComponent(resumeId)}/verify-claims`, {
+    method: 'POST',
+    headers: getJsonHeaders(),
+    credentials: 'include',
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    const detail = extractErrorDetail(body, 'Could not check your claims right now. Please try again.')
+    throw new Error(detail)
+  }
+  return res.json()
+}
+
 export function getResumeExportUrl(resumeId, template = null) {
   const params = new URLSearchParams()
   if (template) params.append('template', template)
