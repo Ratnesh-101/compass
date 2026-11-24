@@ -124,7 +124,8 @@ def parse_academic_year(
     """Derive academic year (1-6) from resume text, semester or date range."""
     if not text:
         return None
-    t = str(text)[:2000]
+    raw = re.sub(r"(?:\| ){2,}", "| ", str(text)).strip("| ")
+    t = re.sub(r"[ \t]+", " ", raw)[:2000]
     m_num = re.search(r"\b([1-6])\s*(?:st|nd|rd|th)\s*year\b", t, re.IGNORECASE)
     if m_num:
         return int(m_num.group(1))
@@ -152,7 +153,8 @@ def parse_graduation_year(text: Optional[str]) -> Optional[int]:
     """Derive graduation year from education lines or cues."""
     if not text:
         return None
-    t = str(text)[:2000]
+    raw = re.sub(r"(?:\| ){2,}", "| ", str(text)).strip("| ")
+    t = re.sub(r"[ \t]+", " ", raw)[:2000]
     cue_match = re.search(
         r"\b(?:expected\s+graduation|graduating|class\s+of|expected)[\s:]*(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\s,]*)?(20\d\d)\b",
         t,

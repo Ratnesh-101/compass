@@ -725,7 +725,8 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
             skills.append(c)
 
     def _ingest_skill_line(line_txt: str) -> None:
-        cl = line_txt[:2000].strip()
+        raw_skill = re.sub(r"(?:\| ){2,}", "| ", line_txt).strip("| ")
+        cl = re.sub(r"[ \t]+", " ", raw_skill)[:2000].strip()
         cl = re.sub(r"^[\s*•\-–—+·\u2022\u25cf\u25cb\u25aa\u25ab]+", "", cl).strip()
         if not cl:
             return
@@ -851,7 +852,8 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
             _ingest_skill_line(line_clean)
 
         elif current_section == "education":
-            cl_line = line_clean[:2000]
+            raw_edu = re.sub(r"(?:\| ){2,}", "| ", line_clean).strip("| ")
+            cl_line = re.sub(r"[ \t]+", " ", raw_edu)[:2000]
             is_edu_header = any(term in line_low for term in ("b.tech", "b.e.", "bs", "bachelor", "master", "m.tech", "ph.d", "university", "institute", "college", "school"))
             rng_m = re.search(r"\b((?:19|20)\d\d)\s{0,5}[-–—~]\s{0,5}((?:19|20)\d\d)\b", cl_line)
             cue_m = re.search(r"\b(?:expected\s+graduation|graduating|class\s+of|expected)[\s:]*(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\s,]*)?(20\d\d)\b", cl_line, re.IGNORECASE)
