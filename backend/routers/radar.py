@@ -23,6 +23,7 @@ from backend.memory.radar import (
     get_opportunity_by_id,
     get_recommendation_candidates,
     get_radar_overview_stats,
+    list_open_opportunities,
     get_user_application_tracking,
     get_user_opportunity_profile,
     get_user_saved_opportunities,
@@ -240,25 +241,14 @@ async def get_open_confirmed_opportunities(
 ):
     """Return strictly verified open opportunities across all employer types."""
     user_id = _get_or_create_user_id(request)
-    profile = await get_user_opportunity_profile(user_id)
-
-    raw_items, _ = await get_all_opportunities(
+    return await list_open_opportunities(
         user_id=user_id,
-        status=OpportunityStatus.OPEN_CONFIRMED,
         category=category,
         employer_type=employer_type,
         work_arrangement=work_arrangement,
         india_only=india_only,
-        page=1,
-        page_size=limit,
+        limit=limit,
     )
-    profile_country = profile_country_of(profile)
-    refined = refine_listings(raw_items, profile_country, country_filter=india_only)
-    enriched = [_enrich_opportunity(item, profile) for item in refined]
-    # Same exclusions and order as the recommendation list, so the "Verified open" counter matches.
-    enriched = [o for o in enriched if o.eligibility_classification != EligibilityClassification.INELIGIBLE]
-    enriched.sort(key=lambda o: recommendation_rank_key(o, profile, profile_country))
-    return enriched
 
 
 @router.get("/upcoming", response_model=List[OpportunityOut])

@@ -190,6 +190,11 @@ async def route_message(
     Returns:
         (skill_name, tool_arguments, text_response)
     """
+    if is_capability_question(message):
+        return None, None, CAPABILITY_REPLY
+    unsupported = unsupported_capability_reply(message)
+    if unsupported:
+        return None, None, unsupported
     if is_pending_action_confirm(message):
         return "pending_action_confirm", {"message": message}, ""
     if is_pending_action_cancel(message):
@@ -205,11 +210,6 @@ async def route_message(
         prose_items = await _prose_task_items(message)
         if prose_items:
             return "add_tasks_preview", {"message": message, "items": prose_items}, ""
-    if is_capability_question(message):
-        return None, None, CAPABILITY_REPLY
-    unsupported = unsupported_capability_reply(message)
-    if unsupported:
-        return None, None, unsupported
     if is_explicit_task_creation(message):
         extracted = _extract_task_creation_args(message)
         if not extracted.get("title"):

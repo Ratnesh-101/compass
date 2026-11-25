@@ -289,6 +289,7 @@ async def list_nearest_active_titles(
         FROM tasks
         WHERE (user_id = $1 OR (user_id IS NULL AND $1 IS NULL))
           AND deleted_at IS NULL
+          AND status <> 'done'
           AND ($3::boolean OR COALESCE(trusted_event_url,'') NOT LIKE 'compass://demo-persona/%')
         ORDER BY due_date ASC NULLS LAST, id ASC
         LIMIT $2

@@ -255,7 +255,12 @@ _POLITE_LEADS = (
 def _looks_like_non_task_target(target: str) -> bool:
     """"remove the bug from my code" / "drop me a summary" are not task deletions."""
     padded = f" {target} "
-    return " from " in padded or target.startswith(("me ", "it ", "i ", "us "))
+    if " from " in padded or target.startswith(("me ", "it ", "i ", "us ")):
+        return True
+    words = target.lower().split()
+    if any(w in ("chat", "chats", "conversation", "conversations") for w in words):
+        return True
+    return False
 
 
 def is_chat_delete_intent(message: str) -> Tuple[bool, bool, str]:

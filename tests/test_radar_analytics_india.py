@@ -38,6 +38,17 @@ def mem(monkeypatch):
     store = {r["id"]: r for r in rows}
     monkeypatch.setattr(radar, "get_pool", AsyncMock(return_value=None))
     monkeypatch.setattr(radar, "_in_memory_opportunities", store)
+
+    async def fake_list_open(user_id, india_only=True, **_kw):
+        # The card must equal the Open Now list: same function, same filters.
+        return [
+            r for r in store.values()
+            if r["current_status"] == "OPEN_CONFIRMED"
+            and r["last_verified_at"] >= now - timedelta(days=30)
+            and (r["is_india_eligible"] or not india_only)
+        ]
+
+    monkeypatch.setattr(radar, "list_open_opportunities", fake_list_open)
     return store
 
 
