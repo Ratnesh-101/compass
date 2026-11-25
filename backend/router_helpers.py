@@ -1093,7 +1093,7 @@ UNSUPPORTED_AREA_RE = re.compile(
     re.IGNORECASE,
 )
 UNSUPPORTED_DELETE_CHAT_RE = re.compile(
-    r"\b(?:delete|remove|clear|drop)\s+(?:this|the|my|current)?\s*chats?\b",
+    r"\b(?:delete|remove|clear|drop)\s+(?:(?:this|the|my|current)\s+)?chats?\b",
     re.IGNORECASE,
 )
 UNSUPPORTED_NEW_CHAT_RE = re.compile(
