@@ -1104,10 +1104,8 @@ UNSUPPORTED_EXPORT_CALENDAR_RE = re.compile(
     r"\b(?:export|download|sync)\s+(?:my\s+|the\s+)?(?:calendar|schedule)\b",
     re.IGNORECASE,
 )
-UNSUPPORTED_WATCHLIST_RE = re.compile(
-    r"\b(?:save|add|put|move)\s+(?:[^\n.!?]{0,40}?\s+)?(?:to|in|on)\s+(?:my\s+)?watchlist\b",
-    re.IGNORECASE,
-)
+UNSUPPORTED_WATCHLIST_VERB_RE = re.compile(r"(?:save|add|put|move)", re.IGNORECASE)
+UNSUPPORTED_WATCHLIST_WORD_RE = re.compile(r"watchlist", re.IGNORECASE)
 UNSUPPORTED_PREPARE_APP_RE = re.compile(
     r"\b(?:prepare|start|create|draft)\s+(?:an?\s+|my\s+)?(?:job\s+|internship\s+)?applications?\b",
     re.IGNORECASE,
@@ -1127,7 +1125,7 @@ def unsupported_capability_reply(message: str) -> Optional[str]:
         return "Use the New chat button."
     if UNSUPPORTED_EXPORT_CALENDAR_RE.search(msg):
         return "Use Export in the Calendar tab."
-    if UNSUPPORTED_WATCHLIST_RE.search(msg) or UNSUPPORTED_PREPARE_APP_RE.search(msg):
+    if (UNSUPPORTED_WATCHLIST_VERB_RE.search(msg[:300]) and UNSUPPORTED_WATCHLIST_WORD_RE.search(msg[:300])) or UNSUPPORTED_PREPARE_APP_RE.search(msg):
         return "Open the listing in Internship Radar and use Add to Watchlist / Prepare Application there."
     return None
 
