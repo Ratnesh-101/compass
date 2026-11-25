@@ -21,6 +21,7 @@ from backend.models_career import (
     ResumeProjectItem,
     ResumeValidationReport,
     ResumeValidationStatus,
+    safe_http_url,
 )
 from backend.models_radar import OpportunityOut, UserOpportunityProfileIn
 from backend.services.career_job_match import build_skill_index, skill_in_index
@@ -578,6 +579,102 @@ _EDU_INSTITUTION_TERMS = ("university", "institute", "college", "school", "acade
 _EDU_DEGREE_TERMS = ("b.tech", "b.e.", "b.s.", "bs", "bachelor", "master", "m.tech", "ph.d", "b.sc", "m.sc", "mba", "diploma")
 
 
+_GRAD_MONTH_MAP = {
+    "jan": 1, "january": 1,
+    "feb": 2, "february": 2,
+    "mar": 3, "march": 3,
+    "apr": 4, "april": 4,
+    "may": 5,
+    "jun": 6, "june": 6,
+    "jul": 7, "july": 7,
+    "aug": 8, "august": 8,
+    "sep": 9, "sept": 9, "september": 9,
+    "oct": 10, "october": 10,
+    "nov": 11, "november": 11,
+    "dec": 12, "december": 12,
+}
+_GRAD_MONTH_RE = re.compile(
+    r"\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b",
+    re.IGNORECASE,
+)
+
+
+def parse_grad_month(text: Optional[str]) -> int:
+    """Derive graduation month (1-12) from text. Explicit month wins; defaults to 6 if no month is stated."""
+    if not text:
+        return 6
+    cl = re.sub(r"[ \t]+", " ", str(text))[:2000]
+    cue_m = re.search(
+        r"\b(?:expected\s+graduation|graduating|class\s+of|expected|batch(?:\s+of)?|passing\s+out)[\s:]*(?:(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b)?",
+        cl,
+        re.IGNORECASE,
+    )
+    if cue_m and cue_m.group(1):
+        return _GRAD_MONTH_MAP.get(cue_m.group(1).lower(), 6)
+    m = _GRAD_MONTH_RE.search(cl)
+    if m:
+        return _GRAD_MONTH_MAP.get(m.group(1).lower(), 6)
+    return 6
+
+
+derive_grad_month = parse_grad_month
+
+
+def _parse_project_line_item(line_text: str) -> Optional[Tuple[str, str, List[str], Optional[str], Optional[str]]]:
+    """Extract (title, description, technologies, project_url, repo_url) from a project line."""
+    cl = re.sub(r"[ \t]+", " ", line_text)[:2000].strip()
+    if not cl:
+        return None
+    inner = re.sub(r"^[\s*•\-–—+·\u2022\u25cf\u25cb\u25aa\u25ab]+", "", cl).strip()
+    if not inner:
+        return None
+
+    url_m = re.search(r"https?://[^\s)\]]{1,500}|(?:\bgithub\.com/[^\s)\]]{1,500})", inner)
+    proj_url, repo_url = None, None
+    if url_m:
+        raw_u = url_m.group(0)
+        s_u = safe_http_url(raw_u) or (safe_http_url("https://" + raw_u) if not raw_u.startswith("http") else None)
+        if s_u:
+            proj_url = s_u
+            if "github.com" in s_u.lower():
+                repo_url = s_u
+        inner = inner[:url_m.start()].rstrip(" -–—;:,") + " " + inner[url_m.end():].lstrip(" -–—;:,")
+        inner = re.sub(r"[ \t]+", " ", inner).strip()
+
+    paren_m = re.search(r"\(([^)]{1,200})\)", inner)
+    paren_techs: List[str] = []
+    if paren_m:
+        p_content = paren_m.group(1)
+        paren_techs = [t.strip(" *•-") for t in re.split(r"[,/|;]+", p_content) if t.strip(" *•-")]
+
+    best_idx, best_sep = -1, ""
+    for sep in (" - ", " – ", " — ", "(", ": ", ":"):
+        idx = inner.find(sep)
+        if idx > 0:
+            if sep in (":", ": ") and inner[idx:idx+3] in ("://", ":/"):
+                continue
+            if best_idx == -1 or idx < best_idx:
+                best_idx, best_sep = idx, sep
+
+    if best_idx > 0:
+        title = inner[:best_idx].strip(" *•-–—:")
+        if best_sep == "(":
+            after = inner[paren_m.end():].strip() if paren_m else ""
+            desc = re.sub(r"^[\s:–—\-]+", "", after).strip()
+        else:
+            desc = inner[best_idx + len(best_sep):].strip()
+    else:
+        title = inner.strip(" *•-–—:")
+        desc = ""
+
+    techs = list(paren_techs)
+    for t in _extract_techs_from_text(cl):
+        if t not in techs:
+            techs.append(t)
+
+    return title, desc, techs, proj_url, repo_url
+
+
 def _split_project_header(header: str) -> Optional[Tuple[str, str]]:
     """Split a project header at its first spaced dash into (title, description)."""
     match = _PROJECT_HEADER_DASH_RE.search(header)
@@ -648,6 +745,7 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
     for raw_l in raw_text.splitlines():
         line = raw_l.strip()
         if not line:
+            cleaned_lines.append("")
             continue
         if line.startswith(('\ufffd', '\u2022', '•', '·', '- ', '* ')):
             line = '• ' + re.sub(r'^[\s\ufffd\u2022•·\-*]+', '', line).strip()
@@ -655,12 +753,12 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
         line = line.replace('\ufffd', '—')
         cleaned_lines.append(line)
     lines = cleaned_lines
-    if not lines:
+    if not any(lines):
         return ResumeContent()
 
     # 1. Contact Extraction
     full_name = ""
-    for line in lines[:5]:
+    for line in [ln for ln in lines if ln.strip()][:5]:
         cand_name = line.split("|")[0].strip() if "|" in line else line.strip()
         cand_name = re.sub(r"^#+\s*", "", cand_name).strip()
         if cand_name and len(cand_name) < 50 and not any(k in cand_name.lower() for k in ["resume", "curriculum", "http", "@", "email", "phone"]):
@@ -754,6 +852,10 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
     for line in lines:
         line_clean = line.strip()
         line_low = line_clean.lower()
+        if not line_clean:
+            if current_section == "projects":
+                current_project = None
+            continue
 
         # Header detection
         if any(line_low == h or line_low.startswith(f"{h}:") or line_low.startswith(f"{h} ") for h in (
@@ -860,6 +962,7 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
             yr_matches = re.findall(r"\b(20\d\d)\b", cl_line)
             start_yr = int(rng_m.group(1)) if rng_m else (int(yr_matches[0]) if len(yr_matches) > 1 else None)
             end_yr = int(rng_m.group(2)) if rng_m else (int(cue_m.group(1)) if cue_m else (int(yr_matches[-1]) if yr_matches else None))
+            grad_m = parse_grad_month(cl_line)
 
             cgpa = extract_grade(cl_line)
             if not cgpa:
@@ -875,6 +978,8 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
                 active_note = edu_note or (f"{stated_yr or note_yr} year" if (stated_yr or note_yr) else None)
                 if active_note:
                     education_notes[f"education_note_{len(edu_list) + 1}"] = active_note
+                if grad_m != 6:
+                    education_notes[f"grad_month_{len(edu_list) + 1}"] = str(grad_m)
 
                 edu_list.append(
                     ResumeEducationItem(
@@ -897,6 +1002,8 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
                     curr.cgpa_or_grade = cgpa
                 if stated_yr:
                     education_notes[f"education_note_{len(edu_list)}"] = f"{stated_yr} year"
+                if grad_m != 6:
+                    education_notes[f"grad_month_{len(edu_list)}"] = str(grad_m)
 
         elif current_section in ("experience", "internships"):
             is_intern = current_section == "internships" or "intern" in line_low
@@ -980,63 +1087,57 @@ def parse_uploaded_resume_text(raw_text: str) -> ResumeContent:
                             current_project.technologies.append(t)
                 continue
 
-            is_bullet = line_clean.startswith("• ")
+            inner = re.sub(r"^[\s*•\-–—+·\u2022\u25cf\u25cb\u25aa\u25ab]+", "", line_clean).strip()
+            is_bullet = line_clean.startswith(("• ", "- ", "* ", "– ", "— ")) or (len(line_clean) > 0 and line_clean[0] in ("•", "-", "*", "–", "—"))
             has_dates = _has_date_range(line_clean)
+            has_sep = any(sep in inner for sep in (" - ", " – ", " — ", "(", ": "))
 
-            # A description sentence under a project header ("used by 200 students.") belongs to that
-            # project; it must not start a project of its own.
             if (
-                not is_bullet
-                and current_project is not None
-                and is_description_line(line_clean, PROJECT_TITLE_SEPARATORS, has_dates, ACTION_VERBS)
+                current_project is not None
+                and not has_sep
+                and is_description_line(inner, PROJECT_TITLE_SEPARATORS, has_dates, ACTION_VERBS)
             ):
-                line_clean = "• " + line_clean
-                is_bullet = True
-
-            if is_bullet:
-                bullet_txt = _clean_bullet(line_clean)
-                if current_project:
-                    current_project.highlights.append(bullet_txt)
-                    if not current_project.description:
-                        current_project.description = bullet_txt
-                    else:
-                        current_project.description = f"{current_project.description} {bullet_txt}"
-                    for t in _extract_techs_from_text(bullet_txt):
-                        if t not in current_project.technologies:
-                            current_project.technologies.append(t)
-                elif projects:
-                    projects[-1].highlights.append(bullet_txt)
-                    if not projects[-1].description:
-                        projects[-1].description = bullet_txt
-                    else:
-                        projects[-1].description = f"{projects[-1].description} {bullet_txt}"
+                current_project.highlights.append(inner)
+                if not current_project.description or current_project.description == current_project.title:
+                    current_project.description = inner
+                else:
+                    current_project.description = f"{current_project.description} {inner}"
+                for t in _extract_techs_from_text(inner):
+                    if t not in current_project.technologies:
+                        current_project.technologies.append(t)
                 continue
-            elif current_project and current_project.highlights and (line_clean[0].islower() or (not has_dates and not any(sep in line_clean for sep in PROJECT_TITLE_SEPARATORS))):
+
+            if (
+                current_project is not None
+                and not has_sep
+                and (inner[0].islower() or (not has_dates and not is_bullet))
+            ):
                 continuation_txt = _clean_bullet(line_clean)
-                current_project.highlights[-1] = f"{current_project.highlights[-1]} {continuation_txt}".strip()
-                current_project.description = f"{current_project.description} {continuation_txt}".strip()
+                if current_project.highlights:
+                    current_project.highlights[-1] = f"{current_project.highlights[-1]} {continuation_txt}".strip()
+                else:
+                    current_project.highlights.append(continuation_txt)
+                if not current_project.description or current_project.description == current_project.title:
+                    current_project.description = continuation_txt
+                else:
+                    current_project.description = f"{current_project.description} {continuation_txt}".strip()
                 for t in _extract_techs_from_text(continuation_txt):
                     if t not in current_project.technologies:
                         current_project.technologies.append(t)
                 continue
 
-
-            # Project Header Line
-            p_title = line_clean
-            p_title = re.sub(r"[\s\t|]+(?:(?:\d{1,2}/\d{4}|\b\d{4})\s*(?:[-–—~]|\bto\b)\s*(?:\d{1,2}/\d{4}|\b\d{4}|present))\s*$", "", p_title, flags=re.IGNORECASE).strip()
-
-            p_desc = ""
-            title_split = _split_project_header(p_title)
-            if title_split:
-                p_title, p_desc = title_split
-
-            current_project = ResumeProjectItem(
-                title=p_title.strip(" *•-–—"),
-                description=p_desc,
-                technologies=_extract_techs_from_text(line_clean),
-                evidence_classification="SOURCE_DOCUMENT",
-            )
-            projects.append(current_project)
+            parsed_proj = _parse_project_line_item(line_clean)
+            if parsed_proj:
+                p_title, p_desc, p_techs, p_url, p_repo = parsed_proj
+                current_project = ResumeProjectItem(
+                    title=p_title,
+                    description=p_desc,
+                    technologies=p_techs,
+                    project_url=p_url,
+                    repo_url=p_repo,
+                    evidence_classification="SOURCE_DOCUMENT",
+                )
+                projects.append(current_project)
 
         elif current_section == "certifications":
             clean_cert = _clean_bullet(line_clean)

@@ -36,6 +36,7 @@ except ImportError:
 logger = logging.getLogger("compass.services.career_profile_archive")
 
 _YEAR_RANGE_RE = re.compile(r"\b(19\d\d|20\d\d)\b(?:[ \t]{0,5}[-–—][ \t]{0,5}\b(19\d\d|20\d\d)\b)?", re.IGNORECASE)
+_WEBSITE_ITEM_RE = re.compile(r"\[([A-Za-z0-9_ -]{1,50}):([^\]\r\n]{1,1000})\]")
 _MAX_SKILLS = 40
 _ALLOWED_ARCHIVE_BASENAMES = {
     "profile.csv", "positions.csv", "education.csv", "skills.csv", "certifications.csv",
@@ -113,13 +114,39 @@ def _populate_content_from_csv(bname: str, text: str, content: ResumeContent) ->
             content.summary = f"{hl.rstrip('.')}. {sm}" if hl and sm else (hl or sm or content.summary)
             if r.get("geo location", ""):
                 content.location = r.get("geo location", "")
-            for u in re.findall(r"https?://[^\s,;]+", (r.get("websites", "") or "")[:2000]):
-                safe = safe_http_url(u)
-                if safe:
-                    if ("github" in safe.lower() or "portfolio" in safe.lower()) and not content.github_or_portfolio:
-                        content.github_or_portfolio = safe
-                    elif safe not in content.relevant_links:
+            websites_raw = (r.get("websites", "") or "")[:5000]
+            items = _WEBSITE_ITEM_RE.findall(websites_raw)
+            first_portfolio = None
+            first_github = None
+            if items:
+                for label_raw, url_raw in items:
+                    safe = safe_http_url(url_raw)
+                    if not safe:
+                        continue
+                    if safe not in content.relevant_links:
                         content.relevant_links.append(safe)
+                    lbl = label_raw.strip().upper()
+                    if lbl in {"PORTFOLIO", "PERSONAL", "BLOG", "OTHER"}:
+                        if first_portfolio is None:
+                            first_portfolio = safe
+                    elif "github.com" in safe.lower():
+                        if first_github is None:
+                            first_github = safe
+            else:
+                for u in re.findall(r"https?://[^\s,;\]]+", websites_raw):
+                    safe = safe_http_url(u)
+                    if not safe:
+                        continue
+                    if safe not in content.relevant_links:
+                        content.relevant_links.append(safe)
+                    if ("portfolio" in safe.lower() or "personal" in safe.lower() or "blog" in safe.lower()) and first_portfolio is None:
+                        first_portfolio = safe
+                    elif "github.com" in safe.lower() and first_github is None:
+                        first_github = safe
+
+            chosen_site = first_portfolio or first_github
+            if chosen_site and not content.github_or_portfolio:
+                content.github_or_portfolio = chosen_site
     elif bname == "positions.csv":
         for r in _read_csv_dict_rows(text, ["company name", "title"]):
             st, fin, d = r.get("started on", ""), r.get("finished on", ""), r.get("description", "")
