@@ -122,6 +122,17 @@ def _split_skill_tokens(text: str) -> List[str]:
     return [c for c in cleaned if c and 1 < len(c) < _MAX_SKILL_LENGTH]
 
 
+_ROLE_HINT_WORDS = ("developer", "engineer", "intern", "analyst", "manager", "designer", "mentor", "lead", "scientist", "researcher", "architect", "consultant", "associate", "trainee")
+
+
+def _orient_company_role(company: str, role: str) -> tuple:
+    """Title and company come in either order: put the job-title-looking line in role."""
+    c_low, r_low = (company or "").lower(), (role or "").lower()
+    if any(w in c_low for w in _ROLE_HINT_WORDS) and not any(w in r_low for w in _ROLE_HINT_WORDS):
+        return role, company
+    return company, role
+
+
 def _split_role_company(line: str) -> Tuple[str, str]:
     lowered = line.lower()
     best, best_sep = -1, ""
@@ -312,27 +323,17 @@ def _parse_education_line(line: str, education: List[ResumeEducationItem]) -> No
     has_inst, has_deg = bool(words & _INSTITUTION_WORDS), bool(words & _DEGREE_WORDS)
     if has_deg:
         if " - " in clean:
-            deg = clean.split(" - ")[0].strip()
-            field = clean.rpartition(",")[2].strip() if "," in clean else None
-        elif "," in clean:
-            d_p, _, f_p = clean.partition(",")
-            deg, field = d_p.strip(), f_p.strip()
+            deg, field = clean.split(" - ")[0].strip(), (clean.rpartition(",")[2].strip() if "," in clean else None)
         else:
-            deg, field = clean.strip(), None
-        if education and not education[-1].degree:
-            last = education[-1]
-            last.degree = sanitize_external_text(deg)
-            last.field_of_study = sanitize_external_text(field) if field else None
-            if start_year:
-                last.start_year = start_year
-            if end_year:
-                last.end_year = end_year
-        else:
-            education.append(ResumeEducationItem(
-                institution="", degree=sanitize_external_text(deg),
-                field_of_study=sanitize_external_text(field) if field else None,
-                start_year=start_year, end_year=end_year,
-            ))
+            deg, _, field = clean.partition(",")
+            deg, field = deg.strip(), field.strip() or None
+        last = education[-1] if education and not education[-1].degree else None
+        if last is None:
+            last = ResumeEducationItem(institution="", degree="")
+            education.append(last)
+        last.degree = sanitize_external_text(deg)
+        last.field_of_study = sanitize_external_text(field) if field else None
+        last.start_year, last.end_year = start_year or last.start_year, end_year or last.end_year
     elif has_inst:
         education.append(ResumeEducationItem(
             institution=sanitize_external_text(clean), degree="", start_year=start_year, end_year=end_year,
@@ -445,7 +446,8 @@ def parse_pasted_linkedin_text(raw_text: str) -> Tuple[ResumeContent, List[str]]
             rp, cp = _split_role_company(pending_exp_lines[0])
         else:
             p1, p2 = pending_exp_lines[-1], pending_exp_lines[-2]
-            cp, rp = (p1.split("·")[0], p2) if " · " in p1 else (_split_role_company(p1)[1], _split_role_company(p1)[0]) if any(s in p1 for s in _ROLE_COMPANY_SEPARATORS) else (p1, p2)
+            cp, rp = (p1.split("·")[0], p2) if " · " in p1 else (_split_role_company(p1)[1], _split_role_company(p1)[0]) if any(s in p1 for s in _ROLE_COMPANY_SEPARATORS) else (p2, p1)
+        cp, rp = _orient_company_role(cp, rp)
         it = ResumeExperienceItem(company=sanitize_external_text(cp), role_title=sanitize_external_text(rp))
         _route_experience_item(it, experience, internships)
         current_exp_item = it
@@ -527,8 +529,9 @@ def parse_pasted_linkedin_text(raw_text: str) -> Tuple[ResumeContent, List[str]]
                     elif any(sep in prev1 for sep in _ROLE_COMPANY_SEPARATORS):
                         role, company = _split_role_company(prev1)
                     else:
-                        role = prev2.strip() if prev2 else prev1.strip()
-                        company = prev1.strip() if prev2 else ""
+                        role = prev1.strip()
+                        company = prev2.strip()
+                company, role = _orient_company_role(company, role)
                 item = ResumeExperienceItem(
                     company=sanitize_external_text(company),
                     role_title=sanitize_external_text(role),
