@@ -274,15 +274,15 @@ async def get_upcoming_opportunities(request: Request):
 
 
 @router.get("/analytics", response_model=OpportunityOverviewStats)
-async def get_radar_analytics_endpoint(request: Request):
+async def get_radar_analytics_endpoint(request: Request, india_only: bool = Query(False)):
     """Return live dashboard statistics computed from real database records and user profile."""
     user_id = _get_or_create_user_id(request)
-    stats_dict = await get_radar_overview_stats(user_id)
+    stats_dict = await get_radar_overview_stats(user_id, india_only=india_only)
     try:
         # Retain DB-wide verified_open_count and stale_open_count from get_radar_overview_stats,
         # but compute strong_matches_count personalized to the user's recommended list.
         profile = await get_user_opportunity_profile(user_id)
-        shown = await recommended_for_user(user_id, profile)
+        shown = await recommended_for_user(user_id, profile, india_only=india_only)
         stats_dict["strong_matches_count"] = sum(
             1 for o in shown if o.eligibility_classification == EligibilityClassification.ELIGIBLE
         )

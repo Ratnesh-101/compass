@@ -98,9 +98,10 @@ export async function fetchUpcomingOpportunities() {
   return res.json()
 }
 
-export async function fetchRadarAnalytics() {
+export async function fetchRadarAnalytics(india_only = false) {
   await ensureSession()
-  const res = await fetch(`${API_BASE}/api/opportunities/analytics`, {
+  const query = india_only ? '?india_only=true' : ''
+  const res = await fetch(`${API_BASE}/api/opportunities/analytics${query}`, {
     headers: getAuthHeaders(),
     credentials: 'include',
   })
