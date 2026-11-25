@@ -488,6 +488,7 @@ async def _handle_message_core(
                             nearest = await list_nearest_active_titles(
                                 conn, owner_identity, limit=5, include_demo=include_demo
                             )
+                            nearest = [t for t in nearest if (t.get("status") or "").lower() != "done"]
                             resp_msg = "I couldn't find an active task with that name."
                             if nearest:
                                 resp_msg += " Your active tasks:\n" + "\n".join(

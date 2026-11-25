@@ -527,13 +527,13 @@ async def _generate_chat_events(
         target_msg_content = getattr(req, "target_message_content", None)
 
         is_safety_intent = (
-            is_pending_action_confirm(message)
+            (unsupported_capability_reply(message) is not None)
+            or is_pending_action_confirm(message)
             or is_pending_action_cancel(message)
             or is_chat_delete_intent(message)[0]
             or is_undo_request(message)
             or is_intake_intent(message)
             or (parse_task_action_intent(message) is not None)
-            or (unsupported_capability_reply(message) is not None)
         )
 
         if (not is_mocked and is_placeholder_key) or is_schedule_or_agent_intent(message) or is_tavily_verification_intent(message) or is_safety_intent:

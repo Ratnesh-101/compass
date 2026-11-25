@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { Check } from 'lucide-react'
-import { getAuthHeaders, API_BASE } from '../api/client'
+import { getAuthHeaders, API_BASE, authedFetch } from '../api/client'
 import { buildAgentRunBody, buildFeasibilityBody } from '../utils/requestBodies'
 import StepCard, { STEP_STYLES, friendlyTool } from './agent/StepCard'
 import ConfirmationGate from './agent/ConfirmationGate'
@@ -32,9 +32,7 @@ export default function AgentPanel({ onTaskMutated, conversationId }) {
 
   const fetchRunsHistory = useCallback(async () => {
     try {
-      const res = await fetch(`${getApiBase()}/api/agent/runs?limit=25`, {
-        headers: getAuthHeaders(),
-      })
+      const res = await authedFetch(`${getApiBase()}/api/agent/runs?limit=25`)
       if (res.ok) {
         const data = await res.json()
         setRunsList(data.runs || [])
@@ -46,9 +44,7 @@ export default function AgentPanel({ onTaskMutated, conversationId }) {
 
   const fetchActivity = useCallback(async () => {
     try {
-      const res = await fetch(`${getApiBase()}/api/agent/activity?limit=15`, {
-        headers: getAuthHeaders(),
-      })
+      const res = await authedFetch(`${getApiBase()}/api/agent/activity?limit=15`)
       if (res.ok) {
         const data = await res.json()
         setActivityList(data.activity || [])
@@ -60,9 +56,7 @@ export default function AgentPanel({ onTaskMutated, conversationId }) {
 
   const fetchCritiqueStats = useCallback(async () => {
     try {
-      const res = await fetch(`${getApiBase()}/api/agent/critique-stats`, {
-        headers: getAuthHeaders(),
-      })
+      const res = await authedFetch(`${getApiBase()}/api/agent/critique-stats`)
       if (res.ok) {
         const data = await res.json()
         setCritiqueStats(data)
@@ -74,9 +68,7 @@ export default function AgentPanel({ onTaskMutated, conversationId }) {
 
   const fetchProactiveBriefing = useCallback(async () => {
     try {
-      const res = await fetch(`${getApiBase()}/api/agent/proactive-briefing`, {
-        headers: getAuthHeaders(),
-      })
+      const res = await authedFetch(`${getApiBase()}/api/agent/proactive-briefing`)
       if (res.ok) {
         const data = await res.json()
         if (data.found) {
@@ -437,7 +429,7 @@ export default function AgentPanel({ onTaskMutated, conversationId }) {
     if (!runId) return
     setIsRunning(true)
     try {
-      const res = await fetch(`${getApiBase()}/api/agent/runs/${runId}`, { headers: getAuthHeaders() })
+      const res = await authedFetch(`${getApiBase()}/api/agent/runs/${runId}`)
       if (!res.ok) throw new Error(`Failed to fetch run: ${res.status}`)
       const data = await res.json()
       if (data) {

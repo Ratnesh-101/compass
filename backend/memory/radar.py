@@ -1255,10 +1255,97 @@ async def get_user_application_tracking(user_id: str) -> List[OpportunityOut]:
     return await _get_all_user_opportunities(user_id, applied_only=True)
 
 
+def compute_is_verified_within_24h(
+    posted_at: Optional[Any],
+    precision: Optional[str] = None,
+    now_utc: Optional[datetime] = None,
+) -> bool:
+    if not posted_at or (precision or "").strip().lower() not in ("exact", "exact_timestamp"):
+        return False
+    if isinstance(posted_at, str):
+        try:
+            posted_at = datetime.fromisoformat(posted_at)
+        except Exception:
+            return False
+    now = now_utc or datetime.now(timezone.utc)
+    if posted_at.tzinfo is None:
+        posted_at = posted_at.replace(tzinfo=timezone.utc)
+    age = now - posted_at
+    return 0 <= age.total_seconds() <= 86400
+
+
+def _enrich_opportunity(opp: OpportunityOut, profile: Optional[UserOpportunityProfileIn]) -> OpportunityOut:
+    """Enriches an opportunity with predictive cycle estimates and personal eligibility."""
+    if opp.compensation and any(k in str(opp.compensation).lower() for k in ("nan", "null", "undefined")):
+        opp.compensation = None
+    if opp.location and str(opp.location).lower() in ("nan", "null", "undefined", "none"):
+        opp.location = None
+    if opp.description and str(opp.description).lower() in ("nan", "null", "undefined", "none"):
+        opp.description = None
+
+    today = datetime.now(timezone.utc).date()
+    if opp.confirmed_close_date and opp.confirmed_close_date < today:
+        if opp.current_status in (
+            OpportunityStatus.OPEN_CONFIRMED,
+            OpportunityStatus.UPCOMING_CONFIRMED,
+            OpportunityStatus.ANNOUNCED,
+            OpportunityStatus.DISCOVERED,
+            OpportunityStatus.NEEDS_VERIFICATION,
+        ):
+            opp.current_status = OpportunityStatus.CLOSED_CONFIRMED
+            if not opp.verification_evidence or "closed" not in opp.verification_evidence.lower():
+                opp.verification_evidence = f"Application deadline closed on {opp.confirmed_close_date.isoformat()}."
+
+    from backend.services.radar_prediction import estimate_recruitment_cycle
+    opp.prediction = estimate_recruitment_cycle(opp.cycles)
+
+    from backend.services.radar_eligibility import evaluate_eligibility
+    cls, explanation, reasons = evaluate_eligibility(opp, profile)
+    opp.eligibility_classification = cls
+    opp.eligibility_explanation = explanation
+    opp.eligibility_reasons = reasons
+    opp.is_verified_within_24h = compute_is_verified_within_24h(opp.posted_at, opp.posted_at_precision)
+    return opp
+
+
+async def list_open_opportunities(
+    user_id: str,
+    category: Optional[str] = None,
+    employer_type: Optional[str] = None,
+    work_arrangement: Optional[str] = None,
+    india_only: bool = True,
+    limit: Optional[int] = None,
+    profile: Optional[UserOpportunityProfileIn] = None,
+) -> List[OpportunityOut]:
+    """Return strictly verified open opportunities matching the /opportunities/open route."""
+    from backend.services.radar_quality import refine_listings, profile_country_of, recommendation_rank_key
+    from backend.models_radar import EligibilityClassification
+
+    if profile is None:
+        profile = await get_user_opportunity_profile(user_id)
+
+    raw_items, _ = await get_all_opportunities(
+        user_id=user_id,
+        status=OpportunityStatus.OPEN_CONFIRMED,
+        category=category,
+        employer_type=employer_type,
+        work_arrangement=work_arrangement,
+        india_only=india_only,
+        page=1,
+        page_size=limit if limit is not None else 500,
+    )
+    profile_country = profile_country_of(profile)
+    refined = refine_listings(raw_items, profile_country, country_filter=india_only)
+    enriched = [_enrich_opportunity(item, profile) for item in refined]
+    enriched = [o for o in enriched if o.eligibility_classification != EligibilityClassification.INELIGIBLE]
+    enriched.sort(key=lambda o: recommendation_rank_key(o, profile, profile_country))
+    return enriched
+
+
 async def get_radar_overview_stats(user_id: str, india_only: bool = False) -> Dict[str, Any]:
     from backend.services.radar_eligibility import evaluate_eligibility
     from backend.models_radar import EligibilityClassification
-    from backend.services.radar_freshness import is_fresh_open, needs_recheck
+    from backend.services.radar_freshness import needs_recheck
 
     profile = await get_user_opportunity_profile(user_id)
     strong_matches_count = 0
@@ -1269,14 +1356,13 @@ async def get_radar_overview_stats(user_id: str, india_only: bool = False) -> Di
             if evaluate_eligibility(opp, profile)[0] == EligibilityClassification.ELIGIBLE
         )
 
+    verified_open_opps = await list_open_opportunities(user_id, india_only=india_only, limit=None, profile=profile)
+    verified_open_cnt = len(verified_open_opps)
+
     pool = await get_pool()
     today = datetime.now(timezone.utc).date()  # UTC, like every stored timestamp
     if not pool:
         all_opps = [o for o in _in_memory_opportunities.values() if not india_only or o.get("is_india_eligible")]
-        verified_open_opps = [
-            o for o in all_opps
-            if is_fresh_open(o, today=today)
-        ]
         stale_open_opps = [
             o for o in all_opps
             if needs_recheck(o, today=today)
@@ -1302,7 +1388,7 @@ async def get_radar_overview_stats(user_id: str, india_only: bool = False) -> Di
 
         user_prefix = f"{user_id}:"
         return {
-            "verified_open_count": len(verified_open_opps),
+            "verified_open_count": verified_open_cnt,
             "stale_open_count": len(stale_open_opps),
             "strong_matches_count": strong_matches_count,
             "opening_soon_count": len(opening_soon),
@@ -1371,7 +1457,7 @@ async def get_radar_overview_stats(user_id: str, india_only: bool = False) -> Di
         type_counts = {r["employer_type"]: r["cnt"] for r in type_rows}
 
         return {
-            "verified_open_count": open_cnt,
+            "verified_open_count": verified_open_cnt,
             "stale_open_count": stale_cnt,
             "strong_matches_count": strong_matches_count,
             "opening_soon_count": upcoming_cnt,
