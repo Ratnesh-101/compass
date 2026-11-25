@@ -1321,7 +1321,7 @@ async def get_radar_overview_stats(user_id: str, india_only: bool = False) -> Di
     async with pool.acquire() as conn:
         india_filter = " AND is_india_eligible IS TRUE" if india_only else ""
         where_india = " WHERE is_india_eligible IS TRUE" if india_only else ""
-        total = await conn.fetchval(f"SELECT COUNT(*) FROM opportunities{where_india}") or 0
+        total = await conn.fetchval(f"SELECT COUNT(*) FROM opportunities{where_india}") or 0  # nosec B608
         counts_row = await conn.fetchrow(
             f"""
             SELECT
@@ -1348,16 +1348,16 @@ async def get_radar_overview_stats(user_id: str, india_only: bool = False) -> Di
                      )
                     THEN 1 END) AS stale_open_cnt
             FROM opportunities{where_india}
-            """
+            """  # nosec B608
         )
         open_cnt = (counts_row["verified_open_cnt"] if counts_row else 0) or 0
         stale_cnt = (counts_row["stale_open_cnt"] if counts_row else 0) or 0
         upcoming_cnt = await conn.fetchval(
-            f"SELECT COUNT(*) FROM opportunities WHERE current_status = ANY($1::text[]) AND (confirmed_close_date IS NULL OR confirmed_close_date >= CURRENT_DATE){india_filter}",
+            f"SELECT COUNT(*) FROM opportunities WHERE current_status = ANY($1::text[]) AND (confirmed_close_date IS NULL OR confirmed_close_date >= CURRENT_DATE){india_filter}",  # nosec B608
             list(OPENING_SOON_STATUSES),
         ) or 0
         upcoming_deadlines_cnt = await conn.fetchval(
-            f"SELECT COUNT(*) FROM opportunities WHERE current_status = 'OPEN_CONFIRMED' AND confirmed_close_date >= CURRENT_DATE AND confirmed_close_date <= CURRENT_DATE + INTERVAL '14 days'{india_filter}",
+            f"SELECT COUNT(*) FROM opportunities WHERE current_status = 'OPEN_CONFIRMED' AND confirmed_close_date >= CURRENT_DATE AND confirmed_close_date <= CURRENT_DATE + INTERVAL '14 days'{india_filter}",  # nosec B608
         ) or 0
         saved_cnt = await conn.fetchval("SELECT COUNT(*) FROM user_opportunities WHERE user_id = $1 AND is_saved IS TRUE", user_id) or 0
         apps_cnt = await conn.fetchval(
@@ -1367,7 +1367,7 @@ async def get_radar_overview_stats(user_id: str, india_only: bool = False) -> Di
         last_sync = await conn.fetchval(
             "SELECT run_completed_at FROM opportunity_sync_runs WHERE status = 'completed' ORDER BY run_completed_at DESC LIMIT 1"
         )
-        type_rows = await conn.fetch(f"SELECT employer_type, COUNT(*) as cnt FROM opportunities{where_india} GROUP BY employer_type")
+        type_rows = await conn.fetch(f"SELECT employer_type, COUNT(*) as cnt FROM opportunities{where_india} GROUP BY employer_type")  # nosec B608
         type_counts = {r["employer_type"]: r["cnt"] for r in type_rows}
 
         return {
