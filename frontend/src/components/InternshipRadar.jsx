@@ -68,7 +68,7 @@ export default function InternshipRadar({
   const loadMetadata = useCallback(async () => {
     try {
       const [analyticsData, profileData, careerData] = await Promise.allSettled([
-        fetchRadarAnalytics(),
+        fetchRadarAnalytics(indiaOnly),
         fetchRadarProfile(),
         fetchCareerApplications(),
       ])
@@ -78,7 +78,7 @@ export default function InternshipRadar({
     } catch (e) {
       console.warn('[Radar] Error fetching metadata:', e)
     }
-  }, [])
+  }, [indiaOnly])
 
   // The Applications card shows the career tracker's count (not the old radar-only tracker).
   const displayStats = useMemo(
@@ -253,7 +253,7 @@ export default function InternshipRadar({
 
   useEffect(() => {
     loadMetadata()
-  }, [loadMetadata])
+  }, [loadMetadata, indiaOnly])
 
   useEffect(() => {
     loadOpportunities()
