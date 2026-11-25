@@ -411,11 +411,11 @@ async def handle_chat_task_action(
 
         if not matches:
             if open_tasks:
-                titles_str = ", ".join(f"'{t['title']}'" for t in open_tasks[:8])
-                resp_msg = f"I couldn't find an open task matching '{target}'. Your open tasks: {titles_str}."
+                titles_str = ", ".join(f"'{t['title']}'" for t in open_tasks[:5])
+                resp_msg = f"I couldn't find an open task called '{target}'. Your open tasks: {titles_str}."
             else:
-                resp_msg = f"I couldn't find an open task matching '{target}'. You have no open tasks."
-            ret_data = {"count": 0, "open_tasks": open_tasks[:8]}
+                resp_msg = f"I couldn't find an open task called '{target}'. You have no open tasks."
+            ret_data = {"count": 0, "open_tasks": open_tasks[:5]}
 
         elif len(matches) == 1:
             target_task = matches[0]
@@ -590,6 +590,44 @@ async def execute_pending_task_action(
             return ("There are no pending actions to confirm. What would you like me to help you with?", None, False)
 
         target_meta = next((it for it in task_titles if it.get("id") == selected_id), {})
-        return await _apply_task_mutation(conn, selected_id, "complete" in act_type, target_meta, owner_identity)
+        target_title = target_meta.get("title") or "task"
+        conv_id = active_action.get("conversation_id") or ""
+        if "complete" in act_type:
+            pending = await create_chat_pending_action(
+                conn,
+                action="complete_task",
+                task_ids=[selected_id],
+                task_titles=[{"id": selected_id, "title": target_title}],
+                count=1,
+                owner_identity=owner_identity,
+                conversation_id=conv_id,
+                expires_minutes=5,
+            )
+            card_text = f"Mark '{target_title}' as done?"
+            pending["card_text"] = card_text
+            resp_msg = f"{card_text} Please confirm to proceed or click Cancel."
+            return (resp_msg, {"pending_action": pending, "task": target_meta}, False)
+        else:
+            due_label = target_meta.get("due_label") or target_meta.get("due_date") or ""
+            pending = await create_chat_pending_action(
+                conn,
+                action="reschedule_task",
+                task_ids=[selected_id],
+                task_titles=[{
+                    "id": selected_id,
+                    "title": target_title,
+                    "due_date": target_meta.get("due_date"),
+                    "due_at": target_meta.get("due_at"),
+                    "due_label": due_label,
+                }],
+                count=1,
+                owner_identity=owner_identity,
+                conversation_id=conv_id,
+                expires_minutes=5,
+            )
+            card_text = f"Move '{target_title}' to {due_label}?"
+            pending["card_text"] = card_text
+            resp_msg = f"{card_text} Please confirm to proceed or click Cancel."
+            return (resp_msg, {"pending_action": pending, "task": target_meta}, False)
 
     return ("No tasks were modified.", None, False)

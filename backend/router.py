@@ -36,6 +36,7 @@ from backend.router_helpers import (
     _fallback_route,
     is_external_project_request,
     _current_today,
+    unsupported_capability_reply,
 )
 from backend.services.task_intake_llm import extract_prose_tasks, llm_available, looks_like_prose_task_list
 from backend.services.task_intake_parse import parse_task_list
@@ -206,6 +207,9 @@ async def route_message(
             return "add_tasks_preview", {"message": message, "items": prose_items}, ""
     if is_capability_question(message):
         return None, None, CAPABILITY_REPLY
+    unsupported = unsupported_capability_reply(message)
+    if unsupported:
+        return None, None, unsupported
     if is_explicit_task_creation(message):
         extracted = _extract_task_creation_args(message)
         if not extracted.get("title"):

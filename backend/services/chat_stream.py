@@ -38,9 +38,11 @@ from backend.router_helpers import (
     is_pending_action_cancel,
     is_chat_delete_intent,
     is_undo_request,
+    unsupported_capability_reply,
 )
 from backend.services.chat_idempotency import committed_event, normalize_request_id, peek_replay, replay_events
 from backend.services.chat_fastpath import GREETING_REPLY, apply_router_extra_body, is_greeting_fastpath
+from backend.services.chat_task_actions import parse_task_action_intent
 from backend.services.task_intent import is_intake_intent
 from backend.services.task_time import local_today, pick_timezone
 from backend.services.token_budget import stream_token_budget
@@ -530,6 +532,8 @@ async def _generate_chat_events(
             or is_chat_delete_intent(message)[0]
             or is_undo_request(message)
             or is_intake_intent(message)
+            or (parse_task_action_intent(message) is not None)
+            or (unsupported_capability_reply(message) is not None)
         )
 
         if (not is_mocked and is_placeholder_key) or is_schedule_or_agent_intent(message) or is_tavily_verification_intent(message) or is_safety_intent:
