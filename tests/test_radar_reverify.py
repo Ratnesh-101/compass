@@ -56,7 +56,7 @@ def _fake_verify(tag: str, outcomes: dict):
 
 
 def test_contract_constants():
-    assert RECHECK_AFTER_DAYS == 3
+    assert RECHECK_AFTER_DAYS == 1
     assert DEFAULT_BATCH_SIZE == 100
 
 
