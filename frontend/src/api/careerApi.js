@@ -7,20 +7,10 @@
  * - Submission adapters & execution
  */
 
-import { API_BASE as BASE_URL, getAuthHeaders, getGuestToken, initGuestSession, safeHref } from './baseClient.js'
+import { API_BASE as BASE_URL, getAuthHeaders, ensureGuestSession as ensureSession, safeHref } from './baseClient.js'
 import { extractErrorDetail, parseRetryAfter, buildJobAnalysisRequest } from '../utils/careerUiHelpers.js'
 
 const API_BASE = `${BASE_URL}/api/career`
-
-async function ensureSession() {
-  if (!getGuestToken()) {
-    try {
-      await initGuestSession()
-    } catch {
-      /* ignore storage access error */
-    }
-  }
-}
 
 /** Build an Error from a failed response, preferring the backend `detail` over statusText. */
 async function errorFromResponse(res, fallback) {
