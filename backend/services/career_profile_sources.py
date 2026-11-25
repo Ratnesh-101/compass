@@ -41,12 +41,12 @@ logger = logging.getLogger("compass.services.career_profile_sources")
 
 _MONTHS = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]{0,10}\.?"
 _DATE_OR_DURATION_RE = re.compile(
-    rf"\b{_MONTHS}[ \t]+(?:19|20)\d\d\b|\b(?:19|20)\d\d[ \t]{0,5}[-–—][ \t]{0,5}(?:(?:19|20)\d\d|present)\b"
+    rf"\b{_MONTHS}[ \t]+(?:19|20)\d\d\b|\b(?:19|20)\d\d[ \t]{{0,5}}[-–—][ \t]{{0,5}}(?:(?:19|20)\d\d|present)\b"
     r"|\b\d{1,4}[ \t]{0,5}(?:yrs?|mos?|years?|months?)\b",
     re.IGNORECASE,
 )
 _DATE_RANGE_RE = re.compile(
-    rf"\b({_MONTHS}[ \t]{1,5}(?:19|20)\d\d|(?:19|20)\d\d)[ \t]{0,5}[-–—][ \t]{0,5}({_MONTHS}[ \t]{1,5}(?:19|20)\d\d|(?:19|20)\d\d|[Pp]resent)\b",
+    rf"\b({_MONTHS}[ \t]{{1,5}}(?:19|20)\d\d|(?:19|20)\d\d)[ \t]{{0,5}}[-–—][ \t]{{0,5}}({_MONTHS}[ \t]{{1,5}}(?:19|20)\d\d|(?:19|20)\d\d|[Pp]resent)\b",
     re.IGNORECASE,
 )
 _YEAR_RANGE_RE = re.compile(r"\b(19\d\d|20\d\d)\b(?:[ \t]{0,5}[-–—][ \t]{0,5}\b(19\d\d|20\d\d)\b)?", re.IGNORECASE)
@@ -60,14 +60,8 @@ _LINKEDIN_URL_RE = re.compile(r"(?:https?://)?(?:[a-z]{2,3}\.)?linkedin\.com/in/
 _GITHUB_URL_RE = re.compile(r"(?:https?://)?(?:www\.)?github\.com/([a-zA-Z0-9_\-]{1,100})", re.IGNORECASE)
 _PORTFOLIO_LABELS_RE = re.compile(r"\((?:Portfolio|Personal Website|Blog|Website)\)", re.IGNORECASE)
 _FOOTER_RE = re.compile(r"^(?:page[ \t]{1,5}\d{1,5}[ \t]{1,5}of[ \t]{1,5}\d{1,5}|\d{1,5}[ \t]{0,5}/[ \t]{0,5}\d{1,5})$", re.IGNORECASE)
-_LANG_PROFICIENCY_RE = re.compile(
-    r"\((?:Native(?:[ \t]{1,5}or[ \t]{1,5}Bilingual)?|Full Professional|Professional Working|Limited Working|Elementary)\)",
-    re.IGNORECASE,
-)
-_PROFICIENCY_WORDS = {
-    "native", "native or bilingual", "full professional", "professional working",
-    "limited working", "elementary", "bilingual", "fluent", "professional",
-}
+_LANG_PROFICIENCY_RE = re.compile(r"\((?:Native(?:[ \t]{1,5}or[ \t]{1,5}Bilingual)?|Full Professional|Professional Working|Limited Working|Elementary)\)", re.IGNORECASE)
+_PROFICIENCY_WORDS = {"native", "native or bilingual", "full professional", "professional working", "limited working", "elementary", "bilingual", "fluent", "professional"}
 _PARTICLES = {"de", "van", "von", "bin", "al", "del", "da", "di", "la", "le", "du"}
 _CERT_KEYWORDS = {"practitioner", "certified", "certificate", "certification", "credential", "license"}
 _COUNTRY_ENDINGS = ("india", "usa", "united states", "uk", "canada", "germany", "singapore")
@@ -79,14 +73,12 @@ _URL_LIKE_RE = re.compile(
 _SECTION_HEADERS: Dict[str, str] = {
     "about": "about", "summary": "about", "professional summary": "about",
     "experience": "experience", "work experience": "experience", "employment": "experience",
-    "education": "education", "academics": "education",
-    "skills": "skills", "top skills": "skills",
+    "education": "education", "academics": "education", "skills": "skills", "top skills": "skills",
     "licenses & certifications": "certifications", "certifications": "certifications", "certificates": "certifications",
     "honors-awards": "awards", "honors & awards": "awards", "honors and awards": "awards", "honors": "awards", "awards": "awards",
     "publications": "publications", "projects": "projects", "personal projects": "projects",
-    "volunteer experience": "volunteering", "volunteering": "volunteering",
-    "languages": "languages", "contact": "contact", "contact information": "contact",
-    "patents": "patents", "patent": "patents",
+    "volunteer experience": "volunteering", "volunteering": "volunteering", "languages": "languages",
+    "contact": "contact", "contact information": "contact", "patents": "patents", "patent": "patents",
 }
 _LEFT_COLUMN_SECTIONS = {
     "contact", "skills", "languages", "certifications", "awards", "publications", "patents",
@@ -94,10 +86,7 @@ _LEFT_COLUMN_SECTIONS = {
 _EMPLOYMENT_TYPES = {"full-time", "part-time", "internship", "contract", "freelance", "self-employed"}
 _ROLE_COMPANY_SEPARATORS = (" - ", " – ", " — ", " | ", " at ", " @ ", " · ")
 _INSTITUTION_WORDS = {"university", "college", "institute", "school", "academy", "iit", "polytechnic"}
-_DEGREE_WORDS = {
-    "bachelor", "bachelors", "bachelor's", "master", "masters", "master's", "degree", "bs", "ms",
-    "b.tech", "m.tech", "btech", "mtech", "b.sc", "m.sc", "bsc", "msc", "mba", "phd", "diploma", "b.e", "m.e",
-}
+_DEGREE_WORDS = {"bachelor", "bachelors", "bachelor's", "master", "masters", "master's", "degree", "bs", "ms", "b.tech", "m.tech", "btech", "mtech", "b.sc", "m.sc", "bsc", "msc", "mba", "phd", "diploma", "b.e", "m.e"}
 _MAX_NAME_LENGTH, _MAX_NAME_WORDS, _MAX_ABOUT_LINES = 40, 5, 10
 _MAX_TITLE_LENGTH, _MAX_SKILL_LENGTH, _MAX_SKILLS = 70, 35, 40
 
@@ -131,6 +120,17 @@ def _split_skill_tokens(text: str) -> List[str]:
     text = text[:2000]
     cleaned = [tok.strip(" -:*•") for tok in re.split(r"[,•|]+", text)]
     return [c for c in cleaned if c and 1 < len(c) < _MAX_SKILL_LENGTH]
+
+
+_ROLE_HINT_WORDS = ("developer", "engineer", "intern", "analyst", "manager", "designer", "mentor", "lead", "scientist", "researcher", "architect", "consultant", "associate", "trainee")
+
+
+def _orient_company_role(company: str, role: str) -> tuple:
+    """Title and company come in either order: put the job-title-looking line in role."""
+    c_low, r_low = (company or "").lower(), (role or "").lower()
+    if any(w in c_low for w in _ROLE_HINT_WORDS) and not any(w in r_low for w in _ROLE_HINT_WORDS):
+        return role, company
+    return company, role
 
 
 def _split_role_company(line: str) -> Tuple[str, str]:
@@ -307,38 +307,37 @@ def _parse_education_line(line: str, education: List[ResumeEducationItem]) -> No
     if _is_footer_line(line):
         return
     ym = _YEAR_RANGE_RE.search(line)
-    if ym and education:
-        start_year = int(ym.group(1)) if ym.group(1) else None
-        end_year = int(ym.group(2)) if ym.group(2) else start_year
-        if ym.group(2) is None and start_year:
+    start_year, end_year = None, None
+    if ym:
+        s_y, e_y = ym.group(1), ym.group(2)
+        start_year = int(s_y) if s_y else None
+        end_year = int(e_y) if e_y else start_year
+        if e_y is None and start_year:
             end_year, start_year = start_year, None
-        last = education[-1]
-        if last.end_year is None:
-            last.start_year, last.end_year = start_year, end_year
+    clean = _YEAR_RANGE_RE.sub("", line).strip(" ·()[],")
+    if not clean:
+        if ym and education and education[-1].end_year is None:
+            education[-1].start_year, education[-1].end_year = start_year, end_year
         return
-    words = _words(line)
-    has_institution, has_degree = bool(words & _INSTITUTION_WORDS), bool(words & _DEGREE_WORDS)
-    if not has_institution and not has_degree:
-        return
-    last = education[-1] if education else None
-    if has_degree and not has_institution and last is not None and not last.degree:
-        deg_part, sep, field_part = line.partition(",")
-        last.degree = deg_part.strip()
-        last.field_of_study = field_part.strip() if sep else None
-        return
-    inst, deg = _split_role_company(line)
-    field_of_study = None
-    if not deg and has_degree and not has_institution:
-        inst, deg = "", line
-    if deg and "," in deg:
-        deg_part, _, field_part = deg.partition(",")
-        deg, field_of_study = deg_part.strip(), field_part.strip()
-    education.append(
-        ResumeEducationItem(
-            institution=sanitize_external_text(inst), degree=sanitize_external_text(deg),
-            field_of_study=sanitize_external_text(field_of_study) if field_of_study else None,
-        )
-    )
+    words = _words(clean)
+    has_inst, has_deg = bool(words & _INSTITUTION_WORDS), bool(words & _DEGREE_WORDS)
+    if has_deg:
+        if " - " in clean:
+            deg, field = clean.split(" - ")[0].strip(), (clean.rpartition(",")[2].strip() if "," in clean else None)
+        else:
+            deg, _, field = clean.partition(",")
+            deg, field = deg.strip(), field.strip() or None
+        last = education[-1] if education and not education[-1].degree else None
+        if last is None:
+            last = ResumeEducationItem(institution="", degree="")
+            education.append(last)
+        last.degree = sanitize_external_text(deg)
+        last.field_of_study = sanitize_external_text(field) if field else None
+        last.start_year, last.end_year = start_year or last.start_year, end_year or last.end_year
+    elif has_inst:
+        education.append(ResumeEducationItem(
+            institution=sanitize_external_text(clean), degree="", start_year=start_year, end_year=end_year,
+        ))
 
 
 def parse_pasted_linkedin_text(raw_text: str) -> Tuple[ResumeContent, List[str]]:
@@ -448,6 +447,7 @@ def parse_pasted_linkedin_text(raw_text: str) -> Tuple[ResumeContent, List[str]]
         else:
             p1, p2 = pending_exp_lines[-1], pending_exp_lines[-2]
             cp, rp = (p1.split("·")[0], p2) if " · " in p1 else (_split_role_company(p1)[1], _split_role_company(p1)[0]) if any(s in p1 for s in _ROLE_COMPANY_SEPARATORS) else (p2, p1)
+        cp, rp = _orient_company_role(cp, rp)
         it = ResumeExperienceItem(company=sanitize_external_text(cp), role_title=sanitize_external_text(rp))
         _route_experience_item(it, experience, internships)
         current_exp_item = it
@@ -517,6 +517,8 @@ def parse_pasted_linkedin_text(raw_text: str) -> Tuple[ResumeContent, List[str]]
         elif current_section == "experience":
             if _is_date_or_duration_line(line):
                 sd, ed, ic = _extract_dates_from_line(line)
+                if not (sd or ed or ic):
+                    continue
                 role, company = "", ""
                 if pending_exp_lines:
                     prev1 = pending_exp_lines[-1]
@@ -529,6 +531,7 @@ def parse_pasted_linkedin_text(raw_text: str) -> Tuple[ResumeContent, List[str]]
                     else:
                         role = prev1.strip()
                         company = prev2.strip()
+                company, role = _orient_company_role(company, role)
                 item = ResumeExperienceItem(
                     company=sanitize_external_text(company),
                     role_title=sanitize_external_text(role),
