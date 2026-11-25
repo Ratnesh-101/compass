@@ -1345,7 +1345,7 @@ async def list_open_opportunities(
 async def get_radar_overview_stats(user_id: str, india_only: bool = False) -> Dict[str, Any]:
     from backend.services.radar_eligibility import evaluate_eligibility
     from backend.models_radar import EligibilityClassification
-    from backend.services.radar_freshness import needs_recheck
+    from backend.services.radar_freshness import is_fresh_open, needs_recheck
 
     profile = await get_user_opportunity_profile(user_id)
     strong_matches_count = 0
@@ -1357,7 +1357,7 @@ async def get_radar_overview_stats(user_id: str, india_only: bool = False) -> Di
         )
 
     verified_open_opps = await list_open_opportunities(user_id, india_only=india_only, limit=None, profile=profile)
-    verified_open_cnt = len(verified_open_opps)
+    verified_open_cnt = sum(1 for o in verified_open_opps if is_fresh_open(o))
 
     pool = await get_pool()
     today = datetime.now(timezone.utc).date()  # UTC, like every stored timestamp
