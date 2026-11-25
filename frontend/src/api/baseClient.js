@@ -142,27 +142,15 @@ export function addKnownAccount(email) {
   const list = getKnownAccounts()
   const filtered = list.filter(e => e !== clean)
   filtered.unshift(clean)
-  try {
-    localStorage.setItem('compass_known_accounts', JSON.stringify(filtered.slice(0, 6)))
-  } catch {
-    /* ignore storage access error */
-  }
+  try { localStorage.setItem('compass_known_accounts', JSON.stringify(filtered.slice(0, 6))) } catch { /* ignore */ }
 }
 
 export function getGuestToken() {
-  try {
-    return localStorage.getItem('compass_guest_token') || null
-  } catch {
-    return null
-  }
+  try { return localStorage.getItem('compass_guest_token') || null } catch { return null }
 }
 
 export function getGuestId() {
-  try {
-    return localStorage.getItem('compass_guest_id') || null
-  } catch {
-    return null
-  }
+  try { return localStorage.getItem('compass_guest_id') || null } catch { return null }
 }
 
 export function setGuestSession(guestId, guestToken) {
@@ -228,24 +216,20 @@ export function resetGuestMintBackoff() {
   mintBlockedUntil = 0
 }
 
-export function initGuestSession() {
+export function initGuestSession(signal = null) {
   if (!inflightGuestSession) {
-    inflightGuestSession = runGuestSessionInit().finally(() => {
+    inflightGuestSession = runGuestSessionInit(signal).finally(() => {
       inflightGuestSession = null
     })
   }
   return inflightGuestSession
 }
 
-async function runGuestSessionInit() {
+async function runGuestSessionInit(signal = null) {
   const existingToken = getGuestToken()
   if (existingToken) {
     try {
-      const res = await fetchWithTimeout(`${API_BASE}/api/guest/session`, {
-        method: 'GET',
-        headers: { 'x-guest-token': existingToken },
-        credentials: 'include',
-      })
+      const res = await fetchWithTimeout(`${API_BASE}/api/guest/session`, { method: 'GET', headers: { 'x-guest-token': existingToken }, credentials: 'include', signal })
       if (res.ok) {
         const data = await res.json()
         if (data.guest_id && data.guest_token) {
@@ -265,16 +249,13 @@ async function runGuestSessionInit() {
       return null
     }
   }
-  return mintGuestSession(existingToken)
+  return mintGuestSession(existingToken, signal)
 }
 
-async function mintGuestSession(staleToken) {
+async function mintGuestSession(staleToken, signal = null) {
   if (!canAttemptMint(Date.now(), mintBlockedUntil)) return null
   try {
-    const res = await fetchWithTimeout(`${API_BASE}/api/guest/session`, {
-      method: 'POST',
-      credentials: 'include',
-    })
+    const res = await fetchWithTimeout(`${API_BASE}/api/guest/session`, { method: 'POST', credentials: 'include', signal })
     if (res.ok) {
       const data = await res.json()
       if (data.guest_id && data.guest_token) {
@@ -349,6 +330,49 @@ export function getAuthHeaders(extraHeaders = {}) {
   return headers
 }
 
+function hasSignedInUser() {
+  try {
+    return typeof localStorage !== 'undefined' && Boolean(localStorage.getItem('compass_auth_token') || localStorage.getItem('compass_user_email'))
+  } catch { return false }
+}
+
+let inflightGuestEnsure = null
+
+export async function ensureGuestSession(force = false, signal = null) {
+  try {
+    if (signal?.aborted) { const err = new Error('The operation was aborted'); err.name = 'AbortError'; throw err }
+    if (!force && (hasSignedInUser() || getGuestToken())) return
+    if (!inflightGuestEnsure) {
+      inflightGuestEnsure = (async () => {
+        try {
+          const res = await initGuestSession(signal)
+          if (!res && !getGuestToken()) resetGuestMintBackoff()
+        } catch { /* ignore */ } finally { inflightGuestEnsure = null }
+      })()
+    }
+    if (signal) {
+      await Promise.race([inflightGuestEnsure, new Promise((_, reject) => {
+        signal.addEventListener('abort', () => { const err = new Error('The operation was aborted'); err.name = 'AbortError'; reject(err) }, { once: true })
+      })])
+    } else {
+      await inflightGuestEnsure
+    }
+  } catch (err) {
+    if (err?.name === 'AbortError') throw err
+  }
+}
+
+export async function authedFetch(url, init = {}) {
+  await ensureGuestSession(false, init.signal)
+  let res = await fetch(url, { credentials: 'include', ...init, headers: getAuthHeaders(init.headers) })
+  if (res.status === 401 && !hasSignedInUser()) {
+    if (!getGuestToken()) await ensureGuestSession(true, init.signal)
+    else await ensureGuestSession(false, init.signal)
+    res = await fetch(url, { credentials: 'include', ...init, headers: getAuthHeaders(init.headers) })
+  }
+  return res
+}
+
 /**
  * Perform a fetch request with automatic guest token minting and 1-time retry on 401/403.
  * Strict rules:
@@ -368,9 +392,7 @@ export async function fetchWithGuestRetry(url, options = {}) {
   }
   let res = await send(url, init)
   if ((res.status === 401 || res.status === 403) && !options._retried) {
-    const hasAuthToken = typeof localStorage !== 'undefined' && Boolean(localStorage.getItem('compass_auth_token'))
-    const hasAuthEmail = typeof localStorage !== 'undefined' && Boolean(localStorage.getItem('compass_user_email'))
-    const isAuthenticated = hasAuthToken || hasAuthEmail
+    const isAuthenticated = hasSignedInUser()
 
     if (isAuthenticated) {
       if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {

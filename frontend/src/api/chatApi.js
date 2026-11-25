@@ -3,8 +3,8 @@
 import {
   API_BASE,
   getAuthHeaders,
-  getGuestToken,
-  initGuestSession,
+  authedFetch,
+  ensureGuestSession,
   fetchWithTimeout,
 } from './baseClient.js'
 import { chatRequestFields, makeRequestId } from '../utils/chatRequest.js'
@@ -128,9 +128,9 @@ export async function streamQueryFromAssistant(prompt, conversationId, { onToken
       body.continue_message_id = contId
     }
 
-    const res = await fetch(`${API_BASE}/api/chat/stream`, {
+    const res = await authedFetch(`${API_BASE}/api/chat/stream`, {
       method: 'POST',
-      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
       signal,
     })
@@ -142,6 +142,9 @@ export async function streamQueryFromAssistant(prompt, conversationId, { onToken
         errText = errJson.detail || errJson.message || `HTTP ${res.status}`
       } catch {
         errText = `HTTP ${res.status}`
+      }
+      if (res.status === 401 || /Authentication required|guest token/i.test(errText)) {
+        throw new Error('Your session is still starting. Please try again in a moment.')
       }
       throw new Error(`SSE endpoint returned ${errText}`)
     }
@@ -206,7 +209,10 @@ export async function streamQueryFromAssistant(prompt, conversationId, { onToken
         if (evt.can_undo !== undefined) lastCanUndo = evt.can_undo
         if (evt.data) lastData = evt.data
       } else if (evt.type === 'error') {
-        const errMsg = evt.detail || evt.message || 'Stream error'
+        let errMsg = evt.detail || evt.message || 'Stream error'
+        if (/Authentication required|guest token/i.test(errMsg)) {
+          errMsg = 'Your session is still starting. Please try again in a moment.'
+        }
         const errObj = new Error(errMsg)
         if (evt.can_retry !== undefined) errObj.can_retry = evt.can_retry
         errObj.partialResponse = fullResponse
@@ -296,30 +302,12 @@ export async function streamQueryFromAssistant(prompt, conversationId, { onToken
 }
 
 
-async function ensureSession() {
-  const hasAuthToken = typeof localStorage !== 'undefined' && Boolean(localStorage.getItem('compass_auth_token'))
-  const hasAuthEmail = typeof localStorage !== 'undefined' && Boolean(localStorage.getItem('compass_user_email'))
-  if (hasAuthToken || hasAuthEmail) {
-    return
-  }
-  if (!getGuestToken()) {
-    try {
-      await initGuestSession()
-    } catch {
-      /* ignore storage access error */
-    }
-  }
-}
-
 /**
  * Fetch previous chat conversations list.
  */
 export async function fetchConversations(limit = 30, includeArchived = false) {
   try {
-    await ensureSession()
-    const res = await fetch(`${API_BASE}/api/conversations?limit=${limit}&include_archived=${includeArchived}`, {
-      headers: getAuthHeaders(),
-    })
+    const res = await authedFetch(`${API_BASE}/api/conversations?limit=${limit}&include_archived=${includeArchived}`)
     if (!res.ok) return []
     const data = await res.json()
     return data.conversations || []
@@ -336,9 +324,7 @@ export const listConversations = fetchConversations
 export async function fetchConversationMessages(conversationId) {
   if (!conversationId) return []
   try {
-    const res = await fetch(`${API_BASE}/api/conversations/${conversationId}/messages`, {
-      headers: getAuthHeaders(),
-    })
+    const res = await authedFetch(`${API_BASE}/api/conversations/${conversationId}/messages`)
     if (!res.ok) return []
     const data = await res.json()
     return (data.messages || []).map(m => ({
@@ -362,11 +348,10 @@ export async function fetchConversationMessages(conversationId) {
 export async function updateConversation(conversationId, updates) {
   if (!conversationId) return false
   try {
-    const res = await fetch(`${API_BASE}/api/conversations/${conversationId}`, {
+    const res = await authedFetch(`${API_BASE}/api/conversations/${conversationId}`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
-        ...getAuthHeaders(),
       },
       body: JSON.stringify(updates),
     })
@@ -413,9 +398,8 @@ export async function fetchSharedConversation(shareToken) {
 export async function deleteConversation(conversationId) {
   if (!conversationId) return false
   try {
-    const res = await fetch(`${API_BASE}/api/conversations/${conversationId}`, {
+    const res = await authedFetch(`${API_BASE}/api/conversations/${conversationId}`, {
       method: 'DELETE',
-      headers: getAuthHeaders(),
     })
     return res.ok
   } catch {
@@ -487,9 +471,7 @@ export async function clearDemoPersona() {
  */
 export async function fetchProfileFacts() {
   try {
-    const res = await fetch(`${API_BASE}/api/profile/facts`, {
-      headers: getAuthHeaders(),
-    })
+    const res = await authedFetch(`${API_BASE}/api/profile/facts`)
     if (!res.ok) return {}
     const data = await res.json()
     return data.facts || {}
@@ -504,9 +486,8 @@ export async function fetchProfileFacts() {
 export async function deleteProfileFact(key) {
   if (!key) return false
   try {
-    const res = await fetch(`${API_BASE}/api/profile/facts/${encodeURIComponent(key)}`, {
+    const res = await authedFetch(`${API_BASE}/api/profile/facts/${encodeURIComponent(key)}`, {
       method: 'DELETE',
-      headers: getAuthHeaders(),
     })
     return res.ok
   } catch {
@@ -519,9 +500,8 @@ export async function deleteProfileFact(key) {
  */
 export async function deleteAllProfileFacts() {
   try {
-    const res = await fetch(`${API_BASE}/api/profile/facts`, {
+    const res = await authedFetch(`${API_BASE}/api/profile/facts`, {
       method: 'DELETE',
-      headers: getAuthHeaders(),
     })
     return res.ok
   } catch {
@@ -550,9 +530,7 @@ export async function fetchPersonaPhrases() {
  */
 export async function fetchParkedThoughts() {
   try {
-    const res = await fetch(`${API_BASE}/api/parked`, {
-      headers: getAuthHeaders(),
-    })
+    const res = await authedFetch(`${API_BASE}/api/parked`)
     if (!res.ok) return []
     const data = await res.json()
     return data.parked || []
@@ -567,9 +545,8 @@ export async function fetchParkedThoughts() {
 export async function resolveParkedThought(id) {
   if (!id) return false
   try {
-    const res = await fetch(`${API_BASE}/api/parked/${id}`, {
+    const res = await authedFetch(`${API_BASE}/api/parked/${id}`, {
       method: 'PATCH',
-      headers: getAuthHeaders(),
     })
     return res.ok
   } catch {
