@@ -66,7 +66,7 @@ async def test_selects_only_stale_open_oldest_first():
     tag = uuid.uuid4().hex[:8]
     old, _ = await _seed(tag, "old", 400)
     mid, _ = await _seed(tag, "mid", 40)
-    fresh, _ = await _seed(tag, "fresh", 1)
+    fresh, _ = await _seed(tag, "fresh", 0)
     closed, _ = await _seed(tag, "closed", 100, status=OpportunityStatus.CLOSED_CONFIRMED)
     disc, _ = await _seed(tag, "disc", 100, status=OpportunityStatus.DISCOVERED)
 
