@@ -1088,12 +1088,58 @@ def is_external_project_request(message: str) -> bool:
     return any(cue in msg_l for cue in EXTERNAL_PROJECT_CUES)
 
 
+UNSUPPORTED_AREA_RE = re.compile(
+    r"\b(?:create|add|make|set\s+up|new)\s+(?:a\s+|an\s+)?(?:new\s+)?areas?\b",
+    re.IGNORECASE,
+)
+UNSUPPORTED_DELETE_CHAT_RE = re.compile(
+    r"\b(?:delete|remove|clear|drop)\s+(?:(?:this|the|my|current)\s+)?chats?\b",
+    re.IGNORECASE,
+)
+UNSUPPORTED_NEW_CHAT_RE = re.compile(
+    r"\b(?:start|create|open|begin|new)\s+(?:a\s+|an\s+)?(?:new\s+)?chats?\b",
+    re.IGNORECASE,
+)
+UNSUPPORTED_EXPORT_CALENDAR_RE = re.compile(
+    r"\b(?:export|download|sync)\s+(?:my\s+|the\s+)?(?:calendar|schedule)\b",
+    re.IGNORECASE,
+)
+UNSUPPORTED_WATCHLIST_VERB_RE = re.compile(r"\b(?:save|add|put|move)\b", re.IGNORECASE)
+UNSUPPORTED_WATCHLIST_WORD_RE = re.compile(r"\bwatchlist\b", re.IGNORECASE)
+UNSUPPORTED_PREPARE_APP_RE = re.compile(
+    r"\b(?:prepare|start|create|draft)\s+(?:an?\s+|my\s+)?(?:job\s+|internship\s+)?applications?\b",
+    re.IGNORECASE,
+)
+
+
+def unsupported_capability_reply(message: str) -> Optional[str]:
+    """Provide honest UI redirection for capabilities not supported in chat."""
+    msg = (message or "").strip()
+    if not msg:
+        return None
+    if UNSUPPORTED_AREA_RE.search(msg):
+        return "Areas come from the task's category; pick one when you add a task."
+    if UNSUPPORTED_DELETE_CHAT_RE.search(msg):
+        return "Use the trash icon next to the chat in History."
+    if UNSUPPORTED_NEW_CHAT_RE.search(msg):
+        return "Use the New chat button."
+    if UNSUPPORTED_EXPORT_CALENDAR_RE.search(msg):
+        return "Use Export in the Calendar tab."
+    if (UNSUPPORTED_WATCHLIST_VERB_RE.search(msg[:300]) and UNSUPPORTED_WATCHLIST_WORD_RE.search(msg[:300])) or UNSUPPORTED_PREPARE_APP_RE.search(msg):
+        return "Open the listing in Internship Radar and use Add to Watchlist / Prepare Application there."
+    return None
+
+
 def _fallback_route(
     message: str,
     history: Optional[list[dict[str, str]]] = None,
     tone: Optional[str] = None,
 ) -> Tuple[Optional[str], Optional[dict[str, Any]], str]:
     """Fallback route logic when LLM router is unavailable or in mock mode."""
+    unsupported = unsupported_capability_reply(message)
+    if unsupported:
+        return None, None, unsupported
+
     msg_lower = message.lower()
 
     # 1. Personal fact forget
