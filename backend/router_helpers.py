@@ -1251,6 +1251,10 @@ def _fallback_route(
     is_del, is_clear, del_target = is_chat_delete_intent(message)
     if is_del:
         return "chat_delete_task", {"query": del_target, "clear_all": is_clear}, ""
+    from backend.services.chat_task_actions import parse_task_action_intent
+    _task_intent = parse_task_action_intent(message)
+    if _task_intent:
+        return "chat_task_action", _task_intent, ""
     if is_undo_request(message):
         return "undo", {"message": message}, ""
     if is_explicit_task_creation(message):
