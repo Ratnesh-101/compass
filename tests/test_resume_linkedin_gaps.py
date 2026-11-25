@@ -195,7 +195,7 @@ def test_zip_portfolio_website_is_used():
     content, _ = parse_linkedin_archive_zip(_zip_with_profile("[PORTFOLIO:https://riya-fakenamey.example.dev]"))
     assert content.full_name == "Riya Fakenamey"
     assert content.github_or_portfolio == "https://riya-fakenamey.example.dev"
-    assert "https://riya-fakenamey.example.dev" in content.relevant_links
+    assert any(link == "https://riya-fakenamey.example.dev" for link in content.relevant_links)
 
 
 def test_zip_multiple_websites_kept_and_javascript_dropped():

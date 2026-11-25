@@ -48,6 +48,13 @@ _MAX_MEMBER_UNCOMPRESSED_BYTES = 5 * 1024 * 1024
 _MAX_TOTAL_UNCOMPRESSED_BYTES = 20 * 1024 * 1024
 
 
+
+def _is_github_url(url: str) -> bool:
+    """True when the URL's host is github.com or a subdomain (not a substring match)."""
+    from urllib.parse import urlparse
+    host = (urlparse(url).hostname or "").lower()
+    return host == "github.com" or host.endswith(".github.com")
+
 def _route_experience_item(
     item: ResumeExperienceItem,
     experience: List[ResumeExperienceItem],
@@ -129,7 +136,7 @@ def _populate_content_from_csv(bname: str, text: str, content: ResumeContent) ->
                     if lbl in {"PORTFOLIO", "PERSONAL", "BLOG", "OTHER"}:
                         if first_portfolio is None:
                             first_portfolio = safe
-                    elif "github.com" in safe.lower():
+                    elif _is_github_url(safe):
                         if first_github is None:
                             first_github = safe
             else:
@@ -141,7 +148,7 @@ def _populate_content_from_csv(bname: str, text: str, content: ResumeContent) ->
                         content.relevant_links.append(safe)
                     if ("portfolio" in safe.lower() or "personal" in safe.lower() or "blog" in safe.lower()) and first_portfolio is None:
                         first_portfolio = safe
-                    elif "github.com" in safe.lower() and first_github is None:
+                    elif _is_github_url(safe) and first_github is None:
                         first_github = safe
 
             chosen_site = first_portfolio or first_github

@@ -636,7 +636,7 @@ def _parse_project_line_item(line_text: str) -> Optional[Tuple[str, str, List[st
         s_u = safe_http_url(raw_u) or (safe_http_url("https://" + raw_u) if not raw_u.startswith("http") else None)
         if s_u:
             proj_url = s_u
-            if "github.com" in s_u.lower():
+            if (urlparse(s_u).hostname or "").lower() in ("github.com", "www.github.com"):
                 repo_url = s_u
         inner = inner[:url_m.start()].rstrip(" -–—;:,") + " " + inner[url_m.end():].lstrip(" -–—;:,")
         inner = re.sub(r"[ \t]+", " ", inner).strip()
