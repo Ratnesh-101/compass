@@ -64,6 +64,27 @@ OFFICIAL_INSTITUTIONAL_SUFFIXES = [
 ]
 
 
+_TLS_CERT_ERROR_PATTERNS = (
+    "certificate_verify_failed",
+    "certificate verify failed",
+    "sslcertverificationerror",
+    "hostname mismatch",
+    "doesn't match",
+    "does not match",
+    "certificate has expired",
+    "self-signed",
+    "self signed",
+)
+
+
+def is_tls_certificate_error(text: str) -> bool:
+    """Return True if the error text indicates a TLS/SSL certificate validation error."""
+    if not text:
+        return False
+    lower = str(text).lower()
+    return any(p in lower for p in _TLS_CERT_ERROR_PATTERNS)
+
+
 def is_official_domain(url: str) -> bool:
     """Determine if a URL belongs to a verified ATS or institutional portal."""
     if not url:
@@ -333,12 +354,34 @@ async def verify_opportunity_status(
             )
         except ValueError as blocked:
             # SSRF-blocked hop, unresolved host, or too many redirects: never an exception.
+            blocked_text = f"{type(blocked).__name__}: {blocked}"
+            if getattr(blocked, "__cause__", None):
+                blocked_text = f"{blocked_text} {type(blocked.__cause__).__name__}: {blocked.__cause__}"
+            if getattr(blocked, "__context__", None):
+                blocked_text = f"{blocked_text} {type(blocked.__context__).__name__}: {blocked.__context__}"
+            if is_tls_certificate_error(blocked_text):
+                return (
+                    OpportunityStatus.NEEDS_VERIFICATION,
+                    "The employer's site presented an invalid security certificate, so the page could not be checked safely and cannot be confirmed as open.",
+                    now,
+                )
             return (
                 current_status,
                 f"Verification stopped: {str(blocked)[:200]}. Retaining current status.",
                 now,
             )
         except Exception as err:
+            err_text = f"{type(err).__name__}: {err}"
+            if getattr(err, "__cause__", None):
+                err_text = f"{err_text} {type(err.__cause__).__name__}: {err.__cause__}"
+            if getattr(err, "__context__", None):
+                err_text = f"{err_text} {type(err.__context__).__name__}: {err.__context__}"
+            if is_tls_certificate_error(err_text):
+                return (
+                    OpportunityStatus.NEEDS_VERIFICATION,
+                    "The employer's site presented an invalid security certificate, so the page could not be checked safely and cannot be confirmed as open.",
+                    now,
+                )
             logger.info(f"Direct HTTP check error for {application_url}: {err}")
             return (
                 current_status,
