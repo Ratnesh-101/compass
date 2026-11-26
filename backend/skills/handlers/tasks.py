@@ -402,6 +402,13 @@ def format_conflict_discrepancy(conflict: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _clean_visible_title(title: Any) -> str:
+    """Remove internal id suffix like '(ID: 2411)' from visible text."""
+    if not title:
+        return ""
+    return re.sub(r"\s*\((?:ID|id):?\s*#?\d+\)$", "", str(title)).strip()
+
+
 def _safe_error_message(prefix: str, exc: Exception) -> str:
     """Format user-safe error message without leaking credentials or raw DSN."""
     err_str = str(exc)
@@ -538,7 +545,7 @@ async def handle_query_tasks(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
             db_due = str(target_t.get("due_date") or "unscheduled")
             if not any(d.lower() in db_due.lower() or db_due.lower() in d.lower() for d in conv_deadlines):
                 disc_lines = [
-                    f"⚠️ **Discrepancy Detected between Conversation and Database Records for '{target_t['title']}'**:",
+                    f"⚠️ **Discrepancy Detected between Conversation and Database Records for '{_clean_visible_title(target_t['title'])}'**:",
                     f"- **Conversation context**: {conv_deadlines[0]}",
                     f"- **Database record**: {db_due}",
                     "The database record is currently active, but our earlier conversation mentioned a different deadline. Would you like me to update the task to match the conversation?",
@@ -548,7 +555,7 @@ async def handle_query_tasks(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
     top_tasks = prioritized[:6]
     if tone == "brief" and top_tasks:
         due_str = str(top_tasks[0].get("due_date")) if top_tasks[0].get("due_date") else "No due date"
-        base_summary = f"Found **{count}** task(s){d_str}{s_str}. Immediate lead item: **{top_tasks[0]['title']}** (Due: {due_str})."
+        base_summary = f"Found **{count}** task(s){d_str}{s_str}. Immediate lead item: **{_clean_visible_title(top_tasks[0]['title'])}** (Due: {due_str})."
     else:
         task_lines = []
         for t in top_tasks:
@@ -556,7 +563,7 @@ async def handle_query_tasks(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
             dom = t.get("domain", "general").title()
             prio = t.get("priority", "medium").title()
             stat = t.get("status", "open")
-            task_lines.append(f"- **{t['title']}** (`{dom}` · {stat} · Due: {due_str} · Priority: {prio})")
+            task_lines.append(f"- **{_clean_visible_title(t['title'])}** (`{dom}` · {stat} · Due: {due_str} · Priority: {prio})")
 
         more_notice = (
             f"\n\n*Showing top {len(top_tasks)} prioritized items out of {count} total matching task(s). "
@@ -636,7 +643,7 @@ async def handle_query_coursework_tasks(args: Dict[str, Any], pool: Any) -> Dict
         due_str = str(t.get("due_date")) if t.get("due_date") else "No due date"
         prio = str(t.get("priority") or "medium").title()
         stat = str(t.get("status") or "open")
-        task_lines.append(f"- **{t['title']}** (`coursework` · {stat} · Due: {due_str} · Priority: {prio})")
+        task_lines.append(f"- **{_clean_visible_title(t['title'])}** (`coursework` · {stat} · Due: {due_str} · Priority: {prio})")
 
     more_notice = (
         f"\n\n*Showing top {len(top_tasks)} prioritized items out of {count} total matching coursework task(s). "
@@ -696,7 +703,7 @@ async def handle_get_hackathon_deadlines(args: Dict[str, Any], pool: Any) -> Dic
         due_str = str(t.get("due_date")) if t.get("due_date") else "No due date"
         prio = str(t.get("priority") or "medium").title()
         stat = str(t.get("status") or "open")
-        task_lines.append(f"- **{t['title']}** (`hackathon` · {stat} · Due: {due_str} · Priority: {prio})")
+        task_lines.append(f"- **{_clean_visible_title(t['title'])}** (`hackathon` · {stat} · Due: {due_str} · Priority: {prio})")
 
     more_notice = (
         f"\n\n*Showing top {len(top_tasks)} prioritized deliverables out of {count} total matching hackathon item(s). "
@@ -767,7 +774,7 @@ async def handle_add_task(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
                 d_str = ex.get("due_date") or "unscheduled"
                 return {
                     "response": (
-                        f"⚠️ A deadline with the exact same name '{ex['title']}' and due date ({d_str}) "
+                        f"⚠️ A deadline with the exact same name '{_clean_visible_title(ex['title'])}' and due date ({d_str}) "
                         f"already exists in your schedule. You cannot add the exact same deadline multiple times. "
                         f"I can inspect your schedules to see when you have free slots or help you rebalance your tasks."
                     ),
@@ -798,13 +805,13 @@ async def handle_add_task(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
                         notes=notes or ex.get("notes"),
                     )
                     return {
-                        "response": f"Shifted existing deadline '{ex['title']}' from {old_d} to {new_d}.",
+                        "response": f"Shifted existing deadline '{_clean_visible_title(ex['title'])}' from {old_d} to {new_d}.",
                         "data": updated,
                     }
                 else:
                     return {
                         "response": (
-                            f"⚠️ A deadline with the name '{ex['title']}' already exists, scheduled for {old_d}. "
+                            f"⚠️ A deadline with the name '{_clean_visible_title(ex['title'])}' already exists, scheduled for {old_d}. "
                             f"Would you like me to shift your existing deadline to {new_d}, or is this for a completely different thing? "
                             f"I can also look into your schedules to find an optimal slot without clashes."
                         ),
@@ -862,7 +869,7 @@ async def handle_add_task(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
             except Exception as conf_err:
                 logger.debug(f"Conflict detection skipped: {conf_err}")
 
-        base_summary = f"Added task #{task_record.get('id')}: '{title}' in {domain}."
+        base_summary = f"Added task #{task_record.get('id')}: '{_clean_visible_title(title)}' in {domain}."
         if conflict_info and conflict_info.get("has_conflict"):
             final_summary = f"{base_summary}\n\n{conflict_info['alert_message']}"
             return {

@@ -391,7 +391,13 @@ export default function ChatMessageList({
                           }}
                         >
                           <div style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text-primary)' }}>
-                            {pendingKind === 'delete_task_disambiguation' ? 'Choose a task to delete:' : 'Confirm destructive action:'}
+                            {pendingKind === 'delete_task_disambiguation'
+                              ? 'Choose a task to delete:'
+                              : pendingKind === 'complete_task'
+                              ? 'Confirm mark as done'
+                              : pendingKind === 'reschedule_task'
+                              ? 'Confirm new due date'
+                              : 'Confirm destructive action:'}
                           </div>
                           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                             {pendingKind !== 'delete_task_disambiguation' && (

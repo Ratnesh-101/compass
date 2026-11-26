@@ -139,6 +139,7 @@ def _clean_target(raw: str) -> str:
     if t_lower.endswith(" task"):
         target = target[:-5].strip()
 
+    target = strip_id_suffix(target)
     return target
 
 
@@ -297,6 +298,29 @@ def match_open_task(target: str, tasks: List[Dict[str, Any]]) -> List[Dict[str, 
     return tied[:5]
 
 
+FRIENDLY_TIMEZONES = {
+    "Asia/Calcutta": "India Standard Time (IST)",
+    "Asia/Kolkata": "India Standard Time (IST)",
+}
+
+
+def friendly_timezone(tz_name: Optional[str]) -> str:
+    """Map Asia/Calcutta and Asia/Kolkata to India Standard Time (IST), with raw fallback."""
+    if not tz_name or not isinstance(tz_name, str):
+        return ""
+    return FRIENDLY_TIMEZONES.get(tz_name, tz_name)
+
+
+friendlyTimeZone = friendly_timezone
+
+
+def strip_id_suffix(title: Any) -> str:
+    """Remove internal id suffix like '(ID: 2411)' from visible text."""
+    if not title:
+        return ""
+    return re.sub(r"\s*\((?:ID|id):?\s*#?\d+\)$", "", str(title)).strip()
+
+
 def format_date_with_year(due: Any, tz_name: str) -> str:
     """Format resolved due date WITH the year, and clock time if present."""
     if not due or not due.due_date:
@@ -411,7 +435,7 @@ async def handle_chat_task_action(
 
         if not matches:
             if open_tasks:
-                titles_str = ", ".join(f"'{t['title']}'" for t in open_tasks[:5])
+                titles_str = ", ".join(f"'{strip_id_suffix(t['title'])}'" for t in open_tasks[:5])
                 resp_msg = f"I couldn't find an open task called '{target}'. Your open tasks: {titles_str}."
             else:
                 resp_msg = f"I couldn't find an open task called '{target}'. You have no open tasks."
@@ -419,6 +443,7 @@ async def handle_chat_task_action(
 
         elif len(matches) == 1:
             target_task = matches[0]
+            clean_title = strip_id_suffix(target_task["title"])
             if action == "complete":
                 pending = await create_chat_pending_action(
                     conn,
@@ -430,8 +455,8 @@ async def handle_chat_task_action(
                     conversation_id=conv_id,
                     expires_minutes=5,
                 )
-                resp_msg = f"Mark '{target_task['title']}' as done? Please confirm to proceed or click Cancel."
-                pending["card_text"] = f"Mark '{target_task['title']}' as done?"
+                resp_msg = f"Mark '{clean_title}' as done? Please confirm to proceed or click Cancel."
+                pending["card_text"] = f"Mark '{clean_title}' as done?"
                 ret_data = {"pending_action": pending, "task": target_task}
             else:
                 due_date_iso = due_obj.due_date.isoformat() if due_obj and due_obj.due_date else None
@@ -452,8 +477,8 @@ async def handle_chat_task_action(
                     conversation_id=conv_id,
                     expires_minutes=5,
                 )
-                resp_msg = f"Move '{target_task['title']}' to {due_label}? Please confirm to proceed or click Cancel."
-                pending["card_text"] = f"Move '{target_task['title']}' to {due_label}?"
+                resp_msg = f"Move '{clean_title}' to {due_label}? Please confirm to proceed or click Cancel."
+                pending["card_text"] = f"Move '{clean_title}' to {due_label}?"
                 ret_data = {"pending_action": pending, "task": target_task}
 
         else:
@@ -488,7 +513,7 @@ async def handle_chat_task_action(
                     conversation_id=conv_id,
                     expires_minutes=5,
                 )
-            items_str = " ".join(f"{i}) '{t['title']}'" for i, t in enumerate(candidates, 1))
+            items_str = " ".join(f"{i}) '{strip_id_suffix(t['title'])}'" for i, t in enumerate(candidates, 1))
             resp_msg = f"Which one: {items_str}?"
             ret_data = {"pending_action": pending, "matches": candidates}
 
@@ -526,7 +551,7 @@ async def _apply_task_mutation(
     if is_complete:
         updated = await structured.update_task(conn, task_id, owner_id=owner_identity, status="done")
         if updated:
-            title = meta.get("title") or updated.get("title") or "task"
+            title = strip_id_suffix(meta.get("title") or updated.get("title") or "task")
             return (f"Done: marked '{title}' as done.", {"completed_task": updated, "success": True}, True)
         return ("I couldn't update it, nothing was changed.", None, False)
 
@@ -543,7 +568,7 @@ async def _apply_task_mutation(
             due_at_val, task_id, owner_identity,
         )
     if updated:
-        title = meta.get("title") or updated.get("title") or "task"
+        title = strip_id_suffix(meta.get("title") or updated.get("title") or "task")
         return (f"Done: moved '{title}' to {due_label}.", {"rescheduled_task": updated, "success": True}, True)
     return ("I couldn't update it, nothing was changed.", None, False)
 
@@ -590,7 +615,7 @@ async def execute_pending_task_action(
             return ("There are no pending actions to confirm. What would you like me to help you with?", None, False)
 
         target_meta = next((it for it in task_titles if it.get("id") == selected_id), {})
-        target_title = target_meta.get("title") or "task"
+        target_title = strip_id_suffix(target_meta.get("title") or "task")
         conv_id = active_action.get("conversation_id") or ""
         if "complete" in act_type:
             pending = await create_chat_pending_action(
