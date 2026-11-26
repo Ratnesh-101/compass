@@ -45,15 +45,36 @@ export function parseApiInstant(value) {
   return Number.isNaN(d.getTime()) ? null : d
 }
 
+export const TIMEZONE_FRIENDLY_NAMES = {
+  'Asia/Calcutta': 'India Standard Time (IST)',
+  'Asia/Kolkata': 'India Standard Time (IST)',
+}
+
 /**
- * Returns the browser's resolved IANA time zone identifier.
+ * Returns a user-friendly label for an IANA time zone, falling back to the raw name.
+ * Maps 'Asia/Calcutta' and 'Asia/Kolkata' to 'India Standard Time (IST)'.
+ *
+ * @param {string|null|undefined} tz
+ * @returns {string}
+ */
+export function friendlyTimeZone(tz) {
+  if (!tz || typeof tz !== 'string') return ''
+  return TIMEZONE_FRIENDLY_NAMES[tz] || tz
+}
+
+export const friendly_timezone = friendlyTimeZone
+export const formatTimeZone = friendlyTimeZone
+
+/**
+ * Returns the browser's resolved time zone identifier or friendly label.
  *
  * @returns {string}
  */
 export function getLocalTimeZone() {
   try {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
-    return typeof tz === 'string' && tz ? tz : 'UTC'
+    const raw = typeof tz === 'string' && tz ? tz : 'UTC'
+    return friendlyTimeZone(raw)
   } catch {
     return 'UTC'
   }
