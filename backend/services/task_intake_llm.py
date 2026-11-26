@@ -16,7 +16,13 @@ from typing import Any, List, Literal, Optional
 from pydantic import BaseModel, Field, ValidationError
 
 from backend.services.task_context import enrich_title, infer_domain
-from backend.services.task_intake_parse import MAX_ITEMS, IntakeItem
+from backend.services.task_intake_parse import (
+    MAX_ITEMS,
+    _DATE_WORDS,
+    IntakeItem,
+    _extract_embedded_time,
+    _extract_parenthesised_meta,
+)
 from backend.services.task_intent import is_question_framed, mentions_task_creation, title_problem
 
 logger = logging.getLogger("compass.services.task_intake_llm")
@@ -45,6 +51,9 @@ SYSTEM_PROMPT = (
     "Extract the tasks the user explicitly asks to add. Never invent tasks, dates or details. "
     "Copy due_text verbatim from the message (empty string if the user gave no date or time). "
     "Use priority 'medium' unless the message says otherwise. "
+    "When a task specifies a domain or category (such as in parentheses like '(general)' or '(coursework)'), "
+    "assign that domain strictly to that task and strip the category label from the title. "
+    "Never leak one item's domain to another item. "
     "Keep the user's context in each title: when the message says what the tasks are for "
     "(for example 'for my data structures exam'), name them like 'Study arrays - Data Structures exam', "
     "not just 'arrays'. Use domain 'coursework' for studying, exams, classes and assignments, "
@@ -73,14 +82,47 @@ def _to_items(drafts: List[TaskDraft], message: str) -> List[IntakeItem]:
     lowered = message.lower()
     items: List[IntakeItem] = []
     for d in drafts[:MAX_ITEMS]:
-        title = re.sub(r"\s+", " ", d.title).strip()
+        raw_title = re.sub(r"\s+", " ", d.title).strip()
+        title, paren_domain, paren_priority = _extract_parenthesised_meta(raw_title)
         if title_problem(title):
             continue
         due_text = d.due_text.strip()
         if due_text and due_text.lower() not in lowered:
             due_text = ""  # not a quote of the user's words: drop it rather than trust it
+
+        # Check embedded time in due_text first, then raw_title
+        notes = None
+        t24, t12, leader, _ = _extract_embedded_time(due_text) if due_text else (None, None, None, None)
+        if t24 and t12:
+            notes = f"by {t12}"
+            # Keep original label format; never reformat existing due_text
+        else:
+            t24_t, t12_t, leader_t, raw_match_t = _extract_embedded_time(raw_title)
+            if t24_t and t12_t:
+                notes = f"by {t12_t}"
+                if due_text:
+                    due_text = f"{due_text}, {t12_t}"
+                else:
+                    if leader_t in _DATE_WORDS:
+                        norm_lead = "tomorrow" if leader_t == "tmrw" else leader_t
+                        due_text = f"{norm_lead} {t12_t}"
+                    else:
+                        due_text = f"{t12_t}"
+                if raw_match_t and raw_match_t in title:
+                    title = title.replace(raw_match_t, "").strip(" -–—@,:()")
+                    title = re.sub(r"\s+", " ", title).strip()
+
+        # Honour parenthesised category per item and keep categories strictly separate
+        if paren_domain:
+            domain = paren_domain
+        elif "domain" in d.model_fields_set and (d.domain != "general" or "general" in lowered):
+            domain = d.domain
+        else:
+            domain = infer_domain(d.domain, message)
+        priority = paren_priority or d.priority
+
         title = enrich_title(title, message)
-        items.append(IntakeItem(title, infer_domain(d.domain, message), d.priority, d.duration_minutes, due_text))
+        items.append(IntakeItem(title, domain, priority, d.duration_minutes, due_text, notes=notes))
     return items
 
 

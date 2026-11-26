@@ -16,6 +16,9 @@ from backend.services.task_intent import title_problem
 MAX_ITEMS = 20
 MIN_ITEMS = 2
 VALID_DOMAINS = ("hackathon", "coursework", "code", "general")
+_DATE_WORDS = frozenset({"today", "tonight", "tmrw", "tomorrow", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"})
+_MARKERS = frozenset({"at", "by"})
+_LEADERS = _DATE_WORDS | _MARKERS
 
 _PRIORITY_WORDS = {
     "urgent": "urgent", "critical": "urgent", "p0": "urgent", "asap": "urgent",
@@ -60,6 +63,112 @@ class ParsedIntake:
     def truncated(self) -> bool:
         return self.total_found > len(self.items) + len(self.skipped)
 
+class _ParenSpan:
+    """Minimal match-like object for a parenthesised span."""
+
+    def __init__(self, start: int, end: int, inner: str) -> None:
+        self._start, self._end, self._inner = start, end, inner
+
+    def start(self) -> int:
+        return self._start
+
+    def end(self) -> int:
+        return self._end
+
+    def group(self, _n: int = 0) -> str:
+        return self._inner
+
+
+def _extract_parenthesised_meta(text: str) -> tuple[str, Optional[str], Optional[str]]:
+    """Extract (clean_text, domain, priority) from parenthesised clauses like '(coursework, high priority)'."""
+    domain: Optional[str] = None
+    priority: Optional[str] = None
+    text = text[:2000]
+    open_i = text.find("(")
+    close_i = text.find(")", open_i + 1) if open_i >= 0 else -1
+    m = None
+    if close_i > open_i + 1:
+        # Linear scan instead of a regex: no backtracking on strings full of "(".
+        inner_start = text.rfind("(", open_i, close_i) + 1
+        m = _ParenSpan(inner_start - 1, close_i + 1, text[inner_start:close_i])
+    cleaned = text
+    if m:
+        content = m.group(1).strip()
+        parts = [p.strip().lower() for p in content.split(",")]
+        matched_any = False
+        for part in parts:
+            for pw, mapped in _PRIORITY_WORDS.items():
+                if re.search(rf"\b{pw}\b", part):
+                    priority = mapped
+                    matched_any = True
+                    break
+            if "general" in part:
+                domain = "general"
+                matched_any = True
+            elif any(k in part for k in ("hack", "devpost")) or part == "hackathon":
+                domain = "hackathon"
+                matched_any = True
+            elif any(k in part for k in ("course", "class", "school", "study", "assign", "exam", "lab")) or part == "coursework":
+                domain = "coursework"
+                matched_any = True
+            elif any(k in part for k in ("code", "dev", "repo", "engineer")):
+                domain = "code"
+                matched_any = True
+        if matched_any:
+            cleaned = (text[:m.start()] + text[m.end():]).strip()
+            cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned, domain, priority
+
+
+def _extract_embedded_time(text: str) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+    """Extract (time_24, time_12, leader_word, matched_substr) from text where time follows a date word or at/by."""
+    tokens = text.split()
+    for i, tok in enumerate(tokens):
+        w = tok.lower().strip(",;:()")
+        if w in _LEADERS and i + 1 < len(tokens):
+            next_tok = tokens[i + 1].strip(",;:()").lower()
+            m_hm = re.match(r"^(\d{1,2}):(\d{2})(am|pm)?$", next_tok)
+            if m_hm:
+                hh, mm, ampm = int(m_hm.group(1)), int(m_hm.group(2)), m_hm.group(3)
+                if not ampm and i + 2 < len(tokens) and tokens[i + 2].lower().strip(",;:()") in ("am", "pm"):
+                    ampm = tokens[i + 2].lower().strip(",;:()")
+                if ampm == "pm" and hh < 12:
+                    hh += 12
+                elif ampm == "am" and hh == 12:
+                    hh = 0
+                d_hh = hh % 12 or 12
+                d_ampm = "PM" if hh >= 12 else "AM"
+                raw = tok + " " + tokens[i + 1] + ((" " + tokens[i + 2]) if ampm and not m_hm.group(3) else "")
+                return f"{hh:02d}:{mm:02d}", f"{d_hh}:{mm:02d} {d_ampm}", w, raw
+            m_ampm = re.match(r"^(\d{1,2})(am|pm)$", next_tok)
+            if m_ampm:
+                hh, ampm = int(m_ampm.group(1)), m_ampm.group(2)
+                if 1 <= hh <= 12:
+                    if ampm == "pm" and hh < 12:
+                        hh += 12
+                    elif ampm == "am" and hh == 12:
+                        hh = 0
+                    d_hh = hh % 12 or 12
+                    d_ampm = "PM" if hh >= 12 else "AM"
+                    return f"{hh:02d}:00", f"{d_hh}:00 {d_ampm}", w, tok + " " + tokens[i + 1]
+            if next_tok.isdigit() and 1 <= int(next_tok) <= 12:
+                hh = int(next_tok)
+                if i + 2 < len(tokens) and tokens[i + 2].lower().strip(",;:()") in ("am", "pm"):
+                    ampm = tokens[i + 2].lower().strip(",;:()")
+                    if ampm == "pm" and hh < 12:
+                        hh += 12
+                    elif ampm == "am" and hh == 12:
+                        hh = 0
+                    d_hh = hh % 12 or 12
+                    d_ampm = "PM" if hh >= 12 else "AM"
+                    return f"{hh:02d}:00", f"{d_hh}:00 {d_ampm}", w, tok + " " + tokens[i + 1] + " " + tokens[i + 2]
+                if 1 <= hh <= 7:
+                    return f"{hh + 12:02d}:00", f"{hh}:00 PM", w, tok + " " + tokens[i + 1]
+                else:
+                    h24 = 0 if hh == 12 else hh
+                    return f"{h24:02d}:00", f"{hh}:00 AM", w, tok + " " + tokens[i + 1]
+    return None, None, None, None
+
 
 def _normalize_domain(raw: str) -> str:
     low = (raw or "").strip().lower()
@@ -67,7 +176,7 @@ def _normalize_domain(raw: str) -> str:
         return low
     if any(k in low for k in ("hack", "devpost")):
         return "hackathon"
-    if any(k in low for k in ("course", "class", "school", "study", "assign", "exam")):
+    if any(k in low for k in ("course", "class", "school", "study", "assign", "exam", "lab")):
         return "coursework"
     if any(k in low for k in ("code", "dev", "repo", "engineer")):
         return "code"
@@ -107,16 +216,50 @@ def _header_map(cells: list[str]) -> Optional[dict[int, str]]:
 
 def _item_from_cells(cells: list[str], mapping: dict[int, str]) -> Optional[IntakeItem]:
     fields = {name: cells[i] for i, name in mapping.items() if i < len(cells)}
-    title = re.sub(r"\s+", " ", fields.get("title", "")).strip()
+    raw_title = fields.get("title", "")
+    clean_title, paren_domain, paren_priority = _extract_parenthesised_meta(raw_title)
+    title = re.sub(r"\s+", " ", clean_title).strip()
     if title_problem(title):
         return None
+    raw_domain = fields.get("domain", "")
+    domain = _normalize_domain(raw_domain) if raw_domain else (paren_domain or "general")
     prio_raw = fields.get("priority", "").strip().lower()
+    priority = _PRIORITY_WORDS.get(prio_raw) or paren_priority or "medium"
+    due_raw = fields.get("due", "").strip()
+    due_text, notes = due_raw, None
+    if due_raw:
+        t24, t12, leader, _ = _extract_embedded_time(due_raw)
+        if t24 and t12:
+            notes = f"by {t12}"
+            # Keep original label format for rows that already produced a label; never reformat it
+            due_text = due_raw
+        else:
+            t24_t, t12_t, _, raw_match = _extract_embedded_time(clean_title)
+            if t24_t and t12_t:
+                notes = f"by {t12_t}"
+                due_text = f"{due_raw}, {t12_t}"
+                if raw_match and raw_match in title:
+                    title = title.replace(raw_match, "").strip(" -–—@,:()")
+                    title = re.sub(r"\s+", " ", title).strip()
+    else:
+        t24_t, t12_t, leader_t, raw_match = _extract_embedded_time(clean_title)
+        if t24_t and t12_t:
+            notes = f"by {t12_t}"
+            if leader_t in _DATE_WORDS:
+                norm_lead = "tomorrow" if leader_t == "tmrw" else leader_t
+                due_text = f"{norm_lead} {t12_t}"
+            else:
+                due_text = f"{t12_t}"
+            if raw_match and raw_match in title:
+                title = title.replace(raw_match, "").strip(" -–—@,:()")
+                title = re.sub(r"\s+", " ", title).strip()
     return IntakeItem(
         title=title,
-        domain=_normalize_domain(fields.get("domain", "")),
-        priority=_PRIORITY_WORDS.get(prio_raw, "medium"),
+        domain=domain,
+        priority=priority,
         duration_minutes=_parse_duration(fields.get("duration", "")),
-        due_text=fields.get("due", "").strip(),
+        due_text=due_text,
+        notes=notes,
     )
 
 
@@ -152,17 +295,42 @@ def _parse_bullets(message: str, lines: list[str]) -> Optional[ParsedIntake]:
     items: list[IntakeItem] = []
     skipped: list[str] = []
     for text in bullets[:MAX_ITEMS]:
-        title, due_text = text, ""
-        delimiters = list(_BULLET_DUE_SPLIT.finditer(text))
-        if delimiters:
-            last = delimiters[-1]
-            candidate = text[last.end():].rstrip(") ").strip()
-            if candidate and resolve_due(candidate, "UTC").due_date is not None:
-                title, due_text = text[:last.start()].rstrip(" (").strip(), candidate
+        clean_text, paren_domain, paren_priority = _extract_parenthesised_meta(text)
+        item_domain = paren_domain or _normalize_domain(clean_text)
+        item_priority = paren_priority or "medium"
+        title, due_text, notes = clean_text, "", None
+
+        delimiters = list(_BULLET_DUE_SPLIT.finditer(clean_text))
+        bullet_cand = clean_text[delimiters[-1].end():].rstrip(") ").strip() if delimiters else ""
+        if bullet_cand and resolve_due(bullet_cand, "UTC").due_date is not None:
+            title, due_text = clean_text[:delimiters[-1].start()].rstrip(" (").strip(), bullet_cand
+            t24, t12, _, _ = _extract_embedded_time(due_text)
+            if t24 and t12:
+                notes = f"by {t12}"
+        else:
+            # Check embedded time
+            t24, t12, leader, raw_match = _extract_embedded_time(clean_text)
+            if t24 and t12:
+                notes = f"by {t12}"
+                if leader in _DATE_WORDS:
+                    norm_leader = "tomorrow" if leader == "tmrw" else leader
+                    due_text = f"{norm_leader} {t12}"
+                else:
+                    due_text = f"{t12}"
+                if raw_match:
+                    title = clean_text.replace(raw_match, "").strip(" -–—@,:()")
+                    title = re.sub(r"\s+", " ", title).strip()
+            else:
+                m_end_date = re.search(r"\b(today|tomorrow|tmrw|yesterday|monday|tuesday|wednesday|thursday|friday|saturday|sunday)$", clean_text, re.IGNORECASE)
+                if m_end_date:
+                    cand = m_end_date.group(1)
+                    if resolve_due(cand, "UTC").due_date is not None:
+                        title, due_text = clean_text[:m_end_date.start()].strip(), cand
+
         if title_problem(title):
             skipped.append(text[:80])
             continue
-        items.append(IntakeItem(title, "general", "medium", None, due_text))
+        items.append(IntakeItem(title=title, domain=item_domain, priority=item_priority, duration_minutes=None, due_text=due_text, notes=notes))
     return ParsedIntake(tuple(items), len(bullets), tuple(skipped)) if items else None
 
 
