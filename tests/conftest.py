@@ -213,6 +213,20 @@ def pytest_sessionfinish(session, exitstatus):
 
 
 
+# The company job-board source does real HTTP; keep it (and the rows it would ingest) out of every test.
+@pytest.fixture(autouse=True)
+def _no_live_company_boards(monkeypatch):
+    try:
+        import backend.services.radar_ats as radar_ats
+    except ImportError:
+        return
+
+    async def _none(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr(radar_ats, "fetch_ats_opportunities", _none)
+
+
 # Reset career_github module-level state so tests don't leak rate-limit/cache state.
 @pytest.fixture(autouse=True)
 def _reset_github_intel_module_state():
