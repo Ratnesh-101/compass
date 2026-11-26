@@ -409,7 +409,7 @@ def test_fallback_route_reads_hours_per_day_and_days():
     assert _fallback_route("feasibility: 2 hrs a day for 9 days")[1] == {
         "days": 9, "hours_per_day": 2.0, "days_stated": True,
     }
-    # "2.5 days" must not be read as "5 days"
+    # "2.5 days" is read as 2.5 days (never as "5 days") and is flagged as stated
     args = _fallback_route("can i finish this in 2.5 days")[1]
-    assert args["days"] == 5  # falls back to the default
-    assert args["days_stated"] is False
+    assert args["days"] == 2.5
+    assert args["days_stated"] is True
