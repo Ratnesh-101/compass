@@ -342,6 +342,17 @@ async def run_radar_sync(source_filter: Optional[str] = None, dry_run: bool = Fa
                     failures += 1
                     logger.warning(f"Public ATS synchronization encountered an issue: {ats_all_err}")
 
+            # 2b. Company job-board APIs: India-based internship postings (additional to the adapters above)
+            if not source_filter or source_filter in {"all", "ats"}:
+                try:
+                    from backend.services.radar_ats import fetch_ats_opportunities
+
+                    for board_opp in await fetch_ats_opportunities():
+                        await _ingest_opportunity(board_opp, source_label="ATS-boards")
+                except Exception as boards_err:
+                    failures += 1
+                    logger.warning(f"Company job-board synchronization encountered an issue: {boards_err}")
+
             # 3. Ingest GitHub Curated Repositories
             if not source_filter or source_filter in {"all", "github"}:
                 for src_cfg in GITHUB_SOURCES:
