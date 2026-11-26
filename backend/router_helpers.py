@@ -135,6 +135,9 @@ def is_explicit_task_creation(message: str) -> bool:
     """Determine whether message represents an explicit command to add a task/deadline/reminder."""
     if not message:
         return False
+    from backend.services.chat_preferences import parse_preferences_intent
+    if parse_preferences_intent(message) is not None:
+        return False
     if blocks_task_creation(message):
         return False
     norm = normalize_task_intent_text(message)
@@ -1135,6 +1138,61 @@ def unsupported_capability_reply(message: str) -> Optional[str]:
     return None
 
 
+FEASIBILITY_TERMS = (
+    "feasibility", "can i finish", "what to drop", "what should i drop",
+    "what i drop", "triage", "overloaded", "overcommit", "adversarial",
+    "get all my tasks done", "get my tasks done", "is that doable",
+    "is it doable", "doable",
+)
+
+
+def parse_feasibility_intent(message: str) -> Optional[dict]:
+    """Extract feasibility triage arguments from message if it expresses a feasibility question."""
+    if not message or not isinstance(message, str):
+        return None
+    msg_lower = message.lower()
+    has_trigger = (
+        any(term in msg_lower for term in FEASIBILITY_TERMS)
+        or bool(re.search(r"\bcan i (?:finish|get (?:all )?(?:my )?tasks done)\b", msg_lower))
+        or bool(re.search(r"\b(?:is that|is it)\s+doable\b", msg_lower))
+        or ("hours of work" in msg_lower and "days" in msg_lower)
+    )
+    if not has_trigger:
+        return None
+
+    per_day_match = re.search(
+        r"(?<![\d.])([0-9]{1,2}(?:\.[0-9]{1,2})?)\s*(?:hours?|hrs?|h)\s*(?:a|an|per|each|every|/)\s*day\b",
+        msg_lower,
+    )
+    workload_match = re.search(
+        r"(?<![\d.])([0-9]{1,4}(?:\.[0-9]{1,2})?)\s*(?:hours?|hrs?|h)\s+of\s+(?:work|tasks?|homework)\b",
+        msg_lower,
+    )
+    days_match = re.search(r"(?<![\d.])([0-9]{1,4}(?:\.[0-9]{1,2})?)\s*days?\b", msg_lower)
+    if days_match:
+        d_val = float(days_match.group(1))
+        f_days: Any = int(d_val) if d_val.is_integer() else d_val
+        days_stated = True
+    elif any(w in msg_lower for w in ("a week", "this week")):
+        f_days, days_stated = 7, True
+    elif "weekend" in msg_lower:
+        f_days, days_stated = 2, True
+    else:
+        f_days, days_stated = 5, False
+
+    if per_day_match:
+        f_hours = float(per_day_match.group(1))
+    else:
+        rem = (msg_lower[:workload_match.start()] + " " + msg_lower[workload_match.end():]) if workload_match else msg_lower
+        hours_match = re.search(r"(?<![\d.])([0-9]{1,4}(?:\.[0-9]{1,2})?)\s*(?:hours?|hrs?)\b", rem)
+        f_hours = float(hours_match.group(1)) if hours_match else 4.0
+
+    feas_args: dict[str, Any] = {"days": f_days, "hours_per_day": f_hours, "days_stated": days_stated}
+    if workload_match:
+        feas_args["workload_hours"] = float(workload_match.group(1))
+    return feas_args
+
+
 def _fallback_route(
     message: str,
     history: Optional[list[dict[str, str]]] = None,
@@ -1269,32 +1327,13 @@ def _fallback_route(
         status = "OPEN_CONFIRMED" if any(k in msg_lower for k in ("open", "today", "now", "apply now", "currently")) else None
         return "query_internship_radar", {"query": message, "category": category, "status": status, "india_only": True}, ""
 
-    if any(term in msg_lower for term in ("feasibility", "can i finish", "what to drop", "what should i drop", "what i drop", "triage", "overloaded", "overcommit", "adversarial")):
-        # "2 hours a day" / "2 hrs per day" / "2h/day" is daily budget; check first
-        per_day_match = re.search(
-            r"(?<![\d.])([0-9]{1,2}(?:\.[0-9]{1,2})?)\s*(?:hours?|hrs?|h)\s*(?:a|an|per|each|every|/)\s*day\b",
-            msg_lower,
-        )
-        workload_match = re.search(r"(?<![\d.])([0-9]{1,4}(?:\.[0-9]{1,2})?)\s*(?:hours?|hrs?|h)\s+of\s+(?:work|tasks?|homework)\b", msg_lower)
-        days_match = re.search(r"(?<![\d.])([0-9]{1,4})\s*days?\b", msg_lower)
-        if days_match:
-            f_days, days_stated = int(days_match.group(1)), True
-        elif any(w in msg_lower for w in ("a week", "this week")):
-            f_days, days_stated = 7, True
-        elif "weekend" in msg_lower:
-            f_days, days_stated = 2, True
-        else:
-            f_days, days_stated = 5, False
-        if per_day_match:
-            f_hours = float(per_day_match.group(1))
-        else:
-            rem = (msg_lower[:workload_match.start()] + " " + msg_lower[workload_match.end():]) if workload_match else msg_lower
-            hours_match = re.search(r"(?<![\d.])([0-9]{1,4}(?:\.[0-9]{1,2})?)\s*(?:hours?|hrs?)\b", rem)
-            f_hours = float(hours_match.group(1)) if hours_match else 4.0
-        feas_args: dict[str, Any] = {"days": f_days, "hours_per_day": f_hours, "days_stated": days_stated}
-        if workload_match:
-            feas_args["workload_hours"] = float(workload_match.group(1))
+    feas_args = parse_feasibility_intent(message)
+    if feas_args is not None:
         return "assess_feasibility", feas_args, ""
+    from backend.services.chat_preferences import parse_preferences_intent
+    _pref_intent = parse_preferences_intent(message)
+    if _pref_intent:
+        return "update_preferences", _pref_intent, ""
     if is_pending_action_confirm(message):
         return "pending_action_confirm", {"message": message}, ""
     if is_pending_action_cancel(message):

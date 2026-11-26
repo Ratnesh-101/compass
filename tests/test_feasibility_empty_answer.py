@@ -127,9 +127,9 @@ def test_router_weekend_is_two_days():
 
 def test_router_decimal_days_not_read_as_five():
     _, args, _ = _fallback_route("can i finish this in 2.5 days")
-    # "2.5" is not "5 days": the 5 here is only the default, so it must be flagged as not stated.
-    assert args["days"] == 5
-    assert args["days_stated"] is False
+    # "2.5 days" is read as 2.5 (never as 5) and flagged as stated.
+    assert args["days"] == 2.5
+    assert args["days_stated"] is True
 
 
 # ---------------------------------------------------------------------------
