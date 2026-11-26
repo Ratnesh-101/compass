@@ -2,6 +2,21 @@ import React, { useState, useEffect } from 'react'
 import { resolveOverallConfidence, computeMissingFields } from '../../utils/careerUiHelpers'
 import Dialog from '../Dialog'
 
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const FULL_MONTHS = { january: 'Jan', february: 'Feb', march: 'Mar', april: 'Apr', may: 'May', june: 'Jun', july: 'Jul', august: 'Aug', september: 'Sep', october: 'Oct', november: 'Nov', december: 'Dec' }
+
+function resolveParsedGradMonth(edu, idx, evidenceNotes) {
+  const candidate = edu?.grad_month || edu?.graduation_month || edu?.end_month ||
+    evidenceNotes?.[`grad_month_${idx + 1}`] || evidenceNotes?.[`grad_month_${idx}`] || evidenceNotes?.[`education_month_${idx + 1}`] || null
+  if (!candidate) return ''
+  const str = String(candidate).trim(), num = parseInt(str, 10)
+  if (!isNaN(num) && num >= 1 && num <= 12) return MONTH_NAMES[num - 1]
+  const lower = str.toLowerCase()
+  if (FULL_MONTHS[lower]) return FULL_MONTHS[lower]
+  const matched = MONTH_NAMES.find(m => m.toLowerCase() === str.slice(0, 3).toLowerCase())
+  return matched || str
+}
+
 export default function ExtractionReviewModal({
   show,
   onClose,
@@ -58,8 +73,21 @@ export default function ExtractionReviewModal({
 
   const handleCommit = (target = 'master') => {
     if (onCommit) {
+      // Backend ResumeEducationItem (backend/models_career.py) schema does not have a grad_month field.
+      // Omit grad_month from education items in commit payload to strictly conform to backend model.
+      const sanitizedEducation = (content.education || []).map(edu => ({
+        institution: edu.institution || '',
+        degree: edu.degree || '',
+        field_of_study: edu.field_of_study || null,
+        start_year: edu.start_year ?? null,
+        end_year: edu.end_year ?? null,
+        cgpa_or_grade: edu.cgpa_or_grade || null,
+        ...(edu.evidence_classification ? { evidence_classification: edu.evidence_classification } : {}),
+      }))
+
       const finalContent = {
         ...content,
+        education: sanitizedEducation,
         skills: skillsText.split(',').map((s) => s.trim()).filter(Boolean),
         awards: awardsText.split('\n').map((s) => s.trim()).filter(Boolean),
         ...(content.certifications !== undefined
@@ -308,88 +336,136 @@ export default function ExtractionReviewModal({
 
           {activeTab === 'education' && (
             <div>
-              {(content.education || []).map((edu, idx) => (
-                <div key={idx} style={{ background: 'var(--bg-card-soft)', padding: '12px', borderRadius: '8px', marginBottom: '10px', border: '1px solid var(--border)' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                    <div>
-                      <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Institution</label>
-                      <input
-                        type="text"
-                        value={edu.institution || ''}
-                        onChange={(e) => {
-                          const updated = [...content.education]
-                          updated[idx].institution = e.target.value
-                          setContent({ ...content, education: updated })
-                        }}
-                        style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--border)' }}
-                      />
+              {(content.education || []).map((edu, idx) => {
+                const parsedMonth = resolveParsedGradMonth(edu, idx, content.evidence_notes || diag.evidence_notes)
+                const currentMonth = edu.grad_month !== undefined ? edu.grad_month : parsedMonth
+
+                return (
+                  <div key={idx} style={{ background: 'var(--bg-card-soft)', padding: '12px', borderRadius: '8px', marginBottom: '10px', border: '1px solid var(--border)' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px' }}>
+                      <div>
+                        <label htmlFor={`edu-inst-${idx}`} style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Institution</label>
+                        <input
+                          id={`edu-inst-${idx}`}
+                          type="text"
+                          value={edu.institution || ''}
+                          onChange={(e) => {
+                            const updated = [...content.education]
+                            updated[idx] = { ...updated[idx], institution: e.target.value }
+                            setContent({ ...content, education: updated })
+                          }}
+                          style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--border)' }}
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor={`edu-degree-${idx}`} style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Degree</label>
+                        <input
+                          id={`edu-degree-${idx}`}
+                          type="text"
+                          value={edu.degree || ''}
+                          placeholder="e.g. B.Tech / B.S."
+                          onChange={(e) => {
+                            const updated = [...content.education]
+                            updated[idx] = { ...updated[idx], degree: e.target.value }
+                            setContent({ ...content, education: updated })
+                          }}
+                          style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--border)' }}
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor={`edu-field-${idx}`} style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Field of study</label>
+                        <input
+                          id={`edu-field-${idx}`}
+                          type="text"
+                          value={edu.field_of_study || ''}
+                          placeholder="e.g. Computer Science"
+                          onChange={(e) => {
+                            const updated = [...content.education]
+                            updated[idx] = { ...updated[idx], field_of_study: e.target.value }
+                            setContent({ ...content, education: updated })
+                          }}
+                          style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--border)' }}
+                        />
+                      </div>
                     </div>
-                    <div>
-                      <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Degree / Field</label>
-                      <input
-                        type="text"
-                        value={edu.degree || ''}
-                        onChange={(e) => {
-                          const updated = [...content.education]
-                          updated[idx].degree = e.target.value
-                          setContent({ ...content, education: updated })
-                        }}
-                        style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--border)' }}
-                      />
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '10px', marginTop: '10px' }}>
+                      <div>
+                        <label htmlFor={`edu-start-${idx}`} style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Start year</label>
+                        <input
+                          id={`edu-start-${idx}`}
+                          type="number"
+                          value={edu.start_year ?? ''}
+                          onChange={(e) => {
+                            const updated = [...content.education]
+                            updated[idx] = { ...updated[idx], start_year: e.target.value === '' ? null : Number(e.target.value) }
+                            setContent({ ...content, education: updated })
+                          }}
+                          style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--border)' }}
+                        />
+                      </div>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
+                          <label htmlFor={`edu-end-${idx}`} style={{ fontSize: '11px', color: 'var(--text-muted)' }}>End (graduation) year</label>
+                          {parsedMonth && (
+                            <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600' }}>
+                              Parsed: {parsedMonth}
+                            </span>
+                          )}
+                        </div>
+                        <input
+                          id={`edu-end-${idx}`}
+                          type="number"
+                          value={edu.end_year ?? ''}
+                          onChange={(e) => {
+                            const updated = [...content.education]
+                            updated[idx] = { ...updated[idx], end_year: e.target.value === '' ? null : Number(e.target.value) }
+                            setContent({ ...content, education: updated })
+                          }}
+                          style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--border)' }}
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor={`edu-grad-month-${idx}`} style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Graduation month</label>
+                        <select
+                          id={`edu-grad-month-${idx}`}
+                          value={currentMonth || ''}
+                          onChange={(e) => {
+                            const updated = [...content.education]
+                            updated[idx] = { ...updated[idx], grad_month: e.target.value }
+                            setContent({ ...content, education: updated })
+                          }}
+                          style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: '13px' }}
+                        >
+                          <option value="">--</option>
+                          {MONTH_NAMES.map((m) => (
+                            <option key={m} value={m}>{m}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label htmlFor={`edu-grade-${idx}`} style={{ fontSize: '11px', color: 'var(--text-muted)' }}>CGPA / grade</label>
+                        <input
+                          id={`edu-grade-${idx}`}
+                          type="text"
+                          value={edu.cgpa_or_grade || ''}
+                          placeholder="e.g. 8.4/10"
+                          onChange={(e) => {
+                            const updated = [...content.education]
+                            updated[idx] = { ...updated[idx], cgpa_or_grade: e.target.value }
+                            setContent({ ...content, education: updated })
+                          }}
+                          style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--border)' }}
+                        />
+                      </div>
                     </div>
+                    {content.evidence_notes?.[`education_note_${idx + 1}`] && (
+                      <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                        Note from your resume: {content.evidence_notes[`education_note_${idx + 1}`]}
+                      </div>
+                    )}
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginTop: '10px' }}>
-                    <div>
-                      <label htmlFor={`edu-start-${idx}`} style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Start year</label>
-                      <input
-                        id={`edu-start-${idx}`}
-                        type="number"
-                        value={edu.start_year ?? ''}
-                        onChange={(e) => {
-                          const updated = [...content.education]
-                          updated[idx].start_year = e.target.value === '' ? null : Number(e.target.value)
-                          setContent({ ...content, education: updated })
-                        }}
-                        style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--border)' }}
-                      />
-                    </div>
-                    <div>
-                      <label htmlFor={`edu-end-${idx}`} style={{ fontSize: '11px', color: 'var(--text-muted)' }}>End (graduation) year</label>
-                      <input
-                        id={`edu-end-${idx}`}
-                        type="number"
-                        value={edu.end_year ?? ''}
-                        onChange={(e) => {
-                          const updated = [...content.education]
-                          updated[idx].end_year = e.target.value === '' ? null : Number(e.target.value)
-                          setContent({ ...content, education: updated })
-                        }}
-                        style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--border)' }}
-                      />
-                    </div>
-                    <div>
-                      <label htmlFor={`edu-grade-${idx}`} style={{ fontSize: '11px', color: 'var(--text-muted)' }}>CGPA / grade</label>
-                      <input
-                        id={`edu-grade-${idx}`}
-                        type="text"
-                        value={edu.cgpa_or_grade || ''}
-                        placeholder="e.g. 8.4/10"
-                        onChange={(e) => {
-                          const updated = [...content.education]
-                          updated[idx].cgpa_or_grade = e.target.value
-                          setContent({ ...content, education: updated })
-                        }}
-                        style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--border)' }}
-                      />
-                    </div>
-                  </div>
-                  {content.evidence_notes?.[`education_note_${idx + 1}`] && (
-                    <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--text-secondary)' }}>
-                      Note from your resume: {content.evidence_notes[`education_note_${idx + 1}`]}
-                    </div>
-                  )}
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
 
@@ -436,27 +512,53 @@ export default function ExtractionReviewModal({
               {((content.experience && content.experience.length > 0) || (content.internships && content.internships.length > 0)) && (
                 <div style={{ marginTop: '20px' }}>
                   <h4 style={{ margin: '0 0 10px', fontSize: '13px', color: 'var(--text-muted)' }}>Extracted Experience & Internships</h4>
-                  {[...(content.experience || []), ...(content.internships || [])].map((exp, idx) => (
-                    <div key={idx} style={{ background: 'var(--bg-card-soft)', padding: '12px', borderRadius: '8px', marginBottom: '8px', border: '1px solid var(--border)' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                        <span style={{ fontWeight: '700', fontSize: '13px', color: 'var(--text-primary)' }}>
-                          {exp.role_title ? `${exp.role_title} · ${exp.company}` : exp.company}
-                        </span>
-                        {(exp.start_date || exp.end_date) && (
-                          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                            {exp.start_date || ''} {exp.end_date ? `– ${exp.end_date}` : ''}
+                  {[...(content.experience || []), ...(content.internships || [])].map((exp, idx) => {
+                    const expCount = (content.experience || []).length
+                    const isInternship = idx >= expCount
+                    const itemIdx = isInternship ? idx - expCount : idx
+
+                    return (
+                      <div key={idx} style={{ background: 'var(--bg-card-soft)', padding: '12px', borderRadius: '8px', marginBottom: '8px', border: '1px solid var(--border)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                          <span style={{ fontWeight: '700', fontSize: '13px', color: 'var(--text-primary)' }}>
+                            {exp.role_title ? `${exp.role_title} · ${exp.company}` : exp.company}
                           </span>
+                          {(exp.start_date || exp.end_date) && (
+                            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                              {exp.start_date || ''} {exp.end_date ? `– ${exp.end_date}` : ''}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ margin: '6px 0 4px' }}>
+                          <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+                            <input
+                              type="checkbox"
+                              checked={Boolean(exp.is_current)}
+                              onChange={(e) => {
+                                if (isInternship) {
+                                  const updated = [...(content.internships || [])]
+                                  updated[itemIdx] = { ...updated[itemIdx], is_current: e.target.checked }
+                                  setContent({ ...content, internships: updated })
+                                } else {
+                                  const updated = [...(content.experience || [])]
+                                  updated[itemIdx] = { ...updated[itemIdx], is_current: e.target.checked }
+                                  setContent({ ...content, experience: updated })
+                                }
+                              }}
+                            />
+                            Currently working here
+                          </label>
+                        </div>
+                        {exp.highlights && exp.highlights.length > 0 && (
+                          <ul style={{ margin: '4px 0 0', paddingLeft: '18px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                            {exp.highlights.map((h, hIdx) => (
+                              <li key={hIdx} style={{ marginBottom: '3px', lineHeight: '1.4' }}>{h}</li>
+                            ))}
+                          </ul>
                         )}
                       </div>
-                      {exp.highlights && exp.highlights.length > 0 && (
-                        <ul style={{ margin: '4px 0 0', paddingLeft: '18px', fontSize: '12px', color: 'var(--text-secondary)' }}>
-                          {exp.highlights.map((h, hIdx) => (
-                            <li key={hIdx} style={{ marginBottom: '3px', lineHeight: '1.4' }}>{h}</li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               )}
             </div>
