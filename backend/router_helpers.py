@@ -460,10 +460,9 @@ def _extract_task_creation_args(message: str) -> dict:
     m_dom = re.search(r"\bdomain[:= ]\s*([a-z0-9_-]+)", msg_lower)
     if m_dom and m_dom.group(1).lower() in ("hackathon", "coursework", "code", "general"):
         domain = m_dom.group(1).lower()
-    m_paren = re.search(r"\((general|coursework|hackathon|code|other)\b", msg_lower)
+    m_paren = re.search(r"\((general|coursework|hackathon|code)\b", msg_lower)
     if m_paren:
-        p_val = m_paren.group(1).lower()
-        domain = "general" if p_val == "other" else p_val
+        domain = m_paren.group(1).lower()
 
     # 2. Date & Time
     msg_for_date = re.sub(r"\btmrw\b", "tomorrow", msg, flags=re.IGNORECASE)

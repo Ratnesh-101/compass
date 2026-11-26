@@ -102,10 +102,17 @@ def _extract_parenthesised_meta(text: str) -> tuple[str, Optional[str], Optional
                     priority = mapped
                     matched_any = True
                     break
-            if part in ("general", "coursework", "hackathon", "code", "other") or any(
-                k in part for k in ("hack", "devpost", "course", "class", "school", "study", "assign", "exam", "code", "dev", "repo")
-            ):
-                domain = "general" if part == "other" else _normalize_domain(part)
+            if "general" in part:
+                domain = "general"
+                matched_any = True
+            elif any(k in part for k in ("hack", "devpost")) or part == "hackathon":
+                domain = "hackathon"
+                matched_any = True
+            elif any(k in part for k in ("course", "class", "school", "study", "assign", "exam", "lab")) or part == "coursework":
+                domain = "coursework"
+                matched_any = True
+            elif any(k in part for k in ("code", "dev", "repo", "engineer")):
+                domain = "code"
                 matched_any = True
         if matched_any:
             cleaned = (text[:m.start()] + text[m.end():]).strip()
@@ -224,11 +231,28 @@ def _item_from_cells(cells: list[str], mapping: dict[int, str]) -> Optional[Inta
         t24, t12, leader, _ = _extract_embedded_time(due_raw)
         if t24 and t12:
             notes = f"by {t12}"
-            if leader in _DATE_WORDS:
-                norm_lead = "tomorrow" if leader == "tmrw" else leader
-                due_text = f"{norm_lead} {t12}"
+            # Keep original label format for rows that already produced a label; never reformat it
+            due_text = due_raw
+        else:
+            t24_t, t12_t, _, raw_match = _extract_embedded_time(clean_title)
+            if t24_t and t12_t:
+                notes = f"by {t12_t}"
+                due_text = f"{due_raw}, {t12_t}"
+                if raw_match and raw_match in title:
+                    title = title.replace(raw_match, "").strip(" -–—@,:()")
+                    title = re.sub(r"\s+", " ", title).strip()
+    else:
+        t24_t, t12_t, leader_t, raw_match = _extract_embedded_time(clean_title)
+        if t24_t and t12_t:
+            notes = f"by {t12_t}"
+            if leader_t in _DATE_WORDS:
+                norm_lead = "tomorrow" if leader_t == "tmrw" else leader_t
+                due_text = f"{norm_lead} {t12_t}"
             else:
-                due_text = f"{t12}"
+                due_text = f"{t12_t}"
+            if raw_match and raw_match in title:
+                title = title.replace(raw_match, "").strip(" -–—@,:()")
+                title = re.sub(r"\s+", " ", title).strip()
     return IntakeItem(
         title=title,
         domain=domain,
@@ -276,25 +300,26 @@ def _parse_bullets(message: str, lines: list[str]) -> Optional[ParsedIntake]:
         item_priority = paren_priority or "medium"
         title, due_text, notes = clean_text, "", None
 
-        # Check embedded time
-        t24, t12, leader, raw_match = _extract_embedded_time(clean_text)
-        if t24 and t12:
-            notes = f"by {t12}"
-            if leader in _DATE_WORDS:
-                norm_leader = "tomorrow" if leader == "tmrw" else leader
-                due_text = f"{norm_leader} {t12}"
-            else:
-                due_text = f"{t12}"
-            if raw_match:
-                title = clean_text.replace(raw_match, "").strip(" -–—@,:()")
-                title = re.sub(r"\s+", " ", title).strip()
+        delimiters = list(_BULLET_DUE_SPLIT.finditer(clean_text))
+        bullet_cand = clean_text[delimiters[-1].end():].rstrip(") ").strip() if delimiters else ""
+        if bullet_cand and resolve_due(bullet_cand, "UTC").due_date is not None:
+            title, due_text = clean_text[:delimiters[-1].start()].rstrip(" (").strip(), bullet_cand
+            t24, t12, _, _ = _extract_embedded_time(due_text)
+            if t24 and t12:
+                notes = f"by {t12}"
         else:
-            delimiters = list(_BULLET_DUE_SPLIT.finditer(clean_text))
-            if delimiters:
-                last = delimiters[-1]
-                candidate = clean_text[last.end():].rstrip(") ").strip()
-                if candidate and resolve_due(candidate, "UTC").due_date is not None:
-                    title, due_text = clean_text[:last.start()].rstrip(" (").strip(), candidate
+            # Check embedded time
+            t24, t12, leader, raw_match = _extract_embedded_time(clean_text)
+            if t24 and t12:
+                notes = f"by {t12}"
+                if leader in _DATE_WORDS:
+                    norm_leader = "tomorrow" if leader == "tmrw" else leader
+                    due_text = f"{norm_leader} {t12}"
+                else:
+                    due_text = f"{t12}"
+                if raw_match:
+                    title = clean_text.replace(raw_match, "").strip(" -–—@,:()")
+                    title = re.sub(r"\s+", " ", title).strip()
             else:
                 m_end_date = re.search(r"\b(today|tomorrow|tmrw|yesterday|monday|tuesday|wednesday|thursday|friday|saturday|sunday)$", clean_text, re.IGNORECASE)
                 if m_end_date:
