@@ -37,7 +37,9 @@ from backend.router_helpers import (
     is_external_project_request,
     _current_today,
     unsupported_capability_reply,
+    parse_feasibility_intent,
 )
+from backend.services.chat_preferences import parse_preferences_intent
 from backend.services.task_intake_llm import extract_prose_tasks, llm_available, looks_like_prose_task_list
 from backend.services.task_intake_parse import parse_task_list
 from backend.services.task_intent import CAPABILITY_REPLY, blocks_task_creation, is_capability_question
@@ -199,6 +201,12 @@ async def route_message(
         return "pending_action_confirm", {"message": message}, ""
     if is_pending_action_cancel(message):
         return "pending_action_cancel", {"message": message}, ""
+    feas_args = parse_feasibility_intent(message)
+    if feas_args is not None:
+        return "assess_feasibility", feas_args, ""
+    pref_args = parse_preferences_intent(message)
+    if pref_args is not None:
+        return "update_preferences", pref_args, ""
     is_del, is_clear, del_target = is_chat_delete_intent(message)
     if is_del:
         return "chat_delete_task", {"query": del_target, "clear_all": is_clear}, ""

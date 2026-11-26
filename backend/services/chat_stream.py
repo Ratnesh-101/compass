@@ -39,7 +39,9 @@ from backend.router_helpers import (
     is_chat_delete_intent,
     is_undo_request,
     unsupported_capability_reply,
+    parse_feasibility_intent,
 )
+from backend.services.chat_preferences import parse_preferences_intent, handle_chat_preferences_stream
 from backend.services.chat_idempotency import committed_event, normalize_request_id, peek_replay, replay_events
 from backend.services.chat_fastpath import GREETING_REPLY, apply_router_extra_body, is_greeting_fastpath
 from backend.services.chat_task_actions import parse_task_action_intent
@@ -534,7 +536,17 @@ async def _generate_chat_events(
             or is_undo_request(message)
             or is_intake_intent(message)
             or (parse_task_action_intent(message) is not None)
+            or (parse_feasibility_intent(message) is not None)
+            or (parse_preferences_intent(message) is not None)
         )
+
+        pref_result = await handle_chat_preferences_stream(message, conv_id, user_id, guest_id, pool)
+        if pref_result is not None:
+            res_text = pref_result.get("response", "")
+            async for chunk in stream_chunks(res_text):
+                yield f"data: {json.dumps({'type': 'token', 'value': chunk})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'conversation_id': pref_result.get('conversation_id', conv_id), 'skill_used': 'update_preferences', 'verifiable': False, 'data': pref_result.get('data')})}\n\n"
+            return
 
         if (not is_mocked and is_placeholder_key) or is_schedule_or_agent_intent(message) or is_tavily_verification_intent(message) or is_safety_intent:
             result: dict[str, Any] = {}
