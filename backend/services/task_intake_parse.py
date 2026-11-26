@@ -63,12 +63,34 @@ class ParsedIntake:
     def truncated(self) -> bool:
         return self.total_found > len(self.items) + len(self.skipped)
 
+class _ParenSpan:
+    """Minimal match-like object for a parenthesised span."""
+
+    def __init__(self, start: int, end: int, inner: str) -> None:
+        self._start, self._end, self._inner = start, end, inner
+
+    def start(self) -> int:
+        return self._start
+
+    def end(self) -> int:
+        return self._end
+
+    def group(self, _n: int = 0) -> str:
+        return self._inner
+
 
 def _extract_parenthesised_meta(text: str) -> tuple[str, Optional[str], Optional[str]]:
     """Extract (clean_text, domain, priority) from parenthesised clauses like '(coursework, high priority)'."""
     domain: Optional[str] = None
     priority: Optional[str] = None
-    m = re.search(r"\(([^)]+)\)", text)
+    text = text[:2000]
+    open_i = text.find("(")
+    close_i = text.find(")", open_i + 1) if open_i >= 0 else -1
+    m = None
+    if close_i > open_i + 1:
+        # Linear scan instead of a regex: no backtracking on strings full of "(".
+        inner_start = text.rfind("(", open_i, close_i) + 1
+        m = _ParenSpan(inner_start - 1, close_i + 1, text[inner_start:close_i])
     cleaned = text
     if m:
         content = m.group(1).strip()
