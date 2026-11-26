@@ -452,25 +452,31 @@ def _extract_task_creation_args(message: str) -> dict:
     domain = "general"
     if any(k in msg_lower for k in ("hackathon", "devpost", "pitch", "demo")):
         domain = "hackathon"
-    elif any(k in msg_lower for k in ("coursework", "assignment", "homework", "exam", "quiz", "lecture", "cs101")):
+    elif any(k in msg_lower for k in ("coursework", "assignment", "homework", "exam", "quiz", "lecture", "cs101", "lab", "study", "dbms")):
         domain = "coursework"
     elif any(k in msg_lower for k in ("code", "repo", "repository", "bug", "branch", "refactor")) or re.search(r"\bprs?\b", msg_lower):
         domain = "code"
 
     m_dom = re.search(r"\bdomain[:= ]\s*([a-z0-9_-]+)", msg_lower)
-    if m_dom:
-        d_val = m_dom.group(1).lower()
-        if d_val in ("hackathon", "coursework", "code", "general"):
-            domain = d_val
+    if m_dom and m_dom.group(1).lower() in ("hackathon", "coursework", "code", "general"):
+        domain = m_dom.group(1).lower()
+    m_paren = re.search(r"\((general|coursework|hackathon|code|other)\b", msg_lower)
+    if m_paren:
+        p_val = m_paren.group(1).lower()
+        domain = "general" if p_val == "other" else p_val
 
     # 2. Date & Time
-    parsed_date, time_24, time_12 = _parse_natural_date(msg)
-    due_str = None
-    if parsed_date:
-        if time_24:
-            due_str = f"{parsed_date.isoformat()} {time_24}"
-        else:
-            due_str = parsed_date.isoformat()
+    msg_for_date = re.sub(r"\btmrw\b", "tomorrow", msg, flags=re.IGNORECASE)
+    parsed_date, time_24, time_12 = _parse_natural_date(msg_for_date)
+    from backend.services.task_intake_parse import _extract_embedded_time
+    if not time_24:
+        emb_24, emb_12, leader, _ = _extract_embedded_time(msg)
+        if emb_24:
+            time_24, time_12 = emb_24, emb_12
+            if not parsed_date and leader:
+                parsed_date, _, _ = _parse_natural_date("tomorrow" if leader == "tmrw" else leader)
+
+    due_str = f"{parsed_date.isoformat()} {time_24}" if (parsed_date and time_24) else (parsed_date.isoformat() if parsed_date else None)
 
     # 3. Title Extraction
     title = ""
@@ -499,39 +505,35 @@ def _extract_task_creation_args(message: str) -> dict:
     def _strip_dates_and_times(text_cand: str) -> str:
         if not text_cand:
             return ""
-        t = text_cand.strip(" .!?:;'\"")
-        t = strip_priority_domain_fragments(t)
+        t = strip_priority_domain_fragments(text_cand.strip(" .!?:;'\""))
         month_rx = "|".join(MONTH_MAP.keys())
         patterns = [
             rf"\b(?:on|at|due|by|for|in)?\s*\d{{1,2}}(?:st|nd|rd|th)?\s+(?:of\s+)?({month_rx})\b(?:\s+\d{{4}})?",
             rf"\b(?:on|at|due|by|for|in)?\s*({month_rx})\s+\d{{1,2}}(?:st|nd|rd|th)?\b(?:\s+\d{{4}})?",
-            r"\b(?:on|at|due|by|for|in)?\s*(?:today|tomorrow|yesterday)\b",
+            r"\b(?:on|at|due|by|for|in)?\s*(?:today|tonight|tomorrow|tmrw|yesterday)\b",
             r"\b(?:(?:on|at|due|by|before|until)\s+)?(?:(?:next|this)\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
-            r"\b\d{4}-\d{2}-\d{2}\b",
-            r"\b(?:at\s+)?(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?\s*(?:am|pm)?\b",
-            r"\b(?:at\s+)?(?:1[0-2]|0?[1-9])\s*(?:am|pm)\b",
-            r"\b(?:at\s+)?(?:midnight|noon)\b",
-            r"^\s*(?:on|at|due|by|in|for)\s+",
-            r"\s+(?:on|at|due|by|in|for)\s*$",
+            r"\b\d{4}-\d{2}-\d{2}\b", r"\b(?:at\s+)?(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?\s*(?:am|pm)?\b",
+            r"\b(?:at\s+)?(?:1[0-2]|0?[1-9])\s*(?:am|pm)\b", r"\b(?:at|by)\s+(?:1[0-2]|0?[1-9])\b",
+            r"\b(?:at\s+)?(?:midnight|noon)\b", r"\((?:general|coursework|hackathon|code|other)[^)]*\)",
+            r"^\s*(?:on|at|due|by|in|for)\s+", r"\s+(?:on|at|due|by|in|for)\s*$",
         ]
         for p in patterns:
             t = re.sub(p, "", t, flags=re.IGNORECASE)
         return tidy_title(t)
 
-    # Strategy C: "remind me to X [by/on/at ...]"
-    if not title and "remind me to " in msg_lower:
-        idx = msg_lower.find("remind me to ") + len("remind me to ")
-        rest = msg[idx:]
-        m_split = re.split(r"\b(?:by|on|at|due|before|in\s+(?:\d+|a|an|one|two|three|the\s+(?:morning|afternoon|evening))|tomorrow|today|yesterday|next\s+[a-z]+|this\s+[a-z]+)\b", rest, flags=re.IGNORECASE)
-        title = m_split[0].strip(" .!?:;'\"")
+    # Strategy C: "remind me [to] X [by/on/at ...]"
+    for r_pref in ("remind me to ", "remind me "):
+        if not title and r_pref in msg_lower:
+            idx = msg_lower.find(r_pref) + len(r_pref)
+            rest = msg[idx:]
+            m_split = re.split(r"\b(?:by|on|at|due|before|in\s+(?:\d+|a|an|one|two|three|the\s+(?:morning|afternoon|evening))|tomorrow|tmrw|today|tonight|yesterday|next\s+[a-z]+|this\s+[a-z]+)\b", rest, flags=re.IGNORECASE)
+            title = m_split[0].strip(" .!?:;'\"")
+            break
 
     # Strategy D: Prefix removal for standard forms:
     if not title:
         prefixes = (
-            "add a deadline on", "add a deadline for", "add a deadline:", "add a deadline", "add deadline on", "add deadline for", "add deadline:", "add deadline",
-            "set a deadline for", "set a deadline on", "set a deadline:", "set a deadline", "create a deadline for", "create a deadline on", "create a deadline:", "create a deadline",
-            "add a task for", "add a task on", "add a task:", "add a task", "add task for", "add task on", "add task:", "add task",
-            "create a task for", "create a task on", "create a task:", "create a task", "create task for", "create task on", "create task:", "create task", "new task:", "new task", "new deadline:", "new deadline",
+            "add a deadline on", "add a deadline for", "add a deadline:", "add a deadline", "add deadline on", "add deadline for", "add deadline:", "add deadline", "set a deadline for", "set a deadline on", "set a deadline:", "set a deadline", "create a deadline for", "create a deadline on", "create a deadline:", "create a deadline", "add a task for", "add a task on", "add a task:", "add a task", "add task for", "add task on", "add task:", "add task", "create a task for", "create a task on", "create a task:", "create a task", "create task for", "create task on", "create task:", "create task", "new task:", "new task", "new deadline:", "new deadline",
         )
         for pref in prefixes:
             if msg_lower.startswith(pref) and not msg_lower[len(pref):len(pref) + 1].isalnum():
@@ -552,20 +554,26 @@ def _extract_task_creation_args(message: str) -> dict:
     # Final guard: if title after stripping dates is empty or was purely date words/digits/time, clear it
     if title:
         residual = _strip_dates_and_times(title)
-        if not residual or re.fullmatch(r"[\d:\sAPMapm\.,\-]+", residual) or title_problem(residual):
-            title = ""
-        else:
-            title = residual
+        title = "" if (not residual or re.fullmatch(r"[\d:\sAPMapm\.,\-]+", residual) or title_problem(residual)) else residual
 
-    if title:
-        if title.islower():
-            title = title[0].upper() + title[1:]
+    if title and title.islower():
+        title = title[0].upper() + title[1:]
 
     res: dict[str, Any] = {"title": title, "domain": domain}
     if due_str:
         res["due_date"] = due_str
     if time_12:
         res["time_str"] = time_12
+        res["notes"] = f"by {time_12}"
+        if parsed_date:
+            res["card_summary"] = f"{parsed_date.strftime('%a %b %d')}, {time_12}"
+            res["card_text"] = f"{title} — {domain} · {res.get('priority', 'medium')} · {res['card_summary']}"
+    from backend.models import CreateTaskRequest
+    m_fields = getattr(CreateTaskRequest, "model_fields", {})
+    if "due_time" in m_fields and time_24:
+        res["due_time"] = time_24
+    if "due_at" in m_fields and due_str and time_24:
+        res["due_at"] = due_str
     stated_priority = extract_priority(msg)
     if stated_priority:
         res["priority"] = stated_priority
