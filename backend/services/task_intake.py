@@ -136,6 +136,12 @@ async def handle_intake_preview(*, message: str, conv_id: str, owner_identity: s
     parsed = (
         ParsedIntake(tuple(IntakeItem(**d) for d in items), len(items), ()) if items else parse_task_list(message)
     )
+    if parsed is None and not items:
+        from backend.services import task_intake_llm
+
+        extracted = await task_intake_llm.extract_items_bounded(message)  # bounded; falls back to the deterministic parser
+        if extracted:
+            parsed = ParsedIntake(tuple(extracted[:MAX_ITEMS]), len(extracted), ())
     success, data, reply = False, None, NOT_A_LIST_REPLY
     pool = active_pool or await get_pool()
     if parsed and parsed.items and pool:
