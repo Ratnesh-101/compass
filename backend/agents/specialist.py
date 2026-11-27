@@ -466,6 +466,15 @@ async def run_calendar_specialist(
 
     fallback_summary = "\n".join(summary_parts) if summary_parts else f"Calendar & schedule analysis completed for '{goal}'."
     synthesized_summary = await _synthesize_specialist_response("calendar", goal, findings, fallback_summary, defer=request.defer_synthesis)
+    from backend.agents.schedule_deterministic import patch_schedule_answer
+    raw_tasks = {t["id"]: t for t in findings.get("active_deadlines_and_tasks", [])}
+    synthesized_summary = patch_schedule_answer(
+        synthesized_summary,
+        findings.get("availability", {}).get("scheduled", []),
+        raw_tasks,
+        goal,
+        committed=False,
+    )
 
     return SpecialistResult(
         capability="calendar",

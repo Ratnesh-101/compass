@@ -20,24 +20,19 @@ from backend.agent_confirm_nudge import nudge_messages, should_nudge_for_tool_ca
 from backend.agent_critic import _run_critic_pass, execute_confirmed_actions
 from backend.agent_escalation import evaluate_abstention_and_web_escalation
 from backend.agent_persistence import (
-    MAX_CONCURRENT_AGENT_RUNS,
-    count_active_agent_runs,
-    get_agent_run,
-    get_critique_stats,
-    record_audit_log,
-    save_agent_run,
-    undo_last_agent_action,
+    MAX_CONCURRENT_AGENT_RUNS, count_active_agent_runs, get_agent_run,
+    get_critique_stats, record_audit_log, save_agent_run, undo_last_agent_action,
 )
 from backend.agent_step_executor import execute_agent_tool_step
 from backend.agent_synthesis import build_done_step, force_final_synthesis
 from backend.agent_types import (
-    AgentStep,
-    MUTATING_TOOLS,
-    READ_ONLY_TOOLS,
-    _PENDING_CONFIRMATION_EVENTS,
-    _build_agent_system_prompt,
-    _clean_synthesis_text,
-    _extract_content_from_response,
+    AgentStep, MUTATING_TOOLS, READ_ONLY_TOOLS, _PENDING_CONFIRMATION_EVENTS,
+    _build_agent_system_prompt, _clean_synthesis_text, _extract_content_from_response,
+)
+from backend.agents.schedule_deterministic import (
+    build_deterministic_schedule_table, extract_schedule_target_date,
+    fetch_real_tasks_for_schedule, find_pending_agent_run,
+    handle_agent_schedule_synthesis, patch_schedule_answer, scrub_internal_agent_text,
 )
 from backend.config import get_settings
 from backend.services.token_budget import reasoning_token_budget
@@ -104,7 +99,15 @@ async def run_agent(
     search_web_unlocked: bool = not abstain_first
     logger.info("SETTINGS.TAVILY_ABSTAIN_FIRST loaded inside run_agent: %s (run_id=%s)", abstain_first, run_id)
 
-    existing_run = await get_agent_run(pool, run_id) if pool else None
+    proposed_blocks: List[Dict[str, Any]] = []
+    if not action and goal and goal.strip().lower().rstrip(".!?") in ("commit this plan", "commit plan", "commit schedule"):
+        action = "approve"
+
+    existing_run = await get_agent_run(pool, run_id) if pool and run_id else None
+    if not existing_run and action == "approve" and pool:
+        existing_run = await find_pending_agent_run(pool, user_id, conversation_id)
+        if existing_run:
+            run_id = existing_run["run_id"]
 
     if action in ("approve", "reject"):
         if existing_run:
@@ -456,21 +459,8 @@ async def run_agent(
                                 user_id=user_id,
                             )
                                 step_num += 1
-                                timeout_step = AgentStep(
-                                    type="done",
-                                    content=json.dumps({
-                                        "status": "expired",
-                                        "draft_saved": True,
-                                        "run_id": run_id,
-                                        "message": f"Confirmation timed out after {int(confirm_timeout_seconds)}s. Partial run saved as draft.",
-                                    }),
-                                    step_number=step_num,
-                                    elapsed_ms=int((time.perf_counter() - start_time) * 1000),
-                                    run_id=run_id,
-                                    model_tier="Compass Timeout Watcher",
-                                    step_cost_usd=0.0,
-                                )
-                                yield timeout_step
+                                t_pay = json.dumps({"status": "expired", "draft_saved": True, "run_id": run_id, "message": f"Confirmation timed out after {int(confirm_timeout_seconds)}s."})
+                                yield AgentStep(type="done", content=t_pay, step_number=step_num, elapsed_ms=int((time.perf_counter() - start_time) * 1000), run_id=run_id, model_tier="Compass Timeout Watcher")
                                 return
                             finally:
                                 _PENDING_CONFIRMATION_EVENTS.pop(run_id, None)
@@ -526,6 +516,11 @@ async def run_agent(
                     tools_used=tools_used,
                     is_guest=is_guest,
                 )
+                if func_name == "propose_schedule" and isinstance(tool_result, dict):
+                    asg = tool_result.get("data", {}).get("scheduled")
+                    if asg:
+                        proposed_blocks = asg
+
                 step_num += 1
                 obs_step.step_number = step_num
                 yield obs_step
@@ -590,6 +585,15 @@ async def run_agent(
                 else:
                     provenance = "memory"
 
+                reply, proposed_blocks, sched_steps, new_pending = await handle_agent_schedule_synthesis(
+                    reply, goal, proposed_blocks, pool, user_id, run_id, step_num
+                )
+                for s in sched_steps:
+                    yield s
+                    accumulated_steps.append(s)
+                step_num += len(sched_steps)
+                pending_confirmations.extend(new_pending)
+
                 step_num += 1
                 synth_step = AgentStep(
                     type="synthesize",
@@ -606,6 +610,7 @@ async def run_agent(
                         "source": provenance,
                         "sources": [provenance],
                         "web_escalation_used": web_escalation_used,
+                        "scheduled": proposed_blocks,
                     },
                 )
                 yield synth_step
@@ -641,6 +646,7 @@ async def run_agent(
                 active_replan_diff=active_replan_diff,
                 tone=tone,
             )
+            forced_synth.content = scrub_internal_agent_text(forced_synth.content)
             total_run_cost_usd += forced_cost
             yield forced_synth
             accumulated_steps.append(forced_synth)
@@ -679,21 +685,12 @@ async def run_agent(
 
 
 __all__ = [
-    "AgentStep",
-    "run_agent",
-    "save_agent_run",
-    "get_agent_run",
-    "record_audit_log",
-    "count_active_agent_runs",
-    "get_critique_stats",
-    "undo_last_agent_action",
-    "execute_confirmed_actions",
-    "_run_critic_pass",
-    "MUTATING_TOOLS",
-    "READ_ONLY_TOOLS",
-    "_PENDING_CONFIRMATION_EVENTS",
-    "_clean_synthesis_text",
-    "_extract_content_from_response",
-    "_build_agent_system_prompt",
-    "MAX_CONCURRENT_AGENT_RUNS",
+    "AgentStep", "run_agent", "save_agent_run", "get_agent_run", "record_audit_log",
+    "count_active_agent_runs", "get_critique_stats", "undo_last_agent_action",
+    "execute_confirmed_actions", "_run_critic_pass", "MUTATING_TOOLS", "READ_ONLY_TOOLS",
+    "_PENDING_CONFIRMATION_EVENTS", "_clean_synthesis_text", "_extract_content_from_response",
+    "_build_agent_system_prompt", "MAX_CONCURRENT_AGENT_RUNS",
+    "scrub_internal_agent_text", "patch_schedule_answer", "fetch_real_tasks_for_schedule",
+    "build_deterministic_schedule_table", "extract_schedule_target_date",
+    "find_pending_agent_run", "handle_agent_schedule_synthesis",
 ]
