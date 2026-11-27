@@ -62,14 +62,17 @@ def parse_followup_edit(message: str) -> Optional[Dict[str, Any]]:
     """Pure parser: detect follow-up edits whose subject is a pronoun for the last task."""
     if not message or not isinstance(message, str):
         return None
-    raw = message.replace("’", "'").replace("‘", "'").strip()
+    raw = " ".join(message.replace("’", "'").replace("‘", "'").split())[:300]
     if not raw or raw.endswith("?"):
         return None
     for lead in ("please ", "pls ", "can you ", "could you ", "would you "):
         if raw.lower().startswith(lead):
             raw = raw[len(lead):].strip()
             break
-    clean = re.sub(r"\s+(?:instead|please|for me)$", "", raw, flags=re.IGNORECASE).strip()
+    clean = raw
+    for tail in (" instead", " please", " for me"):
+        if clean.lower().endswith(tail):
+            clean = clean[: -len(tail)].strip()
     for pat in PATTERNS:
         m = pat.match(clean)
         if not m:
