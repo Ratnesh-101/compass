@@ -523,7 +523,7 @@ export function mapHttpErrorToUserMessage(status, fallbackMessage = 'An unexpect
   return fallbackMessage
 }
 
-export async function downloadAuthedFile(url, fallbackFilename = 'download') {
+export async function downloadAuthedFile(url, fallbackFilename = 'download', options = {}) {
   let res
   try {
     res = await fetchWithGuestRetry(url)
@@ -550,6 +550,21 @@ export async function downloadAuthedFile(url, fallbackFilename = 'download') {
   }
 
   const blob = await res.blob()
+
+  if (options && options.minEvents != null) {
+    const text = typeof blob.text === 'function' ? await blob.text() : ''
+    const eventCount = (text.match(/BEGIN:VEVENT/g) || []).length
+    if (eventCount === 0) {
+      let skipped = res.headers?.get?.('x-compass-skipped-count') || res.headers?.get?.('X-Compass-Skipped-Count')
+      if (skipped == null || skipped === '') {
+        const descMatch = text.slice(0, 600).match(/(\d+)\s+tasks without a date were not exported/)
+        if (descMatch) skipped = descMatch[1]
+      }
+      const skippedNote = skipped != null && skipped !== '' ? ` ${skipped} tasks have no date.` : ''
+      throw new Error(`Nothing to export yet: none of your open tasks has a date or time.${skippedNote} Add a due date to a task (or schedule it) and export again.`)
+    }
+  }
+
   const urlHelper = (typeof window !== 'undefined' ? window.URL : null) || globalThis.URL || URL
   const doc = typeof document !== 'undefined' ? document : (typeof globalThis !== 'undefined' ? globalThis.document : null)
   if (doc && urlHelper && typeof urlHelper.createObjectURL === 'function') {

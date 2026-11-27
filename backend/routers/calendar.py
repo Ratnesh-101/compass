@@ -118,25 +118,33 @@ async def export_calendar_ics_endpoint(
     except Exception:
         pool = None
     tasks = []
+    skipped_count = 0
     if pool is not None:
         async with pool.acquire() as conn:
             # Real tasks only: never export Judge Persona demo rows or finished work, and never fall back to "everything".
             all_tasks = await structured.list_tasks(
                 conn, domain=domain, user_id=target_user_id, include_demo=False
             )
-            tasks = [
+            open_tasks = [
                 t for t in all_tasks
                 if (t.get("status") or "open") not in ICS_EXCLUDED_STATUSES
-                and (t.get("scheduled_start") or t.get("due_date"))
             ]
+            tasks = [
+                t for t in open_tasks
+                if (t.get("scheduled_start") or t.get("due_date") or t.get("due_at"))
+            ]
+            skipped_count = len(open_tasks) - len(tasks)
 
-    ics_content = generate_ics_feed(tasks, calendar_name="Compass Tasks")
+    ics_content = generate_ics_feed(tasks, calendar_name="Compass Tasks", skipped_count=skipped_count)
+    event_count = ics_content.count("BEGIN:VEVENT")
     return Response(
         content=ics_content,
         media_type="text/calendar",
         headers={
             "Content-Disposition": "attachment; filename=compass_schedule.ics",
             "Cache-Control": "no-cache",
+            "X-Compass-Event-Count": str(event_count),
+            "X-Compass-Skipped-Count": str(skipped_count),
         },
     )
 

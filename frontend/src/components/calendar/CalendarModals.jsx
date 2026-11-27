@@ -122,7 +122,23 @@ export function QuickConnectModal({ show, onClose, quickEmailInput, setQuickEmai
 }
 
 export function IcsExportModal({ show, onClose, activeDomain }) {
+  const [exportError, setExportError] = React.useState(null)
+  const [exporting, setExporting] = React.useState(false)
+
   if (!show) return null
+
+  const handleDownload = async () => {
+    if (exporting) return
+    setExporting(true)
+    setExportError(null)
+    try {
+      await downloadAuthedFile(getCalendarExportUrl(activeDomain), 'compass_schedule.ics', { minEvents: 1 })
+    } catch (err) {
+      setExportError(err.message || 'Failed to export calendar feed.')
+    } finally {
+      setExporting(false)
+    }
+  }
 
   return (
     <Dialog onClose={onClose} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(27, 26, 23, 0.45)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
@@ -147,13 +163,19 @@ export function IcsExportModal({ show, onClose, activeDomain }) {
               <div style={{ marginTop: '8px', marginBottom: '8px' }}>
                 <button
                   type="button"
-                  onClick={() => downloadAuthedFile(getCalendarExportUrl(activeDomain), 'compass_schedule.ics')}
+                  onClick={handleDownload}
+                  disabled={exporting}
                   className="btn-touch-target btn-secondary"
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '8px 14px', borderRadius: 'var(--radius-btn, 6px)', fontSize: '13px', fontWeight: '600', minHeight: '44px', cursor: 'pointer', border: '1px solid var(--border)' }}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '8px 14px', borderRadius: 'var(--radius-btn, 6px)', fontSize: '13px', fontWeight: '600', minHeight: '44px', cursor: exporting ? 'wait' : 'pointer', border: '1px solid var(--border)' }}
                 >
                   <Download size={14} strokeWidth={1.8} />
-                  <span>Download compass_schedule.ics</span>
+                  <span>{exporting ? 'Downloading...' : 'Download compass_schedule.ics'}</span>
                 </button>
+                {exportError && (
+                  <div style={{ marginTop: '8px', padding: '8px 12px', borderRadius: 'var(--radius-btn, 6px)', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid var(--error, #ef4444)', color: 'var(--error, #ef4444)', fontSize: '12px', lineHeight: '1.4' }}>
+                    {exportError}
+                  </div>
+                )}
               </div>
             </li>
             <li>In Google Calendar, look at the left sidebar under <b>Other calendars</b> and click <b>+</b>.</li>
