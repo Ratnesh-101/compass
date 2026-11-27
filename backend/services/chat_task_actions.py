@@ -540,6 +540,32 @@ async def handle_chat_task_action(
     }
 
 
+def _shift_due_at_date(task: Dict[str, Any], new_date: date) -> Optional[datetime]:
+    """Shift an existing task's due_at to a new date keeping the same local clock time.
+
+    A date-only change sets due_at to null only if the task had no time.
+    If it had a time, keeps the same local clock time on the new date, using
+    the task's stored zone from its description suffix or Asia/Kolkata fallback.
+    """
+    raw = task.get("due_at")
+    if not raw:
+        return None
+    if isinstance(raw, str):
+        try:
+            raw = datetime.fromisoformat(raw)
+        except Exception:
+            return None
+    if not isinstance(raw, datetime):
+        return None
+    m = re.search(r"\(([A-Za-z_]+/[A-Za-z_]+)\)", str(task.get("notes") or task.get("description") or ""))
+    try:
+        tz = ZoneInfo(m.group(1) if m else "Asia/Kolkata")
+    except Exception:
+        tz = ZoneInfo("Asia/Kolkata")
+    dt_utc = raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+    return datetime.combine(new_date, dt_utc.astimezone(tz).time()).replace(tzinfo=tz).astimezone(timezone.utc)
+
+
 async def _apply_task_mutation(
     conn: Any,
     task_id: int,
@@ -559,14 +585,23 @@ async def _apply_task_mutation(
     due_at_str = meta.get("due_at")
     due_label = meta.get("due_label") or due_date_str
     due_date_val = date.fromisoformat(due_date_str) if due_date_str else None
-    due_at_val = datetime.fromisoformat(due_at_str) if due_at_str else None
 
-    updated = await structured.update_task(conn, task_id, owner_id=owner_identity, due_date=due_date_val)
-    if updated and due_at_val is not None:
-        await conn.execute(
-            "UPDATE tasks SET due_at = $1 WHERE id = $2 AND lower(user_id) = lower($3)",
-            due_at_val, task_id, owner_identity,
-        )
+    # Write due_at (UTC) together with due_date whenever the card carried a time, and clear nothing else.
+    # A date-only change sets due_at to null only if the task had no time; if it had a time
+    # keep the same local clock time on the new date (using task stored zone suffix or Asia/Kolkata fallback).
+    if due_at_str:
+        dt = datetime.fromisoformat(due_at_str)
+        due_at_val = (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
+    else:
+        try:
+            ex = await structured.get_task(conn, task_id)
+        except Exception:
+            ex = None
+        due_at_val = _shift_due_at_date(ex, due_date_val) if (isinstance(ex, dict) and ex.get("due_at") and due_date_val) else None
+
+    updated = await structured.update_task(
+        conn, task_id, owner_id=owner_identity, due_date=due_date_val, due_at=due_at_val
+    )
     if updated:
         title = strip_id_suffix(meta.get("title") or updated.get("title") or "task")
         return (f"Done: moved '{title}' to {due_label}.", {"rescheduled_task": updated, "success": True}, True)

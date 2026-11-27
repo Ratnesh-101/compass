@@ -48,6 +48,19 @@ def _emit_due_date(row: dict[str, Any], due_d: Any, s_end: Any) -> Optional[str]
         return due_d.isoformat()
     return str(due_d) if due_d else None
 
+def _due_at_iso(val: Any) -> Optional[str]:
+    """due_at as an ISO string in UTC, or None when the task has no due time."""
+    if not val:
+        return None
+    if isinstance(val, str):
+        try:
+            val = datetime.fromisoformat(val)
+        except ValueError:
+            return val
+    if isinstance(val, datetime):
+        return (val if val.tzinfo else val.replace(tzinfo=timezone.utc)).astimezone(timezone.utc).isoformat()
+    return str(val)
+
 
 def build_frontend_task(
     row: dict[str, Any],
@@ -106,6 +119,7 @@ def build_frontend_task(
         description=row.get("notes") or row.get("description"),
         # The REAL deadline; the planned slot lives only in scheduled_start/scheduled_end.
         due_date=_emit_due_date(row, due_d, s_end),
+        due_at=_due_at_iso(row.get("due_at")),
         cognitive_conflict=cognitive_conflict,
     )
 
