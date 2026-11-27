@@ -125,10 +125,13 @@ export function QuickConnectModal({ show, onClose, quickEmailInput, setQuickEmai
 }
 
 export function IcsExportModal({ show, onClose, activeDomain, tasks }) {
+  const [feedback, setFeedback] = React.useState(null)
+  const [exporting, setExporting] = React.useState(false)
+
   if (!show) return null
-  const [feedback, setFeedback] = useState(null)
 
   const handleDownload = async () => {
+    if (exporting) return
     const { exportable, undated } = summarizeIcsExport(tasks, activeDomain)
     if (exportable === 0) {
       const text = undated > 0
@@ -137,12 +140,16 @@ export function IcsExportModal({ show, onClose, activeDomain, tasks }) {
       setFeedback({ type: 'error', text })
       return
     }
+    setExporting(true)
+    setFeedback(null)
     try {
-      await downloadAuthedFile(getCalendarExportUrl(activeDomain), 'compass_schedule.ics')
+      await downloadAuthedFile(getCalendarExportUrl(activeDomain), 'compass_schedule.ics', { minEvents: 1 })
       const extra = undated > 0 ? ` ${undated} tasks with no date or time slot were left out.` : ''
       setFeedback({ type: 'success', text: `Exported ${exportable} tasks.${extra}` })
     } catch (err) {
       setFeedback({ type: 'error', text: err.message || 'Failed to export calendar feed.' })
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -170,11 +177,12 @@ export function IcsExportModal({ show, onClose, activeDomain, tasks }) {
                 <button
                   type="button"
                   onClick={handleDownload}
+                  disabled={exporting}
                   className="btn-touch-target btn-secondary"
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '8px 14px', borderRadius: 'var(--radius-btn, 6px)', fontSize: '13px', fontWeight: '600', minHeight: '44px', cursor: 'pointer', border: '1px solid var(--border)' }}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '8px 14px', borderRadius: 'var(--radius-btn, 6px)', fontSize: '13px', fontWeight: '600', minHeight: '44px', cursor: exporting ? 'wait' : 'pointer', border: '1px solid var(--border)' }}
                 >
                   <Download size={14} strokeWidth={1.8} />
-                  <span>Download compass_schedule.ics</span>
+                  <span>{exporting ? 'Downloading...' : 'Download compass_schedule.ics'}</span>
                 </button>
                 {feedback && (
                   <div

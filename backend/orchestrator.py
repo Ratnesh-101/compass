@@ -344,6 +344,9 @@ async def _handle_message_core(
                     elif act_type and ("complete_task" in act_type or "reschedule_task" in act_type):
                         from backend.services.chat_task_actions import execute_pending_task_action
                         intake_result = await execute_pending_task_action(conn, active_action, owner_identity, message)
+                    elif act_type and "edit_last_task" in act_type:
+                        from backend.services.chat_followup_edit import execute_pending_edit_last_task
+                        intake_result = await execute_pending_edit_last_task(conn, active_action, owner_identity, message)
 
         if intake_result is not None:
             resp_msg, ret_data, success = intake_result
@@ -946,10 +949,8 @@ async def _handle_message_core(
         from backend.services.ownership import NO_OWNER
         pool = active_pool or await get_pool()
         goal = (args.get("goal") if isinstance(args, dict) else None) or message
-        thoughts = []
-        synth_text = ""
-        agent_succeeded = True
-        err_msg = None
+        thoughts, synth_text, agent_succeeded, err_msg = [], "", True, None
+        confirm_data, scheduled_data = None, None
         try:
             async for step in run_agent(
                 goal=goal,
@@ -981,8 +982,15 @@ async def _handle_message_core(
                     m = "Verifying plan constraints"
                     if not thoughts or thoughts[-1] != m:
                         thoughts.append(m)
+                elif step.type == "confirm_request":
+                    confirm_data = {"tool": step.tool_name, "args": step.tool_args, "content": step.content}
+                    m = "Awaiting confirmation"
+                    if not thoughts or thoughts[-1] != m:
+                        thoughts.append(m)
                 elif step.type == "synthesize":
                     synth_text = step.content
+                    if getattr(step, "metadata", None) and isinstance(step.metadata, dict) and "scheduled" in step.metadata:
+                        scheduled_data = step.metadata["scheduled"]
                     m = "Preparing your response"
                     if not thoughts or thoughts[-1] != m:
                         thoughts.append(m)
@@ -1000,8 +1008,11 @@ async def _handle_message_core(
 
         reply_content = synth_text or (f"I encountered an error while processing your request: {err_msg}" if err_msg else "")
         if not reply_content:
-            agent_succeeded = False
-            reply_content = "Unable to complete request. Please retry."
+            agent_succeeded, reply_content = False, "Unable to complete request. Please retry."
+        else:
+            from backend.agents.schedule_deterministic import scrub_internal_agent_text
+            from backend.services.action_claim_guard import guard_unbacked_action_claims
+            reply_content, _ = guard_unbacked_action_claims(scrub_internal_agent_text(reply_content), False)
 
         if persist and pool:
             try:
@@ -1014,6 +1025,14 @@ async def _handle_message_core(
                 logger.debug("Could not persist agent conversation: %s", e)
 
         latency_ms = int((time.perf_counter() - start_time) * 1000)
+        asg = scheduled_data or (confirm_data.get("args", {}).get("assignments") if confirm_data and confirm_data.get("tool") == "commit_schedule" else None)
+        ret_data: Dict[str, Any] = {
+            "thought": "\n\n".join(thoughts) if thoughts else None,
+            "can_retry": not agent_succeeded,
+            **({"confirm_request": confirm_data} if confirm_data else {}),
+            **({"status": "proposed", "scheduled": asg} if asg else {}),
+        }
+
         return {
             "conversation_id": conv_id,
             "response": reply_content,
@@ -1021,10 +1040,7 @@ async def _handle_message_core(
             "skill_used": "agent",
             "success": agent_succeeded,
             "error": err_msg if not agent_succeeded else None,
-            "data": {
-                "thought": "\n\n".join(thoughts) if thoughts else None,
-                "can_retry": not agent_succeeded,
-            },
+            "data": ret_data,
             "verifiable": False,
             "routing_latency_ms": latency_ms,
         }

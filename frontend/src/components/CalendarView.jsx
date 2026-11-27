@@ -366,7 +366,7 @@ export default function CalendarView({
     }
     setExportingIcs(true)
     try {
-      await downloadAuthedFile(getCalendarExportUrl(activeDomain), 'compass_schedule.ics')
+      await downloadAuthedFile(getCalendarExportUrl(activeDomain), 'compass_schedule.ics', { minEvents: 1 })
       const extra = undated > 0 ? ` ${undated} tasks with no date or time slot were left out.` : ''
       setBannerMessage({ type: 'success', text: `Exported ${exportable} tasks.${extra}` })
     } catch (err) {
