@@ -1015,6 +1015,14 @@ async def _handle_message_core(
                     b.setdefault("scheduled_end", b.get("end"))
                 tids = [int(b["task_id"]) for b in blocks if b.get("task_id") is not None]
                 real = await fetch_real_tasks_for_schedule(pool, user_id or guest_id, tids)
+                from backend.agents.schedule_deterministic import repair_plan_blocks
+                fixed = await repair_plan_blocks(blocks, pool, user_id or guest_id, request_timezone.get(), real)
+                if fixed is not blocks:
+                    blocks = [dict(b, scheduled_start=b.get("scheduled_start") or b.get("start"),
+                                   scheduled_end=b.get("scheduled_end") or b.get("end")) for b in fixed]
+                    confirm_data["args"] = dict(confirm_data.get("args") or {}, assignments=blocks)
+                    real = await fetch_real_tasks_for_schedule(
+                        pool, user_id or guest_id, [int(b["task_id"]) for b in blocks if b.get("task_id") is not None])
                 synth_text = patch_schedule_answer("Here is your plan.", blocks, real, goal, committed=False)
             except Exception as e:
                 logger.debug("Could not build plan from confirm_request: %s", e)
