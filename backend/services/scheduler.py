@@ -118,7 +118,8 @@ def get_available_windows(
     end_utc = _ensure_utc(search_end)
     w_start = _parse_time_str(work_start_time)
     w_end = _parse_time_str(work_end_time)
-    allowed_days = set(work_days if work_days is not None else [1, 2, 3, 4, 5])
+    # None or empty means Monday-Friday; days are ISO weekdays (1=Mon..7=Sun), 0 is read as Sunday.
+    allowed_days = {7 if int(d) == 0 else int(d) for d in (work_days or [])} or {1, 2, 3, 4, 5}
 
     normalized_busy: List[TimeWindow] = []
     buf_td = timedelta(minutes=buffer_minutes)
