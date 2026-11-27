@@ -1132,6 +1132,9 @@ def unsupported_capability_reply(message: str) -> Optional[str]:
     msg = (message or "").strip()
     if not msg:
         return None
+    from backend.services.chat_extra_actions import is_extra_action_intent
+    if is_extra_action_intent(msg):
+        return None
     if UNSUPPORTED_AREA_RE.search(msg):
         return "Areas come from the task's category; pick one when you add a task."
     if UNSUPPORTED_DELETE_CHAT_RE.search(msg):

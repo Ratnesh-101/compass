@@ -189,9 +189,7 @@ def test_guard_keeps_everything_when_action_executed(text):
     "message",
     [
         "Create a new area called Research",
-        "Delete this chat",
         "Start a new chat",
-        "Export my calendar",
         "Save the first one to my watchlist",
         "Prepare an application for the first one",
     ],
