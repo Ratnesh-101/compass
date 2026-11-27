@@ -398,6 +398,36 @@ def _sse(step_type: str, content: str, *, step: int, t0: float,
     }
 
 
+def _sync_real_durations(loads: List[TaskLoad], tasks: List[Dict[str, Any]]) -> None:
+    task_map = {t.get("id"): t for t in tasks if t.get("id") is not None}
+    title_map = {str(t.get("title") or "").strip().lower(): t for t in tasks}
+    for load in loads:
+        orig = task_map.get(load.task_id)
+        if orig is None:
+            try:
+                orig = task_map.get(int(load.task_id))
+            except (TypeError, ValueError):
+                pass
+        if orig is None and isinstance(load.task_id, int) and 1 <= load.task_id <= len(tasks):
+            orig = tasks[load.task_id - 1]
+        if orig is None and load.title:
+            orig = title_map.get(str(load.title).strip().lower())
+        if orig is not None:
+            dm = orig.get("duration_minutes")
+            if dm is not None:
+                try:
+                    val = float(dm)
+                    if val > 0:
+                        load.estimated_hours = round(val / 60.0, 2)
+                        if orig.get("id") is not None:
+                            try:
+                                load.task_id = int(orig["id"])
+                            except (TypeError, ValueError):
+                                pass
+                except (TypeError, ValueError):
+                    pass
+
+
 async def _fetch_open_tasks(
     pool, domain: Optional[str], user_id: Optional[str] = None, include_demo: bool = False
 ) -> List[Dict[str, Any]]:
@@ -506,10 +536,8 @@ async def run_feasibility_review(
             proposal = PlannerProposal.model_validate(planner_raw)
             if not proposal.loads:
                 raise ValueError("planner returned zero loads")
-            for load in proposal.loads:
-                orig = task_map.get(load.task_id)
-                if orig and orig.get("duration_minutes") is not None:
-                    load.estimated_hours = task_duration_hours(orig)
+            _sync_real_durations(proposal.loads, tasks)
+            proposal.claimed_total_hours = proposal.real_total_hours()
         except Exception as e:
             logger.warning("Planner output invalid (%s) — using heuristic", e)
             proposal = _heuristic_proposal(tasks)
@@ -606,11 +634,7 @@ async def run_feasibility_review(
                 narrative=str(replan_raw.get("narrative") or ""),
                 degraded=degraded,
             )
-            for bucket in (revised_plan.keep, revised_plan.defer, revised_plan.drop):
-                for load in bucket:
-                    orig = task_map.get(load.task_id)
-                    if orig and orig.get("duration_minutes") is not None:
-                        load.estimated_hours = task_duration_hours(orig)
+            _sync_real_durations(revised_plan.keep + revised_plan.defer + revised_plan.drop, tasks)
             if not revised_plan.keep and not revised_plan.defer and not revised_plan.drop:
                 revised_plan = None
         except Exception as e:

@@ -393,11 +393,23 @@ export default function ChatMessageList({
                           <div style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text-primary)' }}>
                             {pendingKind === 'delete_task_disambiguation'
                               ? 'Choose a task to delete:'
+                              : pendingKind === 'delete_task'
+                              ? 'Confirm delete task'
+                              : pendingKind === 'delete_chat'
+                              ? 'Confirm delete chat'
                               : pendingKind === 'complete_task'
                               ? 'Confirm mark as done'
                               : pendingKind === 'reschedule_task'
-                              ? 'Confirm new due date'
-                              : 'Confirm destructive action:'}
+                              ? 'Confirm new due date or time'
+                              : pendingKind === 'edit_last_task'
+                              ? (pendingAction?.title || pendingAction?.priority ? 'Confirm change' : 'Confirm new due date or time')
+                              : pendingKind === 'update_preferences'
+                              ? 'Confirm new planning preferences'
+                              : (pendingKind === 'add_to_watchlist' || pendingKind === 'add_to_watchlist_disambiguation')
+                              ? 'Confirm add to watchlist'
+                              : String(pendingKind || '').startsWith('delete')
+                              ? 'Confirm destructive action:'
+                              : 'Confirm action:'}
                           </div>
                           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                             {pendingKind !== 'delete_task_disambiguation' && (

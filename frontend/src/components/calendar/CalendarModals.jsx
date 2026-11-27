@@ -11,6 +11,23 @@ export function ProposedPlanModal({ proposedPlan, onClose, onCommit, committing 
   if (!proposedPlan) return null
   const { canCommit, reasons } = planCommitState(proposedPlan)
   const localTz = getLocalTimeZone()
+  const displaySummary = (() => {
+    const s = proposedPlan.summary || ''
+    if (/Scheduled \d+ tasks? successfully/i.test(s)) {
+      const schedMatch = s.match(/Scheduled (\d+) tasks? successfully/i)
+      const count = schedMatch ? schedMatch[1] : (proposedPlan.scheduled?.length ?? 0)
+      const base = `Found time for ${count} ${Number(count) === 1 ? 'task' : 'tasks'} (not saved yet; confirm to add them to your calendar).`
+      const unplacedCount = proposedPlan.unassigned?.length ?? 0
+      if (unplacedCount > 0) {
+        const unplacedText = unplacedCount === 1
+          ? '1 task could not be placed before its deadline.'
+          : `${unplacedCount} tasks could not be placed before their deadlines.`
+        return `${base} ${unplacedText}`
+      }
+      return base
+    }
+    return s
+  })()
 
   return (
     <Dialog onClose={onClose} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(27, 26, 23, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(3px)' }}>
@@ -24,7 +41,7 @@ export function ProposedPlanModal({ proposedPlan, onClose, onCommit, committing 
             <X size={16} strokeWidth={1.8} />
           </button>
         </div>
-        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.5', margin: 0 }}>{proposedPlan.summary}</p>
+        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.5', margin: 0 }}>{displaySummary}</p>
         <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
           Times shown in your local time ({localTz})
         </div>
