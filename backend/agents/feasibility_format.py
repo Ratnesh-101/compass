@@ -10,15 +10,37 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 
-DEFAULT_TASK_HOURS: float = 2.0  # Documented default for tasks without a duration estimate
+def task_has_length(task: Dict[str, Any]) -> bool:
+    try:
+        return float(task.get("duration_minutes")) > 0  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return False
 
 
-def task_duration_hours(task: Dict[str, Any], default: float = DEFAULT_TASK_HOURS) -> float:
-    """Return task duration in hours.
+def estimate_assumption_sentence(entries: List[str], max_listed: int = 6) -> str:
+    """One sentence naming tasks counted at an estimated length ("Title (2h)"); '' when none."""
+    if not entries:
+        return ""
+    listed = ", ".join(entries[:max_listed])
+    if len(entries) > max_listed:
+        listed += f" and {len(entries) - max_listed} more"
+    return f"Tasks without a set length use estimated lengths: {listed}."
 
-    Uses task['duration_minutes'] / 60 if present and positive;
-    otherwise falls back to the documented default (2.0 hours).
-    """
+
+def estimate_entries(tasks: List[Dict[str, Any]], loads: List[Any], fallback: Any) -> List[str]:
+    """'Title (Nh)' per task without a stored length, using the hours the plan used."""
+    by_id = {load.task_id: load for load in loads}
+    out: List[str] = []
+    for t in tasks:
+        if task_has_length(t):
+            continue
+        load = by_id.get(int(t.get("id", 0) or 0))
+        hours = load.estimated_hours if load is not None else fallback(t)
+        out.append(f"{t.get('title') or 'untitled'} ({hours:g}h)")
+    return out
+
+def task_duration_hours(task: Dict[str, Any], default: float = 0.0) -> float:
+    """Return the task's stored duration in hours (duration_minutes / 60 when > 0), else `default`."""
     dm = task.get("duration_minutes")
     if dm is not None:
         try:
@@ -29,17 +51,16 @@ def task_duration_hours(task: Dict[str, Any], default: float = DEFAULT_TASK_HOUR
             pass
     return default
 
-
 def describe_tasks(tasks: List[Dict[str, Any]]) -> str:
     """Format tasks for model prompts."""
     out = []
     for t in tasks:
-        dur = task_duration_hours(t)
+        dur = f"{task_duration_hours(t):g}h" if task_has_length(t) else "unset (estimate it)"
         due = t.get("due_date")
         due_str = str(due)[:10] if due else "none"
         out.append(
             f"- id={t.get('id')} | {t.get('title')} | domain={t.get('domain')} "
-            f"| priority={t.get('priority')} | duration={dur}h | due={due_str}"
+            f"| priority={t.get('priority')} | duration={dur} | due={due_str}"
         )
     return "\n".join(out) if out else "(no open tasks)"
 
@@ -58,7 +79,7 @@ def format_bucket(label: str, tasks: List[Any], max_titles: int = 8) -> str:
         if hours is None and isinstance(t, dict):
             hours = task_duration_hours(t)
         elif hours is None:
-            hours = DEFAULT_TASK_HOURS
+            hours = 0.0
         items.append(f"{title} ({hours:g}h)")
     if count > max_titles:
         items.append(f"and {count - max_titles} more")
@@ -135,6 +156,9 @@ def format_feasibility_summary(
         parts.append("I looked at all your open tasks.")
     if not days_stated:
         parts.append(f"(I assumed the next {days} days at {hours_per_day:g} hours a day.)")
+    assumption = estimate_assumption_sentence(list(getattr(plan, "default_duration_titles", None) or []))
+    if assumption:
+        parts.append(assumption)
 
     return " ".join(parts)
 
