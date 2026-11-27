@@ -546,14 +546,14 @@ async def _generate_chat_events(
             res_text = pref_result.get("response", "")
             async for chunk in stream_chunks(res_text):
                 yield f"data: {json.dumps({'type': 'token', 'value': chunk})}\n\n"
-            yield f"data: {json.dumps({'type': 'done', 'conversation_id': pref_result.get('conversation_id', conv_id), 'skill_used': 'update_preferences', 'verifiable': False, 'data': pref_result.get('data')})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'conversation_id': pref_result.get('conversation_id', conv_id), 'skill_used': 'update_preferences', 'verifiable': False, 'data': pref_result.get('data')}, default=str)}\n\n"
             return
 
         extra_result = await handle_chat_extra_actions_stream(message, conv_id, user_id, guest_id, pool)
         if extra_result is not None:
             async for chunk in stream_chunks(extra_result.get("response", "")):
                 yield f"data: {json.dumps({'type': 'token', 'value': chunk})}\n\n"
-            yield f"data: {json.dumps({'type': 'done', 'conversation_id': extra_result.get('conversation_id', conv_id), 'skill_used': extra_result.get('skill_used', 'agent'), 'verifiable': False, 'data': extra_result.get('data')})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'conversation_id': extra_result.get('conversation_id', conv_id), 'skill_used': extra_result.get('skill_used', 'agent'), 'verifiable': False, 'data': extra_result.get('data')}, default=str)}\n\n"
             return
 
         from backend.services.chat_followup_edit import handle_chat_followup_edit_stream
@@ -561,7 +561,7 @@ async def _generate_chat_events(
         if fup_result is not None:
             async for chunk in stream_chunks(fup_result.get("response", "")):
                 yield f"data: {json.dumps({'type': 'token', 'value': chunk})}\n\n"
-            yield f"data: {json.dumps({'type': 'done', 'conversation_id': fup_result.get('conversation_id', conv_id), 'skill_used': 'edit_last_task', 'verifiable': False, 'data': fup_result.get('data')})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'conversation_id': fup_result.get('conversation_id', conv_id), 'skill_used': 'edit_last_task', 'verifiable': False, 'data': fup_result.get('data')}, default=str)}\n\n"
             return
 
         if (not is_mocked and is_placeholder_key) or is_schedule_or_agent_intent(message) or is_tavily_verification_intent(message) or is_safety_intent:
