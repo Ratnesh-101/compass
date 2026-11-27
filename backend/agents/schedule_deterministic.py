@@ -226,9 +226,12 @@ def drop_contradicting_sentences(
     allowed_dates = {f"{m.group(1)[:3].lower()} {int(m.group(2))}" for m in _MONTH_DAY_PATTERN.finditer(table_md)}
 
     zone = _resolve_tz()
+    today = datetime.now(zone).date()
+    any_due_today = False
     for t in task_list:
         d_obj = _get_task_due_date_obj(t, zone)
         if d_obj:
+            any_due_today = any_due_today or d_obj == today
             allowed_wds.add(d_obj.strftime("%a")[:3].lower())
             allowed_dates.add(f"{d_obj.strftime('%b')[:3].lower()} {d_obj.day}")
 
@@ -261,8 +264,9 @@ def drop_contradicting_sentences(
             if not s_clean:
                 continue
 
-            drop = False
-            for m in _WEEKDAY_PATTERN.finditer(s_clean):
+            low_s = s_clean.lower()
+            drop = "task id" in low_s or "(id:" in low_s or ("due today" in low_s and not any_due_today)
+            for m in ([] if drop else _WEEKDAY_PATTERN.finditer(s_clean)):
                 if m.group(0)[:3].lower() not in allowed_wds:
                     drop = True
                     break
