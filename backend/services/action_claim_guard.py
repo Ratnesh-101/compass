@@ -8,6 +8,7 @@ requesting user confirmation.
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 from typing import List, Optional, Tuple
 
 # Action verbs indicating completion or modification
@@ -142,18 +143,50 @@ GENERAL_NEXT_STEP = (
 )
 
 
+_MAX_SENTENCE_CHARS = 400
+_DQUOTE_PATTERN = re.compile(r'["“][^"”]{0,400}["”]')
+_SQUOTE_PATTERN = re.compile(r"(?<=[\s:,(])'[^']{1,400}'(?=[\s:,.!?]|$)")
+_USER_ATTRIBUTION_PATTERN = re.compile(
+    r"\b(?:you\s+(?:said|asked|wrote|mentioned)|user\s*[:>])",
+    re.IGNORECASE,
+)
+_HONEST_STARTS = (
+    "nothing is saved yet",
+    "nothing is scheduled",
+    "i haven't changed anything yet",
+    "i haven’t changed anything yet",
+)
+
+
+_SENTENCE_END_PATTERN = re.compile(r"[.!?]+\s+")
+
+
+def _sentence_spans(text: str) -> List[Tuple[int, int]]:
+    """Linear scan returning (start, end) spans; each span includes trailing whitespace."""
+    spans: List[Tuple[int, int]] = []
+    start = 0
+    for m in _SENTENCE_END_PATTERN.finditer(text):
+        spans.append((start, m.end()))
+        start = m.end()
+    if start < len(text):
+        spans.append((start, len(text)))
+    return spans
+
 def _split_into_sentences(text: str) -> List[str]:
     """Split text into sentences while respecting common sentence boundaries."""
-    raw_parts = re.split(r"(?<=[.!?])\s+|\n+", text)
-    return [p.strip() for p in raw_parts if p.strip()]
+    parts: List[str] = []
+    for line in text.split("\n"):
+        for s, e in _sentence_spans(line):
+            piece = line[s:e].strip()
+            if piece:
+                parts.append(piece)
+    return parts
 
 
 def _strip_quotes(sentence: str) -> str:
     """Remove quoted substrings to prevent user quotes from confusing detection."""
-    cleaned = re.sub(r'["“][^"”]*["”]', '""', sentence)
-    cleaned = re.sub(r"(?<=[\s:,(])'[^']+'(?=[\s:,.!?]|$)", "''", cleaned)
-    return cleaned
-
+    cleaned = _DQUOTE_PATTERN.sub('""', sentence)
+    return _SQUOTE_PATTERN.sub("''", cleaned)
 
 def _has_unnegated_claim(text: str) -> bool:
     """Check if text contains any action claim that is not negated."""
@@ -183,6 +216,7 @@ def _has_unnegated_claim(text: str) -> bool:
     return False
 
 
+@lru_cache(maxsize=8192)
 def _is_claim(sentence: str) -> bool:
     """Check if a single sentence constitutes an unbacked action completion claim."""
     trimmed = sentence.strip()
@@ -233,6 +267,21 @@ def _select_honest_text(claim_sentences: List[str]) -> str:
     return HONEST_PREFIX + GENERAL_NEXT_STEP
 
 
+def _line_is_candidate(line: str) -> bool:
+    """Return True if the line may contain prose claims (not table/heading/data)."""
+    s = line.strip()
+    if len(s) <= 3 or s[0] in "|#":
+        return False
+    is_bullet = s[0] in "-*+•" and s[1] == " "
+    if not is_bullet:
+        k = 0
+        while k < len(s) and k < 4 and s[k].isdigit():
+            k += 1
+        is_bullet = 0 < k < 4 and k + 1 < len(s) and s[k] in ".)" and s[k + 1] == " "
+    if is_bullet:
+        return FIRST_PERSON_CLAIM_PATTERN.search(s[:_MAX_SENTENCE_CHARS]) is not None
+    return True
+
 def guard_unbacked_action_claims(
     reply: str, action_executed: bool
 ) -> Tuple[str, bool]:
@@ -248,41 +297,47 @@ def guard_unbacked_action_claims(
     if action_executed or not reply or not reply.strip():
         return reply, False
 
-    sentences = _split_into_sentences(reply)
-    if not sentences:
+    lines = reply.split("\n")
+    # Per line: None (copy through) or list of (segment, is_claim)
+    plan: List[Optional[List[Tuple[str, bool]]]] = []
+    claim_sentences: List[str] = []
+    tail_chars = 0
+    for line in lines:
+        if not _line_is_candidate(line):
+            plan.append(None)
+            continue
+        segments: List[Tuple[str, bool]] = []
+        for s, e in _sentence_spans(line):
+            seg = line[s:e]
+            is_claim = _is_claim(seg)
+            if is_claim or (claim_sentences and tail_chars < 2000):
+                claim_sentences.append(seg.strip()[:_MAX_SENTENCE_CHARS])
+                tail_chars += min(len(seg), _MAX_SENTENCE_CHARS)
+            segments.append((seg, is_claim))
+        plan.append(segments)
+
+    if not claim_sentences:
         return reply, False
 
-    first_claim_idx = -1
-    for idx, sentence in enumerate(sentences):
-        if _is_claim(sentence):
-            first_claim_idx = idx
-            break
-
-    if first_claim_idx == -1:
-        return reply, False
-
-    # Keep any harmless non-claim sentences of the original reply that precede the claim (max 2)
-    harmless_preceding = [
-        s for s in sentences[:first_claim_idx] if not _is_claim(s)
-    ][:2]
-
-    claim_sentences = sentences[first_claim_idx:]
-    honest_text = _select_honest_text(claim_sentences)
-
-    if harmless_preceding:
-        formatted_preceding = []
-        for s in harmless_preceding:
-            s_clean = s.strip()
-            if s_clean and not s_clean.endswith((".", "!", "?")):
-                s_clean += "."
-            formatted_preceding.append(s_clean)
-        prefix = " ".join(formatted_preceding)
-        result_text = f"{prefix} {honest_text}"
-    else:
-        result_text = honest_text
-
-    return result_text, True
-
+    honest_text = _select_honest_text(claim_sentences).strip()
+    replaced = False
+    out: List[str] = []
+    for line, segments in zip(lines, plan):
+        if segments is None or not any(c for _, c in segments):
+            out.append(line)
+            continue
+        parts: List[str] = []
+        for seg, is_claim in segments:
+            if not is_claim:
+                parts.append(seg)
+            elif not replaced:
+                replaced = True
+                trailing = seg[len(seg.rstrip()):]
+                parts.append(honest_text + trailing)
+        new_line = "".join(parts).rstrip()
+        if new_line.strip():
+            out.append(new_line)
+    return "\n".join(out), True
 
 # State claims that cannot be backed by a tool in a plain reply
 STATE_CLAIM_PATTERNS = (
