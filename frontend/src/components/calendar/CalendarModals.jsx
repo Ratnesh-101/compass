@@ -1,9 +1,10 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { getCalendarExportUrl, quickConnectUser, fetchCalendarStatus, downloadAuthedFile } from '../../api/client'
 
 import { Zap, X, Check, Calendar, Download, ExternalLink } from 'lucide-react'
 import { planCommitState } from '../../utils/scheduleHonesty'
 import { localDateKey, formatLocalTime, getLocalTimeZone } from '../../utils/localTime'
+import { summarizeIcsExport } from '../../utils/icsExport'
 import Dialog from '../Dialog'
 
 export function ProposedPlanModal({ proposedPlan, onClose, onCommit, committing }) {
@@ -32,7 +33,9 @@ export function ProposedPlanModal({ proposedPlan, onClose, onCommit, committing 
             <div key={s.task_id} style={{ padding: '8px 12px', borderRadius: 'var(--radius-btn, 6px)', background: 'var(--bg-card)', border: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <strong style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: '600' }}>{s.title}</strong>
-                <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>Domain: {s.domain} · Duration: {s.duration_minutes}m</div>
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                  Domain: {s.domain} · Duration: {s.duration_minutes}m{s.has_deadline === false ? ' · No deadline, placed in free time' : ''}
+                </div>
               </div>
               <span style={{ fontSize: '12px', color: 'var(--accent)', fontWeight: '600' }}>
                 {localDateKey(s.scheduled_start)} {formatLocalTime(s.scheduled_start)} → {formatLocalTime(s.scheduled_end)}
@@ -121,8 +124,27 @@ export function QuickConnectModal({ show, onClose, quickEmailInput, setQuickEmai
   )
 }
 
-export function IcsExportModal({ show, onClose, activeDomain }) {
+export function IcsExportModal({ show, onClose, activeDomain, tasks }) {
   if (!show) return null
+  const [feedback, setFeedback] = useState(null)
+
+  const handleDownload = async () => {
+    const { exportable, undated } = summarizeIcsExport(tasks, activeDomain)
+    if (exportable === 0) {
+      const text = undated > 0
+        ? `Nothing to export yet: your ${undated} open tasks have no due date or time slot. Use Auto-schedule to give them a time, then export again.`
+        : 'Nothing to export yet: you have no open tasks with a date or time.'
+      setFeedback({ type: 'error', text })
+      return
+    }
+    try {
+      await downloadAuthedFile(getCalendarExportUrl(activeDomain), 'compass_schedule.ics')
+      const extra = undated > 0 ? ` ${undated} tasks with no date or time slot were left out.` : ''
+      setFeedback({ type: 'success', text: `Exported ${exportable} tasks.${extra}` })
+    } catch (err) {
+      setFeedback({ type: 'error', text: err.message || 'Failed to export calendar feed.' })
+    }
+  }
 
   return (
     <Dialog onClose={onClose} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(27, 26, 23, 0.45)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
@@ -147,18 +169,31 @@ export function IcsExportModal({ show, onClose, activeDomain }) {
               <div style={{ marginTop: '8px', marginBottom: '8px' }}>
                 <button
                   type="button"
-                  onClick={() => downloadAuthedFile(getCalendarExportUrl(activeDomain), 'compass_schedule.ics')}
+                  onClick={handleDownload}
                   className="btn-touch-target btn-secondary"
                   style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '8px 14px', borderRadius: 'var(--radius-btn, 6px)', fontSize: '13px', fontWeight: '600', minHeight: '44px', cursor: 'pointer', border: '1px solid var(--border)' }}
                 >
                   <Download size={14} strokeWidth={1.8} />
                   <span>Download compass_schedule.ics</span>
                 </button>
+                {feedback && (
+                  <div
+                    role={feedback.type === 'error' ? 'alert' : 'status'}
+                    style={{
+                      marginTop: '8px',
+                      fontSize: '12px',
+                      lineHeight: '1.4',
+                      color: feedback.type === 'error' ? 'var(--danger-text, #e53e3e)' : 'var(--accent, #38a169)',
+                    }}
+                  >
+                    {feedback.text}
+                  </div>
+                )}
               </div>
             </li>
             <li>In Google Calendar, look at the left sidebar under <b>Other calendars</b> and click <b>+</b>.</li>
             <li>Click <b>Import</b>, select the downloaded file, and click <b>Import</b>.</li>
-            <li>All scheduled tasks immediately appear in your Google Calendar!</li>
+            <li>Tasks with a time slot or due date appear in Google Calendar.</li>
           </ol>
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
