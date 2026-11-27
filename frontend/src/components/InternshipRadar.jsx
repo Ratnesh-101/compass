@@ -54,6 +54,8 @@ export default function InternshipRadar({
   const [isRefreshingMatches, setIsRefreshingMatches] = useState(false)
   const [page, setPage] = useState(1)
   const [hasMore, setHasMore] = useState(false)
+  const openLoadedRef = useRef(0)
+  const statsRef = useRef(null)
   const [isLoadingMore, setIsLoadingMore] = useState(false)
   const [careerApps, setCareerApps] = useState(null)
 
@@ -63,6 +65,7 @@ export default function InternshipRadar({
   const [worldwideNotice, setWorldwideNotice] = useState(false)
 
   const hasCandidateProfile = hasSavedProfile(profile)
+  statsRef.current = stats
 
   // Load analytics, profile and the one application list that feeds the Applications counter
   const loadMetadata = useCallback(async () => {
@@ -129,12 +132,17 @@ export default function InternshipRadar({
         items = res.opportunities || []
         serverHasMore = Boolean(res.has_more)
       } else if (activeTab === 'open') {
-        items = await fetchOpenOpportunities({
+        const openPage = await fetchOpenOpportunities({
           category: selectedCategory,
           employer_type: selectedEmployerType,
           work_arrangement: workArrangement,
           india_only: indiaOnly,
+          offset: isAppending ? options.offset || 0 : 0,
         })
+        items = openPage
+        openLoadedRef.current = (isAppending ? openLoadedRef.current : 0) + openPage.length
+        const openTotal = openPage.total || statsRef.current?.verified_open_count || 0
+        serverHasMore = openPage.length > 0 && openTotal > openLoadedRef.current
       } else if (activeTab === 'upcoming') {
         items = await fetchUpcomingOpportunities()
       } else if (activeTab === 'watchlist') {
@@ -193,7 +201,10 @@ export default function InternshipRadar({
       }
 
       if (isAppending) {
-        setOpportunities(prev => [...prev, ...items])
+        setOpportunities(prev => {
+          const seen = new Set(prev.map(o => o.id))
+          return [...prev, ...items.filter(o => !seen.has(o.id))]
+        })
       } else {
         setOpportunities(items)
       }
@@ -778,7 +789,7 @@ export default function InternshipRadar({
                 type="button"
                 onClick={() => {
                   if (!isLoadingMore) {
-                    loadOpportunities({ append: true, targetPage: page + 1 })
+                    loadOpportunities({ append: true, targetPage: page + 1, offset: openLoadedRef.current })
                   }
                 }}
                 disabled={isLoadingMore}
@@ -804,7 +815,7 @@ export default function InternshipRadar({
                   </>
                 ) : (
                   <>
-                    <span>Load More Opportunities</span>
+                    <span>{activeTab === 'open' ? 'Load more' : 'Load More Opportunities'}</span>
                     <ArrowDown size={14} />
                   </>
                 )}

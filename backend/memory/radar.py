@@ -1316,8 +1316,12 @@ async def list_open_opportunities(
     india_only: bool = True,
     limit: Optional[int] = None,
     profile: Optional[UserOpportunityProfileIn] = None,
+    offset: int = 0,
 ) -> List[OpportunityOut]:
-    """Return strictly verified open opportunities matching the /opportunities/open route."""
+    """Return strictly verified open opportunities matching the /opportunities/open route.
+
+    ``offset`` skips rows of the filtered, ranked list (stable order), then ``limit`` truncates.
+    """
     from backend.services.radar_quality import refine_listings, profile_country_of, recommendation_rank_key
     from backend.models_radar import EligibilityClassification
 
@@ -1340,7 +1344,8 @@ async def list_open_opportunities(
     enriched = [_enrich_opportunity(item, profile) for item in refined]
     enriched = [o for o in enriched if o.eligibility_classification != EligibilityClassification.INELIGIBLE]
     enriched.sort(key=lambda o: recommendation_rank_key(o, profile, profile_country))
-    return enriched[:limit] if limit is not None else enriched
+    offset = max(offset, 0)
+    return enriched[offset:offset + limit] if limit is not None else enriched[offset:]
 
 
 async def get_radar_overview_stats(user_id: str, india_only: bool = False) -> Dict[str, Any]:
