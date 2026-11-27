@@ -267,6 +267,7 @@ def allocate_task_slots(
     existing_scheduled_map: Optional[Dict[int, Dict[str, Any]]] = None,
     not_before: Optional[datetime | str] = None,
     tz_name: Optional[str] = None,
+    now: Optional[datetime | str] = None,
 ) -> Dict[str, Any]:
     """Deterministically allocate tasks into available time windows.
 
@@ -325,6 +326,9 @@ def allocate_task_slots(
 
     remaining_tasks = list(tasks)
     floor = _ensure_utc(not_before) if not_before is not None else None
+    if now is not None:
+        now_floor = ceil_to_quarter_hour(now)
+        floor = max(floor, now_floor) if floor is not None else now_floor
     free_blocks: List[List[datetime]] = []
     for w in available_windows:
         w_start = max(w.start, floor) if floor else w.start
@@ -379,6 +383,8 @@ def allocate_task_slots(
         for i, block in enumerate(free_blocks):
             b_start, b_end = block[0], block[1]
             slot_start = max(b_start, earliest_allowed_start)
+            if floor is not None:
+                slot_start = max(slot_start, floor)
             slot_end = slot_start + needed_delta
 
             if slot_end > b_end:
@@ -388,10 +394,11 @@ def allocate_task_slots(
                 earliest_candidate_start = slot_start
 
             if due_limit and slot_end > due_limit:
+                raw_due = task.get("due_date") if task.get("due_date") is not None else task.get("deadline")
                 conflicts.append({
                     "task_id": task.get("id"),
                     "title": task.get("title"),
-                    "due_date": str(task.get("due_date")),
+                    "due_date": str(raw_due) if raw_due is not None else None,
                     "earliest_available": slot_start.isoformat(),
                     "issue": "Cannot be scheduled before deadline with current calendar load.",
                 })
@@ -427,12 +434,13 @@ def allocate_task_slots(
             break
 
         if not placed:
+            raw_due = task.get("due_date") if task.get("due_date") is not None else task.get("deadline")
             if due_limit:
                 if not any(c.get("task_id") == task.get("id") for c in conflicts):
                     conflicts.append({
                         "task_id": task.get("id"),
                         "title": task.get("title"),
-                        "due_date": str(task.get("due_date")),
+                        "due_date": str(raw_due) if raw_due is not None else None,
                         "earliest_available": earliest_candidate_start.isoformat() if earliest_candidate_start else None,
                         "issue": "Cannot be scheduled before deadline with current calendar load.",
                     })
@@ -441,7 +449,7 @@ def allocate_task_slots(
                     "title": task.get("title"),
                     "priority": task.get("priority", "medium"),
                     "duration_minutes": duration_min,
-                    "due_date": str(task.get("due_date")) if task.get("due_date") else None,
+                    "due_date": str(raw_due) if raw_due is not None else None,
                     "reason": "Cannot be scheduled before deadline with current calendar load.",
                 })
             else:
@@ -450,19 +458,63 @@ def allocate_task_slots(
                     "title": task.get("title"),
                     "priority": task.get("priority", "medium"),
                     "duration_minutes": duration_min,
-                    "due_date": str(task.get("due_date")) if task.get("due_date") else None,
+                    "due_date": str(raw_due) if raw_due is not None else None,
                     "reason": "Insufficient free time windows within working hours or before deadline.",
                 })
 
-    deadline_summary = (
-        "1 task could not be placed before its deadline"
-        if len(conflicts) == 1
-        else f"{len(conflicts)} tasks could not be placed before their deadlines"
-    )
-    summary_text = (
-        f"Scheduled {len(scheduled)} tasks successfully ({len(unassigned)} unassigned, "
-        f"{deadline_summary})."
-    )
+    # De-duplicate unassigned and conflicts by task_id; exclude already scheduled tasks
+    scheduled_ids = {s["task_id"] for s in scheduled if s.get("task_id") is not None}
+    deduped_unassigned: List[Dict[str, Any]] = []
+    seen_unassigned: set = set()
+    for u in unassigned:
+        t_id = u.get("task_id")
+        if t_id is not None:
+            if t_id in scheduled_ids or t_id in seen_unassigned:
+                continue
+            seen_unassigned.add(t_id)
+        deduped_unassigned.append(u)
+    unassigned = deduped_unassigned
+
+    deduped_conflicts: List[Dict[str, Any]] = []
+    seen_conflicts: set = set()
+    for c in conflicts:
+        t_id = c.get("task_id")
+        if t_id is not None:
+            if t_id in scheduled_ids or t_id in seen_conflicts:
+                continue
+            seen_conflicts.add(t_id)
+        deduped_conflicts.append(c)
+    conflicts = deduped_conflicts
+
+    n_sched = len(scheduled)
+    n_unplaced = len(unassigned)
+    if n_unplaced == 0:
+        summary_text = f"Scheduled {n_sched} tasks successfully."
+    else:
+        n_conf = len(conflicts)
+        if n_conf == n_unplaced:
+            dl_text = (
+                "1 task could not be placed before its deadline"
+                if n_conf == 1
+                else f"{n_conf} tasks could not be placed before their deadlines"
+            )
+            summary_text = (
+                f"Scheduled {n_sched} tasks successfully "
+                f"({n_unplaced} not placed: {dl_text})."
+            )
+        elif n_conf == 0:
+            summary_text = f"Scheduled {n_sched} tasks successfully ({n_unplaced} not placed)."
+        else:
+            other_cnt = n_unplaced - n_conf
+            dl_text = (
+                "1 before deadline"
+                if n_conf == 1
+                else f"{n_conf} before deadline"
+            )
+            summary_text = (
+                f"Scheduled {n_sched} tasks successfully "
+                f"({n_unplaced} not placed: {dl_text}, {other_cnt} unassigned)."
+            )
 
     return {
         "scheduled": scheduled,
