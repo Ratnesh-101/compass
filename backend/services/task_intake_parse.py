@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 from backend.services.task_intent import title_problem
 
@@ -51,6 +51,45 @@ class IntakeItem:
     due_text: str
     project: Optional[str] = None
     notes: Optional[str] = None
+    due_time: Optional[str] = None
+
+
+def extract_item_due_time(item: Any) -> Optional[str]:
+    """Extract a 24-hour HH:MM time string from an intake item or dict, or None if not stated."""
+    if not item:
+        return None
+    for key in ("due_time", "time"):
+        raw = item.get(key) if isinstance(item, dict) else getattr(item, key, None)
+        if raw:
+            s = str(raw).strip()
+            m = re.match(r"^(\d{1,2}):(\d{2})$", s)
+            if m:
+                hh, mm = int(m.group(1)), int(m.group(2))
+                if 0 <= hh < 24 and 0 <= mm < 60:
+                    return f"{hh:02d}:{mm:02d}"
+            t24, _, _, _ = _extract_embedded_time(s)
+            if t24:
+                return t24
+            from backend.router_helpers import _parse_time
+
+            t24_p, _ = _parse_time(s.lower())
+            if t24_p:
+                return t24_p
+
+    from backend.router_helpers import _parse_time
+
+    for key in ("notes", "due_label", "card_text", "due_text"):
+        raw = item.get(key) if isinstance(item, dict) else getattr(item, key, None)
+        if raw and isinstance(raw, str):
+            s = raw.strip()
+            t24, _, _, _ = _extract_embedded_time(s)
+            if t24:
+                return t24
+            t24_p, _ = _parse_time(s.lower())
+            if t24_p:
+                return t24_p
+
+    return None
 
 
 @dataclass(frozen=True)
@@ -227,16 +266,19 @@ def _item_from_cells(cells: list[str], mapping: dict[int, str]) -> Optional[Inta
     priority = _PRIORITY_WORDS.get(prio_raw) or paren_priority or "medium"
     due_raw = fields.get("due", "").strip()
     due_text, notes = due_raw, None
+    due_time = None
     if due_raw:
         t24, t12, leader, _ = _extract_embedded_time(due_raw)
         if t24 and t12:
             notes = f"by {t12}"
+            due_time = t24
             # Keep original label format for rows that already produced a label; never reformat it
             due_text = due_raw
         else:
             t24_t, t12_t, _, raw_match = _extract_embedded_time(clean_title)
             if t24_t and t12_t:
                 notes = f"by {t12_t}"
+                due_time = t24_t
                 due_text = f"{due_raw}, {t12_t}"
                 if raw_match and raw_match in title:
                     title = title.replace(raw_match, "").strip(" -–—@,:()")
@@ -245,6 +287,7 @@ def _item_from_cells(cells: list[str], mapping: dict[int, str]) -> Optional[Inta
         t24_t, t12_t, leader_t, raw_match = _extract_embedded_time(clean_title)
         if t24_t and t12_t:
             notes = f"by {t12_t}"
+            due_time = t24_t
             if leader_t in _DATE_WORDS:
                 norm_lead = "tomorrow" if leader_t == "tmrw" else leader_t
                 due_text = f"{norm_lead} {t12_t}"
@@ -260,6 +303,7 @@ def _item_from_cells(cells: list[str], mapping: dict[int, str]) -> Optional[Inta
         duration_minutes=_parse_duration(fields.get("duration", "")),
         due_text=due_text,
         notes=notes,
+        due_time=due_time,
     )
 
 
@@ -299,6 +343,7 @@ def _parse_bullets(message: str, lines: list[str]) -> Optional[ParsedIntake]:
         item_domain = paren_domain or _normalize_domain(clean_text)
         item_priority = paren_priority or "medium"
         title, due_text, notes = clean_text, "", None
+        due_time = None
 
         delimiters = list(_BULLET_DUE_SPLIT.finditer(clean_text))
         bullet_cand = clean_text[delimiters[-1].end():].rstrip(") ").strip() if delimiters else ""
@@ -307,11 +352,13 @@ def _parse_bullets(message: str, lines: list[str]) -> Optional[ParsedIntake]:
             t24, t12, _, _ = _extract_embedded_time(due_text)
             if t24 and t12:
                 notes = f"by {t12}"
+                due_time = t24
         else:
             # Check embedded time
             t24, t12, leader, raw_match = _extract_embedded_time(clean_text)
             if t24 and t12:
                 notes = f"by {t12}"
+                due_time = t24
                 if leader in _DATE_WORDS:
                     norm_leader = "tomorrow" if leader == "tmrw" else leader
                     due_text = f"{norm_leader} {t12}"
@@ -330,7 +377,7 @@ def _parse_bullets(message: str, lines: list[str]) -> Optional[ParsedIntake]:
         if title_problem(title):
             skipped.append(text[:80])
             continue
-        items.append(IntakeItem(title=title, domain=item_domain, priority=item_priority, duration_minutes=None, due_text=due_text, notes=notes))
+        items.append(IntakeItem(title=title, domain=item_domain, priority=item_priority, duration_minutes=None, due_text=due_text, notes=notes, due_time=due_time))
     return ParsedIntake(tuple(items), len(bullets), tuple(skipped)) if items else None
 
 
