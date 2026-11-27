@@ -19,7 +19,13 @@ from typing import Any, AsyncGenerator, Dict, List, Literal, Optional, Union
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field, field_validator
 
-from backend.agents.feasibility_format import describe_tasks, format_triage_markdown, task_duration_hours
+from backend.agents.feasibility_format import (
+    describe_tasks,
+    estimate_entries,
+    format_triage_markdown,
+    task_duration_hours,
+    task_has_length,
+)
 from backend.config import get_settings
 from backend.memory import structured
 from backend.services.usage import record_usage
@@ -107,6 +113,7 @@ class TriagePlan(BaseModel):
     rounds_used: int = 0
     narrative: str = ""
     degraded: bool = False  # True when produced by the offline fallback
+    default_duration_titles: List[str] = Field(default_factory=list)  # "Title (Nh)" for tasks using an estimate
 
     def kept_hours(self) -> float:
         return round(sum(t.estimated_hours for t in self.keep), 2)
@@ -292,6 +299,14 @@ async def _call_model(
 # Deterministic fallbacks — these are why the demo cannot crash
 # ---------------------------------------------------------------------------
 
+def _heuristic_hours(t: Dict[str, Any]) -> float:
+    """Stored length when set, else the priority/domain estimate."""
+    if task_has_length(t):
+        return task_duration_hours(t)
+    base = _PRIORITY_HOURS.get(str(t.get("priority") or "medium"), 2.0)
+    return round(min(max(base * _DOMAIN_MULTIPLIER.get(str(t.get("domain")), 1.0), 0.25), 40.0), 2)
+
+
 def _heuristic_proposal(tasks: List[Dict[str, Any]]) -> PlannerProposal:
     loads: List[TaskLoad] = []
     for t in tasks:
@@ -302,8 +317,8 @@ def _heuristic_proposal(tasks: List[Dict[str, Any]]) -> PlannerProposal:
                 domain=str(t.get("domain") or "general"),
                 priority=str(t.get("priority") or "medium"),
                 due_date=_iso(t.get("due_date")),
-                estimated_hours=task_duration_hours(t),
-                rationale="stored duration estimate" if t.get("duration_minutes") else "default estimate (2.0h)",
+                estimated_hours=_heuristic_hours(t),
+                rationale=("stored duration" if task_has_length(t) else "estimated from priority and domain"),
             )
         )
     loads.sort(key=lambda x: (x.due_date or "9999-12-31",
@@ -399,6 +414,7 @@ def _sse(step_type: str, content: str, *, step: int, t0: float,
 
 
 def _sync_real_durations(loads: List[TaskLoad], tasks: List[Dict[str, Any]]) -> None:
+    """Force each load to the task's stored length when set; otherwise keep the planner's estimate."""
     task_map = {t.get("id"): t for t in tasks if t.get("id") is not None}
     title_map = {str(t.get("title") or "").strip().lower(): t for t in tasks}
     for load in loads:
@@ -413,19 +429,13 @@ def _sync_real_durations(loads: List[TaskLoad], tasks: List[Dict[str, Any]]) -> 
         if orig is None and load.title:
             orig = title_map.get(str(load.title).strip().lower())
         if orig is not None:
-            dm = orig.get("duration_minutes")
-            if dm is not None:
+            if orig.get("id") is not None:
                 try:
-                    val = float(dm)
-                    if val > 0:
-                        load.estimated_hours = round(val / 60.0, 2)
-                        if orig.get("id") is not None:
-                            try:
-                                load.task_id = int(orig["id"])
-                            except (TypeError, ValueError):
-                                pass
+                    load.task_id = int(orig["id"])
                 except (TypeError, ValueError):
                     pass
+            if task_has_length(orig):
+                load.estimated_hours = task_duration_hours(orig)
 
 
 async def _fetch_open_tasks(
@@ -483,12 +493,7 @@ async def run_feasibility_review(
         if tasks:
             saved_hours = round(sum(task_duration_hours(t) for t in tasks), 2)
             narrative += f" Your saved open tasks add up to {saved_hours:g}h separately."
-        empty = TriagePlan(
-            keep=[], defer=[], drop=[],
-            verdict=verdict,
-            rounds_used=0,
-            narrative=narrative,
-        )
+        empty = TriagePlan(keep=[], defer=[], drop=[], verdict=verdict, rounds_used=0, narrative=narrative)
         yield _sse("done", narrative, step=step, t0=t0,
                    triage_plan=empty.model_dump(), artifact_markdown=empty.as_markdown())
         return
@@ -501,12 +506,7 @@ async def run_feasibility_review(
             f"At {hours_per_day:g} hours a day for {days} days you would have {capacity:g} hours "
             f"of focused time. Tell me your tasks, or add them in the Timeline, and I will check whether they fit."
         )
-        empty = TriagePlan(
-            keep=[], defer=[], drop=[],
-            verdict=verdict,
-            rounds_used=0,
-            narrative=narrative,
-        )
+        empty = TriagePlan(keep=[], defer=[], drop=[], verdict=verdict, rounds_used=0, narrative=narrative)
         yield _sse("done", "No open tasks to assess.", step=step, t0=t0,
                    triage_plan=empty.model_dump(), artifact_markdown=empty.as_markdown())
         return
@@ -594,6 +594,7 @@ async def run_feasibility_review(
             keep=proposal.loads, defer=[], drop=[], verdict=verdict, rounds_used=1,
             narrative="The plan fits within effective capacity. No cuts required.",
             degraded=degraded,
+            default_duration_titles=estimate_entries(tasks, proposal.loads, _heuristic_hours),
         )
         step += 1
         yield _sse("done", "Plan accepted on the first round.", step=step, t0=t0,
@@ -651,6 +652,7 @@ async def run_feasibility_review(
     final_verdict = _arithmetic_verdict(demand, capacity)
     final_verdict.challenged_estimates = verdict.challenged_estimates
     revised_plan.verdict = final_verdict
+    revised_plan.default_duration_titles = estimate_entries(tasks, proposal.loads, _heuristic_hours)
 
     step += 1
     yield _sse("verdict",

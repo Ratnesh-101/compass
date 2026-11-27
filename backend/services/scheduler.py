@@ -15,6 +15,9 @@ import logging
 import sys
 from pathlib import Path
 
+# Scheduler-only length for a task saved without one (feasibility uses the planner's estimate).
+DEFAULT_TASK_MINUTES = 60
+
 # Ensure project root is available when executed directly
 _root = Path(__file__).resolve().parent.parent.parent
 if str(_root) not in sys.path:
@@ -252,7 +255,7 @@ def sort_tasks_for_scheduling(
         dl_moment = due_dt if due_dt is not None else datetime.max.replace(tzinfo=timezone.utc)
         prio = str(t.get("priority", "medium")).lower()
         prio_rank = -PRIORITY_WEIGHTS.get(prio, 2)
-        duration = int(t.get("duration_minutes") or 60)
+        duration = int(t.get("duration_minutes") or DEFAULT_TASK_MINUTES)
         return (has_dl, dl_moment, prio_rank, duration, _id_sort_key(t.get("id")))
 
     return sorted(tasks, key=task_sort_key)
@@ -353,7 +356,7 @@ def allocate_task_slots(
                     "task_id": t.get("id"),
                     "title": t.get("title"),
                     "priority": t.get("priority", "medium"),
-                    "duration_minutes": int(t.get("duration_minutes") or 60),
+                    "duration_minutes": int(t.get("duration_minutes") or DEFAULT_TASK_MINUTES),
                     "due_date": str(t.get("due_date")) if t.get("due_date") else None,
                     "reason": "Prerequisite dependencies not satisfied or could not be scheduled.",
                 })
@@ -362,7 +365,7 @@ def allocate_task_slots(
         task = sort_tasks_for_scheduling(ready_tasks, now=floor, tz_name=tz_name)[0]
         remaining_tasks.remove(task)
 
-        duration_min = int(task.get("duration_minutes") or 60)
+        duration_min = int(task.get("duration_minutes") or DEFAULT_TASK_MINUTES)
         needed_delta = timedelta(minutes=duration_min)
 
         due_limit = normalize_task_deadline(
