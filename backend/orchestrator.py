@@ -344,6 +344,9 @@ async def _handle_message_core(
                     elif act_type and ("complete_task" in act_type or "reschedule_task" in act_type):
                         from backend.services.chat_task_actions import execute_pending_task_action
                         intake_result = await execute_pending_task_action(conn, active_action, owner_identity, message)
+                    elif act_type and "edit_last_task" in act_type:
+                        from backend.services.chat_followup_edit import execute_pending_edit_last_task
+                        intake_result = await execute_pending_edit_last_task(conn, active_action, owner_identity, message)
 
         if intake_result is not None:
             resp_msg, ret_data, success = intake_result
