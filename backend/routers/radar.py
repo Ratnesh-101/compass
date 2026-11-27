@@ -11,7 +11,7 @@ import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from backend.dependencies import Identity, _get_or_create_user_id, _get_current_identity, rate_limit, require_identity
 from backend.memory.radar import (
@@ -233,22 +233,30 @@ async def recommended_for_user(
 @router.get("/open", response_model=List[OpportunityOut])
 async def get_open_confirmed_opportunities(
     request: Request,
+    response: Response,
     limit: int = Query(300, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     category: Optional[str] = Query(None),
     employer_type: Optional[str] = Query(None),
     work_arrangement: Optional[str] = Query(None),
     india_only: bool = Query(True),
 ):
-    """Return strictly verified open opportunities across all employer types."""
+    """Return strictly verified open opportunities across all employer types.
+
+    The body stays a bare list; the filtered total is in the X-Total-Count header.
+    """
     user_id = _get_or_create_user_id(request)
-    return await list_open_opportunities(
+    # One ranked, filtered list (candidate cap 1000); page slice and total come from it.
+    ranked = await list_open_opportunities(
         user_id=user_id,
         category=category,
         employer_type=employer_type,
         work_arrangement=work_arrangement,
         india_only=india_only,
-        limit=limit,
+        limit=1000,
     )
+    response.headers["X-Total-Count"] = str(len(ranked))
+    return ranked[offset:offset + limit]
 
 
 @router.get("/upcoming", response_model=List[OpportunityOut])

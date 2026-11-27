@@ -65,6 +65,7 @@ export async function fetchOpenOpportunities(filters = {}) {
   await ensureSession()
   const params = new URLSearchParams()
   params.set('limit', '500')
+  params.set('offset', String(filters.offset || 0))
   if (filters.category) params.set('category', filters.category)
   if (filters.employer_type) params.set('employer_type', filters.employer_type)
   if (filters.work_arrangement) params.set('work_arrangement', filters.work_arrangement)
@@ -75,7 +76,11 @@ export async function fetchOpenOpportunities(filters = {}) {
     credentials: 'include',
   })
   if (!res.ok) throw new Error(`Failed to fetch open opportunities: HTTP ${res.status}`)
-  return res.json()
+  const items = await res.json()
+  const total = Number(res.headers?.get?.('X-Total-Count'))
+  // Bare list stays the return value; the filtered total (when exposed) rides along as a property.
+  items.total = Number.isFinite(total) && total > 0 ? total : null
+  return items
 }
 
 export async function fetchSourceInventory() {
