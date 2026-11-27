@@ -30,8 +30,8 @@ from backend.agent_types import (
     _build_agent_system_prompt, _clean_synthesis_text, _extract_content_from_response,
 )
 from backend.agents.schedule_deterministic import (
-    build_deterministic_schedule_table, extract_schedule_target_date,
-    fetch_real_tasks_for_schedule, find_pending_agent_run,
+    build_deterministic_schedule_table, drop_contradicting_sentences,
+    extract_schedule_target_date, fetch_real_tasks_for_schedule, find_pending_agent_run,
     handle_agent_schedule_synthesis, patch_schedule_answer, scrub_internal_agent_text,
 )
 from backend.config import get_settings
@@ -693,4 +693,5 @@ __all__ = [
     "scrub_internal_agent_text", "patch_schedule_answer", "fetch_real_tasks_for_schedule",
     "build_deterministic_schedule_table", "extract_schedule_target_date",
     "find_pending_agent_run", "handle_agent_schedule_synthesis",
+    "drop_contradicting_sentences",
 ]
