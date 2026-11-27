@@ -1332,14 +1332,15 @@ async def list_open_opportunities(
         work_arrangement=work_arrangement,
         india_only=india_only,
         page=1,
-        page_size=limit if limit is not None else 500,
+        # Over-fetch: refinement/eligibility drop rows, so truncate only afterwards.
+        page_size=min(max((limit or 0) * 2, 600), 1000),
     )
     profile_country = profile_country_of(profile)
     refined = refine_listings(raw_items, profile_country, country_filter=india_only)
     enriched = [_enrich_opportunity(item, profile) for item in refined]
     enriched = [o for o in enriched if o.eligibility_classification != EligibilityClassification.INELIGIBLE]
     enriched.sort(key=lambda o: recommendation_rank_key(o, profile, profile_country))
-    return enriched
+    return enriched[:limit] if limit is not None else enriched
 
 
 async def get_radar_overview_stats(user_id: str, india_only: bool = False) -> Dict[str, Any]:
