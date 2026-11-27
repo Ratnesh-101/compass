@@ -5,6 +5,7 @@ Dispatches user messages to skills via native OpenAI function calling.
 Probed and verified on Nebius Token Factory with nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B.
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -177,7 +178,46 @@ async def _prose_task_items(message: str) -> list[dict]:
     return [asdict(i) for i in items]
 
 
+def _timeout_task_route(message: str) -> Optional[Tuple[str, dict[str, Any], str]]:
+    """Deterministic add-task route for a short, non-question message that carries a date/time (used when the model times out)."""
+    text = (message or "").strip()
+    if not text or "?" in text or len(text.split()) > 14 or is_greeting_intent(text):
+        return None
+    args = _extract_task_creation_args(text)
+    if not args.get("due_date"):
+        return None
+    args["title"] = args.get("title") or text
+    return "add_task", args, ""
+
+ROUTER_PREPASS_BUDGET_S = 15.0
+
+
 async def route_message(
+    message: str,
+    history: Optional[list[dict[str, str]]] = None,
+    memory_context: Optional[str] = None,
+    target_message_id: Optional[str] = None,
+    target_message_content: Optional[str] = None,
+    pool: Optional[Any] = None,
+    user_id: Optional[str] = None,
+    tone: Optional[str] = None,
+) -> Tuple[Optional[str], Optional[dict[str, Any]], str]:
+    """Route with a hard time budget; on timeout use the deterministic route so add-task messages still get a card."""
+    try:
+        return await asyncio.wait_for(
+            _route_message_inner(
+                message, history, memory_context, target_message_id, target_message_content, pool, user_id, tone,
+            ),
+            ROUTER_PREPASS_BUDGET_S,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("router_prepass_timeout stage=route_message budget_s=%s; using deterministic route", ROUTER_PREPASS_BUDGET_S)
+        if is_task_mutation_request(message) or is_explicit_task_creation(message):
+            return "add_task", _extract_task_creation_args(message), ""
+        return _timeout_task_route(message) or _fallback_route(message, history, tone=tone)
+
+
+async def _route_message_inner(
     message: str,
     history: Optional[list[dict[str, str]]] = None,
     memory_context: Optional[str] = None,
