@@ -135,7 +135,9 @@ async def handle_propose_schedule(args: Dict[str, Any], pool: Any) -> Dict[str, 
         return _NO_CALLER_RESULT
     scoped_owner = scope_owner(user_id)
     all_tenants = scoped_owner is None  # admin identity is intentionally unscoped (caller already checked)
-    tz_name = resolve_timezone_name(args.get("timezone"))
+    from backend.services.task_time import request_timezone
+
+    tz_name = resolve_timezone_name(args.get("timezone") or request_timezone.get())
     zone = resolve_zone(tz_name)
 
     include_demo = bool(args.get("include_demo", False))
