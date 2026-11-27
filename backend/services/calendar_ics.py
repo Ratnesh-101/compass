@@ -82,35 +82,37 @@ def _task_time_fields(t: Dict[str, Any]) -> Optional[List[str]]:
             end_dt = start_dt + timedelta(minutes=DEFAULT_EVENT_MINUTES)
         return [f"DTSTART:{_format_ics_dt(start_dt)}", f"DTEND:{_format_ics_dt(end_dt)}"]
     due = date_only_value(t.get("due_date"))
-    if due is None:
-        return None
-    nxt = due + timedelta(days=1)
-    return [
-        f"DTSTART;VALUE=DATE:{due.strftime('%Y%m%d')}",
-        f"DTEND;VALUE=DATE:{nxt.strftime('%Y%m%d')}",
-    ]
+    if due is not None:
+        nxt = due + timedelta(days=1)
+        return [
+            f"DTSTART;VALUE=DATE:{due.strftime('%Y%m%d')}",
+            f"DTEND;VALUE=DATE:{nxt.strftime('%Y%m%d')}",
+        ]
+    due_at = t.get("due_at")
+    if due_at:
+        try:
+            start_dt = _ensure_utc(due_at)
+            end_dt = start_dt + timedelta(minutes=DEFAULT_EVENT_MINUTES)
+            return [f"DTSTART:{_format_ics_dt(start_dt)}", f"DTEND:{_format_ics_dt(end_dt)}"]
+        except Exception:
+            return None
+    return None
 
 
 def generate_ics_feed(
     tasks: Sequence[Dict[str, Any]],
     calendar_name: str = "Compass Focus Schedule",
+    skipped_count: int = 0,
 ) -> str:
     """Generate RFC 5545 compliant iCalendar string for calendar export."""
     now_stamp = _format_ics_dt(datetime.now(timezone.utc))
 
-    lines = [
-        "BEGIN:VCALENDAR",
-        "VERSION:2.0",
-        "PRODID:-//Compass Autonomous Agent//Dynamic Scheduler 2.0//EN",
-        "CALSCALE:GREGORIAN",
-        "METHOD:PUBLISH",
-        f"X-WR-CALNAME:{escape_ics_text(calendar_name)}",
-        "X-WR-TIMEZONE:UTC",
-    ]
-
+    event_blocks: List[List[str]] = []
+    local_skipped = 0
     for t in tasks:
         time_lines = _task_time_fields(t)
         if time_lines is None:
+            local_skipped += 1
             continue
 
         task_id = t.get("id") or uuid.uuid4().hex[:8]
@@ -122,9 +124,13 @@ def generate_ics_feed(
         if notes:
             desc += f"\nNotes: {notes}"
 
-        lines.extend(["BEGIN:VEVENT", f"UID:compass-task-{task_id}@compass.ai", f"DTSTAMP:{now_stamp}"])
-        lines.extend(time_lines)
-        lines.extend([
+        event_lines = [
+            "BEGIN:VEVENT",
+            f"UID:compass-task-{task_id}@compass.ai",
+            f"DTSTAMP:{now_stamp}",
+        ]
+        event_lines.extend(time_lines)
+        event_lines.extend([
             f"SUMMARY:[{escape_ics_text(domain.upper())}] {title}",
             f"DESCRIPTION:{escape_ics_text(desc)}",
             "STATUS:CONFIRMED",
@@ -132,6 +138,25 @@ def generate_ics_feed(
             "TRANSP:OPAQUE",
             "END:VEVENT",
         ])
+        event_blocks.append(event_lines)
+
+    event_count = len(event_blocks)
+    total_skipped = skipped_count + local_skipped
+    desc_text = f"{event_count} events, {total_skipped} tasks without a date were not exported"
+
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Compass Autonomous Agent//Dynamic Scheduler 2.0//EN",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+        f"X-WR-CALNAME:{escape_ics_text(calendar_name)}",
+        f"X-WR-CALDESC:{escape_ics_text(desc_text)}",
+        "X-WR-TIMEZONE:UTC",
+    ]
+
+    for block in event_blocks:
+        lines.extend(block)
 
     lines.append("END:VCALENDAR")
     return "\r\n".join(fold_ics_line(ln) for ln in lines) + "\r\n"

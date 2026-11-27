@@ -1,6 +1,6 @@
 // Calendar & Dynamic Scheduling API
 
-import { API_BASE, getAuthHeaders, getCurrentUserId, setCurrentUserId, safeHref, fetchWithTimeout } from './baseClient.js'
+import { API_BASE, getAuthHeaders, getCurrentUserId, setCurrentUserId, safeHref, fetchWithTimeout, downloadAuthedFile } from './baseClient.js'
 import { getUserTimeZone } from '../utils/userTimezone.js'
 import { classifyAuthMe } from '../utils/firstRun.js'
 import { commitErrorText } from '../utils/scheduleHonesty.js'
@@ -229,6 +229,10 @@ export function getCalendarExportUrl(domain) {
   if (domain && domain !== 'all') params.append('domain', domain)
   const qs = params.toString()
   return safeHref(qs ? `${API_BASE}/api/calendar/export.ics?${qs}` : `${API_BASE}/api/calendar/export.ics`)
+}
+
+export async function exportCalendarIcs(domain, options = { minEvents: 1 }) {
+  return await downloadAuthedFile(getCalendarExportUrl(domain), 'compass_schedule.ics', options)
 }
 
 

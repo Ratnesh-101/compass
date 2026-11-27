@@ -360,7 +360,7 @@ export default function CalendarView({
     setExportingIcs(true)
     try {
       const url = getCalendarExportUrl(activeDomain)
-      await downloadAuthedFile(url, 'compass_schedule.ics')
+      await downloadAuthedFile(url, 'compass_schedule.ics', { minEvents: 1 })
     } catch (err) {
       setBannerMessage({ type: 'error', text: err.message || 'Failed to export calendar feed.' })
     } finally {
