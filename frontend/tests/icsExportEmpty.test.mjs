@@ -19,7 +19,7 @@ test('error text "Nothing to export yet" exists', () => {
 
 test('CalendarView export handler passes { minEvents: 1 }', () => {
   const src = read('components/CalendarView.jsx')
-  assert.match(src, /downloadAuthedFile\([^)]*\{\s*minEvents:\s*1\s*\}\s*\)/)
+  assert.match(src, /downloadAuthedFile\([^\n]*\{\s*minEvents:\s*1\s*\}\s*\)/)
 })
 
 test('IcsExportModal button passes { minEvents: 1 }', () => {

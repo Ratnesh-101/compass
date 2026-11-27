@@ -39,6 +39,7 @@ import { ProposedPlanModal, QuickConnectModal, IcsExportModal } from './calendar
 import DarkModeToggle from './DarkModeToggle'
 import { syncResultBanner, syncErrorBanner, commitResultBanner, reactiveResultBanner, availabilityNote } from '../utils/scheduleHonesty'
 import { getUserTimeZone, zonedDateKey, zonedMinutes, workingWindowLabel } from '../utils/userTimezone'
+import { summarizeIcsExport } from '../utils/icsExport'
 
 const DOMAIN_STYLES = {
   hackathon: {
@@ -253,11 +254,11 @@ export default function CalendarView({
 
   // Filter unplaced / unscheduled tasks
   const unscheduledTasks = tasks.filter(t => {
-    const isUnplaced = !t.scheduled_start
-    const matchesDomain = activeDomain === 'all' || t.domain === activeDomain
-    const isOpen = (t.status || 'open') !== 'done'
-    return isUnplaced && matchesDomain && isOpen
+    const s = String(t.status || 'open').toLowerCase().trim()
+    return !t.scheduled_start && (activeDomain === 'all' || t.domain === activeDomain) && s !== 'done' && s !== 'completed' && s !== 'cancelled'
   })
+  const dueTasks = unscheduledTasks.filter(t => Boolean(t.due_date || t.due_at))
+  const undatedTasks = unscheduledTasks.filter(t => !t.due_date && !t.due_at)
 
   // All scheduled tasks, for agenda view + mini-calendar dot markers
   const allScheduledTasks = useMemo(
@@ -357,10 +358,17 @@ export default function CalendarView({
   const [exportingIcs, setExportingIcs] = useState(false)
   const handleExportIcs = async () => {
     if (exportingIcs) return
+    const { exportable, undated } = summarizeIcsExport(tasks, activeDomain)
+    if (exportable === 0) {
+      setBannerMessage({ type: 'error', text: undated > 0 ? `Nothing to export yet: your ${undated} open tasks have no due date or time slot. Use Auto-schedule to give them a time, then export again.` : 'Nothing to export yet: you have no open tasks with a date or time.' })
+      setShowMoreMenu(false)
+      return
+    }
     setExportingIcs(true)
     try {
-      const url = getCalendarExportUrl(activeDomain)
-      await downloadAuthedFile(url, 'compass_schedule.ics', { minEvents: 1 })
+      await downloadAuthedFile(getCalendarExportUrl(activeDomain), 'compass_schedule.ics', { minEvents: 1 })
+      const extra = undated > 0 ? ` ${undated} tasks with no date or time slot were left out.` : ''
+      setBannerMessage({ type: 'success', text: `Exported ${exportable} tasks.${extra}` })
     } catch (err) {
       setBannerMessage({ type: 'error', text: err.message || 'Failed to export calendar feed.' })
     } finally {
@@ -718,47 +726,51 @@ export default function CalendarView({
               <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Unscheduled</span>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
-              {unscheduledTasks.map(task => {
-                const s = getCalendarDomainStyle(task.domain)
-                return (
-                  <div key={task.id} style={{ padding: '12px 14px', borderRadius: 'var(--radius-card, 8px)', background: 'var(--bg-card)', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <span style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: '600' }}>{task.title}</span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: 'var(--text-primary)', fontWeight: '500' }}>
-                          <span className="domain-swatch" style={{ background: s.accent }} />
-                          <span>{task.domain}</span>
-                        </span>
-                        <button
-                          title="Delete task/deadline"
-                          onClick={async (e) => {
-                            e.stopPropagation()
-                            if (window.confirm(`Delete "${task.title}"?`)) {
-                              try {
-                                await deleteTask(task.id)
-                                if (onTasksUpdated) onTasksUpdated()
-                              } catch (err) {
-                                alert(`Failed to delete: ${err.message}`)
-                              }
-                            }
-                          }}
-                          style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px', borderRadius: 'var(--radius-btn, 6px)', display: 'flex', alignItems: 'center' }}
-                          onMouseEnter={e => e.currentTarget.style.color = 'var(--danger-text)'}
-                          onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
-                        ><Trash2 size={13} strokeWidth={1.8} /></button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '20px' }}>
+              {[
+                { title: 'Due, needs a time slot', items: dueTasks, isUndated: false },
+                { title: 'No deadline', items: undatedTasks, isUndated: true }
+              ].filter(g => g.items.length > 0).map(group => (
+                <div key={group.title} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <h4 style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', fontWeight: '600', margin: 0 }}>{group.title}</h4>
+                  {group.items.map(task => {
+                    const s = getCalendarDomainStyle(task.domain)
+                    return (
+                      <div key={task.id} style={{ padding: '12px 14px', borderRadius: 'var(--radius-card, 8px)', background: 'var(--bg-card)', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <span style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: '600' }}>{task.title}</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: 'var(--text-primary)', fontWeight: '500' }}>
+                              <span className="domain-swatch" style={{ background: s.accent }} />
+                              <span>{task.domain}</span>
+                            </span>
+                            <button
+                              title="Delete task/deadline"
+                              onClick={async (e) => {
+                                e.stopPropagation()
+                                if (window.confirm(`Delete "${task.title}"?`)) {
+                                  try { await deleteTask(task.id); if (onTasksUpdated) onTasksUpdated() } catch (err) { alert(`Failed to delete: ${err.message}`) }
+                                }
+                              }}
+                              style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px', borderRadius: 'var(--radius-btn, 6px)', display: 'flex', alignItems: 'center' }}
+                              onMouseEnter={e => e.currentTarget.style.color = 'var(--danger-text)'}
+                              onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
+                            ><Trash2 size={13} strokeWidth={1.8} /></button>
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
+                          <span style={{ fontSize: '12px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <Clock size={11} strokeWidth={1.8} />
+                            <span>{task.duration_minutes || 60}m · {task.priority || 'medium'}</span>
+                          </span>
+                          <span style={{ fontSize: '12px', color: 'var(--accent)', fontWeight: '600' }}>{group.isUndated ? 'No deadline' : (task.countdown || 'Needs slot')}</span>
+                        </div>
+                        {group.isUndated && <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px', lineHeight: '1.4' }}>Not on your calendar. Auto-schedule can find time for these.</div>}
                       </div>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
-                      <span style={{ fontSize: '12px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <Clock size={11} strokeWidth={1.8} />
-                        <span>{task.duration_minutes || 60}m · {task.priority || 'medium'}</span>
-                      </span>
-                      <span style={{ fontSize: '12px', color: 'var(--accent)', fontWeight: '600' }}>{task.countdown || 'Needs slot'}</span>
-                    </div>
-                  </div>
-                )
-              })}
+                    )
+                  })}
+                </div>
+              ))}
 
               {unscheduledTasks.length === 0 && (
                 <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-muted)', background: 'var(--bg-card-soft)', borderRadius: 'var(--radius-card, 8px)', border: '1px dashed var(--border)' }}>
@@ -799,6 +811,7 @@ export default function CalendarView({
         show={showIcsModal}
         onClose={() => setShowIcsModal(false)}
         activeDomain={activeDomain}
+        tasks={tasks}
       />
     </div>
   )

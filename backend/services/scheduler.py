@@ -405,6 +405,7 @@ def allocate_task_slots(
                 "duration_minutes": duration_min,
                 "scheduled_start": slot_start.isoformat(),
                 "scheduled_end": slot_end.isoformat(),
+                "has_deadline": due_limit is not None,
             })
 
             if tid is not None:
