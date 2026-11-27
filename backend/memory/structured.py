@@ -5,7 +5,7 @@ Provides CRUD operations and fuzzy project matching for PostgreSQL.
 Used by the router skills and API endpoints.
 """
 
-from datetime import date, datetime, time as dt_time
+from datetime import date, datetime, time as dt_time, timezone
 import logging
 from typing import Optional, Union, Any
 import asyncpg
@@ -193,7 +193,7 @@ async def get_task(conn: DbConn, task_id: int) -> Optional[dict]:
     """Retrieve a task by ID including project details."""
     row = await conn.fetchrow(
         """
-        SELECT t.id, t.domain, t.title, t.due_date, t.status, t.priority, t.notes, t.trusted_event_url,
+        SELECT t.id, t.domain, t.title, t.due_date, t.due_at, t.status, t.priority, t.notes, t.trusted_event_url,
                t.duration_minutes, t.scheduled_start, t.scheduled_end, t.is_fixed, t.recurrence_rule,
                t.created_at, t.updated_at, t.user_id,
                p.id AS project_id, p.name AS project_name
@@ -238,7 +238,7 @@ async def list_tasks(
     if all_tenants:
         user_id = None
     query = """
-        SELECT t.id, t.domain, t.title, t.due_date, t.status, t.priority, t.notes, t.trusted_event_url,
+        SELECT t.id, t.domain, t.title, t.due_date, t.due_at, t.status, t.priority, t.notes, t.trusted_event_url,
                t.duration_minutes, t.scheduled_start, t.scheduled_end, t.is_fixed, t.recurrence_rule,
                t.created_at, t.updated_at, t.user_id,
                p.id AS project_id, p.name AS project_name
@@ -277,19 +277,27 @@ async def list_tasks(
     return results
 
 
+_UNSET = object()
+
+
 async def update_task(
     conn: DbConn,
     task_id: int,
     owner_id: Optional[str] = None,
+    due_at: Any = _UNSET,
     **kwargs: Any
 ) -> Optional[dict]:
-    """Update task fields dynamically (e.g. status, priority, due_date, notes, scheduling) with normalization.
+    """Update task fields dynamically (e.g. status, priority, due_date, due_at, notes, scheduling) with normalization.
 
     When `owner_id` is given the UPDATE only matches a task owned by that user (case-insensitive).
     """
     allowed_fields = {"domain", "project_id", "title", "due_date", "status", "priority", "notes",
                       "duration_minutes", "scheduled_start", "scheduled_end", "is_fixed", "recurrence_rule", "trusted_event_url"}
     updates = {k: v for k, v in kwargs.items() if k in allowed_fields}
+    if due_at is not _UNSET:
+        updates["due_at"] = due_at
+    elif "due_at" in kwargs:
+        updates["due_at"] = kwargs["due_at"]
 
     if not updates:
         found = await get_task(conn, task_id)
@@ -311,6 +319,14 @@ async def update_task(
             updates["duration_minutes"] = int(updates["duration_minutes"])
         except (ValueError, TypeError):
             updates["duration_minutes"] = 60
+    if "due_at" in updates and updates["due_at"] is not None:
+        if isinstance(updates["due_at"], str):
+            try:
+                updates["due_at"] = datetime.fromisoformat(updates["due_at"])
+            except (ValueError, TypeError):
+                pass
+        if isinstance(updates["due_at"], datetime) and updates["due_at"].tzinfo is None:
+            updates["due_at"] = updates["due_at"].replace(tzinfo=timezone.utc)
 
     query = """
         UPDATE tasks
@@ -327,9 +343,10 @@ async def update_task(
             is_fixed = CASE WHEN $22::boolean THEN $23::boolean ELSE is_fixed END,
             recurrence_rule = CASE WHEN $24::boolean THEN $25::text ELSE recurrence_rule END,
             trusted_event_url = CASE WHEN $26::boolean THEN $27::text ELSE trusted_event_url END,
+            due_at = CASE WHEN $28::boolean THEN $29::timestamptz ELSE due_at END,
             updated_at = now()
         WHERE id = $1 AND deleted_at IS NULL
-          AND ($28::text IS NULL OR lower(user_id) = lower($28::text))
+          AND ($30::text IS NULL OR lower(user_id) = lower($30::text))
         RETURNING id
     """
     row = await conn.fetchrow(
@@ -361,6 +378,8 @@ async def update_task(
         updates.get("recurrence_rule"),
         "trusted_event_url" in updates,
         updates.get("trusted_event_url"),
+        "due_at" in updates,
+        updates.get("due_at"),
         owner_id,
     )
     if not row:

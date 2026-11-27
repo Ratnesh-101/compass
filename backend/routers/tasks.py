@@ -4,7 +4,7 @@ Compass — Task, Project, and Timeline Endpoints.
 
 import hmac
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -48,6 +48,22 @@ from backend.services.task_service import (
 )
 
 logger = logging.getLogger("compass.routers.tasks")
+
+
+def _format_due_at_utc(val: Any) -> Optional[str]:
+    """Serialize due_at as ISO string in UTC or null when absent."""
+    if not val:
+        return None
+    if isinstance(val, str):
+        try:
+            val = datetime.fromisoformat(val)
+        except Exception:
+            return val
+    if hasattr(val, "astimezone"):
+        return val.astimezone(timezone.utc).isoformat()
+    if hasattr(val, "isoformat"):
+        return val.isoformat()
+    return str(val)
 
 router = APIRouter(tags=["tasks"])
 settings = get_settings()
@@ -146,6 +162,7 @@ async def get_tasks(
                     project=TaskProjectRef(**r["project"]) if r.get("project") else None,
                     title=r["title"],
                     due_date=r["due_date"].isoformat() if hasattr(r["due_date"], "isoformat") and r["due_date"] else (str(r["due_date"]) if r["due_date"] else None),
+                    due_at=_format_due_at_utc(r.get("due_at")),
                     status=r["status"],
                     priority=r["priority"],
                     notes=r.get("notes"),
@@ -351,7 +368,9 @@ async def get_frontend_tasks(
                     if t.get("is_demo") or trusted_url.startswith(DEMO_URL_PREFIX):
                         continue
                 proj_name = t.get("project", {}).get("name", "General") if t.get("project") else "General"
-                result.append(build_frontend_task(t, proj_name=proj_name, user_tz_name=user_tz))
+                ft = build_frontend_task(t, proj_name=proj_name, user_tz_name=user_tz)
+                ft.due_at = _format_due_at_utc(t.get("due_at"))
+                result.append(ft)
             return result
     except HTTPException:
         raise
@@ -468,7 +487,9 @@ async def update_frontend_task(task_id: str, req: UpdateTaskRequest, request: Re
 
             proj_data = updated.get("project") or {}
             proj_name_out = proj_data.get("name", "General") if proj_data else "General"
-            return build_frontend_task(updated, proj_name=proj_name_out)
+            ft = build_frontend_task(updated, proj_name=proj_name_out)
+            ft.due_at = _format_due_at_utc(updated.get("due_at"))
+            return ft
     except HTTPException:
         raise
     except Exception as e:

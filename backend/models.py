@@ -119,6 +119,7 @@ class TaskOut(BaseModel):
     project: Optional[TaskProjectRef] = None
     title: str
     due_date: Optional[str] = None
+    due_at: Optional[str] = None
     status: str
     priority: str
     notes: Optional[str] = None
@@ -224,6 +225,7 @@ class FrontendTaskOut(BaseModel):
     is_fixed: bool = False
     description: Optional[str] = None
     due_date: Optional[str] = None
+    due_at: Optional[str] = None
     cognitive_conflict: Optional[Dict[str, Any]] = None
 
 

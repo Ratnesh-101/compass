@@ -9,7 +9,7 @@ from backend.memory.chat_pending import create_chat_pending_action, resolve_chat
 from backend.memory.db import get_pool
 from backend.memory import structured
 from backend.router_helpers import _parse_time
-from backend.services.chat_task_actions import _is_date_like, format_date_with_year, strip_id_suffix
+from backend.services.chat_task_actions import _is_date_like, _shift_due_at_date, format_date_with_year, strip_id_suffix
 from backend.services.task_time import combine_local, local_today, request_timezone, resolve_due, ResolvedDue
 
 PRIORITY_MAP = {
@@ -209,11 +209,20 @@ async def execute_pending_edit_last_task(
             return (f"Done: updated priority of '{title}' to {new_prio}.", {"updated_task": updated, "success": True}, True)
         return ("I couldn't update it, nothing was changed.", None, False)
     due_d = date.fromisoformat(changes["due_date"]) if changes.get("due_date") else None
-    due_at = datetime.fromisoformat(changes["due_at"]) if changes.get("due_at") else None
     due_label = changes.get("due_label") or (due_d.isoformat() if due_d else "")
-    updated = await structured.update_task(conn, task_id, owner_id=owner_identity, due_date=due_d)
-    if updated and due_at is not None:
-        await conn.execute("UPDATE tasks SET due_at = $1 WHERE id = $2 AND lower(user_id) = lower($3)", due_at, task_id, owner_identity)
+    if changes.get("due_at"):
+        dt = datetime.fromisoformat(changes["due_at"])
+        due_at = (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
+    else:
+        try:
+            ex = await structured.get_task(conn, task_id)
+        except Exception:
+            ex = None
+        due_at = _shift_due_at_date(ex, due_d) if (isinstance(ex, dict) and ex.get("due_at") and due_d) else None
+
+    updated = await structured.update_task(
+        conn, task_id, owner_id=owner_identity, due_date=due_d, due_at=due_at
+    )
     if updated:
         return (f"Done: moved '{title}' to {due_label}.", {"rescheduled_task": updated, "success": True}, True)
     return ("I couldn't update it, nothing was changed.", None, False)
