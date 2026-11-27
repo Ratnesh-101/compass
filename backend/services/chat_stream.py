@@ -980,12 +980,15 @@ async def _generate_chat_events(
                     yield f"data: {json.dumps({'type': 'token', 'value': to_emit})}\n\n"
             elif not emitted_text:
                 # Nothing was streamed yet — emit full response as tokens
-                is_first = True
-                async for sc_token in stream_chunks(response_text):
-                    if not is_first:
-                        await asyncio.sleep(0.012)
-                    is_first = False
-                    yield f"data: {json.dumps({'type': 'token', 'value': sc_token})}\n\n"
+                try:
+                    is_first = True
+                    async for sc_token in stream_chunks(response_text):
+                        if not is_first:
+                            await asyncio.sleep(0.012)
+                        is_first = False
+                        yield f"data: {json.dumps({'type': 'token', 'value': sc_token})}\n\n"
+                except Exception as emit_err:  # the card in the done event must still be sent
+                    logger.warning("Token emit failed before done event: %s", type(emit_err).__name__)
             else:
                 # Partial streamed text does NOT match orchestrator response —
                 # send a replace event so the client discards the leaked markup

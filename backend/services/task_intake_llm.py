@@ -9,6 +9,7 @@ verbatim quote of the user's message, so the model cannot invent a deadline.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Any, List, Literal, Optional
@@ -22,12 +23,14 @@ from backend.services.task_intake_parse import (
     IntakeItem,
     _extract_embedded_time,
     _extract_parenthesised_meta,
+    parse_single_task,
 )
 from backend.services.task_intent import is_question_framed, mentions_task_creation, title_problem
 
 logger = logging.getLogger("compass.services.task_intake_llm")
 
 EXTRACTION_MAX_TOKENS = 1500  # fixed: never capped by the tone/style settings
+LLM_EXTRACT_TIMEOUT_SECONDS = 12.0  # hard budget for any model call on the add-task preview path
 MAX_PROSE_CHARS = 4000
 _PLURAL_TASK_NOUN = re.compile(r"\b(?:tasks|deadlines|reminders|todos|to-dos)\b", re.IGNORECASE)
 _ITEM_SEPARATOR = re.compile(r"[,;\n]|\band\b", re.IGNORECASE)
@@ -126,7 +129,7 @@ def _to_items(drafts: List[TaskDraft], message: str) -> List[IntakeItem]:
     return items
 
 
-async def extract_prose_tasks(client: Any, model: str, message: str) -> List[IntakeItem]:
+async def _extract_prose_tasks_call(client: Any, model: str, message: str) -> List[IntakeItem]:
     """Validated task drafts from prose; [] when the model returns nothing usable."""
     messages: List[dict] = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -153,3 +156,55 @@ async def extract_prose_tasks(client: Any, model: str, message: str) -> List[Int
                 return []
             messages.append({"role": "user", "content": f"That output was invalid ({str(e)[:300]}). Call {_TOOL_NAME} again with valid arguments."})
     return []
+
+
+def deterministic_items(message: str) -> List[IntakeItem]:
+    """No-model fallback: one item per separated clause, each read by the deterministic single-task parser."""
+    items: List[IntakeItem] = []
+    text = message or ""
+    head, sep, tail = text.partition(":")
+    if sep and len(head) <= 40 and mentions_task_creation(head):
+        text = tail
+    plural = bool(_PLURAL_TASK_NOUN.search(message or "")) and not is_question_framed(message or "")
+    clauses = [c.strip() for c in _ITEM_SEPARATOR.split(text)] if plural else [text]
+    for clause in clauses[:MAX_ITEMS]:
+        parsed = parse_single_task(clause)
+        if parsed:
+            items.extend(parsed.items)
+    return items
+
+
+async def llm_extract_items(message: str) -> List[IntakeItem]:
+    """One model extraction call for a task message (patched in tests; always run through extract_items_bounded)."""
+    from backend.config import get_settings
+    from backend.router import get_openai_client
+
+    settings = get_settings()
+    if not llm_available(settings.NEBIUS_API_KEY):
+        return []
+    return await _extract_prose_tasks_call(get_openai_client(), settings.ROUTER_MODEL, message)
+
+
+async def extract_items_bounded(message: str) -> List[IntakeItem]:
+    """Model extraction under LLM_EXTRACT_TIMEOUT_SECONDS; on timeout, error or empty result use the deterministic parser."""
+    try:
+        items = await asyncio.wait_for(llm_extract_items(message), timeout=LLM_EXTRACT_TIMEOUT_SECONDS)
+        if items:
+            return list(items)
+        logger.warning("Task extraction returned nothing; using deterministic parser")
+    except asyncio.TimeoutError:
+        logger.warning("Task extraction timed out after %.1fs; using deterministic parser", LLM_EXTRACT_TIMEOUT_SECONDS)
+    except Exception as e:
+        logger.warning("Task extraction failed (%s); using deterministic parser", type(e).__name__)
+    return deterministic_items(message)
+
+
+async def extract_prose_tasks(client: Any, model: str, message: str) -> List[IntakeItem]:
+    """Bounded prose extraction for the router: a timeout or error returns the deterministic items, never hangs."""
+    try:
+        return await asyncio.wait_for(_extract_prose_tasks_call(client, model, message), timeout=LLM_EXTRACT_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError:
+        logger.warning("Prose task extraction timed out after %.1fs; using deterministic parser", LLM_EXTRACT_TIMEOUT_SECONDS)
+    except Exception as e:
+        logger.warning("Prose task extraction failed (%s); using deterministic parser", type(e).__name__)
+    return deterministic_items(message)

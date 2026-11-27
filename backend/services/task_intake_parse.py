@@ -381,6 +381,47 @@ def _parse_bullets(message: str, lines: list[str]) -> Optional[ParsedIntake]:
     return ParsedIntake(tuple(items), len(bullets), tuple(skipped)) if items else None
 
 
+_SINGLE_PREFIX_WORDS = frozenset({"please", "add", "create", "new", "a", "task", "to", "remind", "me", "schedule", "todo", "set"})
+_TRAILING_JOINERS = frozenset({"at", "by", "on", "for", "due", "and"})
+
+
+def parse_single_task(message: str) -> Optional[ParsedIntake]:
+    """Deterministic one-task parse ("call the bank tomorrow at 5pm"): title, date word, clock time."""
+    text = (message or "").strip()[:500]
+    if not text or "\n" in text:
+        return None
+    text, paren_domain, paren_priority = _extract_parenthesised_meta(text)
+    t24, t12, _leader, raw_time = _extract_embedded_time(text)
+    tokens = text.split()
+    if raw_time:
+        raw_tokens = raw_time.split()
+        for i in range(len(tokens) - len(raw_tokens) + 1):
+            if tokens[i:i + len(raw_tokens)] == raw_tokens:
+                tokens = tokens[:i] + tokens[i + len(raw_tokens):]
+                break
+    date_word = ""
+    kept: list[str] = []
+    for tok in tokens:
+        low = tok.lower().strip(",;:.!?")
+        if not date_word and low in _DATE_WORDS:
+            date_word = "tomorrow" if low == "tmrw" else low
+            continue
+        kept.append(tok)
+    while kept and kept[0].lower().strip(",;:") in _SINGLE_PREFIX_WORDS:
+        kept.pop(0)
+    while kept and kept[-1].lower().strip(",;:.") in _TRAILING_JOINERS:
+        kept.pop()
+    title = " ".join(kept).strip(" -–—@,:;.")
+    if title_problem(title):
+        return None
+    due_text = " ".join(p for p in (date_word, t12 or "") if p)
+    item = IntakeItem(
+        title=title, domain=paren_domain or "general", priority=paren_priority or "medium",
+        duration_minutes=None, due_text=due_text, notes=f"by {t12}" if t12 else None, due_time=t24,
+    )
+    return ParsedIntake((item,), 1, ())
+
+
 def parse_task_list(message: str) -> Optional[ParsedIntake]:
     """Extract up to MAX_ITEMS tasks from a pasted table or list; None when the text is not one."""
     lines = [ln for ln in (message or "").splitlines() if ln.strip()]
