@@ -101,7 +101,8 @@ export function formatJobLocation({
   return 'Location unspecified'
 }
 
-const STALE_AFTER_DAYS = 3
+// Same window as backend RECENCY_FRESH_DAYS and radarFreshness.FRESH_DAYS.
+const STALE_AFTER_DAYS = 14
 const MS_PER_DAY = 86400000
 
 // Date-only values ("2026-10-24") are calendar dates: parse them as UTC so they never shift a day
@@ -129,7 +130,8 @@ export function daysSinceVerified(value, now = new Date()) {
 
 export function isStaleVerification(value, now = new Date()) {
   const days = daysSinceVerified(value, now)
-  return days !== null && days > STALE_AFTER_DAYS
+  // Never verified counts as stale: it must not earn the green chip.
+  return days === null || days > STALE_AFTER_DAYS
 }
 
 export function lastCheckedText(value, now = new Date()) {
@@ -298,7 +300,6 @@ export function cleanOpportunity(opportunity, now = new Date()) {
     }
   }
 
-  const rawVerified = opportunity.last_verified_at
 
   // Source name: clean, no JobSpy
   const rawSource =
@@ -315,10 +316,7 @@ export function cleanOpportunity(opportunity, now = new Date()) {
     footerParts.push('Posting date unrecorded')
   }
 
-  const checkedText = lastCheckedText(rawVerified, now)
-  if (checkedText) {
-    footerParts.push(checkedText)
-  }
+  // Verification age is rendered by the card from last_verified_at (radarFreshness.freshnessLabels).
 
   let footerLine = footerParts.join(', ')
   if (sourceName) {

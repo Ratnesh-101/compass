@@ -2,6 +2,8 @@
 // Mirrors the backend contract: RECENCY_FRESH_DAYS = 14, `verification_age_days`
 // (int or null) and `needs_recheck` (bool) on every opportunity.
 
+import { daysSinceVerified } from './jobCardCleaner.js'
+
 export const FRESH_DAYS = 14
 export const NOT_VERIFIED_RECENTLY = 'Not verified recently'
 
@@ -38,18 +40,45 @@ export function formatVerifiedAge(ageDays, absoluteDate = null) {
   return NOT_VERIFIED_RECENTLY
 }
 
-/** Convenience wrapper taking an opportunity object. */
-export function formatOpportunityVerifiedAge(opportunity) {
-  const opp = opportunity || {}
-  return formatVerifiedAge(
-    opp.verification_age_days ?? null,
-    opp.last_verified_at || opp.last_checked_at || null,
-  )
+function relativeAge(days) {
+  if (days === 0) return 'today'
+  if (days === 1) return '1 day ago'
+  return `${days} days ago`
 }
 
-/** True only when the backend flagged the listing as needing a re-check. */
-export function needsRecheck(opportunity) {
-  return opportunity?.needs_recheck === true
+/**
+ * Single source of truth for the freshness labels on a radar card. Everything derives from
+ * `last_verified_at` (the field backend is_fresh_open / needs_recheck use), never from
+ * last_checked_at / updated_at, so the badges cannot contradict each other.
+ *   fresh (<= FRESH_DAYS): 'Verified open' badge + 'Verified <age>'
+ *   otherwise:             'Needs re-check' + 'Last verified <age>' / 'Never verified'
+ */
+export function freshnessLabels(opportunity, now = new Date()) {
+  const opp = opportunity || {}
+  const days = daysSinceVerified(opp.last_verified_at, now)
+  const fresh = days !== null && days <= FRESH_DAYS
+  const isOpen = opp.current_status === 'OPEN_CONFIRMED'
+  const badgeEligible = isOpen || !opp.current_status
+  let ageText
+  if (days === null) ageText = 'Never verified'
+  else ageText = `${fresh ? 'Verified' : 'Last verified'} ${relativeAge(days)}`
+  return {
+    fresh,
+    showVerifiedBadge: badgeEligible && fresh,
+    verifiedBadgeLabel: badgeEligible && fresh ? 'Verified open' : null,
+    needsRecheck: isOpen ? !fresh : opp.needs_recheck === true,
+    ageText,
+  }
+}
+
+/** Age line for a card, derived from last_verified_at only. */
+export function formatOpportunityVerifiedAge(opportunity, now = new Date()) {
+  return freshnessLabels(opportunity, now).ageText
+}
+
+/** Re-check chip: derived from last_verified_at for open listings. */
+export function needsRecheck(opportunity, now = new Date()) {
+  return freshnessLabels(opportunity, now).needsRecheck
 }
 
 /**
