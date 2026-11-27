@@ -179,6 +179,8 @@ def scrub_internal_agent_text(text: str) -> str:
     lines = text.split("\n")
     cleaned_lines = []
     for line in lines:
+        if line.lstrip(" \t").startswith("\\*"):
+            continue
         if _INTERNAL_AGENT_PATTERNS.search(line):
             sentences = re.split(r"(?<=[.!?]) +", line)
             kept = [s for s in sentences if not _INTERNAL_AGENT_PATTERNS.search(s)]
@@ -405,6 +407,31 @@ def build_deterministic_schedule_table(
     return "\n".join(lines)
 
 
+def _single_day_answer(
+    table_md: str,
+    scheduled_blocks: List[Dict[str, Any]],
+    target_date: date,
+    committed: bool,
+    zone: ZoneInfo,
+) -> str:
+    """Deterministic-only answer for a single-day question; model prose is discarded."""
+    on_day = other_days = False
+    for b in scheduled_blocks:
+        b_dt = _get_block_local_dt(b, zone)
+        if b_dt is None:
+            continue
+        if b_dt.date() == target_date:
+            on_day = True
+        else:
+            other_days = True
+    parts = [table_md.strip()]
+    if on_day and not committed:
+        parts.append("Nothing is saved yet. Say 'commit this plan' to put these blocks on your calendar.")
+    elif other_days and not on_day and not committed:
+        parts.append('Nothing is saved yet. Say "plan my week" to see a proposal.')
+    return "\n\n".join(p for p in parts if p).strip()
+
+
 def patch_schedule_answer(
     reply: str,
     scheduled_blocks: List[Dict[str, Any]],
@@ -422,6 +449,9 @@ def patch_schedule_answer(
     table_md = build_deterministic_schedule_table(
         scheduled_blocks, real_tasks, target_date=target_date, day_label=day_label, tz_name=str(zone)
     )
+
+    if target_date is not None:
+        return _single_day_answer(table_md, scheduled_blocks, target_date, committed, zone)
 
     if table_md:
         replaced = _replace_first_table(clean_reply, table_md)
