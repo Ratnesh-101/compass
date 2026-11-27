@@ -5,7 +5,7 @@ This is the single implementation of ``assess_feasibility`` and ``apply_triage_p
 Both are tenant-scoped: the caller's ``user_id`` is required.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 import logging
 
 from backend.services.ownership import scope_owner
@@ -29,7 +29,7 @@ def _as_int_ids(raw: Any) -> list:
     return ids
 
 
-async def _run_scoped_review(pool: Any, *, days: int, hours: float, domain: Optional[str],
+async def _run_scoped_review(pool: Any, *, days: Union[int, float], hours: float, domain: Optional[str],
                              user_id: str, include_demo: bool,
                              workload_hours: Optional[float] = None):
     """Non-streaming wrapper that, unlike agents.feasibility.assess_feasibility,
@@ -57,11 +57,13 @@ async def handle_assess_feasibility(args: Dict[str, Any], pool: Any) -> Dict[str
     if not user_id:
         return _missing_user()
     try:
-        days = int(args.get("days") or 5)
+        raw_days = args.get("days")
+        val_days = float(raw_days) if raw_days is not None and str(raw_days).strip() != "" else 5.0
+        days = int(val_days) if val_days.is_integer() else val_days
         hours = float(args.get("hours_per_day") or DEFAULT_HOURS_PER_DAY)
     except (TypeError, ValueError):
         days, hours = 5, DEFAULT_HOURS_PER_DAY
-    days = min(max(days, 1), 90)
+    days = min(max(days, 0.5), 90)
     hours = min(max(hours, 0.5), 16.0)
 
     domain = args.get("domain")
