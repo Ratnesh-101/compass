@@ -11,6 +11,8 @@ from backend.services import task_intake, task_intake_llm
 from backend.services.task_intake_parse import IntakeItem
 from backend.services.task_time import local_today
 
+PROSE = "add tasks: finish the lab report by Friday, call mom tomorrow and buy milk"
+
 
 class _Conn:
     async def execute(self, *a, **k):
@@ -91,11 +93,25 @@ def test_no_date_task_uses_fallback(monkeypatch):
     assert item["due_date"] is None
 
 
-def test_prose_extraction_timeout_returns_deterministic_items(monkeypatch):
+def test_prose_extraction_timeout_returns_single_task_only(monkeypatch):
     async def slow(client, model, message):
         await asyncio.sleep(2)
         return []
 
     monkeypatch.setattr(task_intake_llm, "_extract_prose_tasks_call", slow)
-    items = asyncio.run(task_intake_llm.extract_prose_tasks(None, "m", "add tasks: buy milk, call mom tomorrow"))
-    assert [i.title for i in items] == ["buy milk", "call mom"]
+    items = asyncio.run(task_intake_llm.extract_prose_tasks(None, "m", "call mom tomorrow"))
+    assert [i.title for i in items] == ["call mom"]
+    assert asyncio.run(task_intake_llm.extract_prose_tasks(None, "m", PROSE)) == []
+
+
+@pytest.mark.parametrize("mode", ["hang", "raise"])
+def test_long_prose_gets_no_preview(monkeypatch, mode):
+    async def broken(message):
+        if mode == "hang":
+            await asyncio.sleep(2)
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(task_intake_llm, "llm_extract_items", broken)
+    assert asyncio.run(task_intake_llm.extract_items_bounded(PROSE)) == []
+    assert asyncio.run(task_intake_llm.extract_items_bounded("call the bank. " * 3 + "x" * 200)) == []
+    assert asyncio.run(task_intake_llm.extract_items_bounded("buy milk.\nCall mom.")) == []

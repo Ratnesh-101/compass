@@ -32,6 +32,7 @@ logger = logging.getLogger("compass.services.task_intake_llm")
 EXTRACTION_MAX_TOKENS = 1500  # fixed: never capped by the tone/style settings
 LLM_EXTRACT_TIMEOUT_SECONDS = 12.0  # hard budget for any model call on the add-task preview path
 MAX_PROSE_CHARS = 4000
+MAX_FALLBACK_CHARS = 160  # deterministic fallback after a model failure is for short single-task messages only
 _PLURAL_TASK_NOUN = re.compile(r"\b(?:tasks|deadlines|reminders|todos|to-dos)\b", re.IGNORECASE)
 _ITEM_SEPARATOR = re.compile(r"[,;\n]|\band\b", re.IGNORECASE)
 _TOOL_NAME = "extract_tasks"
@@ -159,19 +160,14 @@ async def _extract_prose_tasks_call(client: Any, model: str, message: str) -> Li
 
 
 def deterministic_items(message: str) -> List[IntakeItem]:
-    """No-model fallback: one item per separated clause, each read by the deterministic single-task parser."""
-    items: List[IntakeItem] = []
-    text = message or ""
-    head, sep, tail = text.partition(":")
-    if sep and len(head) <= 40 and mentions_task_creation(head):
-        text = tail
-    plural = bool(_PLURAL_TASK_NOUN.search(message or "")) and not is_question_framed(message or "")
-    clauses = [c.strip() for c in _ITEM_SEPARATOR.split(text)] if plural else [text]
-    for clause in clauses[:MAX_ITEMS]:
-        parsed = parse_single_task(clause)
-        if parsed:
-            items.extend(parsed.items)
-    return items
+    """No-model fallback for SHORT single-task messages only; longer or multi-task prose yields nothing."""
+    text = (message or "").strip()
+    if not text or len(text) > MAX_FALLBACK_CHARS or "\n" in text:
+        return []
+    if len(re.findall(r"[.!?]", text.rstrip(".!? \t"))) > 1 or _PLURAL_TASK_NOUN.search(text):
+        return []
+    parsed = parse_single_task(text)
+    return list(parsed.items) if parsed else []
 
 
 async def llm_extract_items(message: str) -> List[IntakeItem]:
