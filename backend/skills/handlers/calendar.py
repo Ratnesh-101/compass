@@ -113,14 +113,21 @@ async def handle_propose_schedule(args: Dict[str, Any], pool: Any) -> Dict[str, 
     from backend.services.calendar import get_calendar_freebusy
     from backend.services.scheduler import (
         INACTIVE_TASK_STATUSES,
+        _parse_time_str,
         allocate_task_slots,
+        ceil_to_quarter_hour,
         earliest_schedulable_start,
         get_available_windows,
     )
 
     from backend.services.ownership import has_caller, scope_owner
 
-    target_date_str = args.get("target_date")
+    raw_start_str = (
+        args.get("target_date")
+        or args.get("start_date")
+        or args.get("from")
+        or args.get("earliest_start")
+    )
     domain = args.get("domain")
     task_ids = args.get("task_ids")
     user_id = args.get("user_id")
@@ -133,16 +140,7 @@ async def handle_propose_schedule(args: Dict[str, Any], pool: Any) -> Dict[str, 
 
     include_demo = bool(args.get("include_demo", False))
     now = datetime.now(timezone.utc)
-    if target_date_str:
-        try:
-            requested_start = datetime.combine(date.fromisoformat(target_date_str[:10]), datetime.min.time(), tzinfo=zone).astimezone(timezone.utc)
-        except Exception:
-            requested_start = now
-    else:
-        requested_start = now
-    # Never propose a slot in the past: clamp to now rounded up to the next 15 minutes.
-    start_dt = earliest_schedulable_start(requested_start, now)
-    end_dt = start_dt + timedelta(days=7)
+    now_floor = ceil_to_quarter_hour(now)
 
     tasks: List[Dict[str, Any]] = []
     dep_map: Dict[int, List[int]] = {}
@@ -159,6 +157,37 @@ async def handle_propose_schedule(args: Dict[str, Any], pool: Any) -> Dict[str, 
             else:
                 tasks = await list_tasks(conn, domain=domain, status="open", user_id=scoped_owner, include_demo=include_demo, all_tenants=all_tenants)
     tasks = [t for t in tasks if str(t.get("status") or "").lower() not in INACTIVE_TASK_STATUSES]
+
+    w_end_t = _parse_time_str(prefs.get("work_end_time", "18:00:00"))
+    work_days_list = list(prefs.get("work_days", [1, 2, 3, 4, 5]))
+    work_days_set = set(work_days_list)
+
+    now_local = now.astimezone(zone)
+    today_local = now_local.date()
+    today_work_end_utc = datetime.combine(today_local, w_end_t, tzinfo=zone).astimezone(timezone.utc)
+
+    # When today is a working day and now is inside working hours (or before working hours end today),
+    # the scheduling window must start at now_floor, not at the next day's start,
+    # so tasks due on a non-working day can land on the last working day before deadline.
+    today_is_working_day = today_local.isoweekday() in work_days_set
+    now_inside_working_hours = today_is_working_day and (now_floor < today_work_end_utc)
+
+    requested_start = now
+    if raw_start_str:
+        try:
+            req_d = date.fromisoformat(str(raw_start_str)[:10])
+            if now_inside_working_hours and req_d <= today_local + timedelta(days=1):
+                requested_start = now
+            else:
+                requested_start = datetime.combine(req_d, datetime.min.time(), tzinfo=zone).astimezone(timezone.utc)
+        except Exception:
+            requested_start = now
+
+    if now_inside_working_hours:
+        start_dt = now_floor
+    else:
+        start_dt = earliest_schedulable_start(requested_start, now)
+    end_dt = start_dt + timedelta(days=7)
 
     busy = await get_calendar_freebusy(
         start_dt, end_dt, pool=pool, user_id=user_id or "default_user", task_user_id=scoped_owner,
@@ -184,6 +213,7 @@ async def handle_propose_schedule(args: Dict[str, Any], pool: Any) -> Dict[str, 
         dependencies=dep_map,
         not_before=start_dt,
         tz_name=tz_name,
+        now=now,
     )
 
     scheduled_list = allocation["scheduled"]
@@ -191,8 +221,17 @@ async def handle_propose_schedule(args: Dict[str, Any], pool: Any) -> Dict[str, 
     for s in scheduled_list:
         lines.append(f"  • Task #{s['task_id']} '{s['title']}' ({s['domain']}): {s['scheduled_start'][:16]} → {s['scheduled_end'][:16]}")
     if allocation["unassigned"]:
-        lines.append(f"\n⚠️ Unplaced tasks ({len(allocation['unassigned'])}):")
+        seen_unplaced_ids: set = set()
+        deduped_unassigned: List[Dict[str, Any]] = []
         for u in allocation["unassigned"]:
+            tid = u.get("task_id")
+            if tid is not None:
+                if tid in seen_unplaced_ids:
+                    continue
+                seen_unplaced_ids.add(tid)
+            deduped_unassigned.append(u)
+        lines.append(f"\n⚠️ Unplaced tasks ({len(deduped_unassigned)}):")
+        for u in deduped_unassigned:
             lines.append(f"  • Task #{u['task_id']} '{u['title']}': {u['reason']}")
 
     return {

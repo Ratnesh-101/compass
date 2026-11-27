@@ -139,7 +139,7 @@ def test_qa_scenario_earliest_deadline_is_placed_first_and_meets_deadline():
     assert end[1] <= _eod_utc(date(2026, 11, 26))
     assert end[3] <= _eod_utc(date(2026, 11, 27))
     assert end[2] <= _eod_utc(date(2026, 12, 3))
-    assert "0 unassigned" in result["summary"]
+    assert "unassigned" not in result["summary"] and "could not be placed" not in result["summary"]
 
 
 def test_qa_scenario_sort_order():
