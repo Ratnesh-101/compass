@@ -237,6 +237,34 @@ async def stream_chunks(text: str) -> AsyncGenerator[str, None]:
         cursor += take
 
 
+STREAM_PREPASS_BUDGET_S = 15.0
+STREAM_TOTAL_BUDGET_S = 45.0
+STREAM_TIMEOUT_DETAIL = "This is taking longer than usual. Please try again."
+
+
+async def _with_total_budget(source: AsyncGenerator[str, None]) -> AsyncGenerator[str, None]:
+    """Cap the silent phase: no content frame (token/card/done/error) within the budget ends in a terminal retryable error."""
+    from backend.services.stream_watch import classify_frame
+    deadline = time.monotonic() + STREAM_TOTAL_BUDGET_S
+    started = False
+    try:
+        while True:
+            try:
+                nxt = anext(source)
+                frame = await (nxt if started else asyncio.wait_for(nxt, max(deadline - time.monotonic(), 0.001)))
+            except StopAsyncIteration:
+                return
+            except asyncio.TimeoutError:
+                logger.warning("chat_stream_total_budget_exceeded budget_s=%s", STREAM_TOTAL_BUDGET_S)
+                yield f"data: {json.dumps({'type': 'error', 'detail': STREAM_TIMEOUT_DETAIL, 'can_retry': True, 'terminal': True})}\n\n"
+                return
+            label = classify_frame(frame)
+            started = started or (label is not None and not label.startswith("status"))
+            yield frame
+    finally:
+        await source.aclose()
+
+
 def generate_chat_events(
     req: StreamChatRequest,
     request: Request,
@@ -245,7 +273,8 @@ def generate_chat_events(
 ) -> AsyncGenerator[str, None]:
     """Traced entry point: logs stream start/end and runs the silent-stream watchdog around the real generator."""
     trace = StreamTrace(normalize_request_id(getattr(req, "request_id", None)), str(getattr(req, "conversation_id", None) or "") or None)
-    return cast(AsyncGenerator[str, None], trace.run(_generate_chat_events(req, request, user_id, guest_id, trace.request_id), request))
+    inner = _with_total_budget(_generate_chat_events(req, request, user_id, guest_id, trace.request_id))
+    return cast(AsyncGenerator[str, None], trace.run(inner, request))
 
 
 async def _generate_chat_events(
@@ -676,10 +705,10 @@ async def _generate_chat_events(
         try:
             stream = cast(
                 openai.AsyncStream[ChatCompletionChunk],
-                await no_retry_client(client).chat.completions.create(**call_kwargs),
+                await asyncio.wait_for(no_retry_client(client).chat.completions.create(**call_kwargs), STREAM_PREPASS_BUDGET_S),
             )
         except Exception as create_err:
-            logger.warning("Upstream stream creation failed: %s, falling back to orchestrator", create_err)
+            logger.warning("Upstream stream creation failed (stage=stream_prepass): %r, falling back to orchestrator", create_err)
             result = await orchestrator.handle_message(
                 conversation_id=conv_id,
                 request_id=getattr(req, "request_id", None),
@@ -1066,12 +1095,8 @@ async def _generate_chat_events(
         yield f"data: {json.dumps(done_payload_final, default=str)}\n\n"
 
     except asyncio.CancelledError:
+        # Abandoned or timed-out request: nothing is persisted, so history never gets a phantom duplicate.
         logger.info("Chat SSE stream cancelled by client disconnect.")
-        if full_text.strip():
-            _persist_bg(
-                conv_id, message, full_text.strip(), user_id, guest_id, "chat",
-                is_truncated=True, stream_status=STATUS_INTERRUPTED,
-            )
         if stream and hasattr(stream, "aclose"):
             await stream.aclose()
         raise
