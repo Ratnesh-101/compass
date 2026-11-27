@@ -14,7 +14,7 @@ import logging
 import re
 import time
 from datetime import date, datetime
-from typing import Any, AsyncGenerator, Dict, List, Literal, Optional
+from typing import Any, AsyncGenerator, Dict, List, Literal, Optional, Union
 
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field, field_validator
@@ -413,7 +413,7 @@ async def _fetch_open_tasks(
 async def run_feasibility_review(
     pool,
     *,
-    days: int = 5,
+    days: Union[int, float] = 5,
     hours_per_day: float = DEFAULT_HOURS_PER_DAY,
     domain: Optional[str] = None,
     user_id: Optional[str] = None,
@@ -442,29 +442,42 @@ async def run_feasibility_review(
                    step=step, t0=t0, recoverable=False)
         return
 
-    if not tasks:
+    if workload_hours is not None and workload_hours > 0:
         step += 1
-        if workload_hours is not None and workload_hours > 0:
-            verdict = _arithmetic_verdict(workload_hours, capacity)
-            verdict_wording = verdict.verdict.lower().replace("_", " ")
-            narrative = (
-                f"You told me about {workload_hours:g} hours of work; "
-                f"with {capacity:g} hours available that is {verdict_wording}."
-            )
-        else:
-            verdict = _arithmetic_verdict(0.0, capacity)
-            narrative = (
-                f"You have no open tasks in Compass yet, so there is nothing to fit into your time. "
-                f"At {hours_per_day:g} hours a day for {days} days you would have {capacity:g} hours "
-                f"of focused time. Tell me your tasks, or add them in the Timeline, and I will check whether they fit."
-            )
+        verdict = _arithmetic_verdict(workload_hours, capacity)
+        verdict_wording = verdict.verdict.lower().replace("_", " ")
+        narrative = (
+            f"You told me about {workload_hours:g} hours of work; "
+            f"with {capacity:g} hours available that is {verdict_wording}."
+        )
+        if tasks:
+            saved_hours = round(sum(task_duration_hours(t) for t in tasks), 2)
+            narrative += f" Your saved open tasks add up to {saved_hours:g}h separately."
         empty = TriagePlan(
             keep=[], defer=[], drop=[],
             verdict=verdict,
             rounds_used=0,
             narrative=narrative,
         )
-        yield _sse("done", narrative if workload_hours else "No open tasks to assess.", step=step, t0=t0,
+        yield _sse("done", narrative, step=step, t0=t0,
+                   triage_plan=empty.model_dump(), artifact_markdown=empty.as_markdown())
+        return
+
+    if not tasks:
+        step += 1
+        verdict = _arithmetic_verdict(0.0, capacity)
+        narrative = (
+            f"You have no open tasks in Compass yet, so there is nothing to fit into your time. "
+            f"At {hours_per_day:g} hours a day for {days} days you would have {capacity:g} hours "
+            f"of focused time. Tell me your tasks, or add them in the Timeline, and I will check whether they fit."
+        )
+        empty = TriagePlan(
+            keep=[], defer=[], drop=[],
+            verdict=verdict,
+            rounds_used=0,
+            narrative=narrative,
+        )
+        yield _sse("done", "No open tasks to assess.", step=step, t0=t0,
                    triage_plan=empty.model_dump(), artifact_markdown=empty.as_markdown())
         return
 
