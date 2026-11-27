@@ -77,7 +77,7 @@ async def test_confirm_add_tasks_sends_committed_before_the_orchestrator_returns
     async def fake_resolve(conn, action_id, status):
         return True
 
-    async def fake_create_all(conn, items, owner, conv_id):
+    async def fake_create_all(conn, items, owner, conv_id, tz_name=None):
         return [{"id": 7, "title": "Write tests", "due_label": "no due date"}]
 
     monkeypatch.setattr(task_intake, "resolve_chat_pending_action", fake_resolve)
