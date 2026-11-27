@@ -40,13 +40,15 @@ test('formatVerifiedAge says not verified recently when age unknown or no date',
   assert.equal(formatVerifiedAge(30, 'not-a-date'), 'Not verified recently')
 })
 
-test('formatOpportunityVerifiedAge reads the contract fields', () => {
+test('formatOpportunityVerifiedAge derives only from last_verified_at', () => {
+  const now = new Date('2026-10-29T03:00:00Z')
   assert.equal(
-    formatOpportunityVerifiedAge({ verification_age_days: 3 }),
-    'Last verified 3 days ago',
+    formatOpportunityVerifiedAge({ last_verified_at: '2026-10-26T01:00:00Z' }, now),
+    'Verified 3 days ago',
   )
-  assert.equal(formatOpportunityVerifiedAge({}), 'Not verified recently')
-  assert.equal(formatOpportunityVerifiedAge(null), 'Not verified recently')
+  assert.equal(formatOpportunityVerifiedAge({ verification_age_days: 3 }, now), 'Never verified')
+  assert.equal(formatOpportunityVerifiedAge({}, now), 'Never verified')
+  assert.equal(formatOpportunityVerifiedAge(null, now), 'Never verified')
 })
 
 test('needsRecheck only true when backend says so', () => {

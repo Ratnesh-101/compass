@@ -53,14 +53,14 @@ test('lastCheckedText wording', () => {
   assert.equal(lastCheckedText(null, NOW), null)
 })
 
-test('stale after more than 3 days', () => {
-  assert.equal(isStaleVerification('2026-10-26', NOW), false) // 3 days
-  assert.equal(isStaleVerification('2026-10-25', NOW), true) // 4 days
-  assert.equal(isStaleVerification(null, NOW), false)
+test('stale after more than 14 days', () => {
+  assert.equal(isStaleVerification('2026-10-15', NOW), false) // 14 days
+  assert.equal(isStaleVerification('2026-10-14', NOW), true) // 15 days
+  assert.equal(isStaleVerification(null, NOW), true) // never verified
 })
 
 test('stale open listing gets amber re-verify badge, fresh gets green', () => {
-  const stale = getVerificationBadge('OPEN_CONFIRMED', '2026-10-20', NOW)
+  const stale = getVerificationBadge('OPEN_CONFIRMED', '2026-10-01', NOW)
   assert.equal(stale.label, 'May be closed. Check the company site.')
   assert.match(stale.text, /brand-dark/)
   const fresh = getVerificationBadge('OPEN_CONFIRMED', '2026-10-28', NOW)
@@ -68,12 +68,12 @@ test('stale open listing gets amber re-verify badge, fresh gets green', () => {
   assert.match(fresh.text, /domain-code/)
 })
 
-test('footer shows last checked N days ago and stale chip', () => {
+test('footer no longer carries a last-checked phrase; stale chip stays', () => {
   const c = cleanOpportunity({
     current_status: 'OPEN_CONFIRMED',
-    last_verified_at: '2026-10-20',
+    last_verified_at: '2026-10-01',
     confirmed_open_date: '2026-10-01',
   }, NOW)
-  assert.match(c.footerLine, /Last checked 9 days ago/)
+  assert.doesNotMatch(c.footerLine, /Last checked/)
   assert.equal(c.verificationBadge.label, 'May be closed. Check the company site.')
 })
