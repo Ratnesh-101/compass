@@ -217,12 +217,12 @@ async def handle_propose_schedule(args: Dict[str, Any], pool: Any) -> Dict[str, 
     )
 
     scheduled_list = allocation["scheduled"]
-    lines = [f"⚡ Proposed Schedule Plan: {allocation['summary']}"]
-    for s in scheduled_list:
-        lines.append(f"  • Task #{s['task_id']} '{s['title']}' ({s['domain']}): {s['scheduled_start'][:16]} → {s['scheduled_end'][:16]}")
+    n_sched = len(scheduled_list)
+    sched_label = "1 task" if n_sched == 1 else f"{n_sched} tasks"
+    propose_summary = f"Found time for {sched_label} (not saved yet; confirm to add them to your calendar)."
+    seen_unplaced_ids: set = set()
+    deduped_unassigned: List[Dict[str, Any]] = []
     if allocation["unassigned"]:
-        seen_unplaced_ids: set = set()
-        deduped_unassigned: List[Dict[str, Any]] = []
         for u in allocation["unassigned"]:
             tid = u.get("task_id")
             if tid is not None:
@@ -230,6 +230,14 @@ async def handle_propose_schedule(args: Dict[str, Any], pool: Any) -> Dict[str, 
                     continue
                 seen_unplaced_ids.add(tid)
             deduped_unassigned.append(u)
+        n_unp = len(deduped_unassigned)
+        unp_label = "1 task could not be placed before its deadline." if n_unp == 1 else f"{n_unp} tasks could not be placed before their deadlines."
+        propose_summary = f"{propose_summary} {unp_label}"
+
+    lines = [f"⚡ Proposed Schedule Plan: {propose_summary}"]
+    for s in scheduled_list:
+        lines.append(f"  • Task #{s['task_id']} '{s['title']}' ({s['domain']}): {s['scheduled_start'][:16]} → {s['scheduled_end'][:16]}")
+    if deduped_unassigned:
         lines.append(f"\n⚠️ Unplaced tasks ({len(deduped_unassigned)}):")
         for u in deduped_unassigned:
             lines.append(f"  • Task #{u['task_id']} '{u['title']}': {u['reason']}")
@@ -244,7 +252,7 @@ async def handle_propose_schedule(args: Dict[str, Any], pool: Any) -> Dict[str, 
             "scheduled": allocation["scheduled"],
             "unassigned": allocation["unassigned"],
             "conflicts": allocation["conflicts"],
-            "summary": allocation["summary"],
+            "summary": propose_summary,
         },
     }
 

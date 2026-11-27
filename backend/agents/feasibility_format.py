@@ -51,8 +51,10 @@ def format_bucket(label: str, tasks: List[Any], max_titles: int = 8) -> str:
         return f"{label} 0"
     items: List[str] = []
     for t in tasks[:max_titles]:
-        title = getattr(t, "title", None) or t.get("title", "untitled")
+        title = getattr(t, "title", None) or (t.get("title") if isinstance(t, dict) else "untitled")
         hours = getattr(t, "estimated_hours", None)
+        if hours is None and isinstance(t, dict):
+            hours = t.get("estimated_hours")
         if hours is None and isinstance(t, dict):
             hours = task_duration_hours(t)
         elif hours is None:

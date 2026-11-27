@@ -22,7 +22,7 @@ test('pending card header has wording for complete_task and reschedule_task', ()
 test('complete_task and reschedule_task get their own headers', () => {
   const region = headerRegion()
   assert.match(region, /pendingKind === 'complete_task'\s*\?\s*'Confirm mark as done'/)
-  assert.match(region, /pendingKind === 'reschedule_task'\s*\?\s*'Confirm new due date'/)
+  assert.match(region, /pendingKind === 'reschedule_task'\s*\?\s*'Confirm new due date or time'/)
 })
 
 test('destructive wording still exists for delete', () => {
