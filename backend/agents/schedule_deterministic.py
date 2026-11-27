@@ -533,6 +533,76 @@ async def fetch_saved_preferences(pool: Any, user_id: Optional[str]) -> Dict[str
         return default_prefs
 
 
+def _parse_dt(value: Any) -> Optional[datetime]:
+    try:
+        dt = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def _hhmm_min(value: Any, default: str) -> int:
+    h, m = (str(value or default).split(":") + ["0"])[:2]
+    return int(h) * 60 + int(m)
+
+
+def _working_days(prefs: Dict[str, Any]) -> set:
+    names = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+    out = set()
+    for d in prefs.get("working_days", prefs.get("work_days")) or [1, 2, 3, 4, 5]:
+        s = str(d).strip()
+        n = int(s) if s.isdigit() else (names.index(s[:3].lower()) + 1 if s[:3].lower() in names else None)
+        out.update([] if n is None else [n or 7])
+    return out
+
+
+def validate_proposed_blocks(
+    blocks: List[Dict[str, Any]], prefs: Dict[str, Any], tz_name: Optional[str], now_utc: datetime, tasks: Dict[int, Any],
+) -> Tuple[bool, List[str]]:
+    """Check blocks against working hours/days, the clock, due times and each other."""
+    zone, now = _resolve_tz(tz_name), (now_utc if now_utc.tzinfo else now_utc.replace(tzinfo=timezone.utc))
+    lo, hi = _hhmm_min(prefs.get("work_start_time"), "09:00"), _hhmm_min(prefs.get("work_end_time"), "18:00")
+    days, problems, spans = _working_days(prefs), [], []
+    for b in blocks or []:
+        title = str(b.get("title") or b.get("task_id") or "block")
+        start, end = _parse_dt(b.get("scheduled_start") or b.get("start")), _parse_dt(b.get("scheduled_end") or b.get("end"))
+        if start is None or end is None or end <= start:
+            problems.append(f"{title}: invalid time range")
+            continue
+        ls, le = start.astimezone(zone), end.astimezone(zone)
+        spans.append((start, end, title))
+        if ls.isoweekday() not in days:
+            problems.append(f"{title}: on a non-working day")
+        if ls.hour * 60 + ls.minute < lo or le.date() != ls.date() or le.hour * 60 + le.minute > hi:
+            problems.append(f"{title}: outside working hours")
+        problems += [f"{title}: starts in the past"] * (start < now)
+        problems += [f"{title}: longer than the working window"] * (end - start > timedelta(minutes=max(hi - lo, 0)))
+        task = tasks.get(b.get("task_id")) or {}
+
+        d = _get_task_due_date_obj(task, zone) if not task.get("due_at") and task.get("due_date") else None
+        due = datetime.combine(d + timedelta(days=1), datetime.min.time(), tzinfo=zone) if d else _parse_dt(task.get("due_at"))
+        if due is not None and end > due:
+            problems.append(f"{title}: ends after its due time")
+    spans.sort(key=lambda s: s[0])
+    problems += [f"{p[2]} and {c[2]}: overlap" for p, c in zip(spans, spans[1:]) if c[0] < p[1]]
+    return (not problems, problems)
+
+
+async def repair_plan_blocks(blocks: List[Dict[str, Any]], pool: Any, owner_id: Optional[str],
+                             tz_name: Optional[str], tasks: Dict[int, Any]) -> List[Dict[str, Any]]:
+    """Return blocks unchanged if valid, else a fresh scheduler proposal. Never raises."""
+    try:
+        prefs = await fetch_saved_preferences(pool, owner_id)
+        ok, problems = validate_proposed_blocks(blocks, prefs, tz_name, datetime.now(timezone.utc), tasks)
+        if ok:
+            return blocks
+        logger.info("Agent plan rejected: %s", "; ".join(problems[:5]))
+        from backend.skills.handlers.calendar import handle_propose_schedule
+        fresh = ((await handle_propose_schedule({"user_id": owner_id}, pool)).get("data") or {}).get("scheduled") or []
+        return [dict(b) for b in fresh] if fresh else blocks
+    except Exception:
+        return blocks
+
 async def find_pending_agent_run(pool: Any, user_id: Optional[str], conversation_id: Optional[str]) -> Optional[Dict[str, Any]]:
     """Find the most recent agent run with pending actions to commit/approve."""
     if not pool:
