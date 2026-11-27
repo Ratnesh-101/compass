@@ -9,7 +9,7 @@ import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 from zoneinfo import ZoneInfo
-
+from backend.services.task_time import request_timezone
 logger = logging.getLogger("compass.schedule_deterministic")
 
 # Regex to scrub internal reviewer, critic, and revision artifacts leaking to the user.
@@ -598,7 +598,7 @@ async def repair_plan_blocks(blocks: List[Dict[str, Any]], pool: Any, owner_id: 
             return blocks
         logger.info("Agent plan rejected: %s", "; ".join(problems[:5]))
         from backend.skills.handlers.calendar import handle_propose_schedule
-        fresh = ((await handle_propose_schedule({"user_id": owner_id}, pool)).get("data") or {}).get("scheduled") or []
+        fresh = ((await handle_propose_schedule({"user_id": owner_id, "timezone": request_timezone.get()}, pool)).get("data") or {}).get("scheduled") or []
         return [dict(b) for b in fresh] if fresh else blocks
     except Exception:
         return blocks
@@ -644,7 +644,7 @@ async def handle_agent_schedule_synthesis(
         if not proposed_blocks and is_planning_goal and target_date is None:
             try:
                 from backend.skills.handlers.calendar import handle_propose_schedule
-                p_res = await handle_propose_schedule({"user_id": user_id}, pool)
+                p_res = await handle_propose_schedule({"user_id": user_id, "timezone": request_timezone.get()}, pool)
                 proposed_blocks = p_res.get("data", {}).get("scheduled") or []
             except Exception as ex:
                 logger.debug(f"Fallback propose failed: {ex}")
