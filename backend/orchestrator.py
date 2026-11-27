@@ -1006,6 +1006,19 @@ async def _handle_message_core(
             agent_succeeded = False
             err_msg = str(e)
 
+        if not synth_text and confirm_data and confirm_data.get("tool") == "commit_schedule":
+            try:
+                from backend.agents.schedule_deterministic import fetch_real_tasks_for_schedule, patch_schedule_answer
+                blocks = [dict(b) for b in ((confirm_data.get("args") or {}).get("assignments") or []) if isinstance(b, dict)]
+                for b in blocks:
+                    b.setdefault("scheduled_start", b.get("start"))
+                    b.setdefault("scheduled_end", b.get("end"))
+                tids = [int(b["task_id"]) for b in blocks if b.get("task_id") is not None]
+                real = await fetch_real_tasks_for_schedule(pool, user_id or guest_id, tids)
+                synth_text = patch_schedule_answer("Here is your plan.", blocks, real, goal, committed=False)
+            except Exception as e:
+                logger.debug("Could not build plan from confirm_request: %s", e)
+
         reply_content = synth_text or (f"I encountered an error while processing your request: {err_msg}" if err_msg else "")
         if not reply_content:
             agent_succeeded, reply_content = False, "Unable to complete request. Please retry."
