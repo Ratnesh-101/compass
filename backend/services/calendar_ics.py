@@ -81,13 +81,6 @@ def _task_time_fields(t: Dict[str, Any]) -> Optional[List[str]]:
         if end_dt <= start_dt:
             end_dt = start_dt + timedelta(minutes=DEFAULT_EVENT_MINUTES)
         return [f"DTSTART:{_format_ics_dt(start_dt)}", f"DTEND:{_format_ics_dt(end_dt)}"]
-    due = date_only_value(t.get("due_date"))
-    if due is not None:
-        nxt = due + timedelta(days=1)
-        return [
-            f"DTSTART;VALUE=DATE:{due.strftime('%Y%m%d')}",
-            f"DTEND;VALUE=DATE:{nxt.strftime('%Y%m%d')}",
-        ]
     due_at = t.get("due_at")
     if due_at:
         try:
@@ -95,7 +88,14 @@ def _task_time_fields(t: Dict[str, Any]) -> Optional[List[str]]:
             end_dt = start_dt + timedelta(minutes=DEFAULT_EVENT_MINUTES)
             return [f"DTSTART:{_format_ics_dt(start_dt)}", f"DTEND:{_format_ics_dt(end_dt)}"]
         except Exception:
-            return None
+            pass
+    due = date_only_value(t.get("due_date"))
+    if due is not None:
+        nxt = due + timedelta(days=1)
+        return [
+            f"DTSTART;VALUE=DATE:{due.strftime('%Y%m%d')}",
+            f"DTEND;VALUE=DATE:{nxt.strftime('%Y%m%d')}",
+        ]
     return None
 
 

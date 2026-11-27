@@ -9,14 +9,28 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 from backend.memory import conversations, structured
 from backend.memory.chat_pending import resolve_chat_pending_action
-from backend.services.task_intake_parse import MAX_ITEMS, IntakeItem, ParsedIntake, parse_task_list
-from backend.services.task_time import request_timezone, resolve_due
+from backend.services.task_intake_parse import (
+    MAX_ITEMS,
+    IntakeItem,
+    ParsedIntake,
+    extract_item_due_time,
+    parse_task_list,
+)
+from backend.services.task_time import (
+    clock_from_24h,
+    combine_local,
+    is_valid_timezone,
+    local_today,
+    request_timezone,
+    resolve_due,
+)
 
 logger = logging.getLogger("compass.services.task_intake")
 
@@ -47,6 +61,7 @@ def _preview_items(parsed: ParsedIntake, tz_name: str) -> list[dict]:
             "due_unparsed": due.unparsed_text,
             "project": item.project,
             "notes": item.notes,
+            "due_time": getattr(item, "due_time", None),
         })
     return out
 
@@ -172,18 +187,58 @@ def _stored_items(action: Dict[str, Any]) -> list[dict]:
     return raw if isinstance(raw, list) else []
 
 
-async def _create_all(conn: Any, items: list[dict], owner: str, conv_id: str) -> list[dict]:
+async def _create_all(conn: Any, items: list[dict], owner: str, conv_id: str, tz_name: Optional[str] = None) -> list[dict]:
     created = []
+    base_tz = tz_name or request_timezone.get() or "Asia/Kolkata"
+    if not is_valid_timezone(base_tz):
+        base_tz = "Asia/Kolkata"
+
     for it in items:
-        due_date = datetime.fromisoformat(it["due_date"]).date() if it.get("due_date") else None
-        due_at = datetime.fromisoformat(it["due_at"]) if it.get("due_at") else None
+        item_tz = it.get("timezone") or base_tz
+        notes_str = str(it.get("notes") or "")
+        label_str = str(it.get("due_label") or "")
+        tz_m = re.search(r"\(([A-Za-z_]+/[A-Za-z_]+)\)", f"{notes_str} {label_str}")
+        if tz_m and is_valid_timezone(tz_m.group(1)):
+            item_tz = tz_m.group(1).strip()
+        elif not is_valid_timezone(item_tz):
+            item_tz = base_tz
+
+        due_date = None
+        if it.get("due_date"):
+            try:
+                due_date = datetime.fromisoformat(str(it["due_date"])[:10]).date()
+            except Exception:
+                due_date = None
+
+        clock = None
+        time_24 = extract_item_due_time(it)
+        if time_24:
+            clock = clock_from_24h(time_24)
+
+        if clock is not None and due_date is None:
+            due_date = local_today(item_tz)
+
+        due_at = None
+        if clock is not None and due_date is not None:
+            due_at = combine_local(due_date, clock, item_tz)
+        elif it.get("due_at"):
+            try:
+                raw_at = it["due_at"]
+                if isinstance(raw_at, datetime):
+                    due_at = raw_at.astimezone(timezone.utc) if raw_at.tzinfo else raw_at.replace(tzinfo=timezone.utc)
+                elif isinstance(raw_at, str):
+                    parsed_at = datetime.fromisoformat(raw_at)
+                    due_at = parsed_at.astimezone(timezone.utc) if parsed_at.tzinfo else parsed_at.replace(tzinfo=timezone.utc)
+            except Exception:
+                due_at = None
+
         project_id = None
         if it.get("project"):  # old pending rows have no project/notes keys
             proj = await structured.get_or_create_project(conn, name=it["project"], domain=it["domain"], owner_id=owner)
             project_id = proj.get("id")
         task = await structured.create_task(
-            conn, domain=it["domain"], title=it["title"], due_date=due_date, due_at=due_at,
-            priority=it["priority"], duration_minutes=it.get("duration_minutes"), user_id=owner,
+            conn, domain=it.get("domain", "general"), title=it["title"], due_date=due_date, due_at=due_at,
+            priority=it.get("priority", "medium"), duration_minutes=it.get("duration_minutes"), user_id=owner,
             project_id=project_id, notes=it.get("notes") or None,
         )
         await conn.execute(
@@ -202,11 +257,12 @@ async def _create_all(conn: Any, items: list[dict], owner: str, conv_id: str) ->
 async def confirm_add_tasks(conn: Any, action: Dict[str, Any], owner_identity: str, conv_id: str) -> tuple[str, Optional[dict], bool]:
     """Claim the pending action and create every item atomically. Returns (reply, data, success)."""
     items = _stored_items(action)
+    action_tz = action.get("timezone") if isinstance(action, dict) else None
     try:
         async with conn.transaction():
             if not await resolve_chat_pending_action(conn, action["id"], "executed"):
                 return "That action was already handled, so nothing new was added.", None, False
-            created = await _create_all(conn, items, owner_identity, conv_id)
+            created = await _create_all(conn, items, owner_identity, conv_id, tz_name=action_tz)
     except Exception as e:
         logger.error("add_tasks confirm failed; no tasks were created: %s", e, exc_info=True)
         return (
