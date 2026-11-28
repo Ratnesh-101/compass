@@ -2221,7 +2221,9 @@ export default function ApplicationWorkspaceModal({
                       </div>
                     ) : (
                       <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-muted)', fontSize: '13px' }}>
-                        {loadingAnalysis ? 'Extracting mandatory and preferred criteria…' : "We couldn't read this job's description. Paste it above to check how well you match."}
+                        {loadingAnalysis ? 'Extracting mandatory and preferred criteria…' : ((customJobDesc || '').trim() || (opportunity?.description || '').trim()
+                          ? "We couldn't find a list of required skills in this description. Paste the requirements section above to check how well you match."
+                          : <strong style={{ fontSize: '14px', color: 'var(--text-primary)' }}>Paste the job description to analyse it</strong>)}
                       </div>
                     )}
                   </div>
