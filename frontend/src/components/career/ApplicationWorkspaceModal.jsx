@@ -1227,7 +1227,7 @@ export default function ApplicationWorkspaceModal({
                         padding: '5px 12px',
                         borderRadius: '6px',
                         background: 'var(--brand)',
-                        color: '#ffffff',
+                        color: 'var(--accent-text, #1b1a17)fff',
                         border: 'none',
                         fontSize: '12px',
                         fontWeight: 600,
@@ -2113,7 +2113,7 @@ export default function ApplicationWorkspaceModal({
                           padding: '5px 12px',
                           borderRadius: '6px',
                           background: 'var(--brand)',
-                          color: '#ffffff',
+                          color: 'var(--accent-text, #1b1a17)fff',
                           border: 'none',
                           fontSize: '12px',
                           fontWeight: 700,
@@ -2305,7 +2305,7 @@ export default function ApplicationWorkspaceModal({
                               padding: '7px 14px',
                               borderRadius: '8px',
                               background: 'var(--brand)',
-                              color: '#ffffff',
+                              color: 'var(--accent-text, #1b1a17)fff',
                               border: 'none',
                               fontSize: '12px',
                               fontWeight: 600,
@@ -2366,8 +2366,9 @@ export default function ApplicationWorkspaceModal({
                     </h4>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '12px' }}>
                       <div>
-                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Full Name</label>
+                        <label htmlFor="workspace-full-name" style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Full Name</label>
                         <input
+                          id="workspace-full-name"
                           type="text"
                           value={fullName}
                           onChange={e => setFullName(e.target.value)}
@@ -2375,8 +2376,9 @@ export default function ApplicationWorkspaceModal({
                         />
                       </div>
                       <div>
-                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Email</label>
+                        <label htmlFor="workspace-email" style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Email</label>
                         <input
+                          id="workspace-email"
                           type="email"
                           value={email}
                           onChange={e => setEmail(e.target.value)}
@@ -2431,7 +2433,7 @@ export default function ApplicationWorkspaceModal({
                         padding: '8px 18px',
                         borderRadius: '7px',
                         background: 'var(--brand)',
-                        color: '#ffffff',
+                        color: 'var(--accent-text, #1b1a17)fff',
                         border: 'none',
                         fontSize: '12px',
                         fontWeight: 600,
@@ -2482,7 +2484,7 @@ export default function ApplicationWorkspaceModal({
                           padding: '7px 14px',
                           borderRadius: '8px',
                           background: 'var(--brand)',
-                          color: '#ffffff',
+                          color: 'var(--accent-text, #1b1a17)fff',
                           border: 'none',
                           fontSize: '12px',
                           fontWeight: 600,
@@ -2605,8 +2607,9 @@ export default function ApplicationWorkspaceModal({
                       </div>
 
                       <div>
-                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Personal Target Deadline</label>
+                        <label htmlFor="workspace-target-deadline" style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Personal Target Deadline</label>
                         <input
+                          id="workspace-target-deadline"
                           type="date"
                           value={targetDeadline}
                           onChange={e => setTargetDeadline(e.target.value)}
@@ -2616,8 +2619,9 @@ export default function ApplicationWorkspaceModal({
                     </div>
 
                     <div style={{ marginBottom: '14px' }}>
-                      <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Private Candidate Notes</label>
+                      <label htmlFor="workspace-private-notes" style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Private Candidate Notes</label>
                       <textarea
+                        id="workspace-private-notes"
                         rows={3}
                         value={privateNotes}
                         onChange={e => setPrivateNotes(e.target.value)}
@@ -2634,7 +2638,7 @@ export default function ApplicationWorkspaceModal({
                         padding: '8px 18px',
                         borderRadius: '7px',
                         background: 'var(--brand)',
-                        color: '#ffffff',
+                        color: 'var(--accent-text, #1b1a17)fff',
                         border: 'none',
                         fontSize: '12px',
                         fontWeight: 600,
@@ -2676,7 +2680,7 @@ export default function ApplicationWorkspaceModal({
                             padding: '10px 18px',
                             borderRadius: '8px',
                             background: 'var(--brand)',
-                            color: '#ffffff',
+                            color: 'var(--accent-text, #1b1a17)fff',
                             fontWeight: 600,
                             fontSize: '13px',
                             textDecoration: 'none',

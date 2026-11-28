@@ -109,6 +109,7 @@ export default function RadarFilters({
         <div style={{ flex: '1 1 200px', minWidth: '180px', position: 'relative' }}>
           <input
             type="text"
+            aria-label="Search internships by company, role or keyword"
             placeholder="Search company, role title, keyword…"
             value={searchQuery}
             onChange={e => onSearchChange(e.target.value)}
@@ -145,6 +146,7 @@ export default function RadarFilters({
           value={selectedEmployerType || ''}
           onChange={e => onEmployerTypeChange && onEmployerTypeChange(e.target.value)}
           title="Filter by Employer Category"
+          aria-label="Filter by employer type"
           style={{
             padding: '10px 14px',
             borderRadius: 'var(--radius-input, 6px)',
@@ -166,6 +168,7 @@ export default function RadarFilters({
         {/* Category Selector */}
         <select
           value={selectedCategory}
+          aria-label="Filter by role category"
           onChange={e => onCategoryChange(e.target.value)}
           style={{
             padding: '10px 14px',
@@ -188,6 +191,7 @@ export default function RadarFilters({
         {/* Work Arrangement Selector */}
         <select
           value={workArrangement}
+          aria-label="Filter by work arrangement"
           onChange={e => onWorkArrangementChange(e.target.value)}
           style={{
             padding: '10px 14px',
@@ -210,6 +214,7 @@ export default function RadarFilters({
         <button
           type="button"
           onClick={onToggleIndiaOnly}
+          aria-pressed={!!indiaOnly}
           style={{
             display: 'flex',
             alignItems: 'center',

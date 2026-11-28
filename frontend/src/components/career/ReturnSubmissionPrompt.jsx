@@ -159,7 +159,7 @@ export default function ReturnSubmissionPrompt({ onSubmissionConfirmed }) {
             padding: '6px 14px',
             borderRadius: '6px',
             background: 'var(--brand, #16a34a)',
-            color: '#ffffff',
+            color: 'var(--accent-text, #1b1a17)fff',
             border: 'none',
             fontSize: '12px',
             fontWeight: 700,
