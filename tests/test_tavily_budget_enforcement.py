@@ -46,6 +46,17 @@ async def _clear_log():
         await conn.execute("DELETE FROM tavily_usage_log")
 
 
+@pytest.fixture(autouse=True)
+def _no_search_cache(monkeypatch):
+    """These tests count spent credits per call: repeated identical queries must not be served from the cache."""
+    from backend.services import tavily as tavily_service
+
+    tavily_service.clear_search_cache()
+    monkeypatch.setattr(tavily_service, "SEARCH_CACHE_TTL_S", 0)
+    yield
+    tavily_service.clear_search_cache()
+
+
 @pytest.fixture
 async def stub(monkeypatch):
     client = FakeTavilyClient()
@@ -194,15 +205,17 @@ async def test_previous_day_and_legacy_null_rows_do_not_count(stub):
 
 
 async def test_identity_query_error_fails_open_with_warning(stub, monkeypatch, caplog):
-    async def boom(identity_id):
+    """A signed-in user is not blocked by a database outage while reserving credits (guests are denied: see the atomic tests)."""
+
+    async def boom():
         raise RuntimeError("db down")
 
-    monkeypatch.setattr(budgets, "_identity_credits_today", boom)
+    monkeypatch.setattr(budgets, "get_pool", boom)
     with caplog.at_level("WARNING", logger="compass.budgets"):
-        with caller(_uid(), guest=True):
+        with caller(_uid(), guest=False):
             await tavily_service.search("q")
     assert stub.search_calls == 1
-    assert any("daily Tavily budget" in r.getMessage() and r.levelname == "WARNING" for r in caplog.records)
+    assert any("Tavily credits against DB" in r.getMessage() and r.levelname == "WARNING" for r in caplog.records)
 
 
 async def test_default_guest_cap_is_25_and_user_cap_is_30(stub, monkeypatch):

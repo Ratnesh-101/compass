@@ -231,8 +231,9 @@ async def _search_with(monkeypatch, **kwargs):
     client = _RecordingClient()
     monkeypatch.setattr(tavily_service, "_client", client)
     monkeypatch.setattr(tavily_service, "tavily_available", lambda: True)
-    monkeypatch.setattr(tavily_service, "enforce_tavily_budget", AsyncMock())
-    monkeypatch.setattr(tavily_service, "record_tavily_credits", AsyncMock())
+    monkeypatch.setattr(tavily_service, "reserve_tavily_credits", AsyncMock(return_value=None))
+    monkeypatch.setattr(tavily_service, "settle_tavily_reservation", AsyncMock())
+    tavily_service.clear_search_cache()
     await tavily_service.search("q", **kwargs)
     return client.kwargs
 

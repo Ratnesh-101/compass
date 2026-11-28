@@ -68,6 +68,7 @@ class Settings(BaseSettings):
     # --- Rate Limiter & Abuse Protection ---
     RATE_LIMIT_FAIL_CLOSED: bool = True
     GLOBAL_DAILY_TAVILY_CREDIT_CAP: int = 100
+    TAVILY_GUEST_GLOBAL_SHARE: float = 0.6  # max share of the global Tavily cap guests may use together
     GLOBAL_DAILY_MODEL_CALL_CAP: int = 1000
     GLOBAL_DAILY_MINT_CAP: int = 200
     COMPASS_KILL_SWITCH_ACTIVE: bool = False
