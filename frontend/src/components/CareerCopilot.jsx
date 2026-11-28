@@ -10,6 +10,7 @@ import { fetchRadarProfile } from '../api/radarApi'
 import { fetchMasterResume } from '../api/careerApi'
 import { hasSavedProfile, hasSavedResume } from '../utils/careerUiHelpers'
 import { SAVED_RESUME_MESSAGE } from '../utils/careerFlowText'
+import { ResumeFocusContext } from './career/resumeFocusContext.js'
 
 const ResumeStudio = React.lazy(() => import('./career/ResumeStudio'))
 const ApplicationWorkspaceModal = React.lazy(() => import('./career/ApplicationWorkspaceModal'))
@@ -26,7 +27,11 @@ export default function CareerCopilot({ isDarkMode, onToggleDarkMode }) {
 
   // Every callback below is memoized: they are passed to InternshipRadar, and a new function on every
   // render used to restart its refresh effect (the reload storm after a profile save).
-  const handleNavigateToResumeStudio = useCallback(() => {
+  const [resumeFocus, setResumeFocus] = useState({ section: null, nonce: 0 })
+  const handleNavigateToResumeStudio = useCallback((section) => {
+    // Callers may pass a section key ('education', 'projects', 'experience', 'links'); anything else is ignored.
+    const key = typeof section === 'string' ? section : null
+    setResumeFocus((prev) => ({ section: key, nonce: prev.nonce + 1 }))
     setActiveSubTab('resumes')
   }, [])
 
@@ -342,7 +347,9 @@ export default function CareerCopilot({ isDarkMode, onToggleDarkMode }) {
         )}
         {activeSubTab === 'resumes' && (
           <React.Suspense fallback={<div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading My resume…</div>}>
-            <ResumeStudio onSaved={handleResumeSaved} />
+            <ResumeFocusContext.Provider value={resumeFocus}>
+              <ResumeStudio onSaved={handleResumeSaved} />
+            </ResumeFocusContext.Provider>
           </React.Suspense>
         )}
         {activeSubTab === 'applications' && (

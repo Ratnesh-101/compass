@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useRef, useReducer, useContext } from 'react'
+import { ResumeFocusContext } from './resumeFocusContext.js'
 import { FileText, GitCompare, PenLine } from 'lucide-react'
 import {
   fetchMasterResume, updateMasterResume, fetchResumes, updateResume,
@@ -9,6 +10,8 @@ import { downloadAuthedFile, openAuthedHtml } from '../../api/baseClient.js'
 
 import ValidationReportCard from './ValidationReportCard'
 import ClaimVerificationCard from './ClaimVerificationCard'
+import ResumeEditorSections from './ResumeEditorSections'
+import { sectionsReducer, contentToSections, buildSectionsContent, SECTION_IDS } from './resumeEditorModel.js'
 import ResumeImportModal from './ResumeImportModal'
 import ExtractionReviewModal from './ExtractionReviewModal'
 import ExternalProfileImportModal from './ExternalProfileImportModal'
@@ -17,6 +20,11 @@ import { getResumeKindLabel, copyTextSafely } from '../../utils/careerUiHelpers'
 const GitHubIntelligenceModal = React.lazy(() => import('./GitHubIntelligenceModal'))
 
 export default function ResumeStudio({ onSaved = () => {} } = {}) {
+  const { section: focusSection, nonce: focusNonce } = useContext(ResumeFocusContext)
+  const [sections, dispatchSections] = useReducer(sectionsReducer, undefined, () => contentToSections({}))
+  const [sectionErrors, setSectionErrors] = useState(null)
+  const sectionRefs = useRef({ education: React.createRef(), projects: React.createRef(), experience: React.createRef(), links: React.createRef() })
+  const handleLinkChange = (key) => (value) => dispatchSections({ type: 'setLink', key, value })
   const [masterResume, setMasterResume] = useState(null), [resumesList, setResumesList] = useState([])
   const [selectedResume, setSelectedResume] = useState(null), [validationReport, setValidationReport] = useState(null)
   const [claimReport, setClaimReport] = useState(null), [checkingClaims, setCheckingClaims] = useState(false)
@@ -66,6 +74,17 @@ export default function ResumeStudio({ onSaved = () => {} } = {}) {
     loadData()
   }, [loadData])
 
+  // '+ Add to profile' and 'add your education' links pass a section key: scroll to and focus it.
+  useEffect(() => {
+    if (!focusSection || loading || !SECTION_IDS[focusSection]) return undefined
+    const t = setTimeout(() => {
+      const el = sectionRefs.current[focusSection]?.current
+      el?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+      el?.focus?.({ preventScroll: true })
+    }, 60)
+    return () => clearTimeout(t)
+  }, [focusSection, focusNonce, loading, viewMode, activeTab])
+
   const populateForm = (res) => {
     if (!res || !res.content) return
     const c = res.content
@@ -76,6 +95,8 @@ export default function ResumeStudio({ onSaved = () => {} } = {}) {
     setSummary(c.summary || '')
     setSkillsText((c.skills || []).join(', '))
     setCoverLetterText(res.cover_letter || '')
+    dispatchSections({ type: 'setAll', sections: contentToSections(c) })
+    setSectionErrors(null)
   }
 
   const handleSelectResume = (res) => {
@@ -239,8 +260,18 @@ export default function ResumeStudio({ onSaved = () => {} } = {}) {
         .map(s => s.trim())
         .filter(Boolean)
 
+      const built = buildSectionsContent(sections, selectedResume?.content || {})
+      setSectionErrors(built.errors)
+      if (!built.ok) {
+        setError('Please fix the highlighted fields before saving.')
+        setSaving(false)
+        const firstBad = ['education', 'projects', 'experience', 'links'].find((k) => (k === 'links' ? Object.keys(built.errors.links).length : built.errors[k].some((e) => e && Object.keys(e).length)))
+        if (firstBad) sectionRefs.current[firstBad]?.current?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
+        return
+      }
       const updatedContent = {
         ...(selectedResume?.content || {}),
+        ...built.content,
         full_name: fullName,
         email: email,
         phone: phone,
@@ -842,6 +873,15 @@ export default function ResumeStudio({ onSaved = () => {} } = {}) {
                   style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: '13px', lineHeight: 1.5 }}
                 />
               </div>
+
+              <ResumeEditorSections
+                sections={sections}
+                errors={sectionErrors}
+                dispatch={dispatchSections}
+                onLinkChange={handleLinkChange}
+                refs={sectionRefs.current}
+                focusSection={focusSection}
+              />
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '14px' }}>
                 <button

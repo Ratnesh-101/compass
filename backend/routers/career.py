@@ -1196,7 +1196,11 @@ async def get_application_handoff_kit_endpoint(app_id: int, request: Request):
     if not common_answers["github_url"]:
         missing_fields.append("github_url")
 
-    common_answers["portfolio_url"] = profile.resume_url if profile and profile.resume_url else None
+    master_notes = master_content.evidence_notes or {}
+    master_links = master_content.relevant_links or []
+    common_answers["portfolio_url"] = (
+        profile.resume_url if profile and profile.resume_url else (master_links[0] if master_links else None)
+    )
     if not common_answers["portfolio_url"]:
         missing_fields.append("portfolio_url")
 
@@ -1205,6 +1209,8 @@ async def get_application_handoff_kit_endpoint(app_id: int, request: Request):
     declared_auth = str(form_answers.get("work_authorization") or "").strip()
     if declared_auth:
         common_answers["work_authorization"] = declared_auth
+    elif str(master_notes.get("work_authorization") or "").strip():
+        common_answers["work_authorization"] = str(master_notes["work_authorization"]).strip()
     elif profile and profile.work_authorization:
         common_answers["work_authorization"] = profile.work_authorization
     else:
@@ -1213,6 +1219,7 @@ async def get_application_handoff_kit_endpoint(app_id: int, request: Request):
 
     # Notice / Availability: only what the candidate stated; a work-arrangement preference is not availability.
     declared_availability = str(form_answers.get("availability") or form_answers.get("notice_or_availability") or "").strip()
+    declared_availability = declared_availability or str(master_notes.get("notice_period") or "").strip()
     if declared_availability:
         common_answers["notice_or_availability"] = declared_availability
     else:
