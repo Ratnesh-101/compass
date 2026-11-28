@@ -9,6 +9,7 @@ import asyncio
 import functools
 import json
 import logging
+import re
 import sys
 import time
 import uuid
@@ -30,6 +31,7 @@ from backend.models import StreamChatRequest
 import backend.orchestrator as orchestrator
 from backend.router import TOOLS, message_needs_tools
 from backend.router_helpers import (
+    is_current_facts_question,
     is_greeting_intent,
     is_long_form_request,
     is_schedule_or_agent_intent,
@@ -47,7 +49,7 @@ from backend.services.chat_idempotency import committed_event, normalize_request
 from backend.services.chat_fastpath import GREETING_REPLY, apply_router_extra_body, is_greeting_fastpath
 from backend.services.chat_task_actions import parse_task_action_intent
 from backend.services.task_intent import is_intake_intent
-from backend.services.task_time import local_today, pick_timezone
+from backend.services.task_time import local_today, pick_timezone, request_timezone
 from backend.services.token_budget import stream_token_budget
 from backend.services.usage import record_usage
 from backend.services.stream_claim_guard import StreamClaimGuard
@@ -66,6 +68,7 @@ from backend.services.chat_stream_extras import (
     mark_message_state,
     no_retry_client,
     orchestrate_with_early_commit,
+    CURRENT_FACTS_OFFLINE_PREFIX,
     run_web_fallback,
     should_search_web,
     specialist_answer_events,
@@ -77,6 +80,123 @@ from backend.services.chat_stream_extras import (
 logger = logging.getLogger("compass.services.chat_stream")
 
 get_pool = db_get_pool
+
+_DEFAULT_TZ = "Asia/Kolkata"
+_WD_FULL = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+_MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August",
+           "September", "October", "November", "December")
+_WD_RE = r"(?P<wd>monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tues?|wed|thu|thurs|fri|sat|sun)"
+_MON_RE = (r"(?P<mon>january|february|march|april|may|june|july|august|september|october|november|december|"
+           r"jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)")
+_DAY_RE = r"(?P<day>[0-3]?\d)(?:st|nd|rd|th)?"
+_WEEKDAY_DATE_RES = (
+    re.compile(rf"\b{_WD_RE},?[ \t]{{1,3}}{_MON_RE}\b\.?[ \t]{{1,3}}{_DAY_RE}\b", re.IGNORECASE),
+    re.compile(rf"\b{_WD_RE},?[ \t]{{1,3}}{_DAY_RE}(?:[ \t]{{1,3}}of)?[ \t]{{1,3}}{_MON_RE}\b", re.IGNORECASE),
+    re.compile(rf"\b{_WD_RE}[ \t]{{1,3}}\({_MON_RE}\b\.?[ \t]{{1,3}}{_DAY_RE}\)", re.IGNORECASE),
+)
+
+CAPABILITIES_PROMPT = (
+    "CAN DO from chat: add, edit, complete and delete tasks (with confirm cards); plan and schedule; "
+    "feasibility checks; change planning hours; add internships to the watchlist; delete the chat; "
+    "explain internship roles; build study plans; web-check facts when web search is available.\n"
+    "CANNOT DO: book travel, make payments, send emails or messages for the user, delete the account, "
+    "access other websites or logins, submit job applications. For any of these reply with the fixed "
+    "pattern: \"I can't do that in Compass. What I can do instead: ...\" and name the closest thing "
+    "Compass can do. If asked to mark all tasks done and delete the account, answer: \"I can't delete "
+    "your account from chat (Settings > Account); I can mark all N open tasks as done after you confirm: "
+    "say Confirm all done\" (N = the number of open tasks) and do not execute anything.\n"
+    "Never treat done tasks as pending: only tasks marked open in the context are pending."
+)
+
+
+def _resolve_zone(name: Optional[str]) -> Any:
+    from zoneinfo import ZoneInfo
+
+    try:
+        return ZoneInfo(name or _DEFAULT_TZ), (name or _DEFAULT_TZ)
+    except Exception:
+        return ZoneInfo(_DEFAULT_TZ), _DEFAULT_TZ
+
+
+def build_calendar_line(today: date, days: int = 14) -> str:
+    """Compact calendar of the next `days` days, e.g. 'Sat 28 Nov, Sun 29 Nov, ...'."""
+    from datetime import timedelta
+
+    return ", ".join(
+        f"{_WD_FULL[d.weekday()][:3]} {d.day} {_MONTHS[d.month - 1][:3]}"
+        for d in (today + timedelta(days=i) for i in range(days))
+    )
+
+
+def build_date_header(now: Any, tz_name: Optional[str]) -> str:
+    """First lines of the system prompt: today, the user's zone, local time, calendar and time rules."""
+    zone, name = _resolve_zone(tz_name)
+    local = now.astimezone(zone)
+    today = local.date()
+    return (
+        f"Today is {_WD_FULL[today.weekday()]} {today.day} {_MONTHS[today.month - 1]} {today.year}, "
+        f"the user's time zone is {name}; current local time {local:%H:%M}.\n"
+        f"Calendar (next 14 days): {build_calendar_line(today)}.\n"
+        "Always state times in the user's time zone, never in UTC; never compute weekdays yourself: use the calendar."
+    )
+
+
+def build_chat_system_prompt(base_prompt: str, now: Any, tz_name: Optional[str]) -> str:
+    return f"{build_date_header(now, tz_name)}\n\n{base_prompt}\n\n{CAPABILITIES_PROMPT}"
+
+
+def build_open_tasks_context(rows: Any) -> str:
+    """Open tasks only, each marked with its status. Done/completed tasks are dropped."""
+    lines = []
+    for t in rows or []:
+        status = str(t["status"] or "open").lower() if "status" in t.keys() else "open"
+        if status in ("completed", "done"):
+            continue
+        lines.append(
+            f"- {t['title']} ({t['domain']}) | Due: {t['due_date'] or 'None'} | {t['priority']} | status: {status}"
+        )
+    return "\n".join(lines)
+
+
+def _expected_date(wd_raw: str, mon_raw: str, day_raw: str, today: date) -> Optional[tuple]:
+    mon = next((i + 1 for i, m in enumerate(_MONTHS) if m.lower().startswith(mon_raw.lower()[:3])), None)
+    if mon is None:
+        return None
+    try:
+        d = date(today.year, mon, int(day_raw))
+        if (d - today).days < -180:
+            d = date(today.year + 1, mon, int(day_raw))
+    except ValueError:
+        return None
+    wd_idx = next((i for i, w in enumerate(_WD_FULL) if w.lower().startswith(wd_raw.lower()[:3])), 0)
+    return (wd_idx, d.weekday())
+
+
+def _weekday_fixes(text: str, today: date) -> List[tuple]:
+    fixes: List[tuple] = []
+    for rx in _WEEKDAY_DATE_RES:
+        for m in rx.finditer(text or ""):
+            exp = _expected_date(m.group("wd"), m.group("mon"), m.group("day"), today)
+            if exp and exp[0] != exp[1]:
+                fixes.append((m.start("wd"), m.end("wd"), m.group(0), m.group("wd"), exp[1]))
+    return fixes
+
+
+def check_weekday_date_pairs(text: str, today: date, tz: Optional[str] = None) -> List[str]:
+    """Return the 'Weekday, Month D' style pairs in `text` whose weekday does not match the real calendar."""
+    return [f[2] for f in sorted(set(_weekday_fixes(text, today)))]
+
+
+def correct_weekday_date_pairs(text: str, today: date, tz: Optional[str] = None) -> str:
+    """Rewrite wrong weekdays in place with the real weekday for the stated date."""
+    out = text
+    for start, end, _full, raw, wd_idx in sorted(set(_weekday_fixes(text, today)), reverse=True):
+        right = _WD_FULL[wd_idx]
+        right = right[:3] if len(raw) == 3 else right
+        if raw.isupper():
+            right = right.upper()
+        out = out[:start] + right + out[end:]
+    return out
 
 
 from backend.services.streaming_filter import StreamingThinkFilter
@@ -445,7 +565,7 @@ async def _generate_chat_events(
                     return []
                 async with pool.acquire() as conn:
                     return await conn.fetch(
-                        "SELECT title, domain, due_date, status, priority FROM tasks WHERE status != 'completed' AND deleted_at IS NULL AND user_id = $1 AND ($2::boolean OR COALESCE(trusted_event_url,'') NOT LIKE 'compass://demo-persona/%') ORDER BY due_date ASC NULLS LAST LIMIT 8",
+                        "SELECT title, domain, due_date, status, priority FROM tasks WHERE status NOT IN ('completed','done') AND deleted_at IS NULL AND user_id = $1 AND ($2::boolean OR COALESCE(trusted_event_url,'') NOT LIKE 'compass://demo-persona/%') ORDER BY due_date ASC NULLS LAST LIMIT 8",
                         user_id,
                         req_include_demo,
                     )
@@ -497,10 +617,8 @@ async def _generate_chat_events(
                 prior_text = "\n".join([f"- [{p.get('role', 'user')}]: {p.get('content', '')[:100]}" for p in prior])
                 mem_parts.append(f"Past Chats Recall:\n{prior_text}")
             if isinstance(tasks_rows, list) and tasks_rows:
-                tasks_text = "\n".join(
-                    [f"- {t['title']} ({t['domain']}) | Due: {t['due_date'] or 'None'} | {t['priority']}" for t in tasks_rows]
-                )
-                mem_parts.append(f"Active Tasks & Deadlines (Prevent schedule clashes):\n{tasks_text}")
+                tasks_text = build_open_tasks_context(tasks_rows)
+                mem_parts.append(f"Open Tasks & Deadlines (done tasks are excluded; never treat done tasks as pending; prevent schedule clashes):\n{tasks_text}")
             if mem_parts:
                 memory_context = "\n\n".join(mem_parts)
     except Exception as e:
@@ -532,6 +650,11 @@ async def _generate_chat_events(
             parked_thoughts=parked_items if isinstance(parked_items, list) and parked_items else None,
             conv_mode=getattr(req, "mode", None),
         )
+
+        from datetime import datetime as _dt, timezone as _tzmod
+        _zone, user_tz_name = _resolve_zone(request_timezone.get() or getattr(req, "tz", None) or profile_tz)
+        user_today = _dt.now(_tzmod.utc).astimezone(_zone).date()
+        sys_prompt = build_chat_system_prompt(sys_prompt, _dt.now(_tzmod.utc), user_tz_name)
 
         messages: List[ChatCompletionMessageParam] = [
             {"role": "system", "content": sys_prompt},
@@ -1075,6 +1198,16 @@ async def _generate_chat_events(
                 full_text = web_text
                 final_truncated = False
                 final_skill = "search_web"
+
+        if final_skill != "search_web" and is_current_facts_question(message) and full_text.strip():
+            if not full_text.startswith(CURRENT_FACTS_OFFLINE_PREFIX):
+                full_text = f"{CURRENT_FACTS_OFFLINE_PREFIX} {full_text}"
+                yield f"data: {json.dumps({'type': 'replace', 'value': full_text})}\n\n"
+
+        fixed_text = correct_weekday_date_pairs(full_text, user_today, user_tz_name)
+        if fixed_text != full_text:
+            full_text = fixed_text
+            yield f"data: {json.dumps({'type': 'replace', 'value': full_text})}\n\n"
 
         _persist_bg(
             conv_id, message, full_text, user_id, guest_id, final_skill,
