@@ -1,5 +1,5 @@
 """
-Compass — Career Copilot Job Description Analysis & Requirement Matching Service.
+Compass â€” Career Copilot Job Description Analysis & Requirement Matching Service.
 
 Extracts structured requirements (mandatory, preferred, responsibilities, eligibility)
 from job descriptions, compares them against the candidate's verified Master Profile,
@@ -106,7 +106,7 @@ _LABEL_MAX_CHARS = 40
 
 def _skill_key(name: str) -> str:
     """Case-insensitive canonical key: lowercased, whitespace collapsed, aliases folded."""
-    key = " ".join((name or "").lower().split()).strip(" .;:-*•·")
+    key = " ".join((name or "").lower().split()).strip(" .;:-*â€¢Â·")
     return _SKILL_ALIASES.get(key, key)
 
 
@@ -128,7 +128,7 @@ def split_skill_entry(entry: str) -> List[str]:
     if colon and rest.strip() and "," not in label and len(label) <= _LABEL_MAX_CHARS:
         text = rest  # drop a 'Languages:' / 'Tools:' style prefix
     out: List[str] = []
-    for chunk in re.split(r"[,;|•·\n]+|\s+&\s+|\s+and\s+", text):
+    for chunk in re.split(r"[,;|â€¢Â·\n]+|\s+&\s+|\s+and\s+", text):
         # 'Python (NumPy, Pandas)' arrives split by the comma; also unwrap simple parentheses
         chunk = chunk.strip().strip("()[]").strip()
         chunk = re.sub(r"\s*\([^)]*\)?\s*$", "", chunk).strip() or chunk
@@ -190,7 +190,7 @@ def extract_job_sections(job_text: str) -> Dict[str, List[str]]:
                 current_section = inline_header
                 line = tail.strip()
 
-        clean_item = line.strip(" -*•·")
+        clean_item = line.strip(" -*â€¢Â·")
         if not clean_item or len(clean_item) < 3:
             continue
 
@@ -204,8 +204,8 @@ def extract_job_sections(job_text: str) -> Dict[str, List[str]]:
             if len(responsibilities) < 15:
                 responsibilities.append(clean_item)
         elif current_section == "skills":
-            for tok in re.split(r"[,•|\n]+", clean_item):
-                s = tok.strip(" -:*•")
+            for tok in re.split(r"[,â€¢|\n]+", clean_item):
+                s = tok.strip(" -:*â€¢")
                 if s and 1 < len(s) < 35 and s not in skills:
                     skills.append(s)
 
@@ -217,6 +217,128 @@ def extract_job_sections(job_text: str) -> Dict[str, List[str]]:
     }
 
 
+_REQ_MARKERS: Tuple[str, ...] = (
+    "minimum qualifications", "basic qualifications", "required qualifications", "required skills",
+    "skills required", "must have", "must-have", "tech stack", "technologies", "requirements",
+    "required", "qualifications",
+)
+_NICE_MARKERS: Tuple[str, ...] = (
+    "preferred qualifications", "preferred skills", "nice to have", "nice-to-have", "good to have",
+    "good-to-have", "preferred", "bonus",
+)
+_OTHER_MARKERS: Tuple[str, ...] = (
+    "responsibilities", "key responsibilities", "what you will do", "what you'll do", "about the role",
+    "about us", "benefits", "perks", "what we offer",
+)
+_MARKER_SECTIONS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    ("required", _REQ_MARKERS), ("nice", _NICE_MARKERS), ("other", _OTHER_MARKERS),
+)
+_MAX_WHOLE_LINE_HEADER = 40
+_MAX_SKILL_WORDS = 3
+_MAX_SKILL_CHARS = 30
+_MAX_JOB_SKILLS = 40
+_AMBIGUOUS_KEYS = {"go", "r", "c"}
+_KNOWN_TECH: Tuple[str, ...] = (
+    "Python", "JavaScript", "TypeScript", "React", "Angular", "Vue", "Node.js", "PostgreSQL", "MySQL",
+    "MongoDB", "Redis", "FastAPI", "Django", "Flask", "Docker", "Kubernetes", "Git", "SQL", "C++", "C#",
+    "Java", "Go", "Rust", "AWS", "Azure", "GCP", "PyTorch", "TensorFlow", "Machine Learning", "Linux",
+    "GraphQL", "Kafka", "Terraform", "HTML", "CSS",
+)
+
+
+def _find_headers(line: str) -> List[Tuple[int, int, str]]:
+    """Section headers in a line as (start, end, section); 'Requirements:' inline or a bare header line."""
+    hay = line.lower()
+    found: List[Tuple[int, int, str]] = []
+    bare = hay.strip().strip("#*_-: ").strip()
+    for section, markers in _MARKER_SECTIONS:
+        for marker in markers:
+            if bare == marker and len(hay) <= _MAX_WHOLE_LINE_HEADER:
+                found.append((0, len(hay), section))
+                continue
+            start = hay.find(marker)
+            while start >= 0:
+                end = start + len(marker)
+                j = end
+                while j < len(hay) and hay[j] == " ":
+                    j += 1
+                if (start == 0 or not _is_word_char(hay[start - 1])) and j < len(hay) and hay[j] == ":":
+                    found.append((start, j + 1, section))
+                start = hay.find(marker, start + 1)
+    found.sort(key=lambda h: (h[0], -(h[1] - h[0])))
+    kept: List[Tuple[int, int, str]] = []
+    for item in found:
+        if not kept or item[0] >= kept[-1][1]:
+            kept.append(item)
+    return kept
+
+
+def _skills_from_chunk(chunk: str) -> List[str]:
+    """Skill names from one chunk of a requirements section (short items as written, long bullets by vocabulary)."""
+    out: List[str] = []
+    for item in split_skill_entry(chunk.replace(". ", ", ")):
+        item = item.strip(" .-*â€¢Â·")
+        key = _skill_key(item)
+        if not key or key[0].isdigit() or "year" in key:
+            continue
+        if len(item.split()) <= _MAX_SKILL_WORDS and len(item) <= _MAX_SKILL_CHARS:
+            out.append(item)
+        else:
+            out.extend(t for t in _KNOWN_TECH if contains_term(item, t))
+    return out
+
+
+def parse_job_skill_lists(text: str) -> Tuple[List[str], List[str]]:
+    """(required, nice_to_have) skills in posting order. Required wins when a skill appears in both."""
+    chunks: Dict[str, List[str]] = {"required": [], "nice": []}
+    section = "other"
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        pos = 0
+        for start, end, new_section in _find_headers(line):
+            if section in chunks and start > pos:
+                chunks[section].append(line[pos:start])
+            section = new_section
+            pos = end
+        if section in chunks and pos < len(line):
+            chunks[section].append(line[pos:])
+    required: List[str] = []
+    nice: List[str] = []
+    seen: Set[str] = set()
+    for name, target in (("required", required), ("nice", nice)):
+        for chunk in chunks[name]:
+            for skill in _skills_from_chunk(chunk):
+                key = _skill_key(skill)
+                if key not in seen and len(seen) < _MAX_JOB_SKILLS:
+                    seen.add(key)
+                    target.append(skill)
+    return required, nice
+
+
+def _resume_evidence(skill: str, master: ResumeContent) -> Optional[str]:
+    """'project X' / 'experience at Y' when the resume text mentions the skill, else None."""
+    key = _skill_key(skill)
+    variants = _skill_variants(key)
+    ambiguous = key in _AMBIGUOUS_KEYS
+    for p in master.projects:
+        tech = " ; ".join(p.technologies)
+        prose = f"{p.title} {p.description} {' '.join(p.highlights)}"
+        if any(contains_term(tech, v) for v in variants) or (
+            not ambiguous and any(contains_term(prose, v) for v in variants)
+        ):
+            return f"project {p.title}"
+    for e in list(master.experience) + list(master.internships):
+        if not ambiguous and any(contains_term(" ".join(e.highlights), v) for v in variants):
+            return f"experience at {e.company}"
+    return None
+
+
+def _join(items: List[str]) -> str:
+    return ", ".join(items)
+
+
 def analyze_job_and_match(
     opportunity: OpportunityOut,
     master: ResumeContent,
@@ -224,10 +346,11 @@ def analyze_job_and_match(
 ) -> JobAnalysisReport:
     """
     Analyzes an opportunity's requirements and maps evidence from the candidate's master profile.
-    Separates explicit requirements from inferred preferences, evaluates matches truthfully,
-    and identifies genuine gaps without inventing qualifications.
+    Required and nice-to-have skills are extracted separately; every required skill the candidate
+    cannot show counts against coverage, so a missing required skill never yields 100%.
     """
-    raw_desc = custom_description or opportunity.description or ""
+    # A blank/whitespace paste falls back to the stored posting text that Company Intel also uses.
+    raw_desc = (custom_description or "").strip() or (opportunity.description or "").strip()
     full_text = f"{opportunity.role_title}\n{opportunity.category}\n{raw_desc}"
 
     sections = extract_job_sections(full_text)
@@ -235,25 +358,52 @@ def analyze_job_and_match(
     preferred = sections["preferred"]
     responsibilities = sections["responsibilities"]
 
-    # Gather explicit required skills from opportunity requirements model if present
-    explicit: List[str] = []
+    req_skills, nice_skills = parse_job_skill_lists(full_text)
     if opportunity.requirements and opportunity.requirements.required_skills:
-        explicit.extend(s.strip() for s in opportunity.requirements.required_skills if s.strip())
-    explicit.extend(sections["skills"])
-    req_skills = _dedupe_skills(explicit)
+        explicit = [s.strip() for s in opportunity.requirements.required_skills if s.strip()]
+        req_skills = _dedupe_skills(explicit + req_skills)
+    req_keys = {_skill_key(s) for s in req_skills}
+    nice_skills = [s for s in nice_skills if _skill_key(s) not in req_keys]
+    skills_list = req_skills
+    score_available = bool(skills_list)
 
-    # If no explicit skills found in section headers, scan for standard tech keywords in description.
-    # A keyword only counts as required when at least one mention is not flagged as preferred/bonus.
-    if not req_skills:
-        common_tech = ["Python", "JavaScript", "React", "Node.js", "PostgreSQL", "FastAPI", "Docker", "Git", "SQL", "C++", "Java", "AWS", "PyTorch"]
-        text_lines = [ln for ln in full_text.splitlines() if ln.strip()]
-        for tech in common_tech:
-            mentions = [ln for ln in text_lines if contains_term(ln, tech)]
-            if any(not any(m in ln.lower() for m in _PREFERRED_MARKERS) for ln in mentions):
-                req_skills.append(tech)
-        req_skills = _dedupe_skills(req_skills)
+    location_info = {
+        "location": opportunity.location or "Not specified",
+        "is_remote": getattr(opportunity, "work_arrangement", "") == "remote",
+        "target_years": getattr(opportunity.requirements, "eligible_graduation_years", []) if opportunity.requirements else [],
+    }
+    formula = (
+        "Skill overlap estimate = required skills you can show / total required skills "
+        "(partial = 0.5, matched nice-to-have skills add 0.25 each, never reaching 100% while a required skill is missing)"
+    )
 
-    skills_list = sorted(req_skills, key=str.lower)
+    def _gap_action(skill: str) -> Dict[str, Any]:
+        return {
+            "skill": skill,
+            "learning_resource_type": "Official documentation, interactive courses, and hands-on tutorials",
+            "project_idea": f"Create a demonstration project showcasing practical {skill} implementation with test suites",
+            "evidence_appearance": f"Public GitHub repository with verifiable commits and CI/CD demonstrating {skill}",
+        }
+
+    def _report(verdict: str, **kw: Any) -> JobAnalysisReport:
+        base: Dict[str, Any] = dict(
+            opportunity_id=opportunity.id,
+            role_title=opportunity.role_title,
+            company_name=opportunity.company_name,
+            mandatory_qualifications=mandatory,
+            preferred_qualifications=preferred,
+            responsibilities=responsibilities,
+            required_skills=skills_list,
+            location_and_eligibility=location_info,
+            summary_verdict=verdict,
+            score_available=score_available,
+            formula_explanation=formula,
+        )
+        base.update(kw)
+        return JobAnalysisReport(**base)
+
+    if not raw_desc and not skills_list:
+        return _report("Paste the job description to analyse it.", score_available=False)
 
     # Check if candidate profile is complete
     is_empty_profile = (
@@ -262,176 +412,128 @@ def analyze_job_and_match(
     )
 
     if is_empty_profile:
-        gap_actions = [
-            {
-                "skill": s,
-                "learning_resource_type": "Official documentation, interactive courses, and hands-on tutorials",
-                "project_idea": f"Create a demonstration project showcasing practical {s} implementation with test suites",
-                "evidence_appearance": f"Public GitHub repository with verifiable commits and CI/CD demonstrating {s}",
-            }
-            for s in skills_list
-        ]
-        return JobAnalysisReport(
-            opportunity_id=opportunity.id,
-            role_title=opportunity.role_title,
-            company_name=opportunity.company_name,
-            mandatory_qualifications=mandatory,
-            preferred_qualifications=preferred,
-            responsibilities=responsibilities,
-            required_skills=skills_list,
-            location_and_eligibility={
-                "location": opportunity.location or "Not specified",
-                "is_remote": getattr(opportunity, "work_arrangement", "") == "remote",
-                "target_years": getattr(opportunity.requirements, "eligible_graduation_years", []) if opportunity.requirements else [],
-            },
-            matches=[],
-            match_score=0.0,
-            summary_verdict="Complete your profile to view your skill overlap estimate and personalized action plan.",
+        return _report(
+            "Complete your profile to view your skill overlap estimate and personalized action plan.",
             missing_critical_skills=skills_list,
-            skill_overlap_estimate=0.0,
-            matched_skills=[],
             missing_skills=skills_list,
-            partial_skills=[],
-            gap_actions=gap_actions,
+            gap_actions=[_gap_action(s) for s in skills_list],
             has_complete_profile=False,
-            score_available=bool(skills_list),
             profile_missing_message="Complete your profile to view skill overlap analysis. No verified skills found.",
-            formula_explanation="Skill overlap estimate = (matched + 0.5 * partial) / total required skills",
         )
 
-    # Build Master Profile evidence index
     master_skills_norm = build_skill_index(master.skills)
     learning_skills_norm = build_skill_index(getattr(master, "learning_skills", []))
-    master_projects_text = " ".join(
-        f"{p.title} {p.description} {' '.join(p.highlights)} {' '.join(p.technologies)}"
-        for p in master.projects
-    ).lower()
 
     matches: List[JobMatchEvidence] = []
     matched_skills: List[str] = []
     partial_skills: List[str] = []
     missing_skills: List[str] = []
+    nice_matched: List[str] = []
+    nice_missing: List[str] = []
+    listed_only: List[str] = []
+    shown_notes: List[str] = []
     gap_actions: List[Dict[str, Any]] = []
 
-    # 1. Match Required Skills
-    for skill in skills_list:
-        saved_entry = skill_in_index(skill, master_skills_norm)
-        learning_entry = skill_in_index(skill, learning_skills_norm)
-        in_projects = any(contains_term(master_projects_text, v) for v in _skill_variants(_skill_key(skill)))
-        if saved_entry:
-            matched_skills.append(skill)
+    for mandatory_flag, group in ((True, skills_list), (False, nice_skills)):
+        label = "required" if mandatory_flag else "nice-to-have"
+        for skill in group:
+            saved_entry = skill_in_index(skill, master_skills_norm)
+            learning_entry = skill_in_index(skill, learning_skills_norm)
+            shown_in = _resume_evidence(skill, master)
+            status, facts, reasoning, conf = "missing_evidence", [], "", 0.9
+            if shown_in:
+                status, conf = "supported", 1.0
+                facts = [f"Shown in your {shown_in}."]
+                reasoning = f"{skill} is shown in your {shown_in}."
+                if mandatory_flag:
+                    shown_notes.append(f"{skill} (shown in your {shown_in})")
+            elif saved_entry:
+                status, conf = "supported", 0.7
+                facts = [f"Listed in your skills: '{saved_entry}'"]
+                reasoning = f"You list {skill} in your skills (no project or experience shows it yet)."
+                if mandatory_flag:
+                    listed_only.append(skill)
+            elif learning_entry:
+                status, conf = "partial", 0.6
+                facts = ["Mentioned in your learning list."]
+                reasoning = f"{skill} is on your learning list but not yet a demonstrated skill."
+            else:
+                reasoning = f"Missing {label}: {skill} is not in your skills, projects or experience."
+            if status == "supported":
+                (matched_skills if mandatory_flag else nice_matched).append(skill)
+            elif status == "partial":
+                if mandatory_flag:
+                    partial_skills.append(skill)
+            else:
+                if mandatory_flag:
+                    missing_skills.append(skill)
+                    gap_actions.append(_gap_action(skill))
+                else:
+                    nice_missing.append(skill)
             matches.append(
                 JobMatchEvidence(
                     requirement=skill,
                     category="technical_skill",
-                    is_mandatory=True,
-                    match_status="supported",
-                    supporting_facts=[f"Verified in Master Profile: '{saved_entry}'"],
-                    reasoning=f"Candidate has verified mastery of {skill}.",
-                    confidence=1.0,
-                )
-            )
-        elif in_projects or learning_entry:
-            partial_skills.append(skill)
-            source = "learning list" if learning_entry else "project implementations"
-            matches.append(
-                JobMatchEvidence(
-                    requirement=skill,
-                    category="technical_skill",
-                    is_mandatory=True,
-                    match_status="partial",
-                    supporting_facts=[f"Mentioned in candidate {source}."],
-                    reasoning=f"Skill {skill} is tracked in candidate {source} but not yet a verified primary competency.",
-                    confidence=0.8,
-                )
-            )
-        else:
-            missing_skills.append(skill)
-            gap_actions.append({
-                "skill": skill,
-                "learning_resource_type": "Official documentation, interactive courses, and hands-on tutorials",
-                "project_idea": f"Create a demonstration project showcasing practical {skill} implementation with test suites",
-                "evidence_appearance": f"Public GitHub repository with verifiable commits and CI/CD demonstrating {skill}",
-            })
-            matches.append(
-                JobMatchEvidence(
-                    requirement=skill,
-                    category="technical_skill",
-                    is_mandatory=True,
-                    match_status="missing_evidence",
-                    supporting_facts=[],
-                    reasoning=(
-                        f"Skill '{skill}' is required by {opportunity.company_name} but absent from verified master profile. "
-                        "Do not fabricate — deliberate candidate action required to verify."
-                    ),
-                    confidence=0.9,
+                    is_mandatory=mandatory_flag,
+                    match_status=status,
+                    supporting_facts=facts,
+                    reasoning=reasoning,
+                    confidence=conf,
                 )
             )
 
-    # 2. Match Mandatory Qualifications
+    # Mandatory qualification (degree) checks
     for q in mandatory:
         q_low = q.lower()
-        # Education match check
         if any(term in q_low for term in ("degree", "bachelor", "b.tech", "computer science")):
-            has_edu = len(master.education) > 0
-            if has_edu:
+            if master.education:
                 edu = master.education[0]
-                matches.append(
-                    JobMatchEvidence(
-                        requirement=q,
-                        category="qualification",
-                        is_mandatory=True,
-                        match_status="supported",
-                        supporting_facts=[f"Education: {edu.degree} at {edu.institution}"],
-                        reasoning="Candidate academic credentials satisfy degree requirements.",
-                        confidence=1.0,
-                    )
-                )
+                matches.append(JobMatchEvidence(
+                    requirement=q, category="qualification", is_mandatory=True, match_status="supported",
+                    supporting_facts=[f"Education: {edu.degree} at {edu.institution}"],
+                    reasoning="Candidate academic credentials satisfy degree requirements.", confidence=1.0,
+                ))
             else:
-                matches.append(
-                    JobMatchEvidence(
-                        requirement=q,
-                        category="qualification",
-                        is_mandatory=True,
-                        match_status="missing_evidence",
-                        supporting_facts=[],
-                        reasoning="Candidate profile does not contain verified education records.",
-                        confidence=0.8,
-                    )
-                )
+                matches.append(JobMatchEvidence(
+                    requirement=q, category="qualification", is_mandatory=True, match_status="missing_evidence",
+                    supporting_facts=[], reasoning="Candidate profile does not contain verified education records.",
+                    confidence=0.8,
+                ))
 
-    # Compute honest skill overlap estimate (0 - 100)
-    total_eval = max(len(skills_list), 1)
-    skill_overlap = round(min(100.0, ((len(matched_skills) + 0.5 * len(partial_skills)) / total_eval) * 100.0), 1)
-
-    score_available = bool(skills_list)
-
-    # Transparent, non-promising verdict
-    if not score_available:
-        verdict = "No explicit skills are listed in this posting, so a skill-match score is not available."
-    elif skill_overlap >= 80:
-        verdict = f"Skill overlap estimate: {skill_overlap}%. High requirement coverage with {len(matched_skills)} verified and {len(partial_skills)} partial competencies."
-    elif skill_overlap >= 50:
-        verdict = f"Skill overlap estimate: {skill_overlap}%. Moderate requirement coverage: core skills verified with {len(missing_skills)} actionable skill gaps."
+    total_req = len(skills_list)
+    if total_req:
+        score = (len(matched_skills) + 0.5 * len(partial_skills) + 0.25 * len(nice_matched)) / total_req * 100.0
+        if missing_skills or partial_skills:
+            score = min(score, 99.0)
+        skill_overlap = round(min(100.0, score), 1)
     else:
-        verdict = f"Skill overlap estimate: {skill_overlap}%. Foundational overlap: {len(missing_skills)} required skills identified for active skill building."
+        skill_overlap = 0.0
 
-    return JobAnalysisReport(
-        opportunity_id=opportunity.id,
-        role_title=opportunity.role_title,
-        company_name=opportunity.company_name,
-        mandatory_qualifications=mandatory,
-        preferred_qualifications=preferred,
-        responsibilities=responsibilities,
-        required_skills=skills_list,
-        location_and_eligibility={
-            "location": opportunity.location or "Not specified",
-            "is_remote": getattr(opportunity, "work_arrangement", "") == "remote",
-            "target_years": getattr(opportunity.requirements, "eligible_graduation_years", []) if opportunity.requirements else [],
-        },
+    if not score_available:
+        verdict = (
+            "We could not find a requirements list (skills under 'Requirements' or 'Must have') in this posting, "
+            "so no skill-match score is shown. Paste the requirements section to analyse it."
+        )
+    else:
+        shown = matched_skills + partial_skills
+        parts = [f"Skill overlap estimate: {skill_overlap}% ({len(matched_skills)}/{total_req} required skills shown)."]
+        if listed_only:
+            parts.append(f"You list {_join(listed_only)} (from your profile).")
+        if shown_notes:
+            parts.append(f"Shown in your resume: {_join(shown_notes)}.")
+        if partial_skills:
+            parts.append(f"Partial (learning): {_join(partial_skills)}.")
+        parts.append(f"Missing required: {_join(missing_skills)}." if missing_skills else "No required skills missing.")
+        if nice_missing:
+            parts.append(f"Missing nice-to-have: {_join(nice_missing)}.")
+        if not shown and not missing_skills:
+            parts = ["No required skills found."]
+        verdict = " ".join(parts)
+
+    return _report(
+        verdict,
         matches=matches,
         match_score=skill_overlap,
-        summary_verdict=verdict,
         missing_critical_skills=missing_skills,
         skill_overlap_estimate=skill_overlap,
         matched_skills=matched_skills,
@@ -439,8 +541,5 @@ def analyze_job_and_match(
         partial_skills=partial_skills,
         gap_actions=gap_actions,
         has_complete_profile=True,
-        score_available=score_available,
         profile_missing_message=None,
-        formula_explanation="Skill overlap estimate = (matched + 0.5 * partial) / total required skills",
     )
-
