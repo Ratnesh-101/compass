@@ -26,6 +26,22 @@ import { newestRefreshDate, createRefreshGate } from '../utils/radarRefresh'
 import { fetchApplications as fetchCareerApplications } from '../api/careerApi'
 import { countApplications, stageOfStatus } from '../utils/applicationStages'
 import TopMatchesBar from './career/TopMatchesBar'
+import { freshnessLabels } from '../utils/radarFreshness'
+
+/** Summary line above the Open Now list; fresh counts reuse freshnessLabels (no duplicate 14-day rule). */
+export function openNowSummary(listings, now = new Date()) {
+  const list = Array.isArray(listings) ? listings : []
+  const total = list.length
+  if (total === 0) {
+    return { total: 0, fresh: 0, stale: 0, text: 'No open listings match your filters' }
+  }
+  const fresh = list.filter(o => freshnessLabels(o, now).fresh).length
+  const stale = total - fresh
+  const text = stale === 0
+    ? `Showing ${total} open listings, all verified in the last 14 days`
+    : `Showing ${total} open listings: ${fresh} verified in the last 14 days, ${stale} need a re-check`
+  return { total, fresh, stale, text }
+}
 
 export default function InternshipRadar({
   refreshTrigger = 0,
@@ -762,6 +778,15 @@ export default function InternshipRadar({
               >
                 <X size={15} strokeWidth={1.8} />
               </button>
+            </div>
+          )}
+
+          {activeTab === 'open' && (
+            <div
+              data-testid="open-now-summary"
+              style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px' }}
+            >
+              {openNowSummary(opportunities).text}
             </div>
           )}
 
