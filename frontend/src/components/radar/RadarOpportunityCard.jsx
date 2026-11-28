@@ -328,6 +328,16 @@ export default function RadarOpportunityCard({
               <span>Prepare Application</span>
             </button>
           )}
+          {application_status && (
+            <button
+              type="button"
+              onClick={() => onApply(opportunity)}
+              className="radar-card-btn radar-card-btn-primary"
+            >
+              <Rocket size={14} strokeWidth={1.8} aria-hidden="true" />
+              <span>Open workspace</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={() => onOpenDetail(opportunity)}
