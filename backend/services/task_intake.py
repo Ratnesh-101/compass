@@ -45,12 +45,33 @@ def _duration_label(minutes: Optional[int]) -> str:
     return f"{minutes / 60:g}h" if minutes % 30 == 0 else f"{minutes}m"
 
 
-def _preview_items(parsed: ParsedIntake, tz_name: str) -> list[dict]:
+_TODAY_WORD = re.compile(r"\b(?:today|tonight)\b", re.IGNORECASE)
+
+
+def _same_weekday_hint(due_text: Optional[str], tz_name: str, now_utc: Optional[datetime] = None) -> str:
+    """Suffix for a bare weekday word that equals today's weekday (it resolves to the NEXT one)."""
+    from backend.services.task_dates import _WEEKDAY_RX, WEEKDAY_INDEX
+
+    text = due_text or ""
+    if _TODAY_WORD.search(text):
+        return ""
+    m = _WEEKDAY_RX.search(text)
+    if not m or m.group(1):
+        return ""
+    today = local_today(tz_name, now_utc)
+    if WEEKDAY_INDEX[m.group(2).lower()] != today.weekday():
+        return ""
+    return f' (next {today.strftime("%A")}: say "today" for today)'
+
+
+def _preview_items(parsed: ParsedIntake, tz_name: str, now_utc: Optional[datetime] = None) -> list[dict]:
     """Resolve every item's due text in the user's zone; unparsed text is reported, never guessed."""
     out = []
     for item in parsed.items:
-        due = resolve_due(item.due_text, tz_name)
+        due = resolve_due(item.due_text, tz_name, now_utc)
+        hint = _same_weekday_hint(item.due_text, tz_name, now_utc) if due.due_date else ""
         out.append({
+            "due_hint": hint,
             "title": item.title,
             "domain": item.domain,
             "priority": item.priority,
@@ -70,6 +91,8 @@ def _line(index: int, it: dict) -> str:
     due = it["due_label"]
     if it.get("due_unparsed"):
         due = f'no due date (could not read "{it["due_unparsed"]}")'
+    elif it.get("due_hint"):
+        due = due + it["due_hint"]
     parts = [it["domain"], it["priority"], _duration_label(it.get("duration_minutes")), due]
     return f"{index}. {it['title']} — " + " · ".join(p for p in parts if p)
 
