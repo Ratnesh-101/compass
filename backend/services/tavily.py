@@ -101,6 +101,8 @@ def _cache_key(q: str, depth: str, topic: str, max_results: int, domains: Option
 
 
 def _cache_get(key: tuple) -> Optional[Dict[str, Any]]:
+    if SEARCH_CACHE_TTL_S <= 0:
+        return None  # caching disabled
     hit = _search_cache.get(key)
     if hit is None:
         return None
@@ -112,6 +114,8 @@ def _cache_get(key: tuple) -> Optional[Dict[str, Any]]:
 
 
 def _cache_put(key: tuple, value: Dict[str, Any]) -> None:
+    if SEARCH_CACHE_TTL_S <= 0:
+        return
     _search_cache[key] = (_cache_now(), copy.deepcopy(value))
     _search_cache.move_to_end(key)
     while len(_search_cache) > SEARCH_CACHE_MAX:
