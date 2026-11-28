@@ -94,7 +94,7 @@ test('empty stage message, watchlist removal, radar banner wording, saved status
   assert.ok(banner.includes('Manage in My resume'))
   assert.ok(!banner.includes('Manage in Resume Studio'))
   const modal = read('components/radar/RadarProfileModal.jsx')
-  assert.ok(modal.includes('role="status"') && modal.includes('setSavedNotice(true)'))
+  assert.ok(!modal.includes('setTimeout(') && modal.includes("if (typeof onClose === 'function') onClose()"))
 })
 
 test('duplicate resume names show created date; diff keeps skill capitalisation', () => {

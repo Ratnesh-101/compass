@@ -55,7 +55,7 @@ async def _sync(conn: Any, user_id: str, app: Any, opp: Any, deadline_changed: b
     a_title = apply_title(opp.role_title, opp.company_name)
     f_title = follow_up_title(opp.role_title, opp.company_name)
     marker = follow_up_marker(app.id)
-    tasks = await structured.list_tasks(conn, user_id=user_id)
+    tasks = await structured.list_tasks(conn, user_id=user_id, include_demo=False)
     apply_tasks = [t for t in tasks if _same_title(t, a_title)]
     follow_tasks = [t for t in tasks if _same_title(t, f_title) and marker in (t.get("notes") or "")]
 

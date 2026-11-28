@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { fetchRadarProfile, updateRadarProfile } from '../../api/radarApi.js'
 import { validateProfileForm, buildProfilePayload } from '../../utils/careerUiHelpers.js'
 import Dialog from '../Dialog'
@@ -133,11 +133,7 @@ function RadarProfileModalContent({
     )
   }
 
-  const [savedNotice, setSavedNotice] = useState(false)
-  const closeTimerRef = useRef(null)
-  useEffect(() => () => { if (closeTimerRef.current) clearTimeout(closeTimerRef.current) }, [])
-
-  const isBusy = isSaving || savingInternal || savedNotice
+  const isBusy = isSaving || savingInternal
   const isFormComplete = validateProfileForm({ degree, academicYear, gradYear, cgpa, cgpaScale }) === null
 
   const handleSubmit = async e => {
@@ -173,11 +169,8 @@ function RadarProfileModalContent({
         onProfileUpdated(result || payload)
       }
 
-      // Show a short confirmation, then close
-      setSavedNotice(true)
-      closeTimerRef.current = setTimeout(() => {
-        if (typeof onClose === 'function') onClose()
-      }, 900)
+      // Close immediately; the parent's onProfileUpdated shows the saved confirmation
+      if (typeof onClose === 'function') onClose()
     } catch (err) {
       console.error('[RadarProfileModal] Failed to save profile:', err)
       setErrorMessage(

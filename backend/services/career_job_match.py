@@ -276,7 +276,14 @@ def _find_headers(line: str) -> List[Tuple[int, int, str]]:
 def _skills_from_chunk(chunk: str) -> List[str]:
     """Skill names from one chunk of a requirements section (short items as written, long bullets by vocabulary)."""
     out: List[str] = []
+    parts_to_skip: List[str] = []
     for item in split_skill_entry(chunk.replace(". ", ", ")):
+        if parts_to_skip and item.strip() == parts_to_skip[0]:
+            parts_to_skip.pop(0)  # 'C/C++' stays one requirement; its split parts are not separate ones
+            continue
+        parts_to_skip = []
+        if "/" in item and item.strip().lower() not in _NO_SPLIT_SLASH:
+            parts_to_skip = [p.strip() for p in item.split("/") if p.strip()]
         item = item.strip(" .-*â€¢Â·")
         key = _skill_key(item)
         if not key or key[0].isdigit() or "year" in key:
@@ -314,7 +321,35 @@ def parse_job_skill_lists(text: str) -> Tuple[List[str], List[str]]:
                 if key not in seen and len(seen) < _MAX_JOB_SKILLS:
                     seen.add(key)
                     target.append(skill)
+    if not required:
+        _fallback_scan(text or "", required, nice, seen)
     return required, nice
+
+
+_INCIDENTAL_PLUS = " + "
+
+
+def _line_is_nice(line: str) -> bool:
+    """A nice-to-have/bonus/plus marker, or an incidental '+ Docker' style mention, in this line."""
+    low = line.lower().strip()
+    return (
+        any(contains_term(low, m) for m in _PREFERRED_MARKERS)
+        or low.startswith("+")
+        or _INCIDENTAL_PLUS in low
+    )
+
+
+def _fallback_scan(text: str, required: List[str], nice: List[str], seen: Set[str]) -> None:
+    """No requirements section: scan the free text for known technologies (required unless marked nice)."""
+    for line in text.splitlines():
+        target = nice if _line_is_nice(line) else required
+        for tech in _KNOWN_TECH:
+            if tech == "Go" or not contains_term(line, tech):
+                continue
+            key = _skill_key(tech)
+            if key not in seen and len(seen) < _MAX_JOB_SKILLS:
+                seen.add(key)
+                target.append(tech)
 
 
 def _resume_evidence(skill: str, master: ResumeContent) -> Optional[str]:
@@ -329,7 +364,7 @@ def _resume_evidence(skill: str, master: ResumeContent) -> Optional[str]:
             not ambiguous and any(contains_term(prose, v) for v in variants)
         ):
             return f"project {p.title}"
-    for e in list(master.experience) + list(master.internships):
+    for e in list(master.experience) + list(getattr(master, "internships", None) or []):
         if not ambiguous and any(contains_term(" ".join(e.highlights), v) for v in variants):
             return f"experience at {e.company}"
     return None
@@ -511,8 +546,8 @@ def analyze_job_and_match(
 
     if not score_available:
         verdict = (
-            "We could not find a requirements list (skills under 'Requirements' or 'Must have') in this posting, "
-            "so no skill-match score is shown. Paste the requirements section to analyse it."
+            "Skill-match score not available: we could not find a requirements list (skills under 'Requirements' or 'Must have') in this posting, "
+            "so no score is shown. Paste the requirements section to analyse it."
         )
     else:
         shown = matched_skills + partial_skills
