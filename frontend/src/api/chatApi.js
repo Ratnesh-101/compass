@@ -319,6 +319,22 @@ export async function fetchConversations(limit = 30, includeArchived = false) {
 export const listConversations = fetchConversations
 
 /**
+ * Copy a conversation's active pending action onto its last assistant message so the
+ * confirmation card (Confirm/Cancel) renders again after a reload. Pure; no-op without one.
+ */
+export function attachPendingAction(messages, pending) {
+  if (!pending || !Array.isArray(messages)) return messages
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i] && messages[i].role === 'assistant') {
+      const next = messages.slice()
+      next[i] = { ...messages[i], pending_action: pending, data: { ...(messages[i].data || {}), pending_action: pending } }
+      return next
+    }
+  }
+  return messages
+}
+
+/**
  * Fetch all messages from a specific previous conversation.
  */
 export async function fetchConversationMessages(conversationId) {
@@ -327,7 +343,7 @@ export async function fetchConversationMessages(conversationId) {
     const res = await authedFetch(`${API_BASE}/api/conversations/${conversationId}/messages`)
     if (!res.ok) return []
     const data = await res.json()
-    return (data.messages || []).map(m => ({
+    const mapped = (data.messages || []).map(m => ({
       id: m.id,
       role: m.role,
       text: m.content,
@@ -337,6 +353,7 @@ export async function fetchConversationMessages(conversationId) {
       isTruncated: Boolean(m.is_truncated || m.isTruncated),
       is_truncated: Boolean(m.is_truncated || m.isTruncated),
     }))
+    return attachPendingAction(mapped, data.pending_action)
   } catch {
     return []
   }
