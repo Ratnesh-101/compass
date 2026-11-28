@@ -8,6 +8,7 @@ import {
 } from '../../api/careerApi'
 import { downloadAuthedFile, openAuthedHtml } from '../../api/baseClient.js'
 
+import LoadErrorPanel from './LoadErrorPanel'
 import ValidationReportCard from './ValidationReportCard'
 import ClaimVerificationCard from './ClaimVerificationCard'
 import ResumeEditorSections from './ResumeEditorSections'
@@ -32,7 +33,7 @@ export default function ResumeStudio({ onSaved = () => {} } = {}) {
   const [loading, setLoading] = useState(true), [saving, setSaving] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
   const [saveKind, setSaveKind] = useState('master')
-  const [error, setError] = useState(null), [exportingType, setExportingType] = useState(null)
+  const [error, setError] = useState(null), [loadError, setLoadError] = useState(null), [exportingType, setExportingType] = useState(null)
   const [exportToast, setExportToast] = useState(null)
 
   // Form edit states
@@ -53,6 +54,7 @@ export default function ResumeStudio({ onSaved = () => {} } = {}) {
   const loadData = useCallback(async () => {
     setLoading(true)
     setError(null)
+    setLoadError(null)
     try {
       const [master, list] = await Promise.all([
         fetchMasterResume(),
@@ -64,7 +66,8 @@ export default function ResumeStudio({ onSaved = () => {} } = {}) {
       populateForm(master)
       setValidationReport(master?.validation_report || null)
     } catch (err) {
-      setError(err.message || 'Failed to load resumes')
+      // A failed load leaves no resume selected: the editor is replaced by the error panel (see below).
+      setLoadError(err || new Error('load failed'))
     } finally {
       setLoading(false)
     }
@@ -152,6 +155,7 @@ export default function ResumeStudio({ onSaved = () => {} } = {}) {
       const saved = await commitExtractedResume(editedContent, docId, target)
       setShowExtractionModal(false)
       const isMaster = !target || target === 'master'
+      // Only reached after the request above returned ok (the api helpers throw on a non-ok response).
       setSaveKind(isMaster ? 'master' : 'tailored')
       setSaveSuccess(true)
       await loadData()
@@ -251,6 +255,7 @@ export default function ResumeStudio({ onSaved = () => {} } = {}) {
   // Save handler enforcing Master Resume Immutability
   const handleSaveResume = async (e) => {
     e.preventDefault()
+    if (!selectedResume) return // nothing loaded: never pretend to save
     setSaving(true)
     setError(null)
     setSaveSuccess(false)
@@ -301,6 +306,7 @@ export default function ResumeStudio({ onSaved = () => {} } = {}) {
         }
       }
 
+      // Only reached after the request above returned ok (the api helpers throw on a non-ok response).
       setSaveKind(isMaster ? 'master' : 'tailored')
       setSaveSuccess(true)
       if (isMaster) {
@@ -397,6 +403,10 @@ export default function ResumeStudio({ onSaved = () => {} } = {}) {
     } finally {
       setExportingType(null)
     }
+  }
+
+  if (!loading && loadError && !selectedResume) {
+    return <LoadErrorPanel error={loadError} onRetry={loadData} what="resume" />
   }
 
   if (loading) {
@@ -898,7 +908,7 @@ export default function ResumeStudio({ onSaved = () => {} } = {}) {
                 </button>
                 <button
                   type="submit"
-                  disabled={saving}
+                  disabled={saving || !selectedResume}
                   style={{
                     background: 'var(--primary, #2563eb)', color: '#ffffff', border: 'none',
                     padding: '10px 24px', borderRadius: '8px', fontSize: '14px', fontWeight: '700',
@@ -980,7 +990,7 @@ export default function ResumeStudio({ onSaved = () => {} } = {}) {
                 <button
                   type="button"
                   onClick={handleSaveResume}
-                  disabled={saving}
+                  disabled={saving || !selectedResume}
                   style={{
                     background: 'var(--primary, #2563eb)',
                     color: '#ffffff',
