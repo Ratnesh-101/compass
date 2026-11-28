@@ -33,9 +33,10 @@ export function summarizeTopMatchesResult(result) {
         needsResume: false,
       }
     }
+    const ready = prepared.length === 1 ? '1 application is ready to review.' : `${prepared.length} applications are ready to review.`
     return {
       tone: 'success',
-      message: prepared.length === 1 ? '1 application is ready to review.' : `${prepared.length} applications are ready to review.`,
+      message: result?.message ? `${result.message}. ${ready}` : ready,
       lines,
       preparedCount: prepared.length,
       needsResume: false,

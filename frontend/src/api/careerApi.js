@@ -37,7 +37,7 @@ export async function fetchMasterResume() {
     headers: getAuthHeaders(),
     credentials: 'include',
   })
-  if (!res.ok) throw new Error(`Failed to fetch master resume: ${res.statusText}`)
+  if (!res.ok) throw Object.assign(new Error(`Failed to fetch master resume: ${res.statusText}`), { status: res.status })
   return res.json()
 }
 
@@ -59,7 +59,7 @@ export async function fetchResumes() {
     headers: getAuthHeaders(),
     credentials: 'include',
   })
-  if (!res.ok) throw new Error(`Failed to list resumes: ${res.statusText}`)
+  if (!res.ok) throw Object.assign(new Error(`Failed to list resumes: ${res.statusText}`), { status: res.status })
   return res.json()
 }
 
@@ -341,7 +341,7 @@ export async function fetchApplications(status = null) {
     headers: getAuthHeaders(),
     credentials: 'include',
   })
-  if (!res.ok) throw new Error(`Failed to list applications: ${res.statusText}`)
+  if (!res.ok) throw Object.assign(new Error(`Failed to list applications: ${res.statusText}`), { status: res.status })
   return res.json()
 }
 

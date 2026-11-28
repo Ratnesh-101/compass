@@ -94,7 +94,7 @@ export default function RadarOverviewCards({
             )}
             {banner.missingGradYear && (
               <button type="button" onClick={goToResumeStudio} style={buttonStyle}>
-                Manage in Resume Studio
+                Manage in My resume
               </button>
             )}
           </div>

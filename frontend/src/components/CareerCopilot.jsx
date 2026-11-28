@@ -10,12 +10,35 @@ import { fetchRadarProfile } from '../api/radarApi'
 import { fetchMasterResume } from '../api/careerApi'
 import { hasSavedProfile, hasSavedResume } from '../utils/careerUiHelpers'
 import { SAVED_RESUME_MESSAGE } from '../utils/careerFlowText'
+import { parseCareerLocation, buildCareerUrl } from '../utils/careerRouting'
+
+const toUrlSub = (key) => (key === 'resumes' ? 'resume' : key)
+const fromUrlSub = (sub) => (sub === 'resume' ? 'resumes' : sub)
+import { ResumeFocusContext } from './career/resumeFocusContext.js'
 
 const ResumeStudio = React.lazy(() => import('./career/ResumeStudio'))
 const ApplicationWorkspaceModal = React.lazy(() => import('./career/ApplicationWorkspaceModal'))
 
 export default function CareerCopilot({ isDarkMode, onToggleDarkMode }) {
-  const [activeSubTab, setActiveSubTab] = useState('radar') // 'radar' | 'resumes' | 'applications'
+  // 'radar' | 'resumes' | 'applications'. The URL says 'resume' for 'resumes'.
+  const [activeSubTab, setActiveSubTabState] = useState(() => fromUrlSub(parseCareerLocation(window.location.search).sub))
+  const setActiveSubTab = useCallback((key) => {
+    setActiveSubTabState(key)
+    const target = buildCareerUrl('career', toUrlSub(key))
+    if (window.location.pathname + window.location.search !== target) {
+      window.history.pushState({ tab: 'career', domain: 'all' }, '', target)
+    }
+  }, [])
+
+  // Browser Back/Forward switches the sub-tab.
+  useEffect(() => {
+    const onPop = () => {
+      const loc = parseCareerLocation(window.location.search)
+      if (loc.tab === 'career') setActiveSubTabState(fromUrlSub(loc.sub))
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
   const [profileRefreshTrigger, setProfileRefreshTrigger] = useState(0)
   const [notification, setNotification] = useState(null)
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false)
@@ -26,7 +49,11 @@ export default function CareerCopilot({ isDarkMode, onToggleDarkMode }) {
 
   // Every callback below is memoized: they are passed to InternshipRadar, and a new function on every
   // render used to restart its refresh effect (the reload storm after a profile save).
-  const handleNavigateToResumeStudio = useCallback(() => {
+  const [resumeFocus, setResumeFocus] = useState({ section: null, nonce: 0 })
+  const handleNavigateToResumeStudio = useCallback((section) => {
+    // Callers may pass a section key ('education', 'projects', 'experience', 'links'); anything else is ignored.
+    const key = typeof section === 'string' ? section : null
+    setResumeFocus((prev) => ({ section: key, nonce: prev.nonce + 1 }))
     setActiveSubTab('resumes')
   }, [])
 
@@ -342,7 +369,9 @@ export default function CareerCopilot({ isDarkMode, onToggleDarkMode }) {
         )}
         {activeSubTab === 'resumes' && (
           <React.Suspense fallback={<div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading My resume…</div>}>
-            <ResumeStudio onSaved={handleResumeSaved} />
+            <ResumeFocusContext.Provider value={resumeFocus}>
+              <ResumeStudio onSaved={handleResumeSaved} />
+            </ResumeFocusContext.Provider>
           </React.Suspense>
         )}
         {activeSubTab === 'applications' && (

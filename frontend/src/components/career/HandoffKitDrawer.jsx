@@ -1,8 +1,11 @@
+import { sectionForMissingField } from './resumeEditorModel.js'
 import React, { useState, useEffect } from 'react'
 import { downloadAuthedFile, openAuthedHtml, API_BASE } from '../../api/baseClient.js'
 import { fetchHandoffKit } from '../../api/careerApi.js'
 import { copyTextSafely, displayKitValue } from '../../utils/careerUiHelpers.js'
 import Dialog from '../Dialog'
+
+export const PRINT_POPUP_BLOCKED_MESSAGE = 'Allow pop-ups to print, or use Download Word.'
 
 const withApiBase = url => (url && url.startsWith('/') ? `${API_BASE}${url}` : url)
 
@@ -18,11 +21,30 @@ export default function HandoffKitDrawer({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [copiedKey, setCopiedKey] = useState(null)
+  const [printMessage, setPrintMessage] = useState(null)
   const [checklist, setChecklist] = useState({
     resumeAttached: false,
     coverLetterReviewed: false,
     questionsAnswered: false,
   })
+
+  // Open the tab synchronously inside the click so the popup blocker allows it, then write into it.
+  const handlePrintResume = async () => {
+    setPrintMessage(null)
+    const popup = typeof window !== 'undefined' ? window.open('about:blank', '_blank') : null
+    if (!popup) {
+      setPrintMessage(PRINT_POPUP_BLOCKED_MESSAGE)
+      return
+    }
+    try {
+      await openAuthedHtml(withApiBase(kit.export_html_url), { printOnLoad: true, popup })
+    } catch (err) {
+      if (popup && typeof popup.close === 'function' && !popup.closed) {
+        try { popup.close() } catch { /* ignore */ }
+      }
+      setPrintMessage(err.message || 'Could not open the printable resume.')
+    }
+  }
 
   useEffect(() => {
     if (!isOpen || !applicationId) return
@@ -179,12 +201,12 @@ export default function HandoffKitDrawer({
                   <div style={{ display: 'flex', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
                     <button
                       type="button"
-                      onClick={() => openAuthedHtml(withApiBase(kit.export_html_url))}
+                      onClick={handlePrintResume}
                       style={{
                         padding: '6px 14px',
                         borderRadius: '6px',
                         background: 'var(--brand, #3b82f6)',
-                        color: '#ffffff',
+                        color: 'var(--accent-text, #1b1a17)fff',
                         border: 'none',
                         fontSize: '12px',
                         fontWeight: 600,
@@ -193,6 +215,9 @@ export default function HandoffKitDrawer({
                     >
                       Print ATS Resume (PDF)
                     </button>
+                    {printMessage && (
+                      <div role="status" style={{ flexBasis: '100%', fontSize: '12px', color: '#92400e' }}>{printMessage}</div>
+                    )}
                     <button
                       type="button"
                       onClick={() => downloadAuthedFile(withApiBase(kit.export_docx_url), `${kit.company_name}_Resume.docx`)}
@@ -305,7 +330,7 @@ export default function HandoffKitDrawer({
                             <span style={{ fontStyle: 'italic', color: 'var(--text-muted, #64748b)' }}>{displayKitValue(val)}</span>
                           <button
                             type="button"
-                            onClick={() => onNavigateToResumeStudio?.()}
+                            onClick={() => onNavigateToResumeStudio?.(sectionForMissingField(item.key))}
                             style={{
                               padding: '2px 8px',
                               borderRadius: '4px',
@@ -343,7 +368,7 @@ export default function HandoffKitDrawer({
                       padding: '6px 14px',
                       borderRadius: '6px',
                       background: 'var(--brand, #3b82f6)',
-                      color: '#ffffff',
+                      color: 'var(--accent-text, #1b1a17)fff',
                       textDecoration: 'none',
                       fontSize: '12px',
                       fontWeight: 600,
@@ -429,7 +454,7 @@ export default function HandoffKitDrawer({
                   padding: '9px 18px',
                   borderRadius: '6px',
                   background: 'var(--brand, #3b82f6)',
-                  color: '#ffffff',
+                  color: 'var(--accent-text, #1b1a17)fff',
                   border: 'none',
                   fontSize: '13px',
                   fontWeight: 700,

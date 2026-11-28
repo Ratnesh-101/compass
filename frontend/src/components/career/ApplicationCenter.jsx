@@ -1,3 +1,4 @@
+import { sectionForMissingField } from './resumeEditorModel.js'
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   fetchApplications,
@@ -9,7 +10,9 @@ import {
   draftCoverLetter,
   setApplicationCoverLetter,
 } from '../../api/careerApi'
+import LoadErrorPanel from './LoadErrorPanel'
 import BatchApprovalModal from './BatchApprovalModal'
+import { SLOW_LOAD_MS, SLOW_LOAD_TEXT } from '../../utils/careerLoadHonesty'
 import HandoffKitModal from './HandoffKitModal'
 import HandoffKitDrawer from './HandoffKitDrawer'
 import ReturnSubmissionPrompt from './ReturnSubmissionPrompt'
@@ -26,6 +29,8 @@ import {
   blockedMessage,
 } from '../../utils/applicationStages'
 
+const ApplicationWorkspaceModal = React.lazy(() => import('./ApplicationWorkspaceModal'))
+
 export default function ApplicationCenter({ onNavigateToResumeStudio }) {
   const [applications, setApplications] = useState([])
   const [selectedAppIds, setSelectedAppIds] = useState(new Set())
@@ -33,6 +38,7 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
   const [showApprovalModal, setShowApprovalModal] = useState(false)
   const [activeKit, setActiveKit] = useState(null)
   const [activeDrawerApp, setActiveDrawerApp] = useState(null)
+  const [activeWorkspaceOpp, setActiveWorkspaceOpp] = useState(null)
   const [activeLetterApp, setActiveLetterApp] = useState(null)
   const [letterDraftingId, setLetterDraftingId] = useState(null)
   const [statusFilter, setStatusFilter] = useState('all')
@@ -40,6 +46,8 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
   const [processing, setProcessing] = useState(false)
   const [submitResult, setSubmitResult] = useState(null)
   const [error, setError] = useState(null)
+  const [loadError, setLoadError] = useState(null)
+  const [slowLoad, setSlowLoad] = useState(false)
 
   // Explicit approval check states (Section 3.3)
   const [attestationConfirmed, setAttestationConfirmed] = useState(false)
@@ -49,11 +57,12 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
   const loadData = useCallback(async () => {
     setLoading(true)
     setError(null)
+    setLoadError(null)
     try {
       const apps = await fetchApplications()
       setApplications(apps)
     } catch (err) {
-      setError(err.message || 'Failed to load applications')
+      setLoadError(err || new Error('load failed'))
     } finally {
       setLoading(false)
     }
@@ -62,6 +71,12 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
   useEffect(() => {
     loadData()
   }, [loadData])
+
+  useEffect(() => {
+    if (!loading) { setSlowLoad(false); return undefined }
+    const timer = setTimeout(() => setSlowLoad(true), SLOW_LOAD_MS)
+    return () => clearTimeout(timer)
+  }, [loading])
 
   const toggleSelectApp = (id) => {
     setSelectedAppIds(prev => {
@@ -198,8 +213,13 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
       <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-muted)' }}>
         <div className="spinner" style={{ margin: '0 auto 12px' }} />
         <p>Loading Application Center...</p>
+        {slowLoad && <p role="status">{SLOW_LOAD_TEXT}</p>}
       </div>
     )
+  }
+
+  if (loadError) {
+    return <LoadErrorPanel error={loadError} onRetry={loadData} what="applications" />
   }
 
   const batchSummary = summarizeBatchResults(submitResult?.results)
@@ -336,6 +356,10 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
             Find an internship in the Radar and choose &quot;Prepare Application&quot;, or paste a job link on the Radar page.
           </p>
         </div>
+      ) : visibleApps.length === 0 ? (
+        <div role="status" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px', padding: '32px 24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '14px' }}>
+          No applications in this stage yet.
+        </div>
       ) : (
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px', overflow: 'hidden' }}>
           <div style={{ overflowX: 'auto' }}>
@@ -345,6 +369,7 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
                   <th style={{ padding: '12px 16px', width: '36px' }}>
                     <input
                       type="checkbox"
+                      aria-label="Select all visible applications"
                       checked={visibleApps.length > 0 && visibleApps.every(a => selectedAppIds.has(a.id))}
                       onChange={handleSelectAll}
                     />
@@ -376,6 +401,7 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
                         <td style={{ padding: '12px 16px' }}>
                           <input
                             type="checkbox"
+                            aria-label={`Select ${cleanedOpp.company !== 'Company' ? cleanedOpp.company : (opp.company_name || 'application')} ${cleanedOpp.role || ''}`.trim()}
                             checked={isSelected}
                             onChange={() => toggleSelectApp(app.id)}
                           />
@@ -392,7 +418,7 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
                               <span>⚠️ Missing: {app.missing_fields.join(', ')}</span>
                               <button
                                 type="button"
-                                onClick={() => onNavigateToResumeStudio?.()}
+                                onClick={() => onNavigateToResumeStudio?.(sectionForMissingField(app.missing_fields[0]))}
                                 style={{
                                   background: 'transparent',
                                   border: 'none',
@@ -500,12 +526,30 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
                         </td>
                         <td style={{ padding: '12px 16px', textAlign: 'right' }}>
                           <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', alignItems: 'center' }}>
+                            {app.opportunity && (
+                              <button
+                                type="button"
+                                onClick={() => setActiveWorkspaceOpp(app.opportunity)}
+                                style={{
+                                  background: 'transparent',
+                                  color: 'var(--brand, #3b82f6)',
+                                  border: '1px solid var(--brand, #3b82f6)',
+                                  padding: '4px 10px',
+                                  borderRadius: '6px',
+                                  fontSize: '12px',
+                                  fontWeight: '600',
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                Open workspace
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => setActiveDrawerApp(app)}
                               style={{
                                 background: 'var(--brand, #3b82f6)',
-                                color: '#ffffff',
+                                color: 'var(--accent-text, #1b1a17)fff',
                                 border: 'none',
                                 padding: '4px 10px',
                                 borderRadius: '6px',
@@ -583,6 +627,21 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
           setActiveDrawerApp(null)
         }}
       />
+
+      {/* Re-enter the application workspace (checklist, notes, cover letter, Job Analysis) */}
+      {activeWorkspaceOpp && (
+        <React.Suspense fallback={null}>
+          <ApplicationWorkspaceModal
+            key={activeWorkspaceOpp.id}
+            opportunity={activeWorkspaceOpp}
+            onClose={() => {
+              setActiveWorkspaceOpp(null)
+              loadData()
+            }}
+            onNavigateToResumeStudio={onNavigateToResumeStudio}
+          />
+        </React.Suspense>
+      )}
 
       {/* Dismissible Post-External-Return Prompt */}
       <ReturnSubmissionPrompt

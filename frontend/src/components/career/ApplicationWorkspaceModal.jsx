@@ -44,6 +44,7 @@ import {
   clearWorkspaceDraft,
   inspectDraftConflict,
 } from '../../utils/workspaceDraft'
+import { needsReplaceConfirm } from '../../utils/careerLoadHonesty'
 import ValidationReportCard from './ValidationReportCard'
 import TailorChangesCard from './TailorChangesCard'
 import AtsCheckPanel from './AtsCheckPanel'
@@ -222,6 +223,10 @@ export default function ApplicationWorkspaceModal({
   const [tailoring, setTailoring] = useState(false)
   const [savingResume, setSavingResume] = useState(false)
   const [draftingLetter, setDraftingLetter] = useState(false)
+  const [savedLetterText, setSavedLetterText] = useState('')
+  const [letterConfirm, setLetterConfirm] = useState(false)
+  const [letterUndo, setLetterUndo] = useState(null)
+  const letterUndoTimerRef = useRef(null)
   const [savingLetter, setSavingLetter] = useState(false)
   const [savingStatus, setSavingStatus] = useState(false)
   const [error, setError] = useState(null)
@@ -471,6 +476,7 @@ export default function ApplicationWorkspaceModal({
       setPrivateNotes(app.private_notes || '')
       setTargetDeadline(app.target_deadline || '')
       setCoverLetterText(app.cover_letter || '')
+      setSavedLetterText(app.cover_letter || '')
       // Preparing now reads the full job page on the server: use that text, not the short list stub.
       if (app.opportunity?.description) setCustomJobDesc(app.opportunity.description)
 
@@ -716,17 +722,23 @@ export default function ApplicationWorkspaceModal({
   }
 
   // Handle Cover Letter Generation
-  const handleGenerateCoverLetter = async () => {
+  // A generated draft is only put in the editor. The user saves it (or undoes it) themselves.
+  const handleGenerateCoverLetter = async (confirmed = false) => {
+    if (confirmed !== true && needsReplaceConfirm(coverLetterText, savedLetterText)) {
+      setLetterConfirm(true)
+      return
+    }
+    setLetterConfirm(false)
     setDraftingLetter(true)
     setError(null)
     try {
       const res = await draftCoverLetter(opportunity.id)
+      const previous = coverLetterText
       setCoverLetterText(res.content)
-      if (application) {
-        await setApplicationCoverLetter(application.id, res.content)
-      }
-      setChecklist(prev => ({ ...prev, coverLetterDrafted: true }))
-      showNotification('Truthful cover letter generated from your verified projects and skills!')
+      if (letterUndoTimerRef.current) clearTimeout(letterUndoTimerRef.current)
+      setLetterUndo({ previous })
+      letterUndoTimerRef.current = setTimeout(() => setLetterUndo(null), 15000)
+      showNotification('Draft ready. Review it, then click Save Letter to keep it.')
     } catch (err) {
       setError(err.message || 'Failed to generate cover letter')
     } finally {
@@ -741,6 +753,8 @@ export default function ApplicationWorkspaceModal({
     setError(null)
     try {
       await setApplicationCoverLetter(application.id, coverLetterText)
+      setSavedLetterText(coverLetterText)
+      setLetterUndo(null)
       clearWorkspaceDraft(opportunity.id)
       setChecklist(prev => ({ ...prev, coverLetterDrafted: Boolean(coverLetterText) }))
       showNotification('Cover letter saved to application record.')
@@ -1213,7 +1227,7 @@ export default function ApplicationWorkspaceModal({
                         padding: '5px 12px',
                         borderRadius: '6px',
                         background: 'var(--brand)',
-                        color: '#ffffff',
+                        color: 'var(--accent-text, #1b1a17)fff',
                         border: 'none',
                         fontSize: '12px',
                         fontWeight: 600,
@@ -2099,7 +2113,7 @@ export default function ApplicationWorkspaceModal({
                           padding: '5px 12px',
                           borderRadius: '6px',
                           background: 'var(--brand)',
-                          color: '#ffffff',
+                          color: 'var(--accent-text, #1b1a17)fff',
                           border: 'none',
                           fontSize: '12px',
                           fontWeight: 700,
@@ -2221,7 +2235,9 @@ export default function ApplicationWorkspaceModal({
                       </div>
                     ) : (
                       <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-muted)', fontSize: '13px' }}>
-                        {loadingAnalysis ? 'Extracting mandatory and preferred criteria…' : "We couldn't read this job's description. Paste it above to check how well you match."}
+                        {loadingAnalysis ? 'Extracting mandatory and preferred criteria…' : ((customJobDesc || '').trim() || (opportunity?.description || '').trim()
+                          ? "We couldn't find a list of required skills in this description. Paste the requirements section above to check how well you match."
+                          : <strong style={{ fontSize: '14px', color: 'var(--text-primary)' }}>Paste the job description to analyse it</strong>)}
                       </div>
                     )}
                   </div>
@@ -2289,7 +2305,7 @@ export default function ApplicationWorkspaceModal({
                               padding: '7px 14px',
                               borderRadius: '8px',
                               background: 'var(--brand)',
-                              color: '#ffffff',
+                              color: 'var(--accent-text, #1b1a17)fff',
                               border: 'none',
                               fontSize: '12px',
                               fontWeight: 600,
@@ -2350,8 +2366,9 @@ export default function ApplicationWorkspaceModal({
                     </h4>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '12px' }}>
                       <div>
-                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Full Name</label>
+                        <label htmlFor="workspace-full-name" style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Full Name</label>
                         <input
+                          id="workspace-full-name"
                           type="text"
                           value={fullName}
                           onChange={e => setFullName(e.target.value)}
@@ -2359,8 +2376,9 @@ export default function ApplicationWorkspaceModal({
                         />
                       </div>
                       <div>
-                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Email</label>
+                        <label htmlFor="workspace-email" style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Email</label>
                         <input
+                          id="workspace-email"
                           type="email"
                           value={email}
                           onChange={e => setEmail(e.target.value)}
@@ -2415,7 +2433,7 @@ export default function ApplicationWorkspaceModal({
                         padding: '8px 18px',
                         borderRadius: '7px',
                         background: 'var(--brand)',
-                        color: '#ffffff',
+                        color: 'var(--accent-text, #1b1a17)fff',
                         border: 'none',
                         fontSize: '12px',
                         fontWeight: 600,
@@ -2443,7 +2461,7 @@ export default function ApplicationWorkspaceModal({
                     <div style={{ display: 'flex', gap: '8px' }}>
                       <button
                         type="button"
-                        onClick={handleGenerateCoverLetter}
+                        onClick={() => handleGenerateCoverLetter()}
                         disabled={draftingLetter}
                         style={{
                           padding: '7px 14px',
@@ -2466,7 +2484,7 @@ export default function ApplicationWorkspaceModal({
                           padding: '7px 14px',
                           borderRadius: '8px',
                           background: 'var(--brand)',
-                          color: '#ffffff',
+                          color: 'var(--accent-text, #1b1a17)fff',
                           border: 'none',
                           fontSize: '12px',
                           fontWeight: 600,
@@ -2477,6 +2495,26 @@ export default function ApplicationWorkspaceModal({
                       </button>
                     </div>
                   </div>
+
+                  {letterConfirm && (
+                    <div role="alert" style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', fontSize: '12.5px', color: '#92400e', background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: '8px', padding: '8px 12px' }}>
+                      <span>Replace your edited letter with a new draft?</span>
+                      <button type="button" onClick={() => handleGenerateCoverLetter(true)} style={{ padding: '3px 10px', borderRadius: '6px', border: '1px solid #fcd34d', background: '#ffffff', fontWeight: 700, fontSize: '12px', cursor: 'pointer' }}>Replace</button>
+                      <button type="button" onClick={() => setLetterConfirm(false)} style={{ padding: '3px 10px', borderRadius: '6px', border: '1px solid #fcd34d', background: '#ffffff', fontWeight: 700, fontSize: '12px', cursor: 'pointer' }}>Keep mine</button>
+                    </div>
+                  )}
+                  {letterUndo && (
+                    <div role="status" style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '12.5px', color: 'var(--text-muted)' }}>
+                      <span>New draft added. It is not saved yet.</span>
+                      <button
+                        type="button"
+                        onClick={() => { setCoverLetterText(letterUndo.previous); setLetterUndo(null) }}
+                        style={{ padding: '3px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-app)', fontWeight: 700, fontSize: '12px', cursor: 'pointer' }}
+                      >
+                        Undo
+                      </button>
+                    </div>
+                  )}
 
                   <textarea
                     rows={12}
@@ -2569,8 +2607,9 @@ export default function ApplicationWorkspaceModal({
                       </div>
 
                       <div>
-                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Personal Target Deadline</label>
+                        <label htmlFor="workspace-target-deadline" style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Personal Target Deadline</label>
                         <input
+                          id="workspace-target-deadline"
                           type="date"
                           value={targetDeadline}
                           onChange={e => setTargetDeadline(e.target.value)}
@@ -2580,8 +2619,9 @@ export default function ApplicationWorkspaceModal({
                     </div>
 
                     <div style={{ marginBottom: '14px' }}>
-                      <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Private Candidate Notes</label>
+                      <label htmlFor="workspace-private-notes" style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>Private Candidate Notes</label>
                       <textarea
+                        id="workspace-private-notes"
                         rows={3}
                         value={privateNotes}
                         onChange={e => setPrivateNotes(e.target.value)}
@@ -2598,7 +2638,7 @@ export default function ApplicationWorkspaceModal({
                         padding: '8px 18px',
                         borderRadius: '7px',
                         background: 'var(--brand)',
-                        color: '#ffffff',
+                        color: 'var(--accent-text, #1b1a17)fff',
                         border: 'none',
                         fontSize: '12px',
                         fontWeight: 600,
@@ -2640,7 +2680,7 @@ export default function ApplicationWorkspaceModal({
                             padding: '10px 18px',
                             borderRadius: '8px',
                             background: 'var(--brand)',
-                            color: '#ffffff',
+                            color: 'var(--accent-text, #1b1a17)fff',
                             fontWeight: 600,
                             fontSize: '13px',
                             textDecoration: 'none',

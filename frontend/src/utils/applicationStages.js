@@ -54,6 +54,8 @@ const DETAIL_BY_STATUS = {
 
 export const BACKEND_STATUSES = Object.keys(STAGE_BY_STATUS)
 
+export const CLOSED_REOPEN_MESSAGE = "Closed applications can't be reopened here. Prepare it again from the Radar."
+
 const normalize = status => String(status || '').trim().toUpperCase()
 
 /** Stage key for a backend status. Unknown values count as "preparing" so nothing disappears. */
@@ -190,7 +192,7 @@ export function planStageMove(currentStatus, targetStage) {
     case 'preparing':
       return ['SAVED', 'RESUME_VALIDATION_FAILED'].includes(status)
         ? status_('PREPARING')
-        : { ok: false, reason: 'This application is already past the preparing stage.' }
+        : { ok: false, reason: current === 'closed' ? CLOSED_REOPEN_MESSAGE : 'This application is already past the preparing stage.' }
     case 'applied':
       if (CAN_MARK_APPLIED.has(status)) return { ok: true, steps: [{ type: 'mark_applied' }] }
       return { ok: false, reason: 'Finish preparing first. The resume check has to pass before you can mark it as applied.' }

@@ -169,10 +169,8 @@ function RadarProfileModalContent({
         onProfileUpdated(result || payload)
       }
 
-      // Close modal immediately upon successful save
-      if (typeof onClose === 'function') {
-        onClose()
-      }
+      // Close immediately; the parent's onProfileUpdated shows the saved confirmation
+      if (typeof onClose === 'function') onClose()
     } catch (err) {
       console.error('[RadarProfileModal] Failed to save profile:', err)
       setErrorMessage(
@@ -642,6 +640,7 @@ function RadarProfileModalContent({
                     key={arr}
                     type="button"
                     onClick={() => toggleArrangement(arr)}
+                    aria-pressed={checked}
                     style={{
                       padding: '6px 14px',
                       borderRadius: '8px',
@@ -718,7 +717,7 @@ function RadarProfileModalContent({
                 padding: '10px 20px',
                 borderRadius: '8px',
                 background: 'var(--brand)',
-                color: '#ffffff',
+                color: 'var(--accent-text, #1b1a17)fff',
                 border: 'none',
                 fontWeight: 600,
                 fontSize: '13px',
@@ -726,8 +725,11 @@ function RadarProfileModalContent({
                 opacity: isBusy || !isFormComplete ? 0.6 : 1,
               }}
             >
-              {isBusy ? 'Saving Profile…' : 'Save Profile'}
+              {savedNotice ? 'Saved' : isBusy ? 'Saving Profile…' : 'Save Profile'}
             </button>
+            {savedNotice && (
+              <span role="status" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>Saved</span>
+            )}
           </div>
         </form>
       </div>

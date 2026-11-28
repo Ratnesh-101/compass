@@ -294,9 +294,11 @@ export default function InternshipRadar({
       } else {
         await saveOpportunity(id)
       }
-      setOpportunities(prev =>
-        prev.map(o => (o.id === id ? { ...o, is_saved: !isCurrentlySaved } : o))
-      )
+      setOpportunities(prev => (
+        activeTab === 'watchlist' && isCurrentlySaved
+          ? prev.filter(o => o.id !== id)
+          : prev.map(o => (o.id === id ? { ...o, is_saved: !isCurrentlySaved } : o))
+      ))
       loadMetadata()
     } catch (err) {
       console.error('Error toggling save:', err)

@@ -65,7 +65,7 @@ export default class TabErrorBoundary extends React.Component {
             borderRadius: '8px',
             border: 'none',
             background: 'var(--brand, #f5a623)',
-            color: '#ffffff',
+            color: 'var(--accent-text, #1b1a17)fff',
             fontSize: '13px',
             fontWeight: 600,
             cursor: 'pointer',
