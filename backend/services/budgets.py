@@ -163,7 +163,7 @@ async def _identity_credits_today(identity_id: str) -> int:
         return 0
     async with pool.acquire() as conn:
         used = await conn.fetchval(
-            f"SELECT COALESCE(SUM(credits), 0) FROM tavily_usage_log WHERE identity = $1 AND created_at >= {_UTC_DAY_START}",
+            f"SELECT COALESCE(SUM(credits), 0) FROM tavily_usage_log WHERE identity = $1 AND created_at >= {_UTC_DAY_START}",  # nosec B608
             identity_id,
         )
     return int(used or 0)
@@ -277,7 +277,7 @@ async def reserve_tavily_credits(cost: int, operation: str = "search", pool: Any
                 if identity:
                     await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", f"{identity}|{day}")
                 g_used = int(await conn.fetchval(
-                    f"SELECT COALESCE(SUM(credits), 0) FROM tavily_usage_log WHERE created_at >= {_UTC_DAY_START}") or 0)
+                    f"SELECT COALESCE(SUM(credits), 0) FROM tavily_usage_log WHERE created_at >= {_UTC_DAY_START}") or 0)  # nosec B608
                 if g_used + cost > tav_cap:
                     raise HTTPException(
                         status_code=429,
@@ -285,8 +285,8 @@ async def reserve_tavily_credits(cost: int, operation: str = "search", pool: Any
                     )
                 if is_guest:
                     guests_used = int(await conn.fetchval(
-                        "SELECT COALESCE(SUM(credits), 0) FROM tavily_usage_log "
-                        f"WHERE operation LIKE $1 AND created_at >= {_UTC_DAY_START}", "%" + GUEST_OP_SUFFIX) or 0)
+                        "SELECT COALESCE(SUM(credits), 0) FROM tavily_usage_log "  # nosec B608
+                        f"WHERE operation LIKE $1 AND created_at >= {_UTC_DAY_START}", "%" + GUEST_OP_SUFFIX) or 0)  # nosec B608
                     if guests_used + cost > _guest_cap(settings, tav_cap):
                         raise HTTPException(
                             status_code=429,
@@ -295,7 +295,7 @@ async def reserve_tavily_credits(cost: int, operation: str = "search", pool: Any
                         )
                 if check_identity:
                     used = int(await conn.fetchval(
-                        f"SELECT COALESCE(SUM(credits), 0) FROM tavily_usage_log WHERE identity = $1 AND created_at >= {_UTC_DAY_START}",
+                        f"SELECT COALESCE(SUM(credits), 0) FROM tavily_usage_log WHERE identity = $1 AND created_at >= {_UTC_DAY_START}",  # nosec B608
                         identity) or 0)
                     if used + cost > limit:
                         raise _daily_identity_exceeded(is_guest, limit)
@@ -390,7 +390,7 @@ async def check_global_spend_cap(pool: Any = None, cost: int = 0) -> None:
         if p:
             async with p.acquire() as conn:
                 global_tav = await conn.fetchval(
-                    f"SELECT COALESCE(SUM(credits), 0) FROM tavily_usage_log WHERE created_at >= {_UTC_DAY_START}"
+                    f"SELECT COALESCE(SUM(credits), 0) FROM tavily_usage_log WHERE created_at >= {_UTC_DAY_START}"  # nosec B608
                 ) or 0
                 if int(global_tav) + cost > tav_cap or (cost == 0 and int(global_tav) >= tav_cap):
                     raise HTTPException(
