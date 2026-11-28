@@ -1,5 +1,5 @@
 """
-Compass â€” Career Copilot Job Description Analysis & Requirement Matching Service.
+Compass — Career Copilot Job Description Analysis & Requirement Matching Service.
 
 Extracts structured requirements (mandatory, preferred, responsibilities, eligibility)
 from job descriptions, compares them against the candidate's verified Master Profile,
@@ -106,7 +106,7 @@ _LABEL_MAX_CHARS = 40
 
 def _skill_key(name: str) -> str:
     """Case-insensitive canonical key: lowercased, whitespace collapsed, aliases folded."""
-    key = " ".join((name or "").lower().split()).strip(" .;:-*â€¢Â·")
+    key = " ".join((name or "").lower().split()).strip(" .;:-*•·")
     return _SKILL_ALIASES.get(key, key)
 
 
@@ -128,10 +128,12 @@ def split_skill_entry(entry: str) -> List[str]:
     if colon and rest.strip() and "," not in label and len(label) <= _LABEL_MAX_CHARS:
         text = rest  # drop a 'Languages:' / 'Tools:' style prefix
     out: List[str] = []
-    for chunk in re.split(r"[,;|â€¢Â·\n]+|\s+&\s+|\s+and\s+", text):
+    text = " ".join(text[:2000].split())  # collapse whitespace and cap the length first
+    for chunk in re.split("[,;|" + chr(0x2022) + chr(0xB7) + "]+| & | and ", text):
         # 'Python (NumPy, Pandas)' arrives split by the comma; also unwrap simple parentheses
         chunk = chunk.strip().strip("()[]").strip()
-        chunk = re.sub(r"\s*\([^)]*\)?\s*$", "", chunk).strip() or chunk
+        if "(" in chunk:
+            chunk = chunk.rsplit("(", 1)[0].strip() or chunk
         chunk = chunk.strip(" .:-*")
         if not chunk:
             continue
@@ -190,7 +192,7 @@ def extract_job_sections(job_text: str) -> Dict[str, List[str]]:
                 current_section = inline_header
                 line = tail.strip()
 
-        clean_item = line.strip(" -*â€¢Â·")
+        clean_item = line.strip(" -*•·")
         if not clean_item or len(clean_item) < 3:
             continue
 
@@ -204,8 +206,8 @@ def extract_job_sections(job_text: str) -> Dict[str, List[str]]:
             if len(responsibilities) < 15:
                 responsibilities.append(clean_item)
         elif current_section == "skills":
-            for tok in re.split(r"[,â€¢|\n]+", clean_item):
-                s = tok.strip(" -:*â€¢")
+            for tok in re.split(r"[,•|\n]+", clean_item):
+                s = tok.strip(" -:*•")
                 if s and 1 < len(s) < 35 and s not in skills:
                     skills.append(s)
 
@@ -284,7 +286,7 @@ def _skills_from_chunk(chunk: str) -> List[str]:
         parts_to_skip = []
         if "/" in item and item.strip().lower() not in _NO_SPLIT_SLASH:
             parts_to_skip = [p.strip() for p in item.split("/") if p.strip()]
-        item = item.strip(" .-*â€¢Â·")
+        item = item.strip(" .-*•·")
         key = _skill_key(item)
         if not key or key[0].isdigit() or "year" in key:
             continue
