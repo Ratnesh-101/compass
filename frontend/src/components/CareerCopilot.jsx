@@ -10,12 +10,34 @@ import { fetchRadarProfile } from '../api/radarApi'
 import { fetchMasterResume } from '../api/careerApi'
 import { hasSavedProfile, hasSavedResume } from '../utils/careerUiHelpers'
 import { SAVED_RESUME_MESSAGE } from '../utils/careerFlowText'
+import { parseCareerLocation, buildCareerUrl } from '../utils/careerRouting'
+
+const toUrlSub = (key) => (key === 'resumes' ? 'resume' : key)
+const fromUrlSub = (sub) => (sub === 'resume' ? 'resumes' : sub)
 
 const ResumeStudio = React.lazy(() => import('./career/ResumeStudio'))
 const ApplicationWorkspaceModal = React.lazy(() => import('./career/ApplicationWorkspaceModal'))
 
 export default function CareerCopilot({ isDarkMode, onToggleDarkMode }) {
-  const [activeSubTab, setActiveSubTab] = useState('radar') // 'radar' | 'resumes' | 'applications'
+  // 'radar' | 'resumes' | 'applications'. The URL says 'resume' for 'resumes'.
+  const [activeSubTab, setActiveSubTabState] = useState(() => fromUrlSub(parseCareerLocation(window.location.search).sub))
+  const setActiveSubTab = useCallback((key) => {
+    setActiveSubTabState(key)
+    const target = buildCareerUrl('career', toUrlSub(key))
+    if (window.location.pathname + window.location.search !== target) {
+      window.history.pushState({ tab: 'career', domain: 'all' }, '', target)
+    }
+  }, [])
+
+  // Browser Back/Forward switches the sub-tab.
+  useEffect(() => {
+    const onPop = () => {
+      const loc = parseCareerLocation(window.location.search)
+      if (loc.tab === 'career') setActiveSubTabState(fromUrlSub(loc.sub))
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
   const [profileRefreshTrigger, setProfileRefreshTrigger] = useState(0)
   const [notification, setNotification] = useState(null)
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false)

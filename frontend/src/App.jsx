@@ -20,6 +20,7 @@ import MigrationModal from './components/MigrationModal'
 import NebiusTelemetryModal from './components/NebiusTelemetryModal'
 import { getCustomDomains, removeCustomDomain, getDomainMeta } from './components/timeline/domainMeta'
 import { parseLocation, buildUrl } from './router'
+import { buildCareerUrl } from './utils/careerRouting'
 import {
   checkBackendHealth,
   fetchTasks,
@@ -150,9 +151,11 @@ export default function App() {
   const navigateTo = useCallback((tab, domain = 'all', replace = false) => {
     setActiveTab(tab)
     setSelectedDomain(domain)
-    const targetUrl = buildUrl(tab, domain)
+    const targetUrl = tab === 'career' ? buildCareerUrl('career') : buildUrl(tab, domain)
     const currentUrl = window.location.pathname + window.location.search
-    if (currentUrl !== targetUrl) {
+    // Already inside Career Copilot (maybe on a sub-tab): keep the sub-tab in the URL
+    const alreadyInCareer = tab === 'career' && parseLocation().tab === 'career' && window.location.search.includes('tab=')
+    if (currentUrl !== targetUrl && !alreadyInCareer) {
       if (replace) {
         window.history.replaceState({ tab, domain }, '', targetUrl)
       } else {
@@ -172,6 +175,19 @@ export default function App() {
       /* ignore history access error */
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // /copilot and /career redirect to the canonical ?tab=copilot URL (keeps ?sub= if present)
+  useEffect(() => {
+    try {
+      const path = window.location.pathname.replace(/\/+$/, '')
+      if (path === '/copilot' || path === '/career') {
+        const sub = new URLSearchParams(window.location.search).get('sub')
+        window.history.replaceState({ tab: 'career', domain: 'all' }, '', buildCareerUrl('career', sub))
+      }
+    } catch {
+      /* ignore history access error */
+    }
   }, [])
 
   // Synchronize browser Back/Forward navigation

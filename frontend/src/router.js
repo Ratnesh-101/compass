@@ -103,7 +103,7 @@ export function parseLocation(pathname = window.location.pathname, search = wind
   }
 
   // Pathname routing: Career Copilot & Internship Radar
-  if (cleanPath === '/career' || cleanPath === '/radar' || cleanPath === '/internships') {
+  if (cleanPath === '/career' || cleanPath === '/copilot' || cleanPath === '/radar' || cleanPath === '/internships') {
     return { tab: 'career', domain: 'all' }
   }
 
