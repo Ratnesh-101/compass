@@ -44,8 +44,8 @@ export const APPLICATION_STATUS_LABELS = {
   ELIGIBILITY_REVIEW: 'Eligibility Review',
   NEEDS_INFORMATION: 'Needs Information',
   RESUME_DRAFT: 'Resume Draft',
-  RESUME_VALIDATION_FAILED: 'Resume Validation Failed',
-  READY_FOR_REVIEW: 'Ready for Review',
+  RESUME_VALIDATION_FAILED: 'Needs fixes before sending',
+  READY_FOR_REVIEW: 'Ready for review',
   READY_FOR_APPROVAL: 'Ready for Approval',
   APPROVED_FOR_SUBMISSION: 'Approved for Submission',
   SUBMITTING: 'Submitting',
@@ -135,6 +135,8 @@ export function buildDeadlinePayload(deadline) {
 // Resume validation card decision
 // ---------------------------------------------------------------------------
 
+import { buildResumeIncompleteHint } from './careerPolishHelpers.js'
+
 export const RESUME_INCOMPLETE_HINT = 'Add your name, email and education in My resume.'
 
 export function getValidationCardState(report) {
@@ -148,7 +150,7 @@ export function getValidationCardState(report) {
     status,
     isIncomplete,
     incompleteLabel: isIncomplete ? 'Resume incomplete' : null,
-    hint: isIncomplete ? RESUME_INCOMPLETE_HINT : null,
+    hint: isIncomplete ? buildResumeIncompleteHint(missingFields) : null,
     missingFields,
     warnings,
     isNotEnoughData: status === 'NOT ENOUGH DATA',

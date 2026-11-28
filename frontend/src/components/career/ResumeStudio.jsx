@@ -13,6 +13,14 @@ import ResumeImportModal from './ResumeImportModal'
 import ExtractionReviewModal from './ExtractionReviewModal'
 import ExternalProfileImportModal from './ExternalProfileImportModal'
 import { getResumeKindLabel, copyTextSafely } from '../../utils/careerUiHelpers'
+import {
+  friendlyStatusLabel,
+  restoreSkillCase,
+  collectSkillNames,
+  resumeVersionLabel,
+  hasCopyableText,
+  COPY_EMPTY_MESSAGE,
+} from '../../utils/careerPolishHelpers.js'
 
 const GitHubIntelligenceModal = React.lazy(() => import('./GitHubIntelligenceModal'))
 
@@ -380,6 +388,10 @@ export default function ResumeStudio({ onSaved = () => {} } = {}) {
   // Diff comparison data
   const isTailored = selectedResume && !selectedResume.is_master
   const diffSummary = selectedResume?.validation_report?.diff_summary || {}
+  const knownSkillNames = [
+    ...collectSkillNames(selectedResume?.content?.skills),
+    ...collectSkillNames((resumesList || []).find(r => r.is_master)?.content?.skills),
+  ]
 
   return (
     <div style={{ padding: '0 8px 36px', maxWidth: '1240px', margin: '0 auto' }}>
@@ -544,7 +556,7 @@ export default function ResumeStudio({ onSaved = () => {} } = {}) {
                   >
                     <div>
                       <div style={{ fontWeight: '700', fontSize: '13.5px', color: 'var(--text-primary)' }}>
-                        {res.title}
+                        {resumeVersionLabel(res)}
                       </div>
                       <div style={{ fontSize: '11.5px', color: isSelected ? 'var(--primary, #2563eb)' : 'var(--text-secondary)', fontWeight: isSelected ? '600' : '400', marginTop: '2px' }}>
                         {res.is_master ? '★ Your main resume' : `${getResumeKindLabel(res)} · v${res.version}`}
@@ -560,7 +572,7 @@ export default function ResumeStudio({ onSaved = () => {} } = {}) {
                         color: res.validation_status === 'APPROVED' ? '#166534' : '#92400e',
                       }}
                     >
-                      {res.validation_status}
+                      {friendlyStatusLabel(res.validation_status)}
                     </span>
                   </button>
                 )
@@ -725,7 +737,7 @@ export default function ResumeStudio({ onSaved = () => {} } = {}) {
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                     {(diffSummary.highlighted_skills || []).map((s, idx) => (
                       <span key={idx} style={{ background: '#dcfce7', color: '#166534', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: '600' }}>
-                        ✓ {s}
+                        ✓ {restoreSkillCase(s, knownSkillNames)}
                       </span>
                     ))}
                   </div>
@@ -735,7 +747,7 @@ export default function ResumeStudio({ onSaved = () => {} } = {}) {
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                     {(diffSummary.omitted_master_skills || []).map((s, idx) => (
                       <span key={idx} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-secondary)', padding: '3px 8px', borderRadius: '6px', fontSize: '12px' }}>
-                        {s}
+                        {restoreSkillCase(s, knownSkillNames)}
                       </span>
                     ))}
                   </div>
@@ -921,6 +933,10 @@ export default function ResumeStudio({ onSaved = () => {} } = {}) {
                 <button
                   type="button"
                   onClick={async () => {
+                    if (!hasCopyableText(coverLetterText)) {
+                      setExportToast({ message: COPY_EMPTY_MESSAGE, type: 'error' })
+                      return
+                    }
                     const ok = await copyTextSafely(coverLetterText)
                     setExportToast(ok
                       ? { message: 'Cover letter copied to clipboard.', type: 'success' }

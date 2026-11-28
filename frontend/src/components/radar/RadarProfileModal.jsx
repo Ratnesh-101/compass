@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { fetchRadarProfile, updateRadarProfile } from '../../api/radarApi.js'
 import { validateProfileForm, buildProfilePayload } from '../../utils/careerUiHelpers.js'
 import Dialog from '../Dialog'
@@ -133,7 +133,11 @@ function RadarProfileModalContent({
     )
   }
 
-  const isBusy = isSaving || savingInternal
+  const [savedNotice, setSavedNotice] = useState(false)
+  const closeTimerRef = useRef(null)
+  useEffect(() => () => { if (closeTimerRef.current) clearTimeout(closeTimerRef.current) }, [])
+
+  const isBusy = isSaving || savingInternal || savedNotice
   const isFormComplete = validateProfileForm({ degree, academicYear, gradYear, cgpa, cgpaScale }) === null
 
   const handleSubmit = async e => {
@@ -169,10 +173,11 @@ function RadarProfileModalContent({
         onProfileUpdated(result || payload)
       }
 
-      // Close modal immediately upon successful save
-      if (typeof onClose === 'function') {
-        onClose()
-      }
+      // Show a short confirmation, then close
+      setSavedNotice(true)
+      closeTimerRef.current = setTimeout(() => {
+        if (typeof onClose === 'function') onClose()
+      }, 900)
     } catch (err) {
       console.error('[RadarProfileModal] Failed to save profile:', err)
       setErrorMessage(
@@ -642,6 +647,7 @@ function RadarProfileModalContent({
                     key={arr}
                     type="button"
                     onClick={() => toggleArrangement(arr)}
+                    aria-pressed={checked}
                     style={{
                       padding: '6px 14px',
                       borderRadius: '8px',
@@ -718,7 +724,7 @@ function RadarProfileModalContent({
                 padding: '10px 20px',
                 borderRadius: '8px',
                 background: 'var(--brand)',
-                color: '#ffffff',
+                color: 'var(--accent-text, #1b1a17)fff',
                 border: 'none',
                 fontWeight: 600,
                 fontSize: '13px',
@@ -726,8 +732,11 @@ function RadarProfileModalContent({
                 opacity: isBusy || !isFormComplete ? 0.6 : 1,
               }}
             >
-              {isBusy ? 'Saving Profile…' : 'Save Profile'}
+              {savedNotice ? 'Saved' : isBusy ? 'Saving Profile…' : 'Save Profile'}
             </button>
+            {savedNotice && (
+              <span role="status" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>Saved</span>
+            )}
           </div>
         </form>
       </div>

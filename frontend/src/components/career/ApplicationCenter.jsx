@@ -336,6 +336,10 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
             Find an internship in the Radar and choose &quot;Prepare Application&quot;, or paste a job link on the Radar page.
           </p>
         </div>
+      ) : visibleApps.length === 0 ? (
+        <div role="status" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px', padding: '32px 24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '14px' }}>
+          No applications in this stage yet.
+        </div>
       ) : (
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px', overflow: 'hidden' }}>
           <div style={{ overflowX: 'auto' }}>
@@ -345,6 +349,7 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
                   <th style={{ padding: '12px 16px', width: '36px' }}>
                     <input
                       type="checkbox"
+                      aria-label="Select all visible applications"
                       checked={visibleApps.length > 0 && visibleApps.every(a => selectedAppIds.has(a.id))}
                       onChange={handleSelectAll}
                     />
@@ -376,6 +381,7 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
                         <td style={{ padding: '12px 16px' }}>
                           <input
                             type="checkbox"
+                            aria-label={`Select ${cleanedOpp.company !== 'Company' ? cleanedOpp.company : (opp.company_name || 'application')} ${cleanedOpp.role || ''}`.trim()}
                             checked={isSelected}
                             onChange={() => toggleSelectApp(app.id)}
                           />
@@ -505,7 +511,7 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
                               onClick={() => setActiveDrawerApp(app)}
                               style={{
                                 background: 'var(--brand, #3b82f6)',
-                                color: '#ffffff',
+                                color: 'var(--accent-text, #1b1a17)fff',
                                 border: 'none',
                                 padding: '4px 10px',
                                 borderRadius: '6px',
