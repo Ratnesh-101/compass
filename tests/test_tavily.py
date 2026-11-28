@@ -351,6 +351,7 @@ async def test_verify_deadline_reports_drift(monkeypatch):
 
     monkeypatch.setattr("backend.memory.structured.get_task", AsyncMock(return_value={
         "id": 101,
+        "user_id": "u-101",
         "title": "Nebius Buildathon Phase 2",
         "domain": "hackathon",
         "due_date": "2026-09-17",
@@ -371,7 +372,7 @@ async def test_verify_deadline_reports_drift(monkeypatch):
     monkeypatch.setattr(tavily_service, "search", AsyncMock(return_value=mock_search))
     monkeypatch.setattr(tavily_service, "tavily_available", lambda: True)
 
-    res = await handle_verify_deadline({"task_id": 101}, pool=mock_pool)
+    res = await handle_verify_deadline({"task_id": 101, "user_id": "u-101"}, pool=mock_pool)
     assert res["success"] is True
     assert res["data"]["task"]["id"] == 101
     assert len(res["data"]["results"]) >= 1

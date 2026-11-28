@@ -13,6 +13,8 @@ Provides:
 from __future__ import annotations
 
 import asyncio
+
+from fastapi import HTTPException
 import hashlib
 import logging
 import re
@@ -157,12 +159,14 @@ async def execute_deep_research(
             all_raw_items.extend(item.get("results", []))
         elif isinstance(item, Exception):
             subquery_errors.append(item)
-            logger.warning(f"Subquery search error in deep research: {item}")
+            logger.warning("Subquery search error in deep research: %s", type(item).__name__)
 
     if not all_raw_items and subquery_errors:
         first_err = subquery_errors[0]
-        logger.error(f"All Tavily research subqueries failed: {first_err}")
-        raise RuntimeError(f"Tavily search provider failed: {first_err}") from first_err
+        logger.warning("All Tavily research subqueries failed: %s", type(first_err).__name__)
+        if isinstance(first_err, HTTPException) or type(first_err).__name__ == "BudgetExceededError":
+            raise first_err
+        raise RuntimeError("Online search failed") from None
 
     # Deduplicate by normalized URL
     seen_urls = set()
