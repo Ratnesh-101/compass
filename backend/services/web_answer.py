@@ -42,6 +42,18 @@ def drop_social_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return [r for r in results if not is_social_url(r.get("url"))]
 
 
+_MD_CONTROL_RE = re.compile(r"[`\[\]<>|\\\x00-\x1f\x7f]+")
+_WS_RE = re.compile(r"\s+")
+
+
+def sanitize_md_text(text: Any, limit: int) -> str:
+    """Make untrusted text safe to embed in a markdown answer: no backticks, brackets, angle
+    brackets, pipes, backslashes, control characters or newlines; collapsed whitespace; length-capped."""
+    cleaned = _MD_CONTROL_RE.sub(" ", str(text or ""))
+    cleaned = _WS_RE.sub(" ", cleaned).strip()
+    return cleaned[:limit].rstrip()
+
+
 def _clean_snippet(text: str) -> str:
     text = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", text or "")
     text = re.sub(r"https?://\S+", "", text)
@@ -69,8 +81,9 @@ def format_sources(results: List[Dict[str, Any]], limit: int = MAX_SOURCES_SHOWN
         url = r.get("url")
         if not url:
             continue
-        title = (r.get("title") or urlparse(str(url)).hostname or "source").strip()
-        links.append(f"[{title[:70]}]({url})")
+        title = sanitize_md_text(r.get("title") or urlparse(str(url)).hostname or "source", 70) or "source"
+        safe_url = str(url).replace(" ", "%20").replace("(", "%28").replace(")", "%29")
+        links.append(f"[{title}]({safe_url})")
         if len(links) >= limit:
             break
     return ("**Sources:** " + " · ".join(links)) if links else ""
@@ -95,7 +108,7 @@ async def synthesize_web_answer(query: str, results: List[Dict[str, Any]]) -> st
 
             blocks = []
             for i, r in enumerate(results[:5], 1):
-                blocks.append(f"[{i}] {r.get('title') or 'Untitled'} ({r.get('url', '')})\n{_clean_snippet(r.get('content', ''))[:700]}")
+                blocks.append(f"[{i}] {sanitize_md_text(r.get('title') or 'Untitled', 120)} ({r.get('url', '')})\n{_clean_snippet(r.get('content', ''))[:700]}")
             user_prompt = (
                 f"Question: {query}\n\n<untrusted_web_content>\n" + "\n\n".join(blocks) + "\n</untrusted_web_content>"
             )
@@ -115,8 +128,56 @@ async def synthesize_web_answer(query: str, results: List[Dict[str, Any]]) -> st
             raw = await _extract_content_from_response(resp)
             answer = _clean_synthesis_text(raw).strip() if raw else ""
     except Exception as e:
-        logger.warning("Web answer synthesis failed, using plain fallback: %s", e)
+        logger.warning("Web answer synthesis failed, using plain fallback: %s", type(e).__name__)
     if not answer:
         answer = fallback_answer(results)
     sources = format_sources(results)
     return f"{answer}\n\n{sources}" if sources else answer
+
+
+_BUDGET_MSG = "Could not check online right now (daily online-check limit reached; try again after 05:30 IST)."
+_UNAVAILABLE_MSG = "Online checking is not available right now."
+
+
+def _failure_reason(exc: BaseException) -> str:
+    """Map an exception to 'budget' | 'unavailable' | 'error' without exposing its text."""
+    from fastapi import HTTPException
+    from backend.services.budgets import BudgetExceededError
+
+    if isinstance(exc, BudgetExceededError):
+        return "budget"
+    if isinstance(exc, HTTPException):
+        return "budget" if exc.status_code == 429 else "unavailable"
+    if isinstance(exc, RuntimeError) and "unconfigured" in str(exc).lower():
+        return "unavailable"
+    return "error"
+
+
+def _friendly_check_message(reason: str) -> str:
+    return _BUDGET_MSG if reason == "budget" else _UNAVAILABLE_MSG
+
+
+def could_not_check_result(claim: str, target_message_id: Any, today_str: str, reason: str) -> Dict[str, Any]:
+    friendly = _friendly_check_message(reason)
+    return {
+        "success": False,
+        "data": {
+            "verdict": "COULD_NOT_CHECK",
+            "reason": reason,
+            "evidence_ledger": [],
+            "evidence": {
+                "target_message_id": target_message_id,
+                "claim_checked": claim,
+                "verdict": "COULD_NOT_CHECK",
+                "finding": friendly,
+                "verified_at": today_str,
+                "sources": [],
+                "items": [],
+                "limitations": [friendly],
+                "summary": friendly,
+            },
+        },
+        "summary": friendly,
+        "response": friendly,
+        "error": friendly,
+    }

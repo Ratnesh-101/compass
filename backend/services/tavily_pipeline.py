@@ -176,6 +176,7 @@ async def execute_subqueries(
     include_domains: Optional[List[str]] = None,
     max_credits: int = 4,
     capped_out: Optional[List[str]] = None,
+    errors_out: Optional[List[str]] = None,
 ) -> Tuple[List[Dict[str, Any]], int]:
     """Execute sub-queries concurrently with a semaphore, bounded by credit budget.
 
@@ -202,14 +203,20 @@ async def execute_subqueries(
                 return resp.get("results", []) or []
             except (BudgetExceededError, HTTPException) as e:
                 reason = e.detail if isinstance(e, HTTPException) else str(e)
+                if isinstance(e, HTTPException) and e.status_code != 429:
+                    if errors_out is not None:
+                        errors_out.append("HTTPException")
+                    return []
                 if isinstance(reason, dict):
                     reason = reason.get("message") or reason.get("code") or "budget exceeded"
-                logger.warning("Subquery capped by budget for '%s': %s", q, reason)
+                logger.warning("Subquery capped by budget (%s)", type(e).__name__)
                 if capped_out is not None:
                     capped_out.append(str(reason))
                 return []
             except Exception as e:
-                logger.warning("Subquery failed for '%s': %s", q, e)
+                logger.warning("Subquery failed: %s", type(e).__name__)
+                if errors_out is not None:
+                    errors_out.append(type(e).__name__)
                 return []
 
     tasks = [_search_one(sq) for sq in sub_queries]
@@ -754,7 +761,7 @@ async def persist_evidence_ledger(run_id: str, evidence: List[Dict[str, Any]]) -
                         str(ev.get("published_date") or ""), ev["authority_tier"], ev["verdict"],
                     )
     except Exception as e:
-        logger.warning("Could not persist evidence ledger to DB: %s", e)
+        logger.warning("Could not persist evidence ledger to DB: %s", type(e).__name__)
 
 
 async def run_tavily_research(
@@ -797,8 +804,9 @@ async def _run_tavily_research(
     if not tavily_available():
         return {
             "status": "unavailable",
-            "verdict": "NOT_FOUND",
-            "summary": "Tavily search service is not configured on this instance.",
+            "verdict": "COULD_NOT_CHECK",
+            "reason": "unavailable",
+            "summary": "Online checking is not available right now.",
             "evidence_ledger": [],
             "sources": [],
         }
@@ -836,18 +844,24 @@ async def _run_tavily_research(
 
         t0 = time.perf_counter()
         capped_reasons: List[str] = []
+        failed_reasons: List[str] = []
         try:
             raw_results, search_credits = await execute_subqueries(
-                sub_queries, include_domains=include_domains, max_credits=max_credits, capped_out=capped_reasons
+                sub_queries,
+                include_domains=include_domains,
+                max_credits=max_credits,
+                capped_out=capped_reasons,
+                errors_out=failed_reasons,
             )
             total_credits += search_credits
         except Exception as e:
-            logger.warning("execute_subqueries failed: %s", e)
+            logger.warning("execute_subqueries failed: %s", type(e).__name__)
             stage_timings["total_ms"] = round((time.perf_counter() - t_start) * 1000, 2)
             return {
                 "status": "unavailable",
-                "verdict": "NOT_FOUND",
-                "summary": f"Search execution failed: {e}",
+                "verdict": "COULD_NOT_CHECK",
+                "reason": "error",
+                "summary": "Online checking is not available right now.",
                 "evidence_ledger": [],
                 "sources": [],
                 "credits": 0,
@@ -859,9 +873,23 @@ async def _run_tavily_research(
             stage_timings["total_ms"] = round((time.perf_counter() - t_start) * 1000, 2)
             return {
                 "status": "unavailable",
-                "verdict": "NOT_FOUND",
-                "summary": f"Web search capped: {capped_reasons[0]}",
+                "verdict": "COULD_NOT_CHECK",
+                "reason": "budget",
+                "summary": "Could not check online right now (daily online-check limit reached; try again after 05:30 IST).",
                 "capped": True,
+                "evidence_ledger": [],
+                "sources": [],
+                "credits": total_credits,
+                "stage_timings": stage_timings,
+            }
+
+        if not raw_results and failed_reasons:
+            stage_timings["total_ms"] = round((time.perf_counter() - t_start) * 1000, 2)
+            return {
+                "status": "unavailable",
+                "verdict": "COULD_NOT_CHECK",
+                "reason": "error",
+                "summary": "Online checking is not available right now.",
                 "evidence_ledger": [],
                 "sources": [],
                 "credits": total_credits,
@@ -898,7 +926,7 @@ async def _run_tavily_research(
                     if u and raw:
                         url_to_raw_content[u] = raw
             except Exception as e:
-                logger.warning("Tavily extraction timed out or failed: %s; falling back to snippets", e)
+                logger.warning("Tavily extraction timed out or failed: %s; falling back to snippets", type(e).__name__)
         stage_timings["extraction_ms"] = round((time.perf_counter() - t0) * 1000, 2)
 
         # Cache raw search and extraction results

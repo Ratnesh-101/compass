@@ -11,6 +11,12 @@ import re
 from urllib.parse import urlparse
 
 from backend.services.ownership import has_caller, scope_owner
+from backend.services.web_answer import (
+    _failure_reason,
+    _friendly_check_message,
+    could_not_check_result as _could_not_check_result,
+    sanitize_md_text,
+)
 from backend.skills.registry import register_skill
 
 logger = logging.getLogger("compass.skills.web")
@@ -32,6 +38,8 @@ def _chunk_owner(user_id: Any) -> str:
     return scope_owner(user_id) or str(user_id)
 
 
+TITLE_MAX = 120
+SNIPPET_MAX = 300
 @register_skill("search_web")
 async def handle_search_web(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
     """Search the live web using the centralized Tavily service.
@@ -59,17 +67,20 @@ async def handle_search_web(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
             "error": "Web search is not configured on this instance",
         }
 
-    depth = args.get("depth") or args.get("search_depth") or "basic"
+    # A model-supplied depth is ignored: "advanced" costs double and is reserved for the
+    # claim/deadline verification paths, which choose their own depth.
     try:
-        resp = await tavily_service.search(query, search_depth=depth)
+        resp = await tavily_service.search(query, search_depth="basic")
     except Exception as e:
-        logger.warning(f"Tavily search failed: {e}")
+        reason = _failure_reason(e)
+        logger.warning("Tavily search failed (%s): %s", reason, type(e).__name__)
+        msg = _friendly_check_message(reason)
         return {
             "success": False,
-            "data": {},
-            "summary": f"Web search failed: {e}",
-            "response": f"Web search failed: {e}",
-            "error": f"Web search failed: {e}",
+            "data": {"reason": reason},
+            "summary": msg,
+            "response": msg,
+            "error": msg,
         }
 
     results = resp.get("results", [])
@@ -80,7 +91,7 @@ async def handle_search_web(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
 
     citations = [
         {
-            "title": r.get("title"),
+            "title": sanitize_md_text(r.get("title"), TITLE_MAX) or None,
             "url": r.get("url"),
             "score": r.get("score"),
             "domain": r.get("domain", ""),
@@ -106,10 +117,10 @@ async def handle_search_web(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
         for r in ranked_results:
             content = r.get("content", "")
             url = r.get("url", "")
-            title = r.get("title", "")
-            badge = r.get("authority_badge", "Web")
-            for line in content.split("\n"):
-                clean_line = line.strip()
+            title = sanitize_md_text(r.get("title", ""), TITLE_MAX)
+            badge = sanitize_md_text(r.get("authority_badge", "Web"), 40)
+            for line in str(content).split("\n"):
+                clean_line = sanitize_md_text(line, SNIPPET_MAX)
                 if not clean_line or len(clean_line) < 15:
                     continue
                 if re.search(r"\b(deadline|submission|due|closes|ends)\b", clean_line, re.I) and re.search(r"\b(202[4-9]|January|February|March|April|May|June|July|August|September|October|November|December|Oct|Nov|Dec)\b", clean_line, re.I):
@@ -235,13 +246,14 @@ async def handle_ingest_url(args: Dict[str, Any], pool: Any) -> Dict[str, Any]:
     try:
         resp = await tavily_service.extract([url], extract_depth="advanced")
     except Exception as e:
-        logger.error(f"Tavily extract failed for {url}: {e}")
+        logger.warning("Tavily extract failed: %s", type(e).__name__)
+        msg = _friendly_check_message(_failure_reason(e))
         return {
             "success": False,
             "data": {},
-            "summary": f"Extraction failed: {e}",
-            "response": f"Extraction failed: {e}",
-            "error": f"Extraction failed: {e}",
+            "summary": msg,
+            "response": msg,
+            "error": msg,
         }
 
     ok = resp.get("results", [])
@@ -327,40 +339,54 @@ async def handle_verify_deadline(args: Dict[str, Any], pool: Any) -> Dict[str, A
             "error": "task_id or claim is required",
         }
 
-    async with pool.acquire() as conn:
-        task = await structured.get_task(conn, int(task_id))
-    if not task:
+    if not tavily_service.tavily_available():
+        msg = _friendly_check_message("unavailable")
         return {
             "success": False,
-            "data": {},
-            "summary": f"No task with id {task_id}",
-            "response": f"No task with id {task_id}",
-            "error": f"No task with id {task_id}",
+            "data": {"verdict": "COULD_NOT_CHECK", "reason": "unavailable"},
+            "summary": msg,
+            "response": msg,
+            "error": msg,
         }
+
+    not_found = {
+        "success": False,
+        "data": {},
+        "summary": "Task not found",
+        "response": "Task not found",
+        "error": "Task not found",
+    }
+    caller_id = args.get("user_id")
+    if not has_caller(caller_id):
+        return not_found
+    try:
+        task_id_int = int(task_id)
+    except (TypeError, ValueError):
+        return not_found
+
+    async with pool.acquire() as conn:
+        task = await structured.get_task(conn, task_id_int)
+    owner = scope_owner(caller_id)  # None = admin (unscoped)
+    if not task or (owner is not None and task.get("user_id") != owner):
+        return not_found
 
     task_title = task.get("title", "")
     stored_due = str(task.get("due_date") or "none")
-
-    if not tavily_service.tavily_available():
-        return {
-            "success": False,
-            "data": {"task": dict(task)},
-            "summary": "Web search is not configured to verify deadline",
-            "response": "Web search is not configured.",
-            "error": "Web search is not configured",
-        }
 
     from backend.services.deadline_query import build_deadline_query
     query = build_deadline_query(task_title, task.get("project_name"), task.get("domain"))
     try:
         resp = await tavily_service.search(query, search_depth="basic")
     except Exception as e:
+        reason = _failure_reason(e)
+        logger.warning("Deadline verification search failed (%s): %s", reason, type(e).__name__)
+        msg = _friendly_check_message(reason)
         return {
             "success": False,
-            "data": {"task": dict(task)},
-            "summary": f"Web search failed during verification: {e}",
-            "response": f"Web search failed during verification: {e}",
-            "error": str(e),
+            "data": {"verdict": "COULD_NOT_CHECK", "reason": reason},
+            "summary": msg,
+            "response": msg,
+            "error": msg,
         }
 
     results = resp.get("results", [])
@@ -444,30 +470,15 @@ async def handle_verify_with_tavily(args: Dict[str, Any], pool: Any) -> Dict[str
             target_entity=target_entity,
         )
     except Exception as e:
-        logger.error("Tavily verification failed: %s", e, exc_info=True)
-        return {
-            "success": False,
-            "data": {
-                "verdict": "UNVERIFIED",
-                "evidence_ledger": [],
-                "evidence": {
-                    "target_message_id": target_message_id,
-                    "claim_checked": claim,
-                    "verdict": "UNVERIFIED",
-                    "finding": f"Verification error: {e}",
-                    "verified_at": today_str,
-                    "sources": [],
-                    "items": [],
-                    "limitations": [f"Pipeline error: {e}"],
-                    "summary": f"Verification error: {e}",
-                },
-            },
-            "summary": f"Verification encountered an error: {e}",
-            "response": f"⚠️ Could not complete Tavily verification: {e}. The claim remains **UNVERIFIED**.",
-            "error": str(e),
-        }
+        reason = _failure_reason(e)
+        logger.warning("Tavily verification failed (%s): %s", reason, type(e).__name__)
+        return _could_not_check_result(claim, target_message_id, today_str, reason)
 
     overall_verdict = pipeline_res.get("verdict", "UNVERIFIED")
+    if overall_verdict == "COULD_NOT_CHECK":
+        return _could_not_check_result(
+            claim, target_message_id, today_str, pipeline_res.get("reason") or "unavailable"
+        )
     evidence_ledger = pipeline_res.get("evidence_ledger", [])
     top_sources = pipeline_res.get("sources", [])
     summary_text = pipeline_res.get("summary", "")
@@ -492,10 +503,10 @@ async def handle_verify_with_tavily(args: Dict[str, Any], pool: Any) -> Dict[str
 
     formatted_response = (
         f"### 🔍 Tavily Verification: {v_icon} {verdict_badge}\n\n"
-        f"**Claim Checked:** \"{claim}\"\n"
+        f"**Claim Checked:** \"{sanitize_md_text(claim, SNIPPET_MAX)}\"\n"
         f"**Verified on:** {today_str}\n"
         f"**Primary Source Authority:** [{primary_tier}]\n\n"
-        f"**Finding:** {summary_text}"
+        f"**Finding:** {sanitize_md_text(summary_text, 600)}"
     )
 
     sources_for_card = []
@@ -588,13 +599,14 @@ async def handle_deep_research(args: Dict[str, Any], pool: Any) -> Dict[str, Any
             search_depth=search_depth,
         )
     except Exception as e:
-        logger.error(f"Deep research failed for '{topic}': {e}")
+        logger.warning("Deep research failed: %s", type(e).__name__)
+        msg = _friendly_check_message(_failure_reason(e))
         return {
             "success": False,
             "data": {},
-            "summary": f"Deep research failed: {e}",
-            "response": f"Deep research failed: {e}",
-            "error": str(e),
+            "summary": msg,
+            "response": msg,
+            "error": msg,
         }
 
     return {

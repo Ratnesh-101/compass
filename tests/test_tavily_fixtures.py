@@ -216,7 +216,7 @@ async def test_tavily_5xx_timeout_graceful():
         # Should not raise exception
         try:
             res = await run_tavily_research("Nebius AI Studio hackathon")
-            assert res["verdict"] in ("NOT_FOUND", "UNVERIFIED")
+            assert res["verdict"] in ("COULD_NOT_CHECK", "UNVERIFIED")
             assert res["evidence_ledger"] == []
         except Exception as e:
             pytest.fail(f"run_tavily_research crashed on Tavily error: {e}")

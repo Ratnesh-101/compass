@@ -129,17 +129,17 @@ def match_opportunities(target: str, items: List[Any]) -> List[Dict[str, Any]]:
             score = 1.0
         elif target_clean in combined or target_clean in role_comp:
             score = 0.95
-        elif target_words and target_words.issubset(set(combined.split())):
+        elif target_words and target_words.issubset(set(re.findall(r"[a-z0-9+#]+", combined))):
             score = 0.9
         else:
-            r1 = difflib.SequenceMatcher(None, target_clean, combined).ratio()
-            r2 = difflib.SequenceMatcher(None, target_clean, role_comp).ratio()
             r3 = difflib.SequenceMatcher(None, target_clean, comp_l).ratio()
-            r4 = difflib.SequenceMatcher(None, target_clean, role_l).ratio()
-            score = max(r1, r2, r3, r4)
-            overlap = len(set(target_clean.split()) & set(combined.split()))
-            if overlap >= 2:
-                score = max(score, 0.65 + 0.1 * overlap)
+            if r3 >= 0.8:
+                score = r3
+            elif target_words & set(re.findall(r"[a-z0-9+#]+", combined)):
+                # Partial overlap: only a weak suggestion, never a confident match.
+                score = 0.55
+            else:
+                score = 0.0
         if score >= 0.55:
             scored.append((score, {"id": opp_id, "company_name": company, "role_title": role}))
 
@@ -339,8 +339,11 @@ async def handle_chat_extra_actions_stream(
 
     async with active_pool.acquire() as conn:
         if not matches:
-            suggestions = [f"'{_opp_field(o, 'role_title')} @ {_opp_field(o, 'company_name')}'" for o in raw_items[:3]]
-            resp_msg = f"I couldn't find a listing matching '{target}'. Here are some open listings: {', '.join(suggestions)}." if suggestions else f"I couldn't find a listing matching '{target}'."
+            clean_name = _clean_target(target)
+            resp_msg = (
+                f'I couldn\'t find a listing called "{clean_name}" in Open Now. '
+                "Try the exact company or role from the Radar, or search it there."
+            )
             ret_data = None
         elif len(matches) == 1:
             opp = matches[0]

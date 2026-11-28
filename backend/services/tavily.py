@@ -159,6 +159,13 @@ async def search(
 
     settings = get_settings()
     depth = search_depth or settings.TAVILY_SEARCH_DEPTH
+    if depth not in ("basic", "advanced"):
+        depth = "basic"
+    try:
+        n_results = int(max_results or settings.TAVILY_MAX_RESULTS)
+    except (TypeError, ValueError):
+        n_results = 5
+    n_results = max(1, min(10, n_results))
     q = query[:390]  # Tavily recommends keeping queries under 400 chars
 
     credits = _SEARCH_CREDITS.get(depth, 1)
