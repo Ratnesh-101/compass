@@ -26,6 +26,8 @@ import {
   blockedMessage,
 } from '../../utils/applicationStages'
 
+const ApplicationWorkspaceModal = React.lazy(() => import('./ApplicationWorkspaceModal'))
+
 export default function ApplicationCenter({ onNavigateToResumeStudio }) {
   const [applications, setApplications] = useState([])
   const [selectedAppIds, setSelectedAppIds] = useState(new Set())
@@ -33,6 +35,7 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
   const [showApprovalModal, setShowApprovalModal] = useState(false)
   const [activeKit, setActiveKit] = useState(null)
   const [activeDrawerApp, setActiveDrawerApp] = useState(null)
+  const [activeWorkspaceOpp, setActiveWorkspaceOpp] = useState(null)
   const [activeLetterApp, setActiveLetterApp] = useState(null)
   const [letterDraftingId, setLetterDraftingId] = useState(null)
   const [statusFilter, setStatusFilter] = useState('all')
@@ -500,6 +503,24 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
                         </td>
                         <td style={{ padding: '12px 16px', textAlign: 'right' }}>
                           <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', alignItems: 'center' }}>
+                            {app.opportunity && (
+                              <button
+                                type="button"
+                                onClick={() => setActiveWorkspaceOpp(app.opportunity)}
+                                style={{
+                                  background: 'transparent',
+                                  color: 'var(--brand, #3b82f6)',
+                                  border: '1px solid var(--brand, #3b82f6)',
+                                  padding: '4px 10px',
+                                  borderRadius: '6px',
+                                  fontSize: '12px',
+                                  fontWeight: '600',
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                Open workspace
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => setActiveDrawerApp(app)}
@@ -583,6 +604,21 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
           setActiveDrawerApp(null)
         }}
       />
+
+      {/* Re-enter the application workspace (checklist, notes, cover letter, Job Analysis) */}
+      {activeWorkspaceOpp && (
+        <React.Suspense fallback={null}>
+          <ApplicationWorkspaceModal
+            key={activeWorkspaceOpp.id}
+            opportunity={activeWorkspaceOpp}
+            onClose={() => {
+              setActiveWorkspaceOpp(null)
+              loadData()
+            }}
+            onNavigateToResumeStudio={onNavigateToResumeStudio}
+          />
+        </React.Suspense>
+      )}
 
       {/* Dismissible Post-External-Return Prompt */}
       <ReturnSubmissionPrompt

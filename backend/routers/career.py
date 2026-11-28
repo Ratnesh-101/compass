@@ -747,6 +747,9 @@ async def track_external_application_endpoint(
 
         # 3. Log the external event
         await log_application_event(app.id, "EXTERNAL_SUBMISSION", {"source": source})
+        from backend.services.career_task_sync import sync_application_tasks
+
+        await sync_application_tasks(user_id, app, opp, status_changed=True, deadline_changed=False)
 
     # 4. Enrich response
     app.opportunity = opp
@@ -1120,6 +1123,15 @@ async def update_application_endpoint(app_id: int, body: UpdateApplicationStatus
     opp = await get_opportunity_by_id(app.opportunity_id, user_id)
     app.opportunity = opp
     await log_application_event(app.id, "status_changed", updates)
+    from backend.services.career_task_sync import sync_application_tasks
+
+    await sync_application_tasks(
+        user_id,
+        app,
+        opp,
+        status_changed="status" in updates,
+        deadline_changed="target_deadline" in updates,
+    )
     return app
 
 
@@ -1301,6 +1313,9 @@ async def mark_application_applied_endpoint(app_id: int, request: Request):
         "submitted_at": now.isoformat(),
         "follow_up_reminder": str(follow_up),
     })
+    from backend.services.career_task_sync import sync_application_tasks
+
+    await sync_application_tasks(user_id, updated, opp, status_changed=True, deadline_changed=False)
 
     updated.opportunity = opp
     return updated
