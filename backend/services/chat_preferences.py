@@ -191,10 +191,52 @@ async def execute_pending_preferences(
         logger.exception("Failed to update scheduling preferences: %s", e)
         return ("I couldn't save your planning preferences, nothing was changed.", None, False)
 
-    if prefs:
-        card = format_pref_card_text(meta).replace("Update your planning preferences: ", "").rstrip("?")
-        return (f"Done: updated your planning preferences: {card}.", {"preferences": prefs, "success": True}, True)
-    return ("I couldn't save your planning preferences, nothing was changed.", None, False)
+    if not prefs:
+        return ("I couldn't save your planning preferences, nothing was changed.", None, False)
+
+    # Read the saved values back from the database; never echo the requested ones.
+    try:
+        saved = await structured.get_scheduling_preferences(conn, owner_identity)
+    except Exception as e:
+        logger.warning("Could not read back scheduling preferences, using the update result: %s", e)
+        saved = prefs
+    if not isinstance(saved, dict):
+        saved = prefs
+
+    def _hhmm(v: Any) -> str:
+        return str(v)[:5] if v is not None else ""
+
+    saved_view: Dict[str, Any] = {}
+    failed: List[str] = []
+    for key in ("work_start_time", "work_end_time"):
+        if key in updates:
+            if key not in saved or _hhmm(saved[key]) == _hhmm(updates[key]):
+                saved_view[key] = _hhmm(saved.get(key, updates[key]))
+            elif "hours" not in failed:
+                failed.append("hours")
+    if "work_days" in updates:
+        want = [int(d) for d in updates["work_days"]]
+        if "work_days" not in saved or [int(d) for d in (saved["work_days"] or [])] == want:
+            saved_view["work_days"] = [int(d) for d in saved["work_days"]] if "work_days" in saved else want
+        else:
+            failed.append("working days")
+    if "buffer_minutes" in updates:
+        if "buffer_minutes" not in saved or saved["buffer_minutes"] == updates["buffer_minutes"]:
+            saved_view["buffer_minutes"] = updates["buffer_minutes"]
+        else:
+            failed.append("break length")
+
+    if failed:
+        what = " and ".join(failed)
+        saved_text = format_pref_card_text(saved_view).replace("Update your planning preferences: ", "").rstrip("?")
+        if saved_view:
+            msg = f"I could not save the {what}; the rest was saved: {saved_text}."
+            if failed == ["working days"] and "work_start_time" in saved_view:
+                msg = "I could not save the working days; hours were saved."
+            return (msg, {"preferences": saved, "success": False}, False)
+        return (f"I could not save the {what}; nothing else was changed.", {"preferences": saved, "success": False}, False)
+    card = format_pref_card_text(saved_view).replace("Update your planning preferences: ", "").rstrip("?")
+    return (f"Done: updated your planning preferences: {card}.", {"preferences": saved, "success": True}, True)
 
 
 async def handle_chat_preferences_stream(
