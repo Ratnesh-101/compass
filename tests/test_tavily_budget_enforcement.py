@@ -308,8 +308,9 @@ async def test_research_pipeline_returns_capped_result_not_exception(stub, monke
             await tavily_service.search("q")
         result = await tavily_pipeline.run_tavily_research("some capped research query")
     assert result["capped"] is True
-    assert result["verdict"] == "NOT_FOUND"
-    assert "capped" in result["summary"].lower()
+    assert result["verdict"] == "COULD_NOT_CHECK"
+    assert result["reason"] == "budget"
+    assert "limit reached" in result["summary"].lower()
 
 
 async def test_search_web_skill_returns_failure_dict_when_capped(stub, monkeypatch):
