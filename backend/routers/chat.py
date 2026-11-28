@@ -40,6 +40,7 @@ from backend.dependencies import (
 )
 from backend.memory.db import get_pool
 from backend.memory import conversations
+from backend.memory.chat_pending import get_active_chat_pending_action
 import backend.orchestrator as orchestrator
 from backend.models import (
     ChatRequest,
@@ -77,6 +78,18 @@ class MessageOutWithState(MessageOut):
 
 class MessagesResponseWithState(MessagesResponse):
     messages: List[MessageOutWithState]  # type: ignore[assignment]
+    pending_action: Optional[dict] = None
+
+
+def _serialize_pending_action(row: Optional[dict]) -> Optional[dict]:
+    """Shape an active pending-action row like the stream's data.pending_action (JSON-safe)."""
+    if not row:
+        return None
+    out = json.loads(json.dumps({k: v for k, v in row.items() if k != "owner_identity"}, default=str))
+    out["kind"] = out.get("action")
+    if isinstance(out.get("task_titles"), list):
+        out["items"] = out["task_titles"]
+    return out
 
 
 # ---- POST /chat -----------------------------------------------------------
@@ -276,7 +289,15 @@ async def get_messages(
                 )
                 for r in rows
             ]
-            return MessagesResponseWithState(conversation_id=conversation_id, messages=messages)
+            pending_action = None
+            owner_identity = user_id or guest_id
+            if owner_identity:
+                try:
+                    pending_action = _serialize_pending_action(
+                        await get_active_chat_pending_action(conn, owner_identity, conversation_id))
+                except Exception as pe:
+                    logger.warning(f"Pending action lookup failed for get_messages: {pe}")
+            return MessagesResponseWithState(conversation_id=conversation_id, messages=messages, pending_action=pending_action)
     except HTTPException:
         raise
     except Exception as e:
