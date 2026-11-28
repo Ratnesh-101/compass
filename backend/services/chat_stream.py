@@ -45,7 +45,7 @@ from backend.router_helpers import (
 )
 from backend.services.chat_preferences import parse_preferences_intent, handle_chat_preferences_stream
 from backend.services.chat_extra_actions import handle_chat_extra_actions_stream
-from backend.services.chat_idempotency import committed_event, normalize_request_id, peek_replay, replay_events
+from backend.services.chat_idempotency import committed_event, normalize_request_id, peek_replay, replay_events, replay_guarded_turn
 from backend.services.chat_fastpath import GREETING_REPLY, apply_router_extra_body, is_greeting_fastpath
 from backend.services.chat_task_actions import parse_task_action_intent
 from backend.services.task_intent import is_intake_intent
@@ -393,7 +393,9 @@ def generate_chat_events(
 ) -> AsyncGenerator[str, None]:
     """Traced entry point: logs stream start/end and runs the silent-stream watchdog around the real generator."""
     trace = StreamTrace(normalize_request_id(getattr(req, "request_id", None)), str(getattr(req, "conversation_id", None) or "") or None)
-    inner = _with_total_budget(_generate_chat_events(req, request, user_id, guest_id, trace.request_id))
+    base = _with_total_budget(_generate_chat_events(req, request, user_id, guest_id, trace.request_id))
+    owner = user_id or guest_id or "default_user"
+    inner = replay_guarded_turn(owner, getattr(req, "conversation_id", None), getattr(req, "request_id", None), lambda: base)
     return cast(AsyncGenerator[str, None], trace.run(inner, request))
 
 

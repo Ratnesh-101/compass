@@ -16,6 +16,7 @@ import {
   getCurrentUserId,
 } from '../api/client'
 import { makeRequestId, failureMessage } from '../utils/chatRequest'
+import { shouldAutoResend } from '../utils/autoResend'
 import { parseSlashCommand } from '../api/specialistRegistry'
 import { isSampleWeekMessage, SAMPLE_WEEK_DISPLAY_TEXT } from '../utils/tourSample'
 import ChatHistoryDrawer from './chat/ChatHistoryDrawer'
@@ -286,6 +287,8 @@ export default function ChatPanel({
 
     let receivedTokens = ''
     let receivedThought = ''
+    let doneSeen = false
+    let pendingActionSeen = false
 
     try {
       await streamQueryFromAssistant(text, conversationId, {
@@ -317,6 +320,8 @@ export default function ChatPanel({
         onComplete: async (doneData) => {
           if (requestId !== activeRequestIdRef.current) return
           const finalText = (doneData?.response || receivedTokens || '').trim()
+          doneSeen = true
+          pendingActionSeen = Boolean(doneData?.data?.pending_action)
           setStreamingStatus(null)
           // Swap the streaming bubble for the finished message (immediately, or once the eased-in text caught up).
           const finish = () => {
@@ -358,7 +363,7 @@ export default function ChatPanel({
             return
           }
           // N-011: Retry once automatically on transient stream interruption
-          if (!extraMeta?.autoRetried && !err?.committed) {
+          if (shouldAutoResend({ autoRetried: extraMeta?.autoRetried, committed: err?.committed, doneSeen, pendingActionSeen })) {
             isSendingRef.current = false
             setContinuingMessageId(null)
             return handleSend(textToSend, overrideMode, explicitSpecialistId, true, {
@@ -396,7 +401,7 @@ export default function ChatPanel({
         return
       }
       // N-011: Retry once automatically on transient stream interruption
-      if (!extraMeta?.autoRetried && !err?.committed) {
+      if (shouldAutoResend({ autoRetried: extraMeta?.autoRetried, committed: err?.committed, doneSeen, pendingActionSeen })) {
         isSendingRef.current = false
         setContinuingMessageId(null)
         return handleSend(textToSend, overrideMode, explicitSpecialistId, true, {
