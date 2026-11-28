@@ -217,7 +217,7 @@ async def test_tavily_handler_claim_level_verification():
 
 @pytest.mark.asyncio
 async def test_tavily_handler_unverified_fallback_on_error():
-    """16. Authoritative failure reports UNVERIFIED rather than hallucinating."""
+    """16. An authoritative failure reports COULD_NOT_CHECK (never a verdict, never the raw error)."""
     with patch("backend.services.tavily_pipeline.run_tavily_research", side_effect=Exception("API connection timeout")):
         res = await handle_verify_with_tavily(
             {"claim": "Contested deadline claim"},
@@ -225,8 +225,9 @@ async def test_tavily_handler_unverified_fallback_on_error():
         )
 
     assert res["success"] is False
-    assert res["data"]["verdict"] == "UNVERIFIED"
-    assert "UNVERIFIED" in res["response"]
+    assert res["data"]["verdict"] == "COULD_NOT_CHECK"
+    assert "not available right now" in res["response"].lower() or "could not check" in res["response"].lower()
+    assert "API connection timeout" not in res["response"]
 
 
 # ============================================================================
