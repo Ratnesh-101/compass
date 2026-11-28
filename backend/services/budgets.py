@@ -8,6 +8,9 @@ Fails gracefully with clear user-facing messages.
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 from fastapi import HTTPException
@@ -29,6 +32,23 @@ MAX_DAILY_GUEST_MODEL_CALLS = 40
 # (TAVILY_DAILY_USER_CREDITS / TAVILY_DAILY_GUEST_CREDITS), which fall back to these.
 MAX_DAILY_USER_TAVILY_CREDITS = 30
 MAX_DAILY_GUEST_TAVILY_CREDITS = 25
+
+
+_run_allowance_var: ContextVar[Optional[int]] = ContextVar("compass_tavily_run_allowance", default=None)
+
+
+@contextmanager
+def run_credit_allowance(limit: int):
+    """Give the code inside the block its own per-run Tavily allowance (still bound by identity/global caps)."""
+    token = _run_allowance_var.set(int(limit))
+    try:
+        yield
+    finally:
+        _run_allowance_var.reset(token)
+
+
+def _run_limit() -> int:
+    return _run_allowance_var.get() or MAX_RUN_TAVILY_CREDITS
 
 
 class BudgetExceededError(Exception):
@@ -56,11 +76,12 @@ def check_run_limits(model_calls: int, tool_calls: int, tavily_credits: int) -> 
             MAX_RUN_TOOL_CALLS,
             tool_calls,
         )
-    if tavily_credits > MAX_RUN_TAVILY_CREDITS:
+    run_limit = _run_limit()
+    if tavily_credits > run_limit:
         raise BudgetExceededError(
-            f"Per-run Tavily search credit budget exceeded ({tavily_credits}/{MAX_RUN_TAVILY_CREDITS}). Search capped gracefully.",
+            f"Per-run Tavily search credit budget exceeded ({tavily_credits}/{run_limit}). Search capped gracefully.",
             "tavily_credits",
-            MAX_RUN_TAVILY_CREDITS,
+            run_limit,
             tavily_credits,
         )
 
@@ -131,6 +152,10 @@ def _daily_identity_exceeded(is_guest: bool, limit: int) -> HTTPException:
     )
 
 
+_UTC_DAY_START = "(date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')"
+GUEST_OP_SUFFIX = ":guest"  # marks guest rows in tavily_usage_log.operation (no schema change needed)
+
+
 async def _identity_credits_today(identity_id: str) -> int:
     """Sum today's (UTC) Tavily credits recorded for ONE identity. Raises on DB errors."""
     pool = await get_pool()
@@ -138,8 +163,7 @@ async def _identity_credits_today(identity_id: str) -> int:
         return 0
     async with pool.acquire() as conn:
         used = await conn.fetchval(
-            "SELECT COALESCE(SUM(credits), 0) FROM tavily_usage_log "
-            "WHERE identity = $1 AND created_at >= (date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')",
+            f"SELECT COALESCE(SUM(credits), 0) FROM tavily_usage_log WHERE identity = $1 AND created_at >= {_UTC_DAY_START}",
             identity_id,
         )
     return int(used or 0)
@@ -154,7 +178,7 @@ async def check_daily_identity_budget(
 
     The identity is ``user_id`` (authenticated) or else ``guest_id``. Raises HTTPException(429)
     with code ``tavily_budget_exceeded`` when used + cost would exceed the limit (with cost=0,
-    when the limit is already reached). Fails open on DB errors (the global cap is the hard backstop).
+    when the limit is already reached). Fails CLOSED for guests and open (with a warning) for signed-in users on DB errors.
     """
     is_guest = bool(not user_id or (guest_id and not user_id))
     identity_id = user_id or guest_id
@@ -164,7 +188,10 @@ async def check_daily_identity_budget(
     try:
         used = await _identity_credits_today(identity_id)
     except Exception as e:
-        logger.warning("Could not verify daily Tavily budget against DB: %s", e)
+        if is_guest:
+            logger.warning("Could not verify guest Tavily budget (denying): %s", e)
+            raise _daily_identity_exceeded(is_guest, limit) from e
+        logger.warning("Could not verify daily Tavily budget against DB (allowing signed-in user): %s", e)
         return
     if used + max(0, cost) > limit or (cost == 0 and used >= limit):
         raise _daily_identity_exceeded(is_guest, limit)
@@ -180,10 +207,10 @@ async def enforce_tavily_budget(cost: int) -> None:
     """
     cost = max(0, int(cost))
     used = budget_context.run_credits_used()
-    if used is not None and used + cost > MAX_RUN_TAVILY_CREDITS:
+    if used is not None and used + cost > _run_limit():
         check_run_limits(0, 0, used + cost)
 
-    await check_global_spend_cap()
+    await check_global_spend_cap(cost=cost)
 
     caller = budget_context.get_identity()
     if caller is not None and not caller.is_admin:
@@ -194,6 +221,138 @@ async def enforce_tavily_budget(cost: int) -> None:
         )
 
     budget_context.add_run_credits(cost)
+
+
+@dataclass
+class TavilyReservation:
+    """Provisional usage row. ``row_id`` is None when the DB was unavailable (signed-in fail-open)."""
+    row_id: Optional[int]
+    cost: int
+    operation: str
+    identity: Optional[str]
+    is_guest: bool = False
+
+
+def _guest_cap(settings: Any, tav_cap: int) -> int:
+    share = getattr(settings, "TAVILY_GUEST_GLOBAL_SHARE", 0.6)
+    if isinstance(share, bool) or not isinstance(share, (int, float)) or not 0 < share <= 1:
+        share = 0.6
+    return int(tav_cap * share)
+
+
+async def reserve_tavily_credits(cost: int, operation: str = "search", pool: Any = None) -> Optional[TavilyReservation]:
+    """Atomically check every Tavily budget and insert a provisional usage row for ``cost`` credits.
+
+    One transaction holds pg_advisory_xact_lock for (global, UTC day) and (identity, UTC day), re-checks
+    used + cost against the global cap, the guest share and the identity limit, then inserts the row, so
+    concurrent callers cannot overshoot. Per-run credits are added on success (refund them if the call fails).
+    Returns None when cost is 0. Raises BudgetExceededError / HTTPException before any spend.
+    """
+    cost = max(0, int(cost))
+    if cost == 0:
+        return None
+    used_run = budget_context.run_credits_used()
+    if used_run is not None and used_run + cost > _run_limit():
+        check_run_limits(0, 0, used_run + cost)
+
+    settings = _get_budget_settings()
+    _check_kill_switch(settings)
+    tav_cap = getattr(settings, "GLOBAL_DAILY_TAVILY_CREDIT_CAP", 100)
+    caller = budget_context.get_identity()
+    identity = caller.identity_id if caller else None
+    is_guest = bool(caller and caller.is_guest)
+    check_identity = caller is not None and not caller.is_admin
+    limit = _daily_tavily_limit(is_guest) if check_identity else 0
+    op = operation + (GUEST_OP_SUFFIX if is_guest else "")
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    row_id: Optional[int] = None
+    try:
+        p = pool or await get_pool()
+        if not p:
+            budget_context.add_run_credits(cost)
+            return TavilyReservation(None, cost, operation, identity, is_guest)
+        async with p.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", f"tavily:global|{day}")
+                if identity:
+                    await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", f"{identity}|{day}")
+                g_used = int(await conn.fetchval(
+                    f"SELECT COALESCE(SUM(credits), 0) FROM tavily_usage_log WHERE created_at >= {_UTC_DAY_START}") or 0)
+                if g_used + cost > tav_cap:
+                    raise HTTPException(
+                        status_code=429,
+                        detail=f"Global daily Tavily credit cap ({tav_cap} credits) reached. Operations paused until reset.",
+                    )
+                if is_guest:
+                    guests_used = int(await conn.fetchval(
+                        "SELECT COALESCE(SUM(credits), 0) FROM tavily_usage_log "
+                        f"WHERE operation LIKE $1 AND created_at >= {_UTC_DAY_START}", "%" + GUEST_OP_SUFFIX) or 0)
+                    if guests_used + cost > _guest_cap(settings, tav_cap):
+                        raise HTTPException(
+                            status_code=429,
+                            detail="Online searching is busy for guest sessions today. Sign in or try again tomorrow.",
+                            headers={"Retry-After": str(_seconds_until_utc_midnight())},
+                        )
+                if check_identity:
+                    used = int(await conn.fetchval(
+                        f"SELECT COALESCE(SUM(credits), 0) FROM tavily_usage_log WHERE identity = $1 AND created_at >= {_UTC_DAY_START}",
+                        identity) or 0)
+                    if used + cost > limit:
+                        raise _daily_identity_exceeded(is_guest, limit)
+                row_id = await conn.fetchval(
+                    "INSERT INTO tavily_usage_log (operation, credits, identity) VALUES ($1, $2, $3) RETURNING id",
+                    op, cost, identity)
+    except HTTPException:
+        raise
+    except Exception as e:
+        if is_guest:
+            logger.warning("Could not reserve guest Tavily credits (denying): %s", e)
+            raise _daily_identity_exceeded(True, limit) from e
+        logger.warning("Could not reserve Tavily credits against DB: [%s] %s", type(e).__name__, e)
+        _fail_closed_in_production(settings, "global spend cap", e)
+        row_id = None
+    budget_context.add_run_credits(cost)
+    return TavilyReservation(row_id, cost, operation, identity, is_guest)
+
+
+async def settle_tavily_reservation(res: Optional[TavilyReservation], actual: int, pool: Any = None) -> None:
+    """Set the provisional row to the actual spend (``actual`` 0 deletes it = refund). Never raises."""
+    if res is None:
+        return
+    actual = max(0, int(actual))
+    try:
+        if res.row_id is None:
+            if actual:
+                from backend.services.usage import record_tavily_credits
+                await record_tavily_credits(res.operation, actual, wait=True)
+            return
+        p = pool or await get_pool()
+        if not p:
+            return
+        async with p.acquire() as conn:
+            if actual == 0:
+                await conn.execute("DELETE FROM tavily_usage_log WHERE id = $1", res.row_id)
+            elif actual != res.cost:
+                await conn.execute("UPDATE tavily_usage_log SET credits = $2 WHERE id = $1", res.row_id, actual)
+    except Exception as e:
+        logger.warning("Could not settle Tavily reservation %s: %s", res.row_id, e)
+    if actual:
+        try:
+            from backend.services.usage import _TAVILY_STATE
+            st = _TAVILY_STATE.setdefault(res.operation, {"calls": 0, "credits": 0})
+            st["calls"] += 1
+            st["credits"] += actual
+        except Exception:
+            pass
+
+
+def _check_kill_switch(settings: Any) -> None:
+    import os
+    if settings.COMPASS_KILL_SWITCH_ACTIVE or os.environ.get("COMPASS_KILL_SWITCH_ACTIVE", "").lower() in ("true", "1", "yes"):
+        raise HTTPException(
+            status_code=503,
+            detail="Service temporarily paused: Global API kill-switch is engaged.",
+        )
 
 
 def _get_budget_settings():
@@ -212,7 +371,7 @@ def _fail_closed_in_production(settings: Any, what: str, exc: Exception) -> None
         ) from exc
 
 
-async def check_global_spend_cap(pool: Any = None) -> None:
+async def check_global_spend_cap(pool: Any = None, cost: int = 0) -> None:
     """Validate that global daily consumption across all users and guests has not exceeded hard limits.
     Prevents sybil or mass-guest creation attacks from draining paid external API credits.
     """
@@ -231,9 +390,9 @@ async def check_global_spend_cap(pool: Any = None) -> None:
         if p:
             async with p.acquire() as conn:
                 global_tav = await conn.fetchval(
-                    "SELECT COALESCE(SUM(credits), 0) FROM tavily_usage_log WHERE created_at >= date_trunc('day', now())"
+                    f"SELECT COALESCE(SUM(credits), 0) FROM tavily_usage_log WHERE created_at >= {_UTC_DAY_START}"
                 ) or 0
-                if int(global_tav) >= tav_cap:
+                if int(global_tav) + cost > tav_cap or (cost == 0 and int(global_tav) >= tav_cap):
                     raise HTTPException(
                         status_code=429,
                         detail=f"Global daily Tavily credit cap ({tav_cap} credits) reached. Operations paused until reset.",

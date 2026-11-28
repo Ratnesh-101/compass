@@ -19,7 +19,8 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, Field
 
 from backend.models_career import ResumeContent, safe_http_url
-from backend.services.budgets import BudgetExceededError
+from backend.services.budgets import BudgetExceededError, run_credit_allowance
+from backend.services import budget_context
 from backend.services.security import safe_http_get_with_url
 from backend.services.tavily import (
     sanitize_untrusted_text,
@@ -438,7 +439,61 @@ def _format_summary(checks: list[ClaimCheck]) -> str:
     return f"Checked {total} {noun}: {details}."
 
 
+# The verifier may issue up to 12 searches; it gets its own per-run allowance (identity and global caps still apply).
+VERIFIER_RUN_CREDITS = 12
+REPORT_CACHE_TTL_S = 15 * 60
+_REPORT_CACHE_MAX = 50
+_report_cache: dict = {}  # (identity, claims fingerprint) -> (monotonic time, report)
+
+
+def _report_cache_key(content: ResumeContent) -> Optional[tuple]:
+    try:
+        caller = budget_context.get_identity()
+        claims = [(c.get("kind"), c.get("text"), c.get("query"), c.get("url")) for c in extract_claims(content)]
+        return (caller.identity_id if caller else "", tuple(claims))
+    except Exception:
+        return None
+
+
+_SKIPPED_NOTICE = "Checked the most important claims online; the rest were not checked."
+
+
 async def verify_claims(
+    content: ResumeContent,
+    *,
+    search: Optional[Any] = None,
+    fetch: Optional[Any] = None,
+    max_claims: int = 12,
+    concurrency: int = 4,
+    budget_seconds: float = 40.0,
+) -> ClaimVerificationReport:
+    """Verify claims; with the default (real) search, reuse the last report for an identical claim set for 15 min."""
+    if search is not None or fetch is not None:
+        return await _verify_claims_impl(
+            content, search=search, fetch=fetch, max_claims=max_claims,
+            concurrency=concurrency, budget_seconds=budget_seconds,
+        )
+    key = _report_cache_key(content)
+    hit = _report_cache.get(key) if key is not None else None
+    if hit is not None and time.monotonic() - hit[0] <= REPORT_CACHE_TTL_S:
+        return hit[1]
+    counter_token = budget_context.begin_run_counter()  # fresh counter: the verifier's allowance is its own
+    try:
+        with run_credit_allowance(VERIFIER_RUN_CREDITS):
+            report = await _verify_claims_impl(
+                content, search=None, fetch=None, max_claims=max_claims,
+                concurrency=concurrency, budget_seconds=budget_seconds,
+            )
+    finally:
+        budget_context.end_run_counter(counter_token)
+    if key is not None and report.tavily_used and report.errors == 0 and not report.notice:
+        if len(_report_cache) >= _REPORT_CACHE_MAX:
+            _report_cache.pop(next(iter(_report_cache)))
+        _report_cache[key] = (time.monotonic(), report)
+    return report
+
+
+async def _verify_claims_impl(
     content: ResumeContent,
     *,
     search: Optional[Any] = None,
@@ -460,12 +515,13 @@ async def verify_claims(
         tavily_used = tavily_ok
         notice = "" if tavily_ok else "Online checking (Tavily) is not available at the moment, so only link checks ran. Try again later."
 
+        skipped_count = 0
         sem = asyncio.Semaphore(concurrency)
         start_time = time.monotonic()
         deadline = start_time + budget_seconds
 
         async def verify_single_claim(claim: dict) -> ClaimCheck:
-            nonlocal tavily_used, notice
+            nonlocal tavily_used, notice, skipped_count
             kind = claim.get("kind", "unknown")
             text = claim.get("text", "")
 
@@ -501,7 +557,12 @@ async def verify_claims(
                     results = res.get("results", []) if isinstance(res, dict) else []
                     st, ev, nt = evaluate_search_result(entity, results)
                     return ClaimCheck(kind=kind, text=text, status=st, evidence=ev, note=nt)
-                except (RuntimeError, BudgetExceededError):
+                except BudgetExceededError:
+                    # Per-run allowance used up: this claim was simply not searched (not an outage).
+                    skipped_count += 1
+                    notice = _SKIPPED_NOTICE
+                    return ClaimCheck(kind=kind, text=text, status="cannot_check", evidence=[], note="Not checked online: the limit for online checks in one run was reached.")
+                except RuntimeError:
                     tavily_used = False
                     notice = "Online checking (Tavily) is not available at the moment, so only link checks ran. Try again later."
                     return ClaimCheck(kind=kind, text=text, status="cannot_check", evidence=[], note="Online verification is not available right now.")
@@ -536,6 +597,10 @@ async def verify_claims(
                 )
             )
 
+        if skipped_count and tavily_used:
+            checked_online = sum(1 for c in checks if c.kind != "link" and c.status in ("found", "not_found"))
+            notice = (f"Checked {checked_online} of the most important claims online; "
+                      "the rest were not checked.")
         return ClaimVerificationReport(
             checked_at=datetime.now(timezone.utc),
             tavily_used=tavily_used,
