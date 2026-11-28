@@ -324,6 +324,20 @@ def _turn_put(key: Tuple[str, str, str], frames: list) -> None:
         _turn_done.pop(next(iter(_turn_done)), None)
 
 
+def _mark_replayed(frame: str) -> str:
+    """Tag a stored final frame as a replay so clients (and tests) can tell it was not re-run."""
+    if '"type": "done"' not in frame or not frame.startswith("data:"):
+        return frame
+    try:
+        payload = json.loads(frame[5:].strip())
+    except ValueError:
+        return frame
+    if not isinstance(payload, dict):
+        return frame
+    payload["replayed"] = True
+    return "data: " + json.dumps(payload, default=str) + "\n\n"
+
+
 async def replay_guarded_turn(owner: str, conv_id: Any, request_id: Any, make_stream: Callable[[], Any]):
     """Run one chat stream at most once per (owner, conversation, request id); repeats replay the stored frames."""
     rid = normalize_request_id(request_id)
@@ -336,7 +350,7 @@ async def replay_guarded_turn(owner: str, conv_id: Any, request_id: Any, make_st
         stored = _turn_get(key)
         if stored is not None:
             for frame in stored:
-                yield frame
+                yield _mark_replayed(frame)
             return
         waiting = _turn_inflight.get(key)
         if waiting is None:

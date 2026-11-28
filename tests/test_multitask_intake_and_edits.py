@@ -250,8 +250,9 @@ def test_repeated_request_id_replays_first_response_and_saves_one_message():
 
     first, second = _run(both())
     assert len(runs) == 1 and add_message.await_count == 1
-    assert [f for f in first if not f.startswith(":")] == second
-    assert "reschedule_task" in second[-1]
+    original = [f for f in first if not f.startswith(":")]
+    assert second[:-1] == original[:-1]
+    assert '"replayed": true' in second[-1] and "reschedule_task" in second[-1]  # same card, marked as a replay
 
 
 def test_repeat_waits_for_the_first_request_still_in_flight():
@@ -270,7 +271,7 @@ def test_repeat_waits_for_the_first_request_still_in_flight():
         return await asyncio.gather(_guard("req-abcdefgh", stream), _guard("req-abcdefgh", stream))
 
     first, second = _run(both())
-    assert len(runs) == 1 and first == second
+    assert len(runs) == 1 and first[:-1] == second[:-1] and "reschedule_task" in second[-1]
 
 
 def test_in_flight_repeat_gets_a_retry_error_after_the_wait_bound():
