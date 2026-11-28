@@ -27,6 +27,7 @@ import {
 import { isEmailSignInEnabled } from '../utils/firstRun'
 import GoogleCloudSetupGuide from './auth/GoogleCloudSetupGuide'
 import Dialog from './Dialog'
+import { showDevSetupNote } from '../utils/careerRouting'
 
 // Email quick-connect only exists on development servers; production leads with Google.
 const emailSignInEnabled = isEmailSignInEnabled(import.meta.env)
@@ -580,7 +581,7 @@ export default function AuthModal({ isOpen, onClose, currentUser, onUserChanged 
                   )}
                 </div>
 
-                {oauthStatus?.configured && (
+                {oauthStatus?.configured && showDevSetupNote(import.meta.env.DEV, window.location.hostname) && (
                   <div style={{
                     marginTop: '12px',
                     padding: '8px 12px',

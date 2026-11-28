@@ -47,6 +47,7 @@ from backend.models_radar import OpportunityOut, OpportunityStatus, UserOpportun
 from backend.services.career_cover_letter import compose_cover_letter
 from backend.services.career_resume import tailor_resume_for_opportunity
 from backend.services.career_tailor_changes import attach_changes
+from backend.services.career_top_picks import only_n_message, select_relevant
 
 logger = logging.getLogger("compass.services.career_flow")
 
@@ -454,8 +455,10 @@ async def prepare_top_matches(user_id: str, master_factory: MasterFactory, limit
         o for o in await recommended_for_user(user_id, profile)
         if o.eligibility_classification != EligibilityClassification.INELIGIBLE
     ]
+    ranked = select_relevant(ranked, list(c.skills) + list(profile.skills if profile and profile.skills else []))
     if not ranked:
         return {"status": "no_eligible_opportunities", "message": "No open internships fit your profile right now.", "prepared_count": 0, "drafts": []}
+    note = only_n_message(len(ranked), limit)
 
     results: List[Dict[str, Any]] = []
     for opp in ranked:
@@ -482,11 +485,14 @@ async def prepare_top_matches(user_id: str, master_factory: MasterFactory, limit
             })
         except HTTPException as err:
             results.append({"opportunity_id": opp.id, "company_name": opp.company_name, "role_title": opp.role_title, "status": "failed", "message": str(err.detail)})
-    return {
+    out: Dict[str, Any] = {
         "status": "completed",
         "prepared_count": len([r for r in results if r["status"] == "prepared"]),
         "drafts": results,
     }
+    if note:
+        out["message"] = note
+    return out
 
 
 async def _existing_application(user_id: str, opportunity_id: int) -> Optional[CareerApplicationOut]:
