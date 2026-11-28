@@ -169,7 +169,6 @@ async def search(
     q = query[:390]  # Tavily recommends keeping queries under 400 chars
 
     credits = _SEARCH_CREDITS.get(depth, 1)
-    n_results = max_results or settings.TAVILY_MAX_RESULTS
     key = _cache_key(q, depth, topic, n_results, include_domains)
     cached = _cache_get(key)
     if cached is not None:
