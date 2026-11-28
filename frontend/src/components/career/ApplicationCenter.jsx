@@ -1,3 +1,4 @@
+import { sectionForMissingField } from './resumeEditorModel.js'
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   fetchApplications,
@@ -395,7 +396,7 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
                               <span>⚠️ Missing: {app.missing_fields.join(', ')}</span>
                               <button
                                 type="button"
-                                onClick={() => onNavigateToResumeStudio?.()}
+                                onClick={() => onNavigateToResumeStudio?.(sectionForMissingField(app.missing_fields[0]))}
                                 style={{
                                   background: 'transparent',
                                   border: 'none',

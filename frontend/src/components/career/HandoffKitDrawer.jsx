@@ -1,3 +1,4 @@
+import { sectionForMissingField } from './resumeEditorModel.js'
 import React, { useState, useEffect } from 'react'
 import { downloadAuthedFile, openAuthedHtml, API_BASE } from '../../api/baseClient.js'
 import { fetchHandoffKit } from '../../api/careerApi.js'
@@ -305,7 +306,7 @@ export default function HandoffKitDrawer({
                             <span style={{ fontStyle: 'italic', color: 'var(--text-muted, #64748b)' }}>{displayKitValue(val)}</span>
                           <button
                             type="button"
-                            onClick={() => onNavigateToResumeStudio?.()}
+                            onClick={() => onNavigateToResumeStudio?.(sectionForMissingField(item.key))}
                             style={{
                               padding: '2px 8px',
                               borderRadius: '4px',

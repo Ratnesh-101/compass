@@ -139,8 +139,8 @@ test('Dead navigate buttons wired to real application navigation mechanism', () 
   assert.match(appCenterSrc, /onClick=\{[^{}]*onNavigateToResumeStudio\?\.?\(\)[^{}]*\}/,
     'Fix now button must invoke onNavigateToResumeStudio')
 
-  // + Add to profile button invokes real callback
-  assert.match(drawerSrc, /onClick=\{[^{}]*onNavigateToResumeStudio\?\.?\(\)[^{}]*\}/,
+  // + Add to profile button invokes real callback, passing the editor section for the missing field
+  assert.match(drawerSrc, /onClick=\{\(\) => onNavigateToResumeStudio\?\.\(sectionForMissingField\(item\.key\)\)\}/,
     '+ Add to profile button must invoke onNavigateToResumeStudio')
 })
 
