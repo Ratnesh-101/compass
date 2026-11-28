@@ -629,6 +629,28 @@ _TOOL_KEYWORDS_REGEX = re.compile(
 )
 
 
+# Questions about the outside world that need fresh facts (versions, news, prices, results).
+# Messages about the user's own tasks/schedule are excluded by _OWN_WORK_RE.
+_CURRENT_FACTS_RE = re.compile(
+    r"\b(?:latest|current|currently|newest|now|versions?|news|prices?|today's|today|"
+    r"this year|recent|recently|2026)\b",
+    re.IGNORECASE,
+)
+_OWN_WORK_RE = re.compile(
+    r"\b(?:my|mine|due|plan|planning|schedule|scheduled|tasks?|todos?|deadlines?|"
+    r"should i|do i|can i|i have|i need|i should)\b",
+    re.IGNORECASE,
+)
+
+
+def is_current_facts_question(message: str) -> bool:
+    """True for outside-world questions that depend on current facts (not the user's own tasks/plans)."""
+    text = (message or "").strip()[:600]
+    if not text or _OWN_WORK_RE.search(text):
+        return False
+    return bool(_CURRENT_FACTS_RE.search(text))
+
+
 LONG_FORM_CUES = (
     "hour-by-hour", "hour by hour", "step-by-step", "step by step", "detailed", "in detail",
     "in depth", "in-depth", "comprehensive", "full plan", "a plan for", "give me a plan",

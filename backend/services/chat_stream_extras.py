@@ -18,8 +18,10 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Callable, Dict, List, Optional, Tuple
 
+from backend.router_helpers import is_current_facts_question
 from backend.services import stream_watch
 from backend.services.chat_idempotency import (
     committed_event,
@@ -636,14 +638,37 @@ def memory_lookup_was_empty(result: Dict[str, Any]) -> bool:
 
 def should_search_web(message: str, result: Optional[Dict[str, Any]] = None, text: Optional[str] = None) -> bool:
     """True when an external-fact question got an empty memory lookup or an "I don't know" reply."""
-    if not is_external_fact_question(message):
-        return False
     if result is not None and (result.get("skill_used") or "") in WEB_SKILLS:
         return False  # already went to the web
+    if is_current_facts_question(message):
+        from backend.services import tavily as tavily_service
+
+        return tavily_service.tavily_available()
+    if not is_external_fact_question(message):
+        return False
     reply = text if text is not None else (result or {}).get("response")
     if result is not None and memory_lookup_was_empty(result):
         return True
     return bool(reply and _ABSTAIN_RE.search(str(reply)))
+
+
+CURRENT_FACTS_OFFLINE_PREFIX = "I can't check online right now, so this may be out of date:"
+
+
+def _with_checked_line(res: Dict[str, Any]) -> str:
+    """Web answer with source links (when missing) and a 'Checked online on <date>' line."""
+    text = str(res.get("response") or "").strip()
+    data = res.get("data") if isinstance(res.get("data"), dict) else {}
+    links = []
+    for c in (data.get("citations") or [])[:3]:
+        url = str((c or {}).get("url") or "")
+        if url.startswith("http") and url not in text:
+            links.append(f"- [{str(c.get('title') or url)[:80]}]({url})")
+    if links:
+        text += "\n\nSources:\n" + "\n".join(links)
+    if "Checked online on" not in text:
+        text += f"\n\nChecked online on {datetime.now(timezone.utc).strftime('%d %B %Y')}"
+    return text
 
 
 async def run_web_fallback(message: str, pool: Any) -> Optional[Dict[str, Any]]:
@@ -666,4 +691,6 @@ async def run_web_fallback(message: str, pool: Any) -> Optional[Dict[str, Any]]:
             budget_context.end_run_counter(counter_token)
     if not isinstance(res, dict) or not res.get("success") or not str(res.get("response") or "").strip():
         return None
+    if is_current_facts_question(message):
+        res = {**res, "response": _with_checked_line(res)}
     return res
