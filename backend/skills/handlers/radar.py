@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from backend.memory.radar import get_user_opportunity_profile
 from backend.models_radar import EligibilityClassification, OpportunityOut, OpportunityStatus
+from backend.services.radar_freshness import is_fresh_open, verification_age_days
 from backend.services.radar_prediction import estimate_recruitment_cycle
 from backend.skills.registry import register_skill
 
@@ -152,6 +153,174 @@ def _matches_any_keyword(item: OpportunityOut, keywords: List[str]) -> bool:
     return any(kw in text for kw in keywords)
 
 
+# ---- Profile-aware search: parse the student's message, score listings, list the best 8 ----
+
+_YEAR_WORDS = {"first": 1, "second": 2, "third": 3, "fourth": 4, "final": 4}
+_YEAR_RE = re.compile(r"\b([1-4])(?:st|nd|rd|th)[- ]year\b", re.IGNORECASE)
+_YEAR_WORD_RE = re.compile(r"\b(first|second|third|fourth|final)[- ]year\b", re.IGNORECASE)
+_BRANCH_RE = re.compile(
+    r"\b(cse|cs|computer science|information technology|ece|eee|mechanical|civil)\b",
+    re.IGNORECASE,
+)
+_IT_RE = re.compile(r"\bIT\b")
+_BRANCH_CANON = {
+    "cse": "cse", "cs": "cse", "computer science": "cse",
+    "it": "it", "information technology": "it",
+    "ece": "ece", "eee": "eee", "mechanical": "mechanical", "civil": "civil",
+}
+_CITY_RE = re.compile(
+    r"\b(bangalore|bengaluru|hyderabad|pune|mumbai|delhi|noida|gurgaon|gurugram|chennai|kolkata|ahmedabad)\b",
+    re.IGNORECASE,
+)
+_STIPEND_RE = re.compile(r"\bstipend\b[^0-9]{0,20}(\d[\d,]{0,8})", re.IGNORECASE)
+_DURATION_RE = re.compile(r"\b(\d{1,2})\s{0,2}months?\b", re.IGNORECASE)
+
+# interest -> (word pattern matched in title and description, categories)
+INTEREST_PATTERNS: Dict[str, tuple] = {
+    "ai_ml": (r"\b(?:ml|ai|machine learning|deep learning|nlp|computer vision|data science|llm|genai)\b", ("ai_ml",)),
+    "web": (r"\b(?:web|full[- ]?stack|react|node)\b", ("swe",)),
+    "data": (r"\b(?:data|analytics|analyst)\b", ("data",)),
+    "security": (r"\b(?:security|cyber|infosec|pentest)\b", ()),
+    "backend": (r"\b(?:backend|back[- ]end|api|server)\b", ("backend",)),
+    "frontend": (r"\b(?:frontend|front[- ]end|ui engineer)\b", ("swe",)),
+    "mobile": (r"\b(?:mobile|android|ios|flutter)\b", ()),
+    "devops": (r"\b(?:devops|sre|cloud|kubernetes)\b", ("cloud",)),
+    "research": (r"\b(?:research|researcher)\b", ("research",)),
+}
+_INTEREST_QUERY_RE = {
+    "ai_ml": re.compile(r"\b(?:ml|ai|machine learning|deep learning|nlp|computer vision|data science|llm|genai)\b", re.IGNORECASE),
+    "web": re.compile(r"\b(?:web|full[- ]?stack)\b", re.IGNORECASE),
+    "data": re.compile(r"\b(?:data|analytics)\b", re.IGNORECASE),
+    "security": re.compile(r"\b(?:security|cyber ?security|infosec)\b", re.IGNORECASE),
+    "backend": re.compile(r"\bback[- ]?end\b", re.IGNORECASE),
+    "frontend": re.compile(r"\bfront[- ]?end\b", re.IGNORECASE),
+    "mobile": re.compile(r"\b(?:mobile|android|ios|flutter)\b", re.IGNORECASE),
+    "devops": re.compile(r"\b(?:devops|sre|cloud)\b", re.IGNORECASE),
+    "research": re.compile(r"\bresearch\b", re.IGNORECASE),
+}
+_NON_TECH_RE = re.compile(
+    r"\b(?:hr|human resources|talent acquisition|payroll|recruiter|recruiting|recruitment|sales|finance|content|design|marketing)\b",
+    re.IGNORECASE,
+)
+_ENGINEERING_RE = re.compile(r"\b(?:engineer|engineering|developer|software|sde|swe|research|scientist)\b", re.IGNORECASE)
+MIN_RELEVANT = 3
+SCORED_RESULTS = 8
+
+
+def parse_internship_query(message: str) -> Dict[str, Any]:
+    """Pull profile hints (year, branch, interests, location, remote, stipend, duration) out of a message."""
+    out: Dict[str, Any] = {
+        "year": None, "branch": None, "interests": [], "location": None,
+        "remote": False, "stipend": None, "duration_months": None,
+    }
+    if not isinstance(message, str) or not message.strip():
+        return out
+    text = " ".join(message.split())[:600]
+    m = _YEAR_RE.search(text)
+    if m:
+        out["year"] = int(m.group(1))
+    else:
+        m = _YEAR_WORD_RE.search(text)
+        if m:
+            out["year"] = _YEAR_WORDS[m.group(1).lower()]
+    m = _BRANCH_RE.search(text)
+    if m:
+        out["branch"] = _BRANCH_CANON.get(m.group(1).lower())
+    elif _IT_RE.search(text):
+        out["branch"] = "it"
+    out["interests"] = [k for k, rx in _INTEREST_QUERY_RE.items() if rx.search(text)]
+    m = _CITY_RE.search(text)
+    if m:
+        out["location"] = m.group(1).lower()
+    elif re.search(r"\bindia\b", text, re.IGNORECASE):
+        out["location"] = "india"
+    out["remote"] = bool(re.search(r"\bremote\b", text, re.IGNORECASE))
+    m = _STIPEND_RE.search(text)
+    if m:
+        out["stipend"] = m.group(1).replace(",", "")
+    m = _DURATION_RE.search(text)
+    if m:
+        out["duration_months"] = int(m.group(1))
+    return out
+
+
+def score_internship(item: OpportunityOut, parsed: Dict[str, Any], message: str = "") -> Dict[str, Any]:
+    """Score one listing. 'matches' counts interest hits; only listings with matches are relevant."""
+    title = (item.role_title or "").lower()
+    haystack = f"{title} {(item.description or '').lower()}"
+    matches = 0
+    for interest in parsed.get("interests") or []:
+        pattern, cats = INTEREST_PATTERNS[interest]
+        if (item.category in cats) or re.search(pattern, haystack):
+            matches += 1
+    technical = bool(parsed.get("interests")) or parsed.get("branch") in ("cse", "it", "ece")
+    score = 3 * matches
+    if parsed.get("branch") in ("cse", "it") and _ENGINEERING_RE.search(title):
+        score += 2
+    asked_design = bool(re.search(r"\bdesign\b", message or "", re.IGNORECASE))
+    non_tech = _NON_TECH_RE.search(title)
+    if non_tech and technical and not (asked_design and non_tech.group(0).lower() == "design"):
+        score -= 4
+    if is_fresh_open(item):
+        score += 1
+    if parsed.get("remote") and (item.work_arrangement or "").lower() == "remote":
+        score += 1
+    return {"score": score, "matches": matches}
+
+
+def verification_note(item: OpportunityOut) -> str:
+    """'verified today', 'verified N days ago' or 'needs re-check'."""
+    if not is_fresh_open(item):
+        return "needs re-check"
+    age = verification_age_days(item)
+    if age is None:
+        return "needs re-check"
+    if age <= 0:
+        return "verified today"
+    return f"verified {age} day{'s' if age != 1 else ''} ago"
+
+
+def rank_internships(items: List[OpportunityOut], parsed: Dict[str, Any], message: str = "") -> tuple:
+    """Return (relevant, closest): interest-matching listings best first, and non-penalised near misses."""
+    city = parsed.get("location")
+    relevant: List[tuple] = []
+    others: List[tuple] = []
+    for idx, item in enumerate(items):
+        sc = score_internship(item, parsed, message)
+        city_ok = not city or city == "india" or city in (item.location or "").lower()
+        row = (-sc["score"], idx, item)
+        if sc["matches"] > 0 and city_ok:
+            relevant.append(row)
+        elif city_ok and sc["score"] > 1:
+            others.append(row)
+    relevant.sort(key=lambda r: (r[0], r[1]))
+    others.sort(key=lambda r: (r[0], r[1]))
+    return [r[2] for r in relevant], [r[2] for r in others]
+
+
+def _scored_line(item: OpportunityOut) -> str:
+    line = f"- **{item.company_name}**: {item.role_title} | {item.location or item.country or 'Not stated'} | {verification_note(item)}"
+    if item.official_application_url:
+        line += f"\n  Apply: {item.official_application_url}"
+    return line
+
+
+def format_scored_answer(relevant: List[OpportunityOut], closest: List[OpportunityOut]) -> str:
+    """Top 8, or 'I found only N' plus the closest and an offer to widen."""
+    n = len(relevant)
+    if n >= MIN_RELEVANT:
+        shown = relevant[:SCORED_RESULTS]
+        head = f"Here are the top {len(shown)} internships that match your profile:\n\n"
+        return head + "\n".join(_scored_line(o) for o in shown) + f"\n\n{SEE_ALL_HINT}"
+    shown = (relevant + closest)[:3]
+    head = f"I found only {n} listing{'s' if n != 1 else ''} that match; "
+    if shown:
+        head += "here is the closest:\n\n" + "\n".join(_scored_line(o) for o in shown) + "\n\n"
+    else:
+        head += "I have nothing close to show, so I will not pad this with unrelated roles.\n\n"
+    return head + "Want me to widen the search? I can drop the interest filter or the location filter.\n" + SEE_ALL_HINT
+
+
 @register_skill("query_internship_radar")
 async def handle_query_internship_radar(args: Dict[str, Any], pool: Any = None) -> Dict[str, Any]:
     """Top internship matches for the user, from the same query as the Career page."""
@@ -165,6 +334,37 @@ async def handle_query_internship_radar(args: Dict[str, Any], pool: Any = None) 
 
     profile = await get_user_opportunity_profile(user_id)
     keywords = extract_search_keywords(query) if query else []
+    parsed = parse_internship_query(query)
+    if parsed["interests"]:
+        raw = await recommended_for_user(user_id, profile, india_only=india_only)
+        widened = False
+        if not raw and india_only:
+            raw, widened = await recommended_for_user(user_id, profile, india_only=False), True
+        relevant, closest = rank_internships(list(raw), parsed, query)
+        if len(relevant) >= MIN_RELEVANT:
+            shown = relevant[:SCORED_RESULTS]
+        else:
+            shown = (relevant + closest)[:3]
+        text = format_scored_answer(relevant, closest)
+        return {
+            "success": True,
+            "data": {
+                "count": len(shown),
+                "total_matching": len(relevant),
+                "opportunities": [
+                    {"id": o.id, "company": o.company_name, "role": o.role_title, "category": o.category,
+                     "location": o.location, "application_url": o.official_application_url,
+                     "verification": verification_note(o), "status": o.current_status}
+                    for o in shown
+                ],
+                "see_all_hint": SEE_ALL_HINT,
+                "keywords": keywords,
+                "profile": parsed,
+                "widened_to_worldwide": widened,
+            },
+            "summary": text,
+            "response": text,
+        }
 
     async def _fetch_opportunities(country_filter: bool) -> tuple[List[OpportunityOut], int, bool]:
         raw_items = await recommended_for_user(user_id, profile, india_only=country_filter)
