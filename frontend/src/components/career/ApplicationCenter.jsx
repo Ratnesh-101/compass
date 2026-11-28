@@ -9,7 +9,9 @@ import {
   draftCoverLetter,
   setApplicationCoverLetter,
 } from '../../api/careerApi'
+import LoadErrorPanel from './LoadErrorPanel'
 import BatchApprovalModal from './BatchApprovalModal'
+import { SLOW_LOAD_MS, SLOW_LOAD_TEXT } from '../../utils/careerLoadHonesty'
 import HandoffKitModal from './HandoffKitModal'
 import HandoffKitDrawer from './HandoffKitDrawer'
 import ReturnSubmissionPrompt from './ReturnSubmissionPrompt'
@@ -40,6 +42,8 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
   const [processing, setProcessing] = useState(false)
   const [submitResult, setSubmitResult] = useState(null)
   const [error, setError] = useState(null)
+  const [loadError, setLoadError] = useState(null)
+  const [slowLoad, setSlowLoad] = useState(false)
 
   // Explicit approval check states (Section 3.3)
   const [attestationConfirmed, setAttestationConfirmed] = useState(false)
@@ -49,11 +53,12 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
   const loadData = useCallback(async () => {
     setLoading(true)
     setError(null)
+    setLoadError(null)
     try {
       const apps = await fetchApplications()
       setApplications(apps)
     } catch (err) {
-      setError(err.message || 'Failed to load applications')
+      setLoadError(err || new Error('load failed'))
     } finally {
       setLoading(false)
     }
@@ -62,6 +67,12 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
   useEffect(() => {
     loadData()
   }, [loadData])
+
+  useEffect(() => {
+    if (!loading) { setSlowLoad(false); return undefined }
+    const timer = setTimeout(() => setSlowLoad(true), SLOW_LOAD_MS)
+    return () => clearTimeout(timer)
+  }, [loading])
 
   const toggleSelectApp = (id) => {
     setSelectedAppIds(prev => {
@@ -198,8 +209,13 @@ export default function ApplicationCenter({ onNavigateToResumeStudio }) {
       <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-muted)' }}>
         <div className="spinner" style={{ margin: '0 auto 12px' }} />
         <p>Loading Application Center...</p>
+        {slowLoad && <p role="status">{SLOW_LOAD_TEXT}</p>}
       </div>
     )
+  }
+
+  if (loadError) {
+    return <LoadErrorPanel error={loadError} onRetry={loadData} what="applications" />
   }
 
   const batchSummary = summarizeBatchResults(submitResult?.results)

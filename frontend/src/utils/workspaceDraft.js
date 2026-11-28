@@ -1,3 +1,4 @@
+import { draftDiffersFromSaved, savedFieldsFromServer } from './careerLoadHonesty.js'
 /**
  * Compass — Safe Workspace Draft Recovery Utility.
  *
@@ -147,7 +148,8 @@ export function inspectDraftConflict(draftRecord, serverResume, serverApp) {
   }
 
   const d = draftRecord.draft
-  const isDifferent = hasMaterialUnsavedChanges(d, serverResume, serverApp)
+  // Show the banner only when the draft really differs from what is saved (trimmed, deep compare).
+  const isDifferent = draftDiffersFromSaved(d, savedFieldsFromServer(serverResume, serverApp))
   if (!isDifferent) {
     return { hasConflict: false }
   }
