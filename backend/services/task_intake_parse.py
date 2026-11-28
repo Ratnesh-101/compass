@@ -97,7 +97,7 @@ class ParsedIntake:
     items: tuple[IntakeItem, ...]
     total_found: int
     skipped: tuple[str, ...]
-
+    unparsed: tuple[str, ...] = ()
     @property
     def truncated(self) -> bool:
         return self.total_found > len(self.items) + len(self.skipped)
@@ -428,3 +428,238 @@ def parse_task_list(message: str) -> Optional[ParsedIntake]:
     if len(lines) < MIN_ITEMS:
         return None
     return _parse_table(message, lines) or _parse_bullets(message, lines)
+
+
+# ---------------------------------------------------------------------------
+# Clause splitting: "A Tuesday 5pm, B tomorrow 7am and C due Dec 5" -> three tasks (no model call).
+# Token based on purpose: no regex with adjacent or overlapping quantifiers.
+# ---------------------------------------------------------------------------
+_WEEKDAYS = frozenset({"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"})
+_MONTHS = frozenset({
+    "january", "february", "march", "april", "may", "june", "july", "august", "september", "october",
+    "november", "december", "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
+})
+_REL_DAYS = frozenset({"today", "tonight", "tomorrow", "tmrw", "noon", "midnight", "eod"})
+_CONNECTORS = frozenset({"at", "of", "the", "on", ","})
+_LEFT_MARKERS = frozenset({"due", "by", "on", "at", "before", "until", "for", "next", "this"})
+_JOINERS = frozenset({"at", "by", "on", "for", "due", "and", "before", "until", "to", "the", "in", "under"})
+_TIME_TOKEN = re.compile(r"^\d{1,2}(?::\d{2})?(?:am|pm)$")
+_NUM_DATE = re.compile(r"^\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?$")
+_ORDINAL = re.compile(r"^\d{1,2}(?:st|nd|rd|th)$")
+_SMALL_NUM = re.compile(r"^\d{1,2}$")
+_YEAR = re.compile(r"^20\d{2}$")
+_PREFIX_WORDS = frozenset({"please", "add", "create", "schedule", "new", "task", "tasks", "todo", "to", "remind", "me", "set", "a", "an", "my"})
+_PREFIX_STARTERS = frozenset({"please", "add", "create", "schedule", "new", "remind", "set"})
+_START_VERBS = frozenset({
+    "call", "buy", "email", "submit", "finish", "write", "study", "read", "go", "send", "pay", "book", "prepare",
+    "complete", "review", "clean", "do", "make", "meet", "visit", "attend", "plan", "fix", "pick", "get", "take",
+    "practice", "revise", "renew", "cook", "water", "check", "update", "reply", "call", "gym", "run", "workout",
+})
+_AREA_SUFFIX = frozenset({"area", "domain", "category", "project", "list"})
+_NOT_AREA = frozenset({"the", "a", "an", "my", "pressure", "control", "review", "way", "time", "pm", "am"})
+MAX_CLAUSES = MAX_ITEMS
+
+
+def _norm_tok(tok: str) -> str:
+    return tok.lower().strip(",.;:()!?\"'")
+
+
+def _date_flags(tokens: list[str]) -> list[bool]:
+    n = len(tokens)
+    low = [_norm_tok(t) for t in tokens]
+    flags = [False] * n
+    for i, t in enumerate(low):
+        if t in _WEEKDAYS or t in _REL_DAYS or _TIME_TOKEN.match(t) or _NUM_DATE.match(t) or _ORDINAL.match(t):
+            flags[i] = True
+    for i, t in enumerate(low):
+        prev_t = low[i - 1] if i else ""
+        next_t = low[i + 1] if i + 1 < n else ""
+        if t in _MONTHS:
+            if _SMALL_NUM.match(next_t) or _ORDINAL.match(next_t) or _SMALL_NUM.match(prev_t) or _ORDINAL.match(prev_t):
+                flags[i] = True
+        elif _SMALL_NUM.match(t):
+            if prev_t in _MONTHS or next_t in _MONTHS or next_t in ("am", "pm"):
+                flags[i] = True
+        elif t in ("am", "pm"):
+            flags[i] = bool(_SMALL_NUM.match(prev_t))
+        elif _YEAR.match(t) and i and flags[i - 1] and (prev_t in _MONTHS or _SMALL_NUM.match(prev_t) or _ORDINAL.match(prev_t)):
+            flags[i] = True
+    return flags
+
+
+def _has_date_word(tokens: list[str]) -> bool:
+    return any(_date_flags(tokens))
+
+
+def _has_title_word(tokens: list[str]) -> bool:
+    flags = _date_flags(tokens)
+    return any(
+        not f and _norm_tok(t) not in _LEFT_MARKERS and _norm_tok(t) not in _JOINERS and any(c.isalpha() for c in t)
+        for t, f in zip(tokens, flags)
+    )
+
+
+def _strip_prefix(tokens: list[str]) -> list[str]:
+    if not tokens or _norm_tok(tokens[0]) not in _PREFIX_STARTERS:
+        return tokens
+    i = 0
+    while i < len(tokens) - 1 and _norm_tok(tokens[i]) in _PREFIX_WORDS:
+        i += 1
+    return tokens[i:]
+
+
+def split_task_clauses(message: str) -> list[str]:
+    """Candidate task clauses on newlines, ';', sentences, ' and ', ' plus ' and ','; dates stay with their clause."""
+    text = (message or "")[:4000]
+    out: list[str] = []
+    for line in text.splitlines():
+        for seg in re.split(r"[;!]|[.](?:\s|$)", line):
+            tokens = seg.replace(",", " , ").split()
+            pieces: list[list[str]] = [[]]
+            for tok in tokens:
+                if _norm_tok(tok) in ("and", "plus") or tok == ",":
+                    if pieces[-1]:
+                        pieces.append([])
+                    continue
+                pieces[-1].append(tok)
+            merged: list[list[str]] = []
+            for piece in pieces:
+                if not piece:
+                    continue
+                starts_new = (
+                    not merged
+                    or not any(c.isalpha() for c in " ".join(piece))
+                    or (_has_date_word(piece) and _has_title_word(piece))
+                    or _norm_tok(piece[0]) in _START_VERBS
+                )
+                if starts_new:
+                    merged.append(piece)
+                else:
+                    merged[-1] = merged[-1] + ["and"] + piece
+            out.extend(" ".join(p) for p in merged)
+    return [c.strip() for c in out if c.strip()][:MAX_CLAUSES]
+
+
+def _area_slug(name: str) -> str:
+    low = " ".join((name or "").lower().split())
+    built_in = _normalize_domain(low)
+    if built_in != "general" or low == "general":
+        return built_in
+    slug = "".join(ch if (ch.isalnum() or ch in "_-") else "-" for ch in low)
+    return slug.strip("-")[:32] or "general"
+
+
+def _take_area(tokens: list[str]) -> tuple[list[str], Optional[str]]:
+    """Area/domain named by '(health)', 'in the Health area' or 'under Health'; returns (tokens_left, area)."""
+    joined = " ".join(tokens)
+    open_i = joined.find("(")
+    close_i = joined.find(")", open_i + 1) if open_i >= 0 else -1
+    if 0 <= open_i < close_i:
+        inner = joined[open_i + 1:close_i].strip()
+        words = inner.split()
+        if 1 <= len(words) <= 3 and all(w.isalpha() for w in words) and _PRIORITY_WORDS.get(inner.lower()) is None:
+            return (joined[:open_i] + " " + joined[close_i + 1:]).split(), inner
+    low = [_norm_tok(t) for t in tokens]
+    for i, t in enumerate(low):
+        if t not in ("in", "under"):
+            continue
+        j = i + 2 if (i + 1 < len(low) and low[i + 1] == "the") else i + 1
+        if j >= len(low) or low[j] in _NOT_AREA or not tokens[j].isalpha():
+            continue
+        has_suffix = j + 1 < len(low) and low[j + 1] in _AREA_SUFFIX
+        if has_suffix or (t == "under" and tokens[j][:1].isupper()):
+            end = j + 2 if has_suffix else j + 1
+            return tokens[:i] + tokens[end:], tokens[j]
+    return tokens, None
+
+
+def parse_clause(clause: str) -> Optional[IntakeItem]:
+    """One clause -> IntakeItem (title, due text/time, area); None when no usable title remains."""
+    tokens = _strip_prefix(clause.strip().strip(".!").split())
+    cleaned, paren_domain, paren_priority = _extract_parenthesised_meta(" ".join(tokens))
+    tokens = cleaned.split()
+    tokens, area = _take_area(tokens)
+    flags = _date_flags(tokens)
+    n = len(tokens)
+    in_run = list(flags)
+    for i, t in enumerate(tokens):
+        if not flags[i] and _norm_tok(t) in _CONNECTORS and 0 < i < n - 1 and in_run[i - 1] and flags[i + 1]:
+            in_run[i] = True
+    due_tokens: list[str] = []
+    for i, t in enumerate(tokens):
+        if in_run[i]:
+            due_tokens.append(t.strip(","))
+    # markers that led into a date ("due Dec 5", "by Friday") belong to the date, not the title
+    first_due = next((i for i, f in enumerate(in_run) if f), None)
+    drop: set[int] = set()
+    if first_due is not None:
+        i = first_due - 1
+        while i >= 0 and not in_run[i] and _norm_tok(tokens[i]) in _LEFT_MARKERS:
+            drop.add(i)
+            if _norm_tok(tokens[i]) in ("next", "this"):
+                due_tokens.insert(0, tokens[i])
+            i -= 1
+    title_tokens = [t for i, t in enumerate(tokens) if not in_run[i] and i not in drop]
+    while title_tokens and _norm_tok(title_tokens[-1]) in _JOINERS:
+        title_tokens.pop()
+    while title_tokens and _norm_tok(title_tokens[0]) in _JOINERS:
+        title_tokens.pop(0)
+    title = " ".join(title_tokens).strip(" -–—@,:;.")
+    if title_problem(title) or not any(c.isalpha() for c in title):
+        return None
+    due_text = " ".join(due_tokens)
+    clock, notes = None, None
+    t24, t12, _, _ = _extract_embedded_time(f"at {due_text}") if due_text else (None, None, None, None)
+    if t24 and t12:
+        clock, notes = t24, f"by {t12}"
+    domain = _area_slug(area) if area else (paren_domain or "general")
+    return IntakeItem(
+        title=title, domain=domain, priority=paren_priority or "medium", duration_minutes=None,
+        due_text=due_text, notes=notes, due_time=clock,
+    )
+
+
+def parse_clauses(message: str) -> tuple[list[IntakeItem], list[str]]:
+    """Deterministic multi-task parse: (items, unparsed fragments). Fewer than two clauses -> ([], [])."""
+    clauses = split_task_clauses(message)
+    if len(clauses) < MIN_ITEMS:
+        return [], []
+    items: list[IntakeItem] = []
+    unparsed: list[str] = []
+    for clause in clauses:
+        item = parse_clause(clause)
+        if item:
+            items.append(item)
+        else:
+            unparsed.append(clause[:120])
+    return items, unparsed
+
+
+def _title_key(title: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z0-9]+", title.lower()) if len(w) > 1}
+
+
+def same_task(a: str, b: str) -> bool:
+    ka, kb = _title_key(a), _title_key(b)
+    if not ka or not kb:
+        return False
+    return len(ka & kb) / min(len(ka), len(kb)) >= 0.6
+
+
+def merge_missing(primary: list[IntakeItem], deterministic: list[IntakeItem]) -> list[IntakeItem]:
+    """Keep the model's items; add every deterministic clause the model missed; fill dates it left empty."""
+    if not deterministic:
+        return list(primary)
+    swallowed = any(sum(1 for d in deterministic if _title_key(d.title) <= _title_key(p.title)) >= 2 for p in primary)
+    if swallowed:  # one model item swallowed several clauses: the clause split is the better reading
+        return list(deterministic)[:MAX_ITEMS]
+    result = list(primary)
+    for i, p in enumerate(result):
+        d = next((d for d in deterministic if same_task(p.title, d.title)), None)
+        if d and not p.due_text and d.due_text:
+            result[i] = IntakeItem(p.title, p.domain, p.priority, p.duration_minutes, d.due_text, p.project,
+                                   p.notes or d.notes, p.due_time or d.due_time)
+    for d in deterministic:
+        if not any(same_task(p.title, d.title) for p in result):
+            result.append(d)
+    return result[:MAX_ITEMS]

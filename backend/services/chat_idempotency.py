@@ -16,6 +16,7 @@ import json
 import logging
 import random
 import re
+import time
 from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
 
 from backend.services.task_time import is_valid_timezone, request_timezone, resolve_effective_timezone
@@ -296,6 +297,70 @@ async def run_chat_request(
 
 def _sse(payload: Dict[str, Any]) -> str:
     return f"data: {json.dumps(payload, default=str)}\n\n"
+
+
+# --- Per-turn replay: (owner, conversation, request_id) -> the frames of the first completed response.
+# A repeat of the same request id (the client's automatic resend) gets those frames back instead of
+# re-running routing or saving the user message again. In-process; bounded by size and age.
+TURN_CACHE_MAX = 500
+TURN_CACHE_TTL_SECONDS = 600
+TURN_WAIT_SECONDS = 60
+TURN_BUSY_DETAIL = "That request is still being processed. Please try again in a moment."
+_turn_done: Dict[Tuple[str, str, str], Tuple[float, list]] = {}
+_turn_inflight: Dict[Tuple[str, str, str], "asyncio.Event"] = {}
+
+
+def _turn_get(key: Tuple[str, str, str]) -> Optional[list]:
+    entry = _turn_done.get(key)
+    if entry and time.monotonic() - entry[0] <= TURN_CACHE_TTL_SECONDS:
+        return entry[1]
+    _turn_done.pop(key, None)
+    return None
+
+
+def _turn_put(key: Tuple[str, str, str], frames: list) -> None:
+    _turn_done[key] = (time.monotonic(), frames)
+    while len(_turn_done) > TURN_CACHE_MAX:
+        _turn_done.pop(next(iter(_turn_done)), None)
+
+
+async def replay_guarded_turn(owner: str, conv_id: Any, request_id: Any, make_stream: Callable[[], Any]):
+    """Run one chat stream at most once per (owner, conversation, request id); repeats replay the stored frames."""
+    rid = normalize_request_id(request_id)
+    if not rid:
+        async for frame in make_stream():
+            yield frame
+        return
+    key = (str(owner), str(conv_id or ""), rid)
+    for _ in range(2):
+        stored = _turn_get(key)
+        if stored is not None:
+            for frame in stored:
+                yield frame
+            return
+        waiting = _turn_inflight.get(key)
+        if waiting is None:
+            break
+        try:
+            await asyncio.wait_for(waiting.wait(), timeout=TURN_WAIT_SECONDS)
+        except asyncio.TimeoutError:
+            yield _sse({"type": "error", "detail": TURN_BUSY_DETAIL, "can_retry": True, "terminal": True})
+            return
+    gate = asyncio.Event()
+    _turn_inflight[key] = gate
+    frames: list = []
+    finished = False
+    try:
+        async for frame in make_stream():
+            if not frame.startswith(": ping"):
+                frames.append(frame)
+            finished = finished or '"type": "done"' in frame
+            yield frame
+        if finished:
+            _turn_put(key, frames)
+    finally:
+        _turn_inflight.pop(key, None)
+        gate.set()
 
 
 def committed_event(result: Dict[str, Any]) -> str:

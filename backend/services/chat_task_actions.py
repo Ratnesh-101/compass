@@ -155,6 +155,12 @@ def parse_task_action_intent(message: str) -> Optional[dict]:
     raw = message.replace("\u2019", "'").replace("\u2018", "'").strip()
     if not raw or raw.endswith("?"):
         return None
+    from backend.services.chat_followup_edit import parse_titled_delete, parse_titled_edit, split_retraction
+    raw, retracted = split_retraction(raw)  # "cancel that. Actually yes, delete X" -> the last clause is the intent
+    if not raw:
+        return None
+    if retracted and (deleted := parse_titled_delete(raw)):
+        return deleted
 
     low = raw.lower()
     if any(low.startswith(q) for q in QUESTION_STARTERS):
@@ -203,7 +209,16 @@ def parse_task_action_intent(message: str) -> Optional[dict]:
             if tgt and not _is_positional_or_pronoun_target(tgt):
                 return {"action": "complete", "target": tgt, "new_due": None}
 
-    # 2. Reschedule patterns
+    # 2. Edits that name a task or use several fields; a single dated change keeps the reschedule action
+    edit = parse_titled_edit(raw)
+    if edit:
+        ch = edit["changes"]
+        if set(ch) == {"due_text"} and edit["target"] and not edit["pronoun"] and _is_date_like(ch["due_text"]) \
+                and resolve_due(ch["due_text"], "UTC").due_date is not None:
+            return {"action": "reschedule", "target": edit["target"], "new_due": ch["due_text"]}
+        return edit
+
+    # 3. Reschedule patterns
     for pat in PATTERNS_RESCHEDULE:
         m = pat.match(raw)
         if m:
@@ -226,6 +241,9 @@ async def check_chat_task_action_intent(
     """Check task action intent with caller pre-route and pending-action safety guards."""
     if pre_routed_skill is not None or skill_name in ("pending_action_confirm", "pending_action_cancel"):
         return None
+    parsed = parse_task_action_intent(message)
+    if parsed is None or parsed.get("action") in ("edit", "delete", "reschedule"):
+        return parsed  # an explicit new edit/delete supersedes a card that is still waiting (the old one is cancelled)
     chk_pool = pool
     if chk_pool is None:
         try:
@@ -240,7 +258,7 @@ async def check_chat_task_action_intent(
                     return None
         except Exception:
             pass
-    return parse_task_action_intent(message)
+    return parsed
 
 
 def compute_match_score(target: str, title: str) -> float:
@@ -397,29 +415,12 @@ async def handle_chat_task_action(
     due_obj = None
 
     if action == "reschedule":
-        if not new_due:
+        due_obj = resolve_due(new_due, effective_tz) if new_due else None
+        if due_obj is None or not due_obj.due_date:
             resp_msg = "What date should I use?"
             return {
-                "conversation_id": conv_id,
-                "response": resp_msg,
-                "message": resp_msg,
-                "skill_used": "chat_task_action",
-                "success": True,
-                "data": None,
-                "verifiable": False,
-                "routing_latency_ms": int((time.perf_counter() - start) * 1000),
-            }
-        due_obj = resolve_due(new_due, effective_tz)
-        if not due_obj.due_date:
-            resp_msg = "What date should I use?"
-            return {
-                "conversation_id": conv_id,
-                "response": resp_msg,
-                "message": resp_msg,
-                "skill_used": "chat_task_action",
-                "success": True,
-                "data": None,
-                "verifiable": False,
+                "conversation_id": conv_id, "response": resp_msg, "message": resp_msg, "skill_used": "chat_task_action",
+                "success": True, "data": None, "verifiable": False,
                 "routing_latency_ms": int((time.perf_counter() - start) * 1000),
             }
         due_label = format_date_with_year(due_obj, effective_tz)
@@ -431,9 +432,13 @@ async def handle_chat_task_action(
             if t.get("status") not in ("done", "completed", "cancelled")
             and not t.get("deleted_at")
         ]
-        matches = match_open_task(target, open_tasks)
+        matches = match_open_task(target, open_tasks) if action not in ("edit", "delete") else []
 
-        if not matches:
+        if action in ("edit", "delete"):
+            from backend.services.chat_followup_edit import build_titled_card
+            resp_msg, ret_data = await build_titled_card(conn, args, owner_identity, conv_id, effective_tz, include_demo)
+
+        elif not matches:
             if open_tasks:
                 titles_str = ", ".join(f"'{strip_id_suffix(t['title'])}'" for t in open_tasks[:5])
                 resp_msg = f"I couldn't find an open task called '{target}'. Your open tasks: {titles_str}."

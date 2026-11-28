@@ -21,6 +21,8 @@ from backend.services.task_intake_parse import (
     IntakeItem,
     ParsedIntake,
     extract_item_due_time,
+    merge_missing,
+    parse_clauses,
     parse_task_list,
 )
 from backend.services.task_time import (
@@ -110,6 +112,7 @@ def _preview_text(items: list[dict], parsed: ParsedIntake, tz_name: str) -> str:
         )
     if parsed.skipped:
         notes.append("Skipped (no usable task name): " + "; ".join(f'"{s}"' for s in parsed.skipped))
+    notes.extend(f'I couldn\'t turn this into a task: "{u}"' for u in parsed.unparsed)
     confirm_hint = 'Reply "Confirm" to add it' if n == 1 else f'Reply "Confirm" to add all {n}'
     notes.append(f'Times are in {tz_name}. {confirm_hint}, or "Cancel".')
     return "\n".join(lines + [""] + notes)
@@ -156,15 +159,20 @@ async def handle_intake_preview(*, message: str, conv_id: str, owner_identity: s
     from backend.memory.db import get_pool
 
     tz_name = request_timezone.get() or "UTC"
-    parsed = (
-        ParsedIntake(tuple(IntakeItem(**d) for d in items), len(items), ()) if items else parse_task_list(message)
-    )
-    if parsed is None and not items:
+    det_items, unparsed = parse_clauses(message)
+    table = None if items else parse_task_list(message)
+    parsed = ParsedIntake(tuple(IntakeItem(**d) for d in items), len(items), ()) if items else table
+    if parsed is None and not items and not (len(det_items) >= 2 and not unparsed):
         from backend.services import task_intake_llm
 
         extracted = await task_intake_llm.extract_items_bounded(message)  # bounded; falls back to the deterministic parser
         if extracted:
             parsed = ParsedIntake(tuple(extracted[:MAX_ITEMS]), len(extracted), ())
+    if det_items and table is None and (parsed is None or len(parsed.items) < len(det_items)):
+        merged = merge_missing(list(parsed.items) if parsed else [], det_items)
+        parsed = ParsedIntake(tuple(merged), len(merged), parsed.skipped if parsed else ())
+    if parsed is not None and unparsed:
+        parsed = ParsedIntake(parsed.items, parsed.total_found, parsed.skipped, tuple(unparsed))
     success, data, reply = False, None, NOT_A_LIST_REPLY
     pool = active_pool or await get_pool()
     if parsed and parsed.items and pool:
